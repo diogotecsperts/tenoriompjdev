@@ -47,6 +47,17 @@ export default function Dashboard() {
             <div>
               <h1 className="text-xl font-bold">Tenorio Médico Perito</h1>
               <p className="text-sm text-muted-foreground">Sistema de Laudos Judiciais</p>
+              <p className="text-xs text-muted-foreground/60">
+                by{" "}
+                <a 
+                  href="https://tecsperts.com" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="hover:text-muted-foreground transition-colors"
+                >
+                  tecsperts
+                </a>
+              </p>
             </div>
           </div>
           <div className="flex items-center space-x-4">

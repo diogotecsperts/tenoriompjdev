@@ -183,6 +183,17 @@ export default function Login() {
           <div className="mt-6 text-center text-xs text-muted-foreground">
             Acesso restrito a profissionais autorizados
           </div>
+          <div className="text-center text-xs text-muted-foreground/60">
+            by{" "}
+            <a 
+              href="https://tecsperts.com" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="hover:text-muted-foreground transition-colors"
+            >
+              tecsperts
+            </a>
+          </div>
         </CardContent>
       </Card>
     </div>
