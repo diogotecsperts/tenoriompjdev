@@ -49,7 +49,7 @@ export default function LaudoEditor() {
     if (id) {
       loadLaudo(id);
     }
-  }, [id]);
+  }, [id, loadLaudo]);
 
   const handleSave = () => {
     saveLaudo();
