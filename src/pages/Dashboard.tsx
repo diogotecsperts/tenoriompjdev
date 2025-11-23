@@ -20,12 +20,14 @@ import {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { profile, logout } = useAuth();
   const { laudos, createLaudo, deleteLaudo, loadLaudo } = useLaudo();
 
-  const handleNewLaudo = () => {
-    const id = createLaudo();
-    navigate(`/laudo/${id}`);
+  const handleNewLaudo = async () => {
+    const id = await createLaudo();
+    if (id) {
+      navigate(`/laudo/${id}`);
+    }
   };
 
   const handleOpenLaudo = (id: string) => {
@@ -49,8 +51,8 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center space-x-4">
             <div className="text-right">
-              <p className="text-sm font-medium">{user?.name}</p>
-              <p className="text-xs text-muted-foreground">{user?.email}</p>
+              <p className="text-sm font-medium">{profile?.nome}</p>
+              <p className="text-xs text-muted-foreground">{profile?.email}</p>
             </div>
             <Button variant="outline" size="sm" onClick={logout}>
               <LogOut className="mr-2 h-4 w-4" />
