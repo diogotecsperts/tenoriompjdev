@@ -121,7 +121,7 @@ export default function Dashboard() {
               <FileText className="h-6 w-6 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-xl font-bold">Tenorio Médico Perito</h1>
+              <h1 className="text-xl font-bold">Tenorio MPJ</h1>
               <p className="text-sm text-muted-foreground">Sistema de Laudos Judiciais</p>
               <p className="text-xs text-muted-foreground/60">
                 by{" "}
