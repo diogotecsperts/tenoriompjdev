@@ -61,6 +61,7 @@ interface LaudoContextType {
   updateLaudo: (data: Partial<LaudoData>) => void;
   saveLaudo: () => Promise<void>;
   deleteLaudo: (id: string) => Promise<void>;
+  renameLaudo: (id: string, newTitle: string) => Promise<void>;
   refreshLaudos: () => Promise<void>;
 }
 
@@ -426,6 +427,38 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const renameLaudo = async (id: string, newTitle: string) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('laudos')
+        .update({ title: newTitle })
+        .eq('id', id)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setLaudos(laudos.map(l => l.id === id ? { ...l, title: newTitle } : l));
+      if (currentLaudo?.id === id) {
+        setCurrentLaudo({ ...currentLaudo, title: newTitle });
+      }
+      
+      toast({
+        title: "Laudo renomeado",
+        description: "O título foi atualizado com sucesso.",
+      });
+    } catch (error: any) {
+      console.error('Erro ao renomear laudo:', error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao renomear laudo",
+        description: error.message
+      });
+    }
+  };
+
   return (
     <LaudoContext.Provider
       value={{
@@ -437,6 +470,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
         updateLaudo,
         saveLaudo,
         deleteLaudo,
+        renameLaudo,
         refreshLaudos,
       }}
     >
