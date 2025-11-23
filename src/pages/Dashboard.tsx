@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, FileText, LogOut, Trash2, Calendar } from "lucide-react";
+import { Plus, FileText, LogOut, Trash2, Calendar, User } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -141,6 +141,10 @@ export default function Dashboard() {
               <p className="text-sm font-medium">{profile?.nome}</p>
               <p className="text-xs text-muted-foreground">{profile?.email}</p>
             </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate("/profile")}>
+              <User className="mr-2 h-4 w-4" />
+              Perfil
+            </Button>
             <ThemeToggle />
             <Button variant="outline" size="sm" onClick={logout}>
               <LogOut className="mr-2 h-4 w-4" />
