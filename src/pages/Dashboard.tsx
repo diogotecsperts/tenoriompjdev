@@ -1,3 +1,4 @@
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLaudo } from "@/contexts/LaudoContext";
@@ -17,11 +18,25 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { RenameDialog } from "@/components/dashboard/RenameDialog";
+import { FilterBar, FilterState } from "@/components/dashboard/FilterBar";
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { profile, logout } = useAuth();
-  const { laudos, createLaudo, deleteLaudo, loadLaudo } = useLaudo();
+  const { laudos, createLaudo, deleteLaudo, loadLaudo, renameLaudo } = useLaudo();
+  
+  const [filters, setFilters] = useState<FilterState>({
+    searchText: "",
+    vitimaName: "",
+    dataAcidenteStart: "",
+    dataAcidenteEnd: "",
+    dataPericiaStart: "",
+    dataPericiaEnd: "",
+    processoNumero: "",
+    reclamante: "",
+  });
 
   const handleNewLaudo = async () => {
     const id = await createLaudo();
@@ -34,6 +49,67 @@ export default function Dashboard() {
     loadLaudo(id);
     navigate(`/laudo/${id}`);
   };
+
+  const handleRenameLaudo = async (id: string, newTitle: string) => {
+    await renameLaudo(id, newTitle);
+  };
+
+  const filteredLaudos = useMemo(() => {
+    return laudos.filter(laudo => {
+      // Global text search
+      if (filters.searchText) {
+        const search = filters.searchText.toLowerCase();
+        const matchesSearch = 
+          laudo.title?.toLowerCase().includes(search) ||
+          laudo.vitimaName?.toLowerCase().includes(search) ||
+          laudo.processoNumero?.toLowerCase().includes(search);
+        if (!matchesSearch) return false;
+      }
+      
+      // Specific filters
+      if (filters.vitimaName && 
+          !laudo.vitimaName?.toLowerCase().includes(filters.vitimaName.toLowerCase())) {
+        return false;
+      }
+      
+      if (filters.processoNumero && 
+          !laudo.processoNumero?.toLowerCase().includes(filters.processoNumero.toLowerCase())) {
+        return false;
+      }
+      
+      if (filters.reclamante && 
+          !laudo.reclamante?.toLowerCase().includes(filters.reclamante.toLowerCase())) {
+        return false;
+      }
+      
+      // Date range filters
+      if (filters.dataAcidenteStart && laudo.dataAcidente) {
+        if (new Date(laudo.dataAcidente) < new Date(filters.dataAcidenteStart)) {
+          return false;
+        }
+      }
+      
+      if (filters.dataAcidenteEnd && laudo.dataAcidente) {
+        if (new Date(laudo.dataAcidente) > new Date(filters.dataAcidenteEnd)) {
+          return false;
+        }
+      }
+      
+      if (filters.dataPericiaStart && laudo.dataPericia) {
+        if (new Date(laudo.dataPericia) < new Date(filters.dataPericiaStart)) {
+          return false;
+        }
+      }
+      
+      if (filters.dataPericiaEnd && laudo.dataPericia) {
+        if (new Date(laudo.dataPericia) > new Date(filters.dataPericiaEnd)) {
+          return false;
+        }
+      }
+      
+      return true;
+    });
+  }, [laudos, filters]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -65,6 +141,7 @@ export default function Dashboard() {
               <p className="text-sm font-medium">{profile?.nome}</p>
               <p className="text-xs text-muted-foreground">{profile?.email}</p>
             </div>
+            <ThemeToggle />
             <Button variant="outline" size="sm" onClick={logout}>
               <LogOut className="mr-2 h-4 w-4" />
               Sair
@@ -88,6 +165,17 @@ export default function Dashboard() {
           </Button>
         </div>
 
+        {/* Filter Bar */}
+        {laudos.length > 0 && (
+          <div className="mb-6">
+            <FilterBar
+              filters={filters}
+              onFiltersChange={setFilters}
+              resultCount={filteredLaudos.length}
+            />
+          </div>
+        )}
+
         {/* Laudos List */}
         {laudos.length === 0 ? (
           <Card className="border-dashed">
@@ -103,15 +191,49 @@ export default function Dashboard() {
               </Button>
             </CardContent>
           </Card>
+        ) : filteredLaudos.length === 0 ? (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-col items-center justify-center py-16">
+              <FileText className="mb-4 h-16 w-16 text-muted-foreground" />
+              <h3 className="mb-2 text-xl font-semibold">Nenhum laudo encontrado</h3>
+              <p className="mb-6 text-center text-muted-foreground">
+                Tente ajustar os filtros de busca
+              </p>
+              <Button variant="outline" onClick={() => setFilters({
+                searchText: "",
+                vitimaName: "",
+                dataAcidenteStart: "",
+                dataAcidenteEnd: "",
+                dataPericiaStart: "",
+                dataPericiaEnd: "",
+                processoNumero: "",
+                reclamante: "",
+              })}>
+                Limpar Filtros
+              </Button>
+            </CardContent>
+          </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {laudos.map((laudo) => (
-              <Card key={laudo.id} className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    <span className="truncate">{laudo.title}</span>
-                    <FileText className="h-5 w-5 text-primary" />
-                  </CardTitle>
+            {filteredLaudos.map((laudo) => {
+              const suggestedTitle = laudo.vitimaName 
+                ? `Laudo - ${laudo.vitimaName}` 
+                : undefined;
+              
+              return (
+                <Card key={laudo.id} className="hover:shadow-lg transition-shadow">
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between gap-2">
+                      <span className="truncate flex-1">{laudo.title}</span>
+                      <div className="flex items-center gap-1">
+                        <RenameDialog
+                          currentTitle={laudo.title}
+                          suggestedTitle={suggestedTitle}
+                          onRename={(newTitle) => handleRenameLaudo(laudo.id, newTitle)}
+                        />
+                        <FileText className="h-5 w-5 text-primary" />
+                      </div>
+                    </CardTitle>
                   <CardDescription className="space-y-1">
                     {laudo.reclamante && (
                       <div className="text-sm">
@@ -167,7 +289,8 @@ export default function Dashboard() {
                   </div>
                 </CardContent>
               </Card>
-            ))}
+            );
+            })}
           </div>
         )}
       </main>
