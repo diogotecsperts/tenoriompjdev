@@ -164,11 +164,24 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
     if (!user) return null;
 
     try {
+      // Get profile data to pre-fill perito information
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('nome, email, crm, especialidade, telefone, endereco')
+        .eq('id', user.id)
+        .single();
+
       const { data, error } = await supabase
         .from('laudos')
         .insert({
           user_id: user.id,
-          title: `Laudo ${laudos.length + 1}`
+          title: `Laudo ${laudos.length + 1}`,
+          perito_nome: profileData?.nome || '',
+          perito_email: profileData?.email || '',
+          perito_crm: profileData?.crm || '',
+          perito_especialidade: profileData?.especialidade || '',
+          perito_telefone: profileData?.telefone || '',
+          perito_endereco: profileData?.endereco || '',
         })
         .select()
         .single();
@@ -181,12 +194,12 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           title: data.title,
           createdAt: new Date(data.created_at),
           updatedAt: new Date(data.updated_at),
-          peritoNome: '',
-          peritoEspecialidade: '',
-          peritoCRM: '',
-          peritoEmail: '',
-          peritoTelefone: '',
-          peritoEndereco: '',
+          peritoNome: data.perito_nome || '',
+          peritoEspecialidade: data.perito_especialidade || '',
+          peritoCRM: data.perito_crm || '',
+          peritoEmail: data.perito_email || '',
+          peritoTelefone: data.perito_telefone || '',
+          peritoEndereco: data.perito_endereco || '',
           processoNumero: '',
           processoVara: '',
           reclamante: '',

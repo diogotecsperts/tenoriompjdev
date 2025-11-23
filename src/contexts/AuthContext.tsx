@@ -4,11 +4,20 @@ import { supabase } from "@/integrations/supabase/client";
 import { User, Session } from "@supabase/supabase-js";
 import { toast } from "@/hooks/use-toast";
 
+interface ProfileData {
+  nome: string;
+  email: string;
+  crm: string | null;
+  especialidade: string | null;
+  telefone: string | null;
+  endereco: string | null;
+}
+
 interface AuthContextType {
   isAuthenticated: boolean;
   user: User | null;
   session: Session | null;
-  profile: { nome: string; email: string } | null;
+  profile: ProfileData | null;
   login: (email: string, password: string) => Promise<boolean>;
   signup: (email: string, password: string, fullName: string) => Promise<boolean>;
   logout: () => Promise<void>;
@@ -20,7 +29,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<{ nome: string; email: string } | null>(null);
+  const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -36,7 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setTimeout(async () => {
             const { data } = await supabase
               .from('profiles')
-              .select('nome, email')
+              .select('nome, email, crm, especialidade, telefone, endereco')
               .eq('id', session.user.id)
               .single();
             
@@ -60,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (session?.user) {
         supabase
           .from('profiles')
-          .select('nome, email')
+          .select('nome, email, crm, especialidade, telefone, endereco')
           .eq('id', session.user.id)
           .single()
           .then(({ data }) => {
