@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./AuthContext";
 import { toast } from "@/hooks/use-toast";
@@ -239,7 +239,9 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
     return null;
   };
 
-  const loadLaudo = async (id: string) => {
+  // Wrap loadLaudo with useCallback to stabilize its reference
+  // This prevents unnecessary re-renders and fixes the typing bug
+  const loadLaudo = useCallback(async (id: string) => {
     if (!user) return;
 
     try {
@@ -312,7 +314,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
         description: error.message
       });
     }
-  };
+  }, [user]);
 
   const updateLaudo = (data: Partial<LaudoData>) => {
     if (currentLaudo) {

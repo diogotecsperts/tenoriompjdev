@@ -2,6 +2,7 @@ import { useLaudo } from "@/contexts/LaudoContext";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionNavigation } from "../SectionNavigation";
 
 const planejamentoOptions = [
   { id: "nexo-direto", label: "Nexo Causal Direto" },
@@ -13,7 +14,14 @@ const planejamentoOptions = [
   { id: "incapacidade-total-perm", label: "Incapacidade Total Permanente" },
 ];
 
-export function Planejamento() {
+interface PlanejamentoProps {
+  currentIndex: number;
+  totalSections: number;
+  onNext: () => void;
+  onPrevious: () => void;
+}
+
+export function Planejamento({ currentIndex, totalSections, onNext, onPrevious }: PlanejamentoProps) {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
@@ -47,6 +55,12 @@ export function Planejamento() {
             </Label>
           </div>
         ))}
+        <SectionNavigation
+          currentIndex={currentIndex}
+          totalSections={totalSections}
+          onNext={onNext}
+          onPrevious={onPrevious}
+        />
       </CardContent>
     </Card>
   );

@@ -2,8 +2,16 @@ import { useLaudo } from "@/contexts/LaudoContext";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionNavigation } from "../SectionNavigation";
 
-export function DadosProcesso() {
+interface DadosProcessoProps {
+  currentIndex: number;
+  totalSections: number;
+  onNext: () => void;
+  onPrevious: () => void;
+}
+
+export function DadosProcesso({ currentIndex, totalSections, onNext, onPrevious }: DadosProcessoProps) {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
@@ -77,6 +85,12 @@ export function DadosProcesso() {
             />
           </div>
         </div>
+        <SectionNavigation
+          currentIndex={currentIndex}
+          totalSections={totalSections}
+          onNext={onNext}
+          onPrevious={onPrevious}
+        />
       </CardContent>
     </Card>
   );

@@ -3,8 +3,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionNavigation } from "../SectionNavigation";
 
-export function DadosVitima() {
+interface DadosVitimaProps {
+  currentIndex: number;
+  totalSections: number;
+  onNext: () => void;
+  onPrevious: () => void;
+}
+
+export function DadosVitima({ currentIndex, totalSections, onNext, onPrevious }: DadosVitimaProps) {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
@@ -103,6 +111,12 @@ export function DadosVitima() {
             </SelectContent>
           </Select>
         </div>
+        <SectionNavigation
+          currentIndex={currentIndex}
+          totalSections={totalSections}
+          onNext={onNext}
+          onPrevious={onPrevious}
+        />
       </CardContent>
     </Card>
   );

@@ -45,11 +45,14 @@ export default function LaudoEditor() {
   const { currentLaudo, loadLaudo, saveLaudo } = useLaudo();
   const [activeSection, setActiveSection] = useState("perito");
 
+  // Load laudo only once when the component mounts or id changes
+  // We don't include loadLaudo in dependencies to prevent re-fetching on every state change
   useEffect(() => {
     if (id) {
       loadLaudo(id);
     }
-  }, [id, loadLaudo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   const handleSave = () => {
     saveLaudo();
@@ -57,6 +60,20 @@ export default function LaudoEditor() {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const currentSectionIndex = sections.findIndex((s) => s.id === activeSection);
+
+  const goToNextSection = () => {
+    if (currentSectionIndex < sections.length - 1) {
+      setActiveSection(sections[currentSectionIndex + 1].id);
+    }
+  };
+
+  const goToPreviousSection = () => {
+    if (currentSectionIndex > 0) {
+      setActiveSection(sections[currentSectionIndex - 1].id);
+    }
   };
 
   const ActiveComponent = sections.find((s) => s.id === activeSection)?.component || DadosPerito;
@@ -111,7 +128,12 @@ export default function LaudoEditor() {
           {/* Main Content */}
           <main className="flex-1 overflow-auto p-6">
             <div className="mx-auto max-w-4xl">
-              <ActiveComponent />
+              <ActiveComponent 
+                currentIndex={currentSectionIndex}
+                totalSections={sections.length}
+                onNext={goToNextSection}
+                onPrevious={goToPreviousSection}
+              />
             </div>
           </main>
         </div>
