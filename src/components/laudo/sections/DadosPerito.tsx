@@ -2,8 +2,16 @@ import { useLaudo } from "@/contexts/LaudoContext";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionNavigation } from "../SectionNavigation";
 
-export function DadosPerito() {
+interface DadosPeritoProps {
+  currentIndex: number;
+  totalSections: number;
+  onNext: () => void;
+  onPrevious: () => void;
+}
+
+export function DadosPerito({ currentIndex, totalSections, onNext, onPrevious }: DadosPeritoProps) {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
@@ -76,6 +84,12 @@ export function DadosPerito() {
             placeholder="Rua, número, complemento, cidade - UF"
           />
         </div>
+        <SectionNavigation
+          currentIndex={currentIndex}
+          totalSections={totalSections}
+          onNext={onNext}
+          onPrevious={onPrevious}
+        />
       </CardContent>
     </Card>
   );

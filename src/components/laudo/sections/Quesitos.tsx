@@ -3,8 +3,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SectionNavigation } from "../SectionNavigation";
 
-export function Quesitos() {
+interface QuesitosProps {
+  currentIndex: number;
+  totalSections: number;
+  onNext: () => void;
+  onPrevious: () => void;
+}
+
+export function Quesitos({ currentIndex, totalSections, onNext, onPrevious }: QuesitosProps) {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
@@ -55,6 +63,12 @@ export function Quesitos() {
             />
           </TabsContent>
         </Tabs>
+        <SectionNavigation
+          currentIndex={currentIndex}
+          totalSections={totalSections}
+          onNext={onNext}
+          onPrevious={onPrevious}
+        />
       </CardContent>
     </Card>
   );
