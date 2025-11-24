@@ -73,7 +73,7 @@ export default function Login() {
             <Stethoscope className="h-8 w-8 text-primary-foreground" />
           </div>
           <div>
-            <CardTitle className="text-2xl font-bold">Tenorio Médico Perito</CardTitle>
+            <CardTitle className="text-2xl font-bold">Tenório MPJ</CardTitle>
             <CardDescription className="mt-2">
               Sistema de Laudos Periciais Judiciais
             </CardDescription>
