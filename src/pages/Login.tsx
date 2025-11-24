@@ -99,6 +99,7 @@ export default function Login() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="pl-10"
+                      autoComplete="off"
                       required
                     />
                   </div>
@@ -114,6 +115,7 @@ export default function Login() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="pl-10"
+                      autoComplete="off"
                       required
                     />
                   </div>
@@ -137,6 +139,7 @@ export default function Login() {
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       className="pl-10"
+                      autoComplete="off"
                       required
                     />
                   </div>
@@ -152,6 +155,7 @@ export default function Login() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="pl-10"
+                      autoComplete="off"
                       required
                     />
                   </div>
@@ -167,6 +171,7 @@ export default function Login() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="pl-10"
+                      autoComplete="new-password"
                       required
                       minLength={6}
                     />
