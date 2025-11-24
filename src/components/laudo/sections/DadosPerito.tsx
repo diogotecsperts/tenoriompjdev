@@ -25,7 +25,7 @@ export function DadosPerito({ currentIndex, totalSections, onNext, onPrevious }:
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="peritoNome">Nome Completo</Label>
             <Input

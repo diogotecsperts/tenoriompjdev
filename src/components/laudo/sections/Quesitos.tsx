@@ -27,7 +27,7 @@ export function Quesitos({ currentIndex, totalSections, onNext, onPrevious }: Qu
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="juizo" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-1 sm:grid-cols-3">
             <TabsTrigger value="juizo">Do Juízo</TabsTrigger>
             <TabsTrigger value="reclamante">Do Reclamante</TabsTrigger>
             <TabsTrigger value="reclamada">Da Reclamada</TabsTrigger>

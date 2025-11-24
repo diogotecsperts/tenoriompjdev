@@ -28,14 +28,36 @@ export function Conclusao({ currentIndex, totalSections, onNext, onPrevious }: C
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="conclusaoCID">Sugestão de CID</Label>
+        <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="conclusaoCID">Sugestão de CID</Label>
           <Input
             id="conclusaoCID"
             value={currentLaudo.conclusaoCID}
             onChange={(e) => updateLaudo({ conclusaoCID: e.target.value })}
             placeholder="Ex: M75.1 - Síndrome do Manguito Rotador"
           />
+          </div>
+          <div className="space-y-2">
+            <Label>Possui Incapacidade?</Label>
+            <RadioGroup
+              value={currentLaudo.conclusaoIncapacidade}
+              onValueChange={(value) => updateLaudo({ conclusaoIncapacidade: value })}
+            >
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="sim" id="incap-sim" />
+                <Label htmlFor="incap-sim" className="font-normal cursor-pointer">
+                  Sim
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="nao" id="incap-nao" />
+                <Label htmlFor="incap-nao" className="font-normal cursor-pointer">
+                  Não
+                </Label>
+              </div>
+            </RadioGroup>
+          </div>
         </div>
         <div className="space-y-2">
           <Label htmlFor="conclusaoAnalise">Análise Conclusiva</Label>
@@ -47,28 +69,9 @@ export function Conclusao({ currentIndex, totalSections, onNext, onPrevious }: C
             rows={6}
           />
         </div>
-        <div className="space-y-2">
-          <Label>Possui Incapacidade?</Label>
-          <RadioGroup
-            value={currentLaudo.conclusaoIncapacidade}
-            onValueChange={(value) => updateLaudo({ conclusaoIncapacidade: value })}
-          >
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="sim" id="incap-sim" />
-              <Label htmlFor="incap-sim" className="font-normal cursor-pointer">
-                Sim
-              </Label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="nao" id="incap-nao" />
-              <Label htmlFor="incap-nao" className="font-normal cursor-pointer">
-                Não
-              </Label>
-            </div>
-          </RadioGroup>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="conclusaoStatus">Status da Incapacidade</Label>
+        <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="conclusaoStatus">Status da Incapacidade</Label>
           <Select
             value={currentLaudo.conclusaoStatus}
             onValueChange={(value) => updateLaudo({ conclusaoStatus: value })}
@@ -84,6 +87,25 @@ export function Conclusao({ currentIndex, totalSections, onNext, onPrevious }: C
               <SelectItem value="nenhuma">Sem Incapacidade</SelectItem>
             </SelectContent>
           </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="conclusaoDestino">Destino Sugerido</Label>
+            <Select
+              value={currentLaudo.conclusaoDestino}
+              onValueChange={(value) => updateLaudo({ conclusaoDestino: value })}
+            >
+              <SelectTrigger id="conclusaoDestino">
+                <SelectValue placeholder="Selecione" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="alta">Alta Médica</SelectItem>
+                <SelectItem value="reabilitacao">Reabilitação Profissional</SelectItem>
+                <SelectItem value="readaptacao">Readaptação de Função</SelectItem>
+                <SelectItem value="aposentadoria">Aposentadoria por Invalidez</SelectItem>
+                <SelectItem value="tratamento">Continuidade de Tratamento</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         <div className="space-y-2">
           <Label htmlFor="conclusaoJustificativa">Justificativa da Conclusão</Label>
@@ -94,24 +116,6 @@ export function Conclusao({ currentIndex, totalSections, onNext, onPrevious }: C
             placeholder="Fundamente a conclusão sobre a incapacidade, grau de comprometimento e limitações funcionais..."
             rows={5}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="conclusaoDestino">Destino Sugerido</Label>
-          <Select
-            value={currentLaudo.conclusaoDestino}
-            onValueChange={(value) => updateLaudo({ conclusaoDestino: value })}
-          >
-            <SelectTrigger id="conclusaoDestino">
-              <SelectValue placeholder="Selecione" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="alta">Alta Médica</SelectItem>
-              <SelectItem value="reabilitacao">Reabilitação Profissional</SelectItem>
-              <SelectItem value="readaptacao">Readaptação de Função</SelectItem>
-              <SelectItem value="aposentadoria">Aposentadoria por Invalidez</SelectItem>
-              <SelectItem value="tratamento">Continuidade de Tratamento</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
         <SectionNavigation
           currentIndex={currentIndex}

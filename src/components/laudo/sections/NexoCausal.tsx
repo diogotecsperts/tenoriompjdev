@@ -26,8 +26,9 @@ export function NexoCausal({ currentIndex, totalSections, onNext, onPrevious }: 
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="nexoCausalTipo">Tipo de Nexo</Label>
+        <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="nexoCausalTipo">Tipo de Nexo</Label>
           <Select
             value={currentLaudo.nexoCausalTipo}
             onValueChange={(value) => updateLaudo({ nexoCausalTipo: value })}
@@ -42,6 +43,7 @@ export function NexoCausal({ currentIndex, totalSections, onNext, onPrevious }: 
               <SelectItem value="sem-nexo">Sem Nexo Causal</SelectItem>
             </SelectContent>
           </Select>
+          </div>
         </div>
         <div className="space-y-2">
           <Label htmlFor="nexoCausalJustificativa">Justificativa</Label>

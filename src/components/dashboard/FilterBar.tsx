@@ -88,7 +88,7 @@ export function FilterBar({ filters, onFiltersChange, resultCount }: FilterBarPr
 
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
         <CollapsibleContent className="space-y-4 rounded-lg border bg-card p-4">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-2">
               <Label htmlFor="vitima">Nome da Vítima</Label>
               <Input
@@ -118,40 +118,44 @@ export function FilterBar({ filters, onFiltersChange, resultCount }: FilterBarPr
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Data do Acidente</Label>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <Input
                   type="date"
                   value={filters.dataAcidenteStart}
                   onChange={(e) => updateFilter("dataAcidenteStart", e.target.value)}
                   placeholder="De"
+                  className="w-full"
                 />
-                <span className="text-muted-foreground">até</span>
+                <span className="hidden text-muted-foreground sm:inline">até</span>
                 <Input
                   type="date"
                   value={filters.dataAcidenteEnd}
                   onChange={(e) => updateFilter("dataAcidenteEnd", e.target.value)}
                   placeholder="Até"
+                  className="w-full"
                 />
               </div>
             </div>
             <div className="space-y-2">
               <Label>Data da Perícia</Label>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <Input
                   type="date"
                   value={filters.dataPericiaStart}
                   onChange={(e) => updateFilter("dataPericiaStart", e.target.value)}
                   placeholder="De"
+                  className="w-full"
                 />
-                <span className="text-muted-foreground">até</span>
+                <span className="hidden text-muted-foreground sm:inline">até</span>
                 <Input
                   type="date"
                   value={filters.dataPericiaEnd}
                   onChange={(e) => updateFilter("dataPericiaEnd", e.target.value)}
                   placeholder="Até"
+                  className="w-full"
                 />
               </div>
             </div>
