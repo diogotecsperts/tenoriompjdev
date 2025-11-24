@@ -14,6 +14,8 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [emailReadOnly, setEmailReadOnly] = useState(true);
+  const [passwordReadOnly, setPasswordReadOnly] = useState(true);
   const { login, signup, isAuthenticated, loading } = useAuth();
   const navigate = useNavigate();
 
@@ -80,7 +82,14 @@ export default function Login() {
           </div>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="login" className="w-full">
+          <Tabs 
+            defaultValue="login" 
+            className="w-full"
+            onValueChange={() => {
+              setEmailReadOnly(true);
+              setPasswordReadOnly(true);
+            }}
+          >
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="login">Login</TabsTrigger>
               <TabsTrigger value="signup">Cadastro</TabsTrigger>
@@ -95,11 +104,14 @@ export default function Login() {
                     <Input
                       id="login-email"
                       type="email"
-                      placeholder="seu@email.com"
+                      name="email-field"
+                      placeholder="seuemail@email.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
+                      onFocus={() => setEmailReadOnly(false)}
                       className="pl-10"
-                      autoComplete="off"
+                      autoComplete="new-password"
+                      readOnly={emailReadOnly}
                       required
                     />
                   </div>
@@ -111,11 +123,14 @@ export default function Login() {
                     <Input
                       id="login-password"
                       type="password"
+                      name="password-field"
                       placeholder="••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                      onFocus={() => setPasswordReadOnly(false)}
                       className="pl-10"
-                      autoComplete="off"
+                      autoComplete="new-password"
+                      readOnly={passwordReadOnly}
                       required
                     />
                   </div>
@@ -135,11 +150,14 @@ export default function Login() {
                     <Input
                       id="signup-name"
                       type="text"
+                      name="name-field"
                       placeholder="Dr. Nome Completo"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
+                      onFocus={() => setEmailReadOnly(false)}
                       className="pl-10"
-                      autoComplete="off"
+                      autoComplete="new-password"
+                      readOnly={emailReadOnly}
                       required
                     />
                   </div>
@@ -151,11 +169,14 @@ export default function Login() {
                     <Input
                       id="signup-email"
                       type="email"
-                      placeholder="seu@email.com"
+                      name="email-field"
+                      placeholder="seuemail@email.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
+                      onFocus={() => setEmailReadOnly(false)}
                       className="pl-10"
-                      autoComplete="off"
+                      autoComplete="new-password"
+                      readOnly={emailReadOnly}
                       required
                     />
                   </div>
@@ -167,11 +188,14 @@ export default function Login() {
                     <Input
                       id="signup-password"
                       type="password"
+                      name="password-field"
                       placeholder="••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                      onFocus={() => setPasswordReadOnly(false)}
                       className="pl-10"
                       autoComplete="new-password"
+                      readOnly={passwordReadOnly}
                       required
                       minLength={6}
                     />
