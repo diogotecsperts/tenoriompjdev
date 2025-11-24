@@ -49,6 +49,7 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [totalStats, setTotalStats] = useState({ totalUsers: 0, totalLaudos: 0 });
+  const [activeTab, setActiveTab] = useState("users");
 
   useEffect(() => {
     if (!authLoading && !isAdmin) {
@@ -148,6 +149,7 @@ export default function Admin() {
   const handleViewUser = async (user: UserData) => {
     setSelectedUser(user);
     await fetchUserLaudos(user.id);
+    setActiveTab("details");
   };
 
   const handleEditUser = (user: UserData) => {
@@ -283,7 +285,7 @@ export default function Admin() {
         </div>
 
         {/* Main Content */}
-        <Tabs defaultValue="users" className="space-y-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList className="grid w-full grid-cols-1 sm:grid-cols-2">
             <TabsTrigger value="users">Usuários</TabsTrigger>
             <TabsTrigger value="details" disabled={!selectedUser}>
