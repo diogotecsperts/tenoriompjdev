@@ -60,18 +60,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setProfile(data);
             }
 
-            // Fetch user role
-            const { data: roleData } = await supabase
-              .from('user_roles')
-              .select('role')
-              .eq('user_id', session.user.id)
-              .single();
-            
-            if (roleData) {
-              setUserRole(roleData.role as 'admin' | 'user');
-            } else {
-              setUserRole('user');
-            }
+            // Fetch user role using is_admin RPC
+            const { data: isAdminData } = await supabase.rpc('is_admin');
+            setUserRole(isAdminData ? 'admin' : 'user');
           }, 0);
         } else {
           setProfile(null);
@@ -98,18 +89,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfile(data);
         }
 
-        // Fetch user role
-        const { data: roleData } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', session.user.id)
-          .single();
-        
-        if (roleData) {
-          setUserRole(roleData.role as 'admin' | 'user');
-        } else {
-          setUserRole('user');
-        }
+        // Fetch user role using is_admin RPC
+        const { data: isAdminData } = await supabase.rpc('is_admin');
+        setUserRole(isAdminData ? 'admin' : 'user');
       }
       
       setLoading(false);
