@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, Save, FileText, Printer } from "lucide-react";
 import { Sidebar, SidebarContent, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { LaudoSidebar } from "@/components/laudo/LaudoSidebar";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { DadosPerito } from "@/components/laudo/sections/DadosPerito";
 import { DadosProcesso } from "@/components/laudo/sections/DadosProcesso";
 import { DocumentosAvaliacao } from "@/components/laudo/sections/DocumentosAvaliacao";
@@ -44,6 +45,7 @@ export default function LaudoEditor() {
   const navigate = useNavigate();
   const { currentLaudo, loadLaudo, saveLaudo } = useLaudo();
   const [activeSection, setActiveSection] = useState("perito");
+  const isMobile = useIsMobile();
 
   // Load laudo only once when the component mounts or id changes
   // We don't include loadLaudo in dependencies to prevent re-fetching on every state change
@@ -90,7 +92,7 @@ export default function LaudoEditor() {
   }
 
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={!isMobile}>
       <div className="flex min-h-screen w-full bg-background">
         <LaudoSidebar
           sections={sections}
@@ -100,33 +102,33 @@ export default function LaudoEditor() {
         
         <div className="flex flex-1 flex-col">
           {/* Header */}
-          <header className="border-b bg-card px-6 py-4 print:hidden">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
+          <header className="border-b bg-card px-4 py-3 print:hidden sm:px-6 sm:py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center space-x-2 sm:space-x-4">
                 <SidebarTrigger />
                 <Button variant="ghost" size="sm" onClick={() => navigate("/dashboard")}>
                   <ArrowLeft className="mr-2 h-4 w-4" />
-                  Voltar
+                  <span className="hidden sm:inline">Voltar</span>
                 </Button>
-                <div className="border-l pl-4">
-                  <h1 className="text-lg font-semibold">{currentLaudo.title}</h1>
+                <div className="border-l pl-2 sm:pl-4">
+                  <h1 className="text-sm font-semibold sm:text-lg">{currentLaudo.title}</h1>
                 </div>
               </div>
-              <div className="flex items-center space-x-2">
-                <Button variant="outline" size="sm" onClick={handlePrint}>
-                  <Printer className="mr-2 h-4 w-4" />
-                  Gerar PDF
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={handlePrint} className="flex-1 sm:flex-none">
+                  <Printer className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Gerar PDF</span>
                 </Button>
-                <Button size="sm" onClick={handleSave}>
-                  <Save className="mr-2 h-4 w-4" />
-                  Salvar
+                <Button size="sm" onClick={handleSave} className="flex-1 sm:flex-none">
+                  <Save className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Salvar</span>
                 </Button>
               </div>
             </div>
           </header>
 
           {/* Main Content */}
-          <main className="flex-1 overflow-auto p-6">
+          <main className="flex-1 overflow-auto p-4 sm:p-6">
             <div className="mx-auto max-w-4xl">
               <ActiveComponent 
                 currentIndex={currentSectionIndex}

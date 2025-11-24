@@ -76,25 +76,27 @@ export default function Profile() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b bg-card shadow-sm">
-        <div className="container mx-auto flex items-center justify-between px-6 py-4">
-          <div className="flex items-center space-x-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-              <Stethoscope className="h-6 w-6 text-primary-foreground" />
+        <div className="container mx-auto px-4 py-4 sm:px-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
+                <Stethoscope className="h-6 w-6 text-primary-foreground" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold sm:text-xl">Meu Perfil</h1>
+                <p className="text-xs text-muted-foreground sm:text-sm">Dados do Perito Médico</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-bold">Meu Perfil</h1>
-              <p className="text-sm text-muted-foreground">Dados do Perito Médico</p>
-            </div>
+            <Button variant="outline" size="sm" onClick={() => navigate("/dashboard")} className="w-full sm:w-auto">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Voltar ao Dashboard
+            </Button>
           </div>
-          <Button variant="outline" onClick={() => navigate("/dashboard")}>
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Voltar ao Dashboard
-          </Button>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-6 py-8">
+      <main className="container mx-auto px-4 py-6 sm:px-6 sm:py-8">
         <Card className="mx-auto max-w-3xl">
           <CardHeader>
             <CardTitle>Informações Profissionais</CardTitle>
@@ -169,15 +171,16 @@ export default function Profile() {
               />
             </div>
 
-            <div className="flex justify-end space-x-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
               <Button
                 variant="outline"
                 onClick={() => navigate("/dashboard")}
                 disabled={loading}
+                className="w-full sm:w-auto"
               >
                 Cancelar
               </Button>
-              <Button onClick={handleSave} disabled={loading}>
+              <Button onClick={handleSave} disabled={loading} className="w-full sm:w-auto">
                 <Save className="mr-2 h-4 w-4" />
                 {loading ? "Salvando..." : "Salvar Perfil"}
               </Button>

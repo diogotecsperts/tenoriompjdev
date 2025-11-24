@@ -115,55 +115,58 @@ export default function Dashboard() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b bg-card shadow-sm">
-        <div className="container mx-auto flex items-center justify-between px-6 py-4">
-          <div className="flex items-center space-x-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-              <FileText className="h-6 w-6 text-primary-foreground" />
+        <div className="container mx-auto px-4 py-4 sm:px-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
+                <FileText className="h-6 w-6 text-primary-foreground" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold sm:text-xl">Tenorio MPJ</h1>
+                <p className="text-xs text-muted-foreground sm:text-sm">Sistema de Laudos Judiciais</p>
+                <p className="text-xs text-muted-foreground/60">
+                  by{" "}
+                  <a 
+                    href="https://tecsperts.com" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="hover:text-muted-foreground transition-colors"
+                  >
+                    tecsperts
+                  </a>
+                </p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-bold">Tenorio MPJ</h1>
-              <p className="text-sm text-muted-foreground">Sistema de Laudos Judiciais</p>
-              <p className="text-xs text-muted-foreground/60">
-                by{" "}
-                <a 
-                  href="https://tecsperts.com" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="hover:text-muted-foreground transition-colors"
-                >
-                  tecsperts
-                </a>
-              </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="hidden text-right sm:block">
+                <p className="text-sm font-medium">{profile?.nome}</p>
+                <p className="text-xs text-muted-foreground">{profile?.email}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="icon" onClick={() => navigate("/profile")} className="shrink-0">
+                  <User className="h-5 w-5" />
+                </Button>
+                <ThemeToggle />
+                <Button variant="outline" size="sm" onClick={logout} className="flex-1 sm:flex-none">
+                  <LogOut className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Sair</span>
+                </Button>
+              </div>
             </div>
-          </div>
-          <div className="flex items-center space-x-4">
-            <div className="text-right">
-              <p className="text-sm font-medium">{profile?.nome}</p>
-              <p className="text-xs text-muted-foreground">{profile?.email}</p>
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => navigate("/profile")}>
-              <User className="mr-2 h-4 w-4" />
-              Perfil
-            </Button>
-            <ThemeToggle />
-            <Button variant="outline" size="sm" onClick={logout}>
-              <LogOut className="mr-2 h-4 w-4" />
-              Sair
-            </Button>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-6 py-8">
-        <div className="mb-8 flex items-center justify-between">
+      <main className="container mx-auto px-4 py-6 sm:px-6 sm:py-8">
+        <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-3xl font-bold">Meus Laudos</h2>
-            <p className="mt-1 text-muted-foreground">
+            <h2 className="text-2xl font-bold sm:text-3xl">Meus Laudos</h2>
+            <p className="mt-1 text-sm text-muted-foreground sm:text-base">
               Gerencie seus laudos periciais judiciais
             </p>
           </div>
-          <Button onClick={handleNewLaudo} size="lg">
+          <Button onClick={handleNewLaudo} size="lg" className="w-full sm:w-auto">
             <Plus className="mr-2 h-5 w-5" />
             Novo Laudo
           </Button>
@@ -218,7 +221,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
             {filteredLaudos.map((laudo) => {
               const suggestedTitle = laudo.vitimaName 
                 ? `Laudo - ${laudo.vitimaName}` 

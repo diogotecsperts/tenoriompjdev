@@ -25,8 +25,9 @@ export function AvaliacaoSequelas({ currentIndex, totalSections, onNext, onPrevi
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="tabelaSUSEP">Tabela SUSEP/DPVAT</Label>
+        <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="tabelaSUSEP">Tabela SUSEP/DPVAT</Label>
           <Textarea
             id="tabelaSUSEP"
             value={currentLaudo.tabelaSUSEP}
@@ -34,9 +35,9 @@ export function AvaliacaoSequelas({ currentIndex, totalSections, onNext, onPrevi
             placeholder="Descreva o percentual de invalidez conforme tabela SUSEP/DPVAT, especificando o item aplicável..."
             rows={5}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="danoEstetico">Dano Estético</Label>
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="danoEstetico">Dano Estético</Label>
           <Textarea
             id="danoEstetico"
             value={currentLaudo.danoEstetico}
@@ -44,9 +45,9 @@ export function AvaliacaoSequelas({ currentIndex, totalSections, onNext, onPrevi
             placeholder="Avalie a existência e grau de dano estético (leve, moderado, grave), descrevendo cicatrizes, deformidades..."
             rows={5}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="auxilioTerceiros">Necessidade de Auxílio de Terceiros</Label>
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="auxilioTerceiros">Necessidade de Auxílio de Terceiros</Label>
           <Textarea
             id="auxilioTerceiros"
             value={currentLaudo.auxilioTerceiros}
@@ -54,6 +55,7 @@ export function AvaliacaoSequelas({ currentIndex, totalSections, onNext, onPrevi
             placeholder="Avalie se o periciando necessita de auxílio permanente de terceiros para atividades da vida diária..."
             rows={5}
           />
+          </div>
         </div>
         <SectionNavigation
           currentIndex={currentIndex}
