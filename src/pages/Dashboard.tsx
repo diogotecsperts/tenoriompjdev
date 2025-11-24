@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, FileText, LogOut, Trash2, Calendar, User } from "lucide-react";
+import { Plus, FileText, LogOut, Trash2, Calendar, User, Shield } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -24,7 +24,7 @@ import { FilterBar, FilterState } from "@/components/dashboard/FilterBar";
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { profile, logout } = useAuth();
+  const { profile, isAdmin, logout } = useAuth();
   const { laudos, createLaudo, deleteLaudo, loadLaudo, renameLaudo } = useLaudo();
   
   const [filters, setFilters] = useState<FilterState>({
@@ -143,10 +143,27 @@ export default function Dashboard() {
                 <p className="text-xs text-muted-foreground">{profile?.email}</p>
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="ghost" size="icon" onClick={() => navigate("/profile")} className="shrink-0">
+                <ThemeToggle />
+                {isAdmin && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => navigate("/admin")}
+                    title="Painel Admin"
+                    className="shrink-0"
+                  >
+                    <Shield className="h-5 w-5" />
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => navigate("/profile")}
+                  title="Perfil"
+                  className="shrink-0"
+                >
                   <User className="h-5 w-5" />
                 </Button>
-                <ThemeToggle />
                 <Button variant="outline" size="sm" onClick={logout} className="flex-1 sm:flex-none">
                   <LogOut className="h-4 w-4 sm:mr-2" />
                   <span className="hidden sm:inline">Sair</span>
