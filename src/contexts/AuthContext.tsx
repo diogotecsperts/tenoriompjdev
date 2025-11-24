@@ -13,11 +13,17 @@ interface ProfileData {
   endereco: string | null;
 }
 
+interface UserRole {
+  role: 'admin' | 'user';
+}
+
 interface AuthContextType {
   isAuthenticated: boolean;
   user: User | null;
   session: Session | null;
   profile: ProfileData | null;
+  userRole: 'admin' | 'user' | null;
+  isAdmin: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   signup: (email: string, password: string, fullName: string) => Promise<boolean>;
   logout: () => Promise<void>;
@@ -30,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<ProfileData | null>(null);
+  const [userRole, setUserRole] = useState<'admin' | 'user' | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -40,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession(session);
         setUser(session?.user ?? null);
         
-        // Load profile when user logs in
+        // Load profile and role when user logs in
         if (session?.user) {
           setTimeout(async () => {
             const { data } = await supabase
@@ -52,9 +59,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (data) {
               setProfile(data);
             }
+
+            // Fetch user role
+            const { data: roleData } = await supabase
+              .from('user_roles')
+              .select('role')
+              .eq('user_id', session.user.id)
+              .single();
+            
+            if (roleData) {
+              setUserRole(roleData.role as 'admin' | 'user');
+            } else {
+              setUserRole('user');
+            }
           }, 0);
         } else {
           setProfile(null);
+          setUserRole(null);
         }
         
         setLoading(false);
@@ -62,21 +83,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 
     // Check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       
       if (session?.user) {
-        supabase
+        const { data } = await supabase
           .from('profiles')
           .select('nome, email, crm, especialidade, telefone, endereco')
           .eq('id', session.user.id)
-          .single()
-          .then(({ data }) => {
-            if (data) {
-              setProfile(data);
-            }
-          });
+          .single();
+        
+        if (data) {
+          setProfile(data);
+        }
+
+        // Fetch user role
+        const { data: roleData } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', session.user.id)
+          .single();
+        
+        if (roleData) {
+          setUserRole(roleData.role as 'admin' | 'user');
+        } else {
+          setUserRole('user');
+        }
       }
       
       setLoading(false);
@@ -165,6 +198,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
     setUser(null);
     setProfile(null);
+    setUserRole(null);
     navigate("/");
   };
 
@@ -175,6 +209,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user, 
         session, 
         profile, 
+        userRole,
+        isAdmin: userRole === 'admin',
         login, 
         signup, 
         logout,
