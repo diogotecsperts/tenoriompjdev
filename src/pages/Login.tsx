@@ -105,7 +105,7 @@ export default function Login() {
                       id="login-email"
                       type="email"
                       name="email-field"
-                      placeholder="seuemail@email.com"
+                      placeholder="email@dominio.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       onFocus={() => setEmailReadOnly(false)}
@@ -170,7 +170,7 @@ export default function Login() {
                       id="signup-email"
                       type="email"
                       name="email-field"
-                      placeholder="seuemail@email.com"
+                      placeholder="email@dominio.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       onFocus={() => setEmailReadOnly(false)}
