@@ -3,6 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Save, FileText, Printer } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { toast } from "@/hooks/use-toast";
 import { Sidebar, SidebarContent, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { LaudoSidebar } from "@/components/laudo/LaudoSidebar";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -61,7 +63,10 @@ export default function LaudoEditor() {
   };
 
   const handlePrint = () => {
-    window.print();
+    toast({
+      title: "Funcionalidade em desenvolvimento",
+      description: "A geração de PDF estará disponível em breve.",
+    });
   };
 
   const currentSectionIndex = sections.findIndex((s) => s.id === activeSection);
@@ -115,10 +120,15 @@ export default function LaudoEditor() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handlePrint} className="flex-1 sm:flex-none">
-                  <Printer className="h-4 w-4 sm:mr-2" />
-                  <span className="hidden sm:inline">Gerar PDF</span>
-                </Button>
+                <div className="relative flex-1 sm:flex-none">
+                  <Button variant="outline" size="sm" onClick={handlePrint} className="w-full">
+                    <Printer className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Gerar PDF</span>
+                  </Button>
+                  <Badge variant="secondary" className="absolute -top-2 -right-2 text-[10px] px-1.5 py-0.5">
+                    Em breve
+                  </Badge>
+                </div>
                 <Button size="sm" onClick={handleSave} className="flex-1 sm:flex-none">
                   <Save className="h-4 w-4 sm:mr-2" />
                   <span className="hidden sm:inline">Salvar</span>
