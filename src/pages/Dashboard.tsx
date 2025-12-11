@@ -3,56 +3,28 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { 
   Plus, 
-  FileText, 
-  Trash2, 
   Calendar, 
   Clock, 
   TrendingUp, 
   Upload,
-  MoreHorizontal,
-  Eye,
-  Pencil,
   DollarSign,
-  AlertCircle
+  AlertCircle,
+  CalendarDays
 } from "lucide-react";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ImportarAutosDialog } from "@/components/tools/ImportarAutosDialog";
+import { PericiasCalendar } from "@/components/dashboard/PericiasCalendar";
+import { TiposPericiaChart } from "@/components/dashboard/TiposPericiaChart";
+import { ProximosCompromissosCards } from "@/components/dashboard/ProximosCompromissosCards";
+import { HistoricoRecenteTable } from "@/components/dashboard/HistoricoRecenteTable";
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const { laudos, createLaudo, deleteLaudo, loadLaudo } = useLaudo();
+  const { laudos, createLaudo, deleteLaudo } = useLaudo();
   const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   const handleNewLaudo = async () => {
@@ -60,11 +32,6 @@ export default function Dashboard() {
     if (id) {
       navigate(`/laudo/${id}`);
     }
-  };
-
-  const handleOpenLaudo = (id: string) => {
-    loadLaudo(id);
-    navigate(`/laudo/${id}`);
   };
 
   // Calculate stats
@@ -94,9 +61,8 @@ export default function Dashboard() {
       .slice(0, 5);
   }, [laudos]);
 
-  // Mock data for upcoming appointments (future feature)
+  // Future appointments
   const upcomingAppointments = useMemo(() => {
-    // Filter laudos with future dataPericia
     const future = laudos.filter(l => {
       if (!l.dataPericia) return false;
       return new Date(l.dataPericia) >= new Date();
@@ -106,30 +72,8 @@ export default function Dashboard() {
     return future;
   }, [laudos]);
 
-  // Get initials for avatar
-  const getInitials = (name: string | undefined) => {
-    if (!name) return "??";
-    const parts = name.split(" ");
-    if (parts.length >= 2) {
-      return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
-    }
-    return name.substring(0, 2).toUpperCase();
-  };
-
-  // Get status badge variant
-  const getStatusBadge = (laudo: typeof laudos[0]) => {
-    // For now, all are drafts - this will be expanded when status field is added
-    if (laudo.conclusaoStatus === "finalizado") {
-      return <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">Concluído</Badge>;
-    }
-    if (laudo.conclusaoStatus === "em_analise") {
-      return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">Em Análise</Badge>;
-    }
-    return <Badge variant="secondary">Rascunho</Badge>;
-  };
-
   return (
-    <div className="p-6 lg:p-8 space-y-8">
+    <div className="p-6 lg:p-8 space-y-6">
       {/* Header Section */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
@@ -140,10 +84,16 @@ export default function Dashboard() {
             Resumo das suas atividades e perícias hoje.
           </p>
         </div>
-        <Button onClick={handleNewLaudo} size="default">
-          <Plus className="mr-2 h-4 w-4" />
-          Nova Perícia
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button variant="outline" onClick={() => navigate('/historico')}>
+            <CalendarDays className="mr-2 h-4 w-4" />
+            Ver Agenda
+          </Button>
+          <Button onClick={handleNewLaudo}>
+            <Plus className="mr-2 h-4 w-4" />
+            Nova Perícia
+          </Button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -233,199 +183,32 @@ export default function Dashboard() {
               <span className="text-sm font-medium">Agenda de Perícias</span>
               <Badge variant="secondary" className="ml-1">{upcomingAppointments.length}</Badge>
             </div>
-            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-muted/50">
-              <FileText className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Tipos de Perícia</span>
-              <Badge variant="secondary" className="ml-1">Todos</Badge>
-            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Tables Section */}
+      {/* Calendar and Chart Section */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Próximos Compromissos */}
-        <Card className="shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg font-semibold">Próximos Compromissos</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {upcomingAppointments.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 px-4">
-                <Calendar className="h-12 w-12 text-muted-foreground/50 mb-3" />
-                <p className="text-muted-foreground text-sm text-center">
-                  Nenhum compromisso agendado
-                </p>
-                <p className="text-muted-foreground/70 text-xs text-center mt-1">
-                  Agende uma perícia definindo a data no formulário
-                </p>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[80px]">DATA</TableHead>
-                    <TableHead>TIPO</TableHead>
-                    <TableHead>PERICIADO</TableHead>
-                    <TableHead className="text-right">HORÁRIO</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {upcomingAppointments.map((laudo) => (
-                    <TableRow 
-                      key={laudo.id} 
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => handleOpenLaudo(laudo.id)}
-                    >
-                      <TableCell>
-                        <div className="flex flex-col items-center justify-center w-12 h-12 rounded-lg bg-primary/10">
-                          <span className="text-[10px] font-semibold text-primary uppercase">
-                            {format(new Date(laudo.dataPericia!), "MMM", { locale: ptBR })}
-                          </span>
-                          <span className="text-lg font-bold text-primary">
-                            {format(new Date(laudo.dataPericia!), "dd")}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm font-medium">Acidente de Trabalho</span>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm">{laudo.vitimaName || "Não informado"}</span>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className="text-sm text-muted-foreground">09:00</span>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Histórico Recente */}
-        <Card className="shadow-sm">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-lg font-semibold">Histórico Recente</CardTitle>
-              <Button variant="ghost" size="sm" className="text-primary" onClick={() => navigate('/historico')}>
-                Ver todos
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            {recentLaudos.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 px-4">
-                <FileText className="h-12 w-12 text-muted-foreground/50 mb-3" />
-                <p className="text-muted-foreground text-sm text-center">
-                  Nenhum laudo criado ainda
-                </p>
-                <Button variant="outline" size="sm" className="mt-4" onClick={handleNewLaudo}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Criar Primeiro Laudo
-                </Button>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>PERICIADO</TableHead>
-                    <TableHead>DATA</TableHead>
-                    <TableHead>STATUS</TableHead>
-                    <TableHead className="w-[50px]"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recentLaudos.map((laudo) => (
-                    <TableRow key={laudo.id} className="group">
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-8 w-8">
-                            <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                              {getInitials(laudo.vitimaName)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex flex-col">
-                            <span className="text-sm font-medium">
-                              {laudo.vitimaName || laudo.title}
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              Acidente de Trabalho
-                            </span>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm text-muted-foreground">
-                          {format(new Date(laudo.updatedAt), "dd MMM, yyyy", { locale: ptBR })}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        {getStatusBadge(laudo)}
-                      </TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
-                              className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleOpenLaudo(laudo.id)}>
-                              <Pencil className="mr-2 h-4 w-4" />
-                              Editar
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleOpenLaudo(laudo.id)}>
-                              <Eye className="mr-2 h-4 w-4" />
-                              Visualizar
-                            </DropdownMenuItem>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <DropdownMenuItem 
-                                  className="text-destructive"
-                                  onSelect={(e) => e.preventDefault()}
-                                >
-                                  <Trash2 className="mr-2 h-4 w-4" />
-                                  Excluir
-                                </DropdownMenuItem>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    Tem certeza que deseja excluir este laudo? Esta ação não pode ser
-                                    desfeita.
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => deleteLaudo(laudo.id)}>
-                                    Excluir
-                                  </AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+        <PericiasCalendar 
+          pericias={laudos.map(l => ({ id: l.id, dataPericia: l.dataPericia || null }))}
+        />
+        <TiposPericiaChart laudos={laudos} />
       </div>
 
-      <ImportarAutosDialog 
-        open={importDialogOpen} 
-        onOpenChange={setImportDialogOpen} 
-      />
+      {/* Appointments and History Section */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ProximosCompromissosCards 
+          appointments={upcomingAppointments}
+          onViewAll={() => navigate('/historico')}
+        />
+        <HistoricoRecenteTable 
+          laudos={recentLaudos}
+          onDelete={deleteLaudo}
+          onViewAll={() => navigate('/historico')}
+        />
+      </div>
+
+      <ImportarAutosDialog open={importDialogOpen} onOpenChange={setImportDialogOpen} />
     </div>
   );
 }
