@@ -8,6 +8,8 @@ export interface LaudoData {
   title: string;
   createdAt: Date;
   updatedAt: Date;
+  status: string;
+  anotacoes: string;
   peritoNome: string;
   peritoEspecialidade: string;
   peritoCRM: string;
@@ -93,6 +95,8 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           title: dbLaudo.title,
           createdAt: new Date(dbLaudo.created_at),
           updatedAt: new Date(dbLaudo.updated_at),
+          status: (dbLaudo as any).status || 'rascunho',
+          anotacoes: (dbLaudo as any).anotacoes || '',
           peritoNome: dbLaudo.perito_nome || '',
           peritoEspecialidade: dbLaudo.perito_especialidade || '',
           peritoCRM: dbLaudo.perito_crm || '',
@@ -194,6 +198,8 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           title: data.title,
           createdAt: new Date(data.created_at),
           updatedAt: new Date(data.updated_at),
+          status: 'rascunho',
+          anotacoes: '',
           peritoNome: data.perito_nome || '',
           peritoEspecialidade: data.perito_especialidade || '',
           peritoCRM: data.perito_crm || '',
@@ -274,6 +280,8 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           title: data.title,
           createdAt: new Date(data.created_at),
           updatedAt: new Date(data.updated_at),
+          status: (data as any).status || 'rascunho',
+          anotacoes: (data as any).anotacoes || '',
           peritoNome: data.perito_nome || '',
           peritoEspecialidade: data.perito_especialidade || '',
           peritoCRM: data.perito_crm || '',
@@ -348,6 +356,8 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
         .from('laudos')
         .update({
           title: currentLaudo.title,
+          status: currentLaudo.status,
+          anotacoes: currentLaudo.anotacoes,
           perito_nome: currentLaudo.peritoNome,
           perito_especialidade: currentLaudo.peritoEspecialidade,
           perito_crm: currentLaudo.peritoCRM,
@@ -390,7 +400,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           quesitos_juizo: currentLaudo.quesitosJuizo,
           quesitos_reclamante: currentLaudo.quesitosReclamante,
           quesitos_reclamada: currentLaudo.quesitosReclamada,
-        })
+        } as any)
         .eq('id', currentLaudo.id)
         .eq('user_id', user.id);
 
