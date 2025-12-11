@@ -14,6 +14,7 @@ import Historico from "./pages/Historico";
 import Modelos from "./pages/Modelos";
 import LaudoEditor from "./pages/LaudoEditor";
 import Configuracoes from "./pages/Configuracoes";
+import Impugnacao from "./pages/Impugnacao";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
@@ -83,7 +84,7 @@ const App = () => (
                   path="/impugnacao"
                   element={
                     <ProtectedWithLayout>
-                      <Dashboard />
+                      <Impugnacao />
                     </ProtectedWithLayout>
                   }
                 />

@@ -20,7 +20,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
-import { toast } from "@/hooks/use-toast";
+import { ImportarAutosDialog } from "@/components/tools/ImportarAutosDialog";
+import { GerarLaudoDialog } from "@/components/tools/GerarLaudoDialog";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -45,16 +46,20 @@ export function AppLayout({ children }: AppLayoutProps) {
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [gerarLaudoDialogOpen, setGerarLaudoDialogOpen] = useState(false);
 
   const handleSignOut = async () => {
     await logout();
   };
 
   const handleToolAction = (action: string) => {
-    toast({
-      title: "Funcionalidade em desenvolvimento",
-      description: "Esta ferramenta estará disponível em breve.",
-    });
+    if (action === "import") {
+      setImportDialogOpen(true);
+    } else if (action === "generate") {
+      setGerarLaudoDialogOpen(true);
+    }
+    setMobileOpen(false);
   };
 
   const userInitials = profile?.nome
@@ -223,39 +228,51 @@ export function AppLayout({ children }: AppLayoutProps) {
   );
 
   return (
-    <div className="min-h-screen flex w-full bg-background">
-      {/* Desktop Sidebar */}
-      <aside
-        className={cn(
-          "hidden lg:flex flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300",
-          collapsed ? "w-[70px]" : "w-[260px]"
-        )}
-      >
-        <SidebarContent />
-      </aside>
+    <>
+      <div className="min-h-screen flex w-full bg-background">
+        {/* Desktop Sidebar */}
+        <aside
+          className={cn(
+            "hidden lg:flex flex-col border-r border-sidebar-border bg-sidebar transition-all duration-300",
+            collapsed ? "w-[70px]" : "w-[260px]"
+          )}
+        >
+          <SidebarContent />
+        </aside>
 
-      {/* Mobile Header & Sidebar */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-50 h-14 border-b border-border bg-card flex items-center px-4">
-        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-          <SheetTrigger asChild>
-            <Button variant="ghost" size="icon">
-              <Menu className="h-5 w-5" />
-            </Button>
-          </SheetTrigger>
-          <SheetContent side="left" className="p-0 w-[280px]">
-            <SidebarContent />
-          </SheetContent>
-        </Sheet>
-        <span className="ml-3 text-lg font-bold text-primary">Tenório MPJ</span>
+        {/* Mobile Header & Sidebar */}
+        <div className="lg:hidden fixed top-0 left-0 right-0 z-50 h-14 border-b border-border bg-card flex items-center px-4">
+          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <Menu className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="p-0 w-[280px]">
+              <SidebarContent />
+            </SheetContent>
+          </Sheet>
+          <span className="ml-3 text-lg font-bold text-primary">Tenório MPJ</span>
+        </div>
+
+        {/* Main Content */}
+        <main className="flex-1 flex flex-col min-h-screen lg:min-h-0">
+          <div className="lg:hidden h-14" /> {/* Spacer for mobile header */}
+          <div className="flex-1 overflow-auto">
+            {children}
+          </div>
+        </main>
       </div>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col min-h-screen lg:min-h-0">
-        <div className="lg:hidden h-14" /> {/* Spacer for mobile header */}
-        <div className="flex-1 overflow-auto">
-          {children}
-        </div>
-      </main>
-    </div>
+      {/* Dialogs */}
+      <ImportarAutosDialog 
+        open={importDialogOpen} 
+        onOpenChange={setImportDialogOpen} 
+      />
+      <GerarLaudoDialog 
+        open={gerarLaudoDialogOpen} 
+        onOpenChange={setGerarLaudoDialogOpen} 
+      />
+    </>
   );
 }

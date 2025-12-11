@@ -47,11 +47,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { ImportarAutosDialog } from "@/components/tools/ImportarAutosDialog";
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const { laudos, createLaudo, deleteLaudo, loadLaudo } = useLaudo();
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   const handleNewLaudo = async () => {
     const id = await createLaudo();
@@ -222,7 +224,7 @@ export default function Dashboard() {
       <Card className="shadow-sm">
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="outline" className="gap-2">
+            <Button variant="outline" className="gap-2" onClick={() => setImportDialogOpen(true)}>
               <Upload className="h-4 w-4" />
               Importar Autos
             </Button>
@@ -419,6 +421,11 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      <ImportarAutosDialog 
+        open={importDialogOpen} 
+        onOpenChange={setImportDialogOpen} 
+      />
     </div>
   );
 }
