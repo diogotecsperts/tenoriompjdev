@@ -6,11 +6,11 @@ interface UseScrollSpyOptions {
   enabled?: boolean;
 }
 
-export function useScrollSpy({ sectionIds, offset = 100, enabled = true }: UseScrollSpyOptions) {
+export function useScrollSpy({ sectionIds, offset = 80, enabled = true }: UseScrollSpyOptions) {
   const [activeId, setActiveId] = useState<string>(sectionIds[0] || "");
   const observerRef = useRef<IntersectionObserver | null>(null);
-  const isScrollingRef = useRef(false);
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isManualNavigationRef = useRef(false);
+  const navigationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -18,9 +18,12 @@ export function useScrollSpy({ sectionIds, offset = 100, enabled = true }: UseSc
       return;
     }
 
+    // Reset flag on mount
+    isManualNavigationRef.current = false;
+
     const handleIntersection = (entries: IntersectionObserverEntry[]) => {
-      // Ignore observer updates during programmatic scroll
-      if (isScrollingRef.current) return;
+      // Skip updates only during manual navigation click animation
+      if (isManualNavigationRef.current) return;
 
       const visibleEntries = entries.filter(entry => entry.isIntersecting);
       
@@ -33,8 +36,8 @@ export function useScrollSpy({ sectionIds, offset = 100, enabled = true }: UseSc
     };
 
     observerRef.current = new IntersectionObserver(handleIntersection, {
-      rootMargin: `-${offset}px 0px -50% 0px`,
-      threshold: [0, 0.25, 0.5, 0.75, 1],
+      rootMargin: `-${offset}px 0px -40% 0px`,
+      threshold: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1],
     });
 
     sectionIds.forEach(id => {
@@ -46,30 +49,31 @@ export function useScrollSpy({ sectionIds, offset = 100, enabled = true }: UseSc
 
     return () => {
       observerRef.current?.disconnect();
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
+      if (navigationTimeoutRef.current) {
+        clearTimeout(navigationTimeoutRef.current);
       }
+      isManualNavigationRef.current = false;
     };
   }, [sectionIds, offset, enabled]);
 
   const scrollToSection = useCallback((id: string) => {
     const element = document.getElementById(id);
     if (element) {
-      // Block observer detection during smooth scroll animation
-      isScrollingRef.current = true;
+      // Block observer updates only during this navigation
+      isManualNavigationRef.current = true;
       
-      // Update activeId immediately before scroll
+      // Update activeId immediately
       setActiveId(id);
       
       element.scrollIntoView({ behavior: "smooth", block: "start" });
       
-      // Unblock after animation completes (~500ms)
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
+      // Re-enable observer after scroll animation completes
+      if (navigationTimeoutRef.current) {
+        clearTimeout(navigationTimeoutRef.current);
       }
-      scrollTimeoutRef.current = setTimeout(() => {
-        isScrollingRef.current = false;
-      }, 500);
+      navigationTimeoutRef.current = setTimeout(() => {
+        isManualNavigationRef.current = false;
+      }, 600);
     }
   }, []);
 
