@@ -2,9 +2,10 @@ import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -55,25 +56,61 @@ import {
   FileText,
   Download,
   Filter,
-  Plus
+  Plus,
+  AlertTriangle
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useToast } from "@/hooks/use-toast";
 
 const ITEMS_PER_PAGE = 10;
 
 export default function Historico() {
   const navigate = useNavigate();
   const { laudos, deleteLaudo, loadLaudo } = useLaudo();
+  const { toast } = useToast();
   
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
 
   const handleOpenLaudo = (id: string) => {
     loadLaudo(id);
     navigate(`/laudo/${id}`);
+  };
+
+  const toggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(new Set(paginatedLaudos.map(l => l.id)));
+    } else {
+      setSelectedIds(new Set());
+    }
+  };
+
+  const toggleSelect = (id: string, checked: boolean) => {
+    const newSelected = new Set(selectedIds);
+    if (checked) {
+      newSelected.add(id);
+    } else {
+      newSelected.delete(id);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  const handleBulkDelete = async () => {
+    const count = selectedIds.size;
+    for (const id of selectedIds) {
+      await deleteLaudo(id);
+    }
+    setSelectedIds(new Set());
+    setBulkDeleteDialogOpen(false);
+    toast({
+      title: "Perícias excluídas",
+      description: `${count} perícia(s) foram removidas com sucesso.`,
+    });
   };
 
   // Get initials for avatar
@@ -123,6 +160,10 @@ export default function Historico() {
     currentPage * ITEMS_PER_PAGE
   );
 
+  const allSelected = paginatedLaudos.length > 0 && 
+    paginatedLaudos.every(l => selectedIds.has(l.id));
+  const someSelected = selectedIds.size > 0;
+
   return (
     <div className="p-6 lg:p-8 space-y-6">
       {/* Header */}
@@ -143,10 +184,11 @@ export default function Historico() {
       <Card className="shadow-sm">
         <CardContent className="p-4">
           <div className="flex flex-col gap-4 md:flex-row md:items-center">
-            <div className="relative flex-1">
+            {/* Search input - reduced size */}
+            <div className="relative w-full md:w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Buscar por nome, processo ou título..."
+                placeholder="Buscar..."
                 value={searchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
@@ -155,12 +197,37 @@ export default function Historico() {
                 className="pl-10"
               />
             </div>
-            <div className="flex gap-3">
+
+            {/* Selection controls */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <Checkbox 
+                  checked={allSelected}
+                  onCheckedChange={(checked) => toggleSelectAll(!!checked)}
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                  {someSelected ? `${selectedIds.size} selecionado(s)` : "Selecionar"}
+                </span>
+              </div>
+
+              <Button 
+                variant="destructive" 
+                size="sm"
+                disabled={!someSelected}
+                onClick={() => setBulkDeleteDialogOpen(true)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                Excluir ({selectedIds.size})
+              </Button>
+            </div>
+
+            {/* Filters */}
+            <div className="flex gap-3 ml-auto">
               <Select value={statusFilter} onValueChange={(value) => {
                 setStatusFilter(value);
                 setCurrentPage(1);
               }}>
-                <SelectTrigger className="w-[160px]">
+                <SelectTrigger className="w-[140px]">
                   <Filter className="mr-2 h-4 w-4" />
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
@@ -175,7 +242,7 @@ export default function Historico() {
                 setTypeFilter(value);
                 setCurrentPage(1);
               }}>
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger className="w-[160px]">
                   <FileText className="mr-2 h-4 w-4" />
                   <SelectValue placeholder="Tipo" />
                 </SelectTrigger>
@@ -190,6 +257,53 @@ export default function Historico() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Bulk Delete Dialog */}
+      <AlertDialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="p-3 rounded-full bg-destructive/10">
+                <AlertTriangle className="h-6 w-6 text-destructive" />
+              </div>
+              <AlertDialogTitle className="text-xl">
+                Excluir {selectedIds.size} perícia{selectedIds.size > 1 ? 's' : ''}?
+              </AlertDialogTitle>
+            </div>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  Você está prestes a excluir permanentemente{' '}
+                  <strong>{selectedIds.size}</strong>{' '}
+                  {selectedIds.size > 1 ? 'perícias' : 'perícia'}.
+                </p>
+                
+                <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
+                  <p className="text-amber-800 text-sm font-medium flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    Atenção: Esta ação é irreversível!
+                  </p>
+                  <ul className="text-amber-700 text-xs mt-2 space-y-1 list-disc list-inside">
+                    <li>Todos os dados serão removidos permanentemente</li>
+                    <li>Não será possível recuperar as informações</li>
+                    <li>Documentos e anotações vinculados serão perdidos</li>
+                  </ul>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleBulkDelete}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Sim, excluir {selectedIds.size > 1 ? 'todas' : ''}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Table */}
       <Card className="shadow-sm">
@@ -214,7 +328,13 @@ export default function Historico() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[300px]">PERICIADO</TableHead>
+                  <TableHead className="w-[50px]">
+                    <Checkbox 
+                      checked={allSelected}
+                      onCheckedChange={(checked) => toggleSelectAll(!!checked)}
+                    />
+                  </TableHead>
+                  <TableHead className="w-[280px]">PERICIADO</TableHead>
                   <TableHead>Nº PROCESSO</TableHead>
                   <TableHead>TIPO</TableHead>
                   <TableHead>DATA PERÍCIA</TableHead>
@@ -225,6 +345,12 @@ export default function Historico() {
               <TableBody>
                 {paginatedLaudos.map((laudo) => (
                   <TableRow key={laudo.id} className="group cursor-pointer" onClick={() => handleOpenLaudo(laudo.id)}>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <Checkbox 
+                        checked={selectedIds.has(laudo.id)}
+                        onCheckedChange={(checked) => toggleSelect(laudo.id, !!checked)}
+                      />
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <Avatar className="h-10 w-10">
