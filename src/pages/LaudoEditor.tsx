@@ -145,7 +145,8 @@ export default function LaudoEditor() {
   useEffect(() => {
     if (viewMode === "infinite" && scrollSpyActiveId) {
       const cardId = scrollSpyActiveId.replace("card-", "");
-      setActiveCard(cardId);
+      // Only update if cardId actually changed to prevent flickering
+      setActiveCard(prev => prev !== cardId ? cardId : prev);
     }
   }, [scrollSpyActiveId, viewMode]);
 
