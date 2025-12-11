@@ -7,6 +7,7 @@ import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { LaudoProvider } from "@/contexts/LaudoContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { AppLayout } from "@/components/layout/AppLayout";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import LaudoEditor from "./pages/LaudoEditor";
@@ -15,6 +16,15 @@ import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+
+// Wrapper component that applies AppLayout to protected routes
+function ProtectedWithLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <ProtectedRoute>
+      <AppLayout>{children}</AppLayout>
+    </ProtectedRoute>
+  );
+}
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -30,33 +40,73 @@ const App = () => (
                 <Route
                   path="/dashboard"
                   element={
-                    <ProtectedRoute>
+                    <ProtectedWithLayout>
                       <Dashboard />
-                    </ProtectedRoute>
+                    </ProtectedWithLayout>
+                  }
+                />
+                <Route
+                  path="/laudo/new"
+                  element={
+                    <ProtectedWithLayout>
+                      <LaudoEditor />
+                    </ProtectedWithLayout>
                   }
                 />
                 <Route
                   path="/laudo/:id"
                   element={
-                    <ProtectedRoute>
+                    <ProtectedWithLayout>
                       <LaudoEditor />
-                    </ProtectedRoute>
+                    </ProtectedWithLayout>
+                  }
+                />
+                <Route
+                  path="/historico"
+                  element={
+                    <ProtectedWithLayout>
+                      <Dashboard />
+                    </ProtectedWithLayout>
+                  }
+                />
+                <Route
+                  path="/modelos"
+                  element={
+                    <ProtectedWithLayout>
+                      <Dashboard />
+                    </ProtectedWithLayout>
+                  }
+                />
+                <Route
+                  path="/impugnacao"
+                  element={
+                    <ProtectedWithLayout>
+                      <Dashboard />
+                    </ProtectedWithLayout>
+                  }
+                />
+                <Route
+                  path="/configuracoes"
+                  element={
+                    <ProtectedWithLayout>
+                      <Profile />
+                    </ProtectedWithLayout>
                   }
                 />
                 <Route
                   path="/profile"
                   element={
-                    <ProtectedRoute>
+                    <ProtectedWithLayout>
                       <Profile />
-                    </ProtectedRoute>
+                    </ProtectedWithLayout>
                   }
                 />
                 <Route
                   path="/admin"
                   element={
-                    <ProtectedRoute>
+                    <ProtectedWithLayout>
                       <Admin />
-                    </ProtectedRoute>
+                    </ProtectedWithLayout>
                   }
                 />
                 <Route path="*" element={<NotFound />} />

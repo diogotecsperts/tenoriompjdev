@@ -228,26 +228,19 @@ export default function Admin() {
   }
 
   return (
-    <div className="min-h-screen bg-background p-4 sm:p-6 lg:p-8">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <Shield className="h-8 w-8 text-primary" />
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold">Painel Administrativo</h1>
-              <p className="text-sm text-muted-foreground">Gerenciamento completo do sistema</p>
-            </div>
+    <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+            <Shield className="h-6 w-6 text-primary" />
           </div>
-          <Button
-            variant="outline"
-            onClick={() => navigate("/dashboard")}
-            className="w-full sm:w-auto"
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Voltar ao Dashboard
-          </Button>
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold">Painel Administrativo</h1>
+            <p className="text-sm text-muted-foreground">Gerenciamento completo do sistema</p>
+          </div>
         </div>
+      </div>
 
         {/* Statistics Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -578,7 +571,6 @@ export default function Admin() {
             </Card>
           </div>
         )}
-      </div>
     </div>
   );
 }

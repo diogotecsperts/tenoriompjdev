@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, FileText, LogOut, Trash2, Calendar, User, Shield } from "lucide-react";
+import { Plus, FileText, Trash2, Calendar, ClipboardList, Clock, TrendingUp } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -18,13 +18,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { RenameDialog } from "@/components/dashboard/RenameDialog";
 import { FilterBar, FilterState } from "@/components/dashboard/FilterBar";
+import { Badge } from "@/components/ui/badge";
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { profile, isAdmin, logout } = useAuth();
+  const { profile } = useAuth();
   const { laudos, createLaudo, deleteLaudo, loadLaudo, renameLaudo } = useLaudo();
   
   const [filters, setFilters] = useState<FilterState>({
@@ -56,7 +56,6 @@ export default function Dashboard() {
 
   const filteredLaudos = useMemo(() => {
     return laudos.filter(laudo => {
-      // Global text search
       if (filters.searchText) {
         const search = filters.searchText.toLowerCase();
         const matchesSearch = 
@@ -66,7 +65,6 @@ export default function Dashboard() {
         if (!matchesSearch) return false;
       }
       
-      // Specific filters
       if (filters.vitimaName && 
           !laudo.vitimaName?.toLowerCase().includes(filters.vitimaName.toLowerCase())) {
         return false;
@@ -82,7 +80,6 @@ export default function Dashboard() {
         return false;
       }
       
-      // Date range filters
       if (filters.dataAcidenteStart && laudo.dataAcidente) {
         if (new Date(laudo.dataAcidente) < new Date(filters.dataAcidenteStart)) {
           return false;
@@ -111,103 +108,121 @@ export default function Dashboard() {
     });
   }, [laudos, filters]);
 
+  // Calculate stats
+  const totalLaudos = laudos.length;
+  const thisMonthLaudos = laudos.filter(l => {
+    const createdAt = new Date(l.updatedAt);
+    const now = new Date();
+    return createdAt.getMonth() === now.getMonth() && createdAt.getFullYear() === now.getFullYear();
+  }).length;
+
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b bg-card shadow-sm">
-        <div className="container mx-auto px-4 py-4 sm:px-6">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-                <FileText className="h-6 w-6 text-primary-foreground" />
-              </div>
+    <div className="p-6 lg:p-8 space-y-8">
+      {/* Header Section */}
+      <div className="space-y-2">
+        <h1 className="text-2xl lg:text-3xl font-bold text-foreground">
+          Bem-vindo, {profile?.nome?.split(' ')[0] || 'Doutor'}
+        </h1>
+        <p className="text-muted-foreground">
+          Resumo das suas atividades e perícias.
+        </p>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
               <div>
-                <h1 className="text-lg font-bold sm:text-xl">Tenorio MPJ</h1>
-                <p className="text-xs text-muted-foreground sm:text-sm">Sistema de Laudos Judiciais</p>
-                <p className="text-xs text-muted-foreground/60">
-                  by{" "}
-                  <a 
-                    href="https://tecsperts.com" 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="hover:text-muted-foreground transition-colors"
-                  >
-                    tecsperts
-                  </a>
-                </p>
+                <p className="text-sm font-medium text-muted-foreground">Total de Laudos</p>
+                <p className="text-2xl font-bold text-foreground">{totalLaudos}</p>
+              </div>
+              <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                <FileText className="h-6 w-6 text-primary" />
               </div>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="hidden text-right sm:block">
-                <p className="text-sm font-medium">{profile?.nome}</p>
-                <p className="text-xs text-muted-foreground">{profile?.email}</p>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Este Mês</p>
+                <p className="text-2xl font-bold text-foreground">{thisMonthLaudos}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <ThemeToggle />
-                {isAdmin && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => navigate("/admin")}
-                    title="Painel Admin"
-                    className="shrink-0"
-                  >
-                    <Shield className="h-5 w-5" />
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => navigate("/profile")}
-                  title="Perfil"
-                  className="shrink-0"
-                >
-                  <User className="h-5 w-5" />
-                </Button>
-                <Button variant="outline" size="sm" onClick={logout} className="flex-1 sm:flex-none">
-                  <LogOut className="h-4 w-4 sm:mr-2" />
-                  <span className="hidden sm:inline">Sair</span>
-                </Button>
+              <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                <TrendingUp className="h-6 w-6 text-primary" />
               </div>
             </div>
-          </div>
-        </div>
-      </header>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Pendentes</p>
+                <p className="text-2xl font-bold text-foreground">0</p>
+                <p className="text-xs text-muted-foreground">Em breve</p>
+              </div>
+              <div className="h-12 w-12 rounded-xl bg-accent/30 flex items-center justify-center">
+                <Clock className="h-6 w-6 text-accent-foreground" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Agendadas</p>
+                <p className="text-2xl font-bold text-foreground">0</p>
+                <p className="text-xs text-muted-foreground">Em breve</p>
+              </div>
+              <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                <ClipboardList className="h-6 w-6 text-primary" />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Main Content */}
-      <main className="container mx-auto px-4 py-6 sm:px-6 sm:py-8">
-        <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
+      <div className="space-y-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-2xl font-bold sm:text-3xl">Meus Laudos</h2>
-            <p className="mt-1 text-sm text-muted-foreground sm:text-base">
+            <h2 className="text-xl font-semibold text-foreground">Meus Laudos</h2>
+            <p className="text-sm text-muted-foreground">
               Gerencie seus laudos periciais judiciais
             </p>
           </div>
-          <Button onClick={handleNewLaudo} size="lg" className="w-full sm:w-auto">
-            <Plus className="mr-2 h-5 w-5" />
-            Novo Laudo
+          <Button onClick={handleNewLaudo} size="default">
+            <Plus className="mr-2 h-4 w-4" />
+            Nova Perícia
           </Button>
         </div>
 
         {/* Filter Bar */}
         {laudos.length > 0 && (
-          <div className="mb-6">
-            <FilterBar
-              filters={filters}
-              onFiltersChange={setFilters}
-              resultCount={filteredLaudos.length}
-            />
-          </div>
+          <FilterBar
+            filters={filters}
+            onFiltersChange={setFilters}
+            resultCount={filteredLaudos.length}
+          />
         )}
 
-        {/* Laudos List */}
+        {/* Laudos Grid */}
         {laudos.length === 0 ? (
-          <Card className="border-dashed">
+          <Card className="border-dashed shadow-sm">
             <CardContent className="flex flex-col items-center justify-center py-16">
-              <FileText className="mb-4 h-16 w-16 text-muted-foreground" />
+              <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
+                <FileText className="h-8 w-8 text-primary" />
+              </div>
               <h3 className="mb-2 text-xl font-semibold">Nenhum laudo criado</h3>
-              <p className="mb-6 text-center text-muted-foreground">
-                Comece criando seu primeiro laudo pericial
+              <p className="mb-6 text-center text-muted-foreground max-w-sm">
+                Comece criando seu primeiro laudo pericial para gerenciar suas perícias
               </p>
               <Button onClick={handleNewLaudo}>
                 <Plus className="mr-2 h-4 w-4" />
@@ -216,7 +231,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         ) : filteredLaudos.length === 0 ? (
-          <Card className="border-dashed">
+          <Card className="border-dashed shadow-sm">
             <CardContent className="flex flex-col items-center justify-center py-16">
               <FileText className="mb-4 h-16 w-16 text-muted-foreground" />
               <h3 className="mb-2 text-xl font-semibold">Nenhum laudo encontrado</h3>
@@ -238,86 +253,87 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
             {filteredLaudos.map((laudo) => {
               const suggestedTitle = laudo.vitimaName 
                 ? `Laudo - ${laudo.vitimaName}` 
                 : undefined;
               
               return (
-                <Card key={laudo.id} className="hover:shadow-lg transition-shadow">
-                  <CardHeader>
+                <Card key={laudo.id} className="hover:shadow-md transition-all shadow-sm">
+                  <CardHeader className="pb-3">
                     <CardTitle className="flex items-center justify-between gap-2">
-                      <span className="truncate flex-1">{laudo.title}</span>
+                      <span className="truncate flex-1 text-base">{laudo.title}</span>
                       <div className="flex items-center gap-1">
                         <RenameDialog
                           currentTitle={laudo.title}
                           suggestedTitle={suggestedTitle}
                           onRename={(newTitle) => handleRenameLaudo(laudo.id, newTitle)}
                         />
-                        <FileText className="h-5 w-5 text-primary" />
                       </div>
                     </CardTitle>
-                  <CardDescription className="space-y-1">
-                    {laudo.reclamante && (
-                      <div className="text-sm">
-                        <span className="font-medium">Reclamante:</span> {laudo.reclamante}
+                    <CardDescription className="space-y-1">
+                      {laudo.reclamante && (
+                        <div className="text-sm">
+                          <span className="font-medium">Reclamante:</span> {laudo.reclamante}
+                        </div>
+                      )}
+                      {laudo.processoNumero && (
+                        <div className="text-sm">
+                          <span className="font-medium">Processo:</span> {laudo.processoNumero}
+                        </div>
+                      )}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center text-xs text-muted-foreground">
+                        <Calendar className="mr-1 h-3 w-3" />
+                        {format(new Date(laudo.updatedAt), "dd/MM/yyyy", { locale: ptBR })}
                       </div>
-                    )}
-                    {laudo.processoNumero && (
-                      <div className="text-sm">
-                        <span className="font-medium">Processo:</span> {laudo.processoNumero}
-                      </div>
-                    )}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex items-center text-xs text-muted-foreground">
-                    <Calendar className="mr-1 h-3 w-3" />
-                    Atualizado em{" "}
-                    {format(new Date(laudo.updatedAt), "dd/MM/yyyy 'às' HH:mm", {
-                      locale: ptBR,
-                    })}
-                  </div>
-                  <div className="flex space-x-2">
-                    <Button
-                      variant="default"
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => handleOpenLaudo(laudo.id)}
-                    >
-                      Abrir
-                    </Button>
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="destructive" size="sm">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Tem certeza que deseja excluir este laudo? Esta ação não pode ser
-                            desfeita.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => deleteLaudo(laudo.id)}>
-                            Excluir
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
-                </CardContent>
-              </Card>
-            );
+                      <Badge variant="secondary" className="text-xs">
+                        Rascunho
+                      </Badge>
+                    </div>
+                    <div className="flex space-x-2">
+                      <Button
+                        variant="default"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => handleOpenLaudo(laudo.id)}
+                      >
+                        Abrir
+                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="outline" size="sm">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Confirmar exclusão</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Tem certeza que deseja excluir este laudo? Esta ação não pode ser
+                              desfeita.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => deleteLaudo(laudo.id)}>
+                              Excluir
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
             })}
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }
