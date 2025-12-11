@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, RefObject } from "react";
 
 interface UseScrollSpyOptions {
   sectionIds: string[];
   offset?: number;
   enabled?: boolean;
+  scrollContainerRef?: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -34,13 +35,16 @@ function getActiveElement(
   return ids[closest.index];
 }
 
-export function useScrollSpy({ sectionIds, offset = 80, enabled = true }: UseScrollSpyOptions) {
+export function useScrollSpy({ sectionIds, offset = 80, enabled = true, scrollContainerRef }: UseScrollSpyOptions) {
   const [activeId, setActiveId] = useState<string>(sectionIds[0] || "");
   const isScrollingRef = useRef(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
+
+    // Use the provided container or fallback to window
+    const scrollContainer = scrollContainerRef?.current || window;
 
     const handleScroll = () => {
       // Ignore during programmatic navigation
@@ -61,15 +65,15 @@ export function useScrollSpy({ sectionIds, offset = 80, enabled = true }: UseScr
     // Run once on mount to set initial state
     handleScroll();
 
-    window.addEventListener('scroll', handleScroll, { passive: true });
+    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
     
     return () => {
-      window.removeEventListener('scroll', handleScroll);
+      scrollContainer.removeEventListener('scroll', handleScroll);
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
       }
     };
-  }, [sectionIds, offset, enabled]);
+  }, [sectionIds, offset, enabled, scrollContainerRef]);
 
   const scrollToSection = useCallback((id: string) => {
     const element = document.getElementById(id);

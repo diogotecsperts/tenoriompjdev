@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Button } from "@/components/ui/button";
@@ -134,11 +134,15 @@ export default function LaudoEditor() {
   // Memoize card IDs for scroll spy
   const cardIds = useMemo(() => consolidatedCards.map(c => `card-${c.id}`), []);
 
+  // Ref for the main scroll container
+  const mainContentRef = useRef<HTMLElement>(null);
+
   // Scroll spy hook for infinite mode
   const { activeId: scrollSpyActiveId, scrollToSection } = useScrollSpy({
     sectionIds: cardIds,
     offset: 120,
     enabled: viewMode === "infinite",
+    scrollContainerRef: mainContentRef,
   });
 
   // Sync scroll spy with activeCard in infinite mode
@@ -456,7 +460,7 @@ export default function LaudoEditor() {
         </header>
 
         {/* Content Area */}
-        <main className="flex-1 overflow-auto p-4 lg:p-6 bg-background">
+        <main ref={mainContentRef} className="flex-1 overflow-auto p-4 lg:p-6 bg-background">
           <div className="mx-auto max-w-4xl">
             {viewMode === "paginated" ? (
               // Paginated Mode - Show only active card
