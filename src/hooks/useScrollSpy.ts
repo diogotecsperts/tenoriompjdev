@@ -22,7 +22,8 @@ export function useScrollSpy({ sectionIds, offset = 100, enabled = true }: UseSc
         const mostVisible = visibleEntries.reduce((prev, current) => 
           current.intersectionRatio > prev.intersectionRatio ? current : prev
         );
-        setActiveId(mostVisible.target.id);
+        // Only update if the ID actually changed to prevent unnecessary re-renders
+        setActiveId(prev => prev !== mostVisible.target.id ? mostVisible.target.id : prev);
       }
     };
 
