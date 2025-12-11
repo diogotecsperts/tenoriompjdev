@@ -209,10 +209,11 @@ export default function LaudoEditor() {
   };
 
   const handleCardNavClick = (cardId: string) => {
+    // Set activeCard immediately before scroll to prevent flickering
+    setActiveCard(cardId);
+    
     if (viewMode === "infinite") {
       scrollToSection(`card-${cardId}`);
-    } else {
-      setActiveCard(cardId);
     }
     setSectionNavOpen(false);
   };
