@@ -1,7 +1,9 @@
 import { useState, useMemo } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, getDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -10,12 +12,17 @@ interface PericiasCalendarProps {
   pericias: Array<{
     id: string;
     dataPericia: string | null;
+    vitimaName?: string;
+    processoNumero?: string;
+    status?: string;
   }>;
   onDayClick?: (date: Date) => void;
 }
 
 export function PericiasCalendar({ pericias, onDayClick }: PericiasCalendarProps) {
+  const navigate = useNavigate();
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const today = new Date();
 
   const daysOfWeek = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"];
@@ -44,6 +51,15 @@ export function PericiasCalendar({ pericias, onDayClick }: PericiasCalendarProps
 
   const getPericiaCount = (date: Date) => {
     return periciasDates.filter(d => isSameDay(d, date)).length;
+  };
+
+  const getPericiasForDate = (date: Date) => {
+    return pericias.filter(p => p.dataPericia && isSameDay(new Date(p.dataPericia), date));
+  };
+
+  const handleDayClick = (day: Date) => {
+    setSelectedDate(day);
+    onDayClick?.(day);
   };
 
   return (
@@ -98,17 +114,19 @@ export function PericiasCalendar({ pericias, onDayClick }: PericiasCalendarProps
             const isCurrentMonth = isSameMonth(day, currentMonth);
             const hasPericiaDay = hasPericia(day);
             const periciaCount = getPericiaCount(day);
+            const isSelected = selectedDate && isSameDay(day, selectedDate);
+            const periciasNoDia = getPericiasForDate(day);
             
-            return (
+            const dayButton = (
               <button
-                key={day.toISOString()}
-                onClick={() => onDayClick?.(day)}
+                onClick={() => handleDayClick(day)}
                 className={cn(
                   "h-9 w-full rounded-md text-sm font-medium relative transition-colors",
                   "hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
                   isCurrentMonth ? "text-foreground" : "text-muted-foreground/50",
                   isToday && "bg-primary text-primary-foreground hover:bg-primary/90",
-                  hasPericiaDay && !isToday && "bg-primary/10"
+                  hasPericiaDay && !isToday && "bg-primary/10",
+                  isSelected && !isToday && "ring-2 ring-primary ring-offset-2"
                 )}
               >
                 {format(day, "d")}
@@ -129,6 +147,51 @@ export function PericiasCalendar({ pericias, onDayClick }: PericiasCalendarProps
                 )}
               </button>
             );
+
+            // Only wrap with Popover if there are pericias on this day
+            if (hasPericiaDay) {
+              return (
+                <Popover key={day.toISOString()}>
+                  <PopoverTrigger asChild>
+                    {dayButton}
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 p-3" align="center">
+                    <div className="space-y-3">
+                      <h4 className="font-semibold text-sm text-foreground">
+                        Perícias em {format(day, "dd/MM/yyyy")}
+                      </h4>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {periciasNoDia.map(p => (
+                          <div 
+                            key={p.id} 
+                            className="flex items-center justify-between p-2 rounded-lg bg-muted/50 gap-2"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-sm truncate text-foreground">
+                                {p.vitimaName || "Sem nome"}
+                              </p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                {p.processoNumero || "Processo N/I"}
+                              </p>
+                            </div>
+                            <Button 
+                              size="sm" 
+                              variant="ghost" 
+                              className="shrink-0 h-8 px-2"
+                              onClick={() => navigate(`/laudo/${p.id}`)}
+                            >
+                              <ExternalLink className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              );
+            }
+
+            return <div key={day.toISOString()}>{dayButton}</div>;
           })}
         </div>
       </CardContent>

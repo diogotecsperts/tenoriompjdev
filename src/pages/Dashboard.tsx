@@ -190,7 +190,13 @@ export default function Dashboard() {
       {/* Calendar and Chart Section */}
       <div className="grid gap-6 lg:grid-cols-2">
         <PericiasCalendar 
-          pericias={laudos.map(l => ({ id: l.id, dataPericia: l.dataPericia || null }))}
+          pericias={laudos.map(l => ({ 
+            id: l.id, 
+            dataPericia: l.dataPericia || null,
+            vitimaName: l.vitimaName,
+            processoNumero: l.processoNumero,
+            status: l.status
+          }))}
         />
         <TiposPericiaChart laudos={laudos} />
       </div>
