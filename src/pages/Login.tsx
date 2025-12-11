@@ -79,7 +79,7 @@ export default function Login() {
             </div>
             <div>
               <h1 className="text-3xl font-bold">MPJ MedPericias</h1>
-              <p className="text-primary-foreground/80 text-sm">Médico Perito Judicial</p>
+              <p className="text-primary-foreground/80 text-sm">Sistema completo para peritos judiciais</p>
             </div>
           </div>
           
