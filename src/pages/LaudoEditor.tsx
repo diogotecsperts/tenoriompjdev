@@ -16,7 +16,8 @@ import {
   ClipboardCheck,
   HelpCircle,
   LayoutGrid,
-  Scroll
+  Scroll,
+  CheckCircle2
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
@@ -29,6 +30,8 @@ import { cn } from "@/lib/utils";
 import { useScrollSpy } from "@/hooks/useScrollSpy";
 import { Toggle } from "@/components/ui/toggle";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Progress } from "@/components/ui/progress";
+import { useLaudoProgress } from "@/hooks/useLaudoProgress";
 
 // Import section components
 import { DadosPerito } from "@/components/laudo/sections/DadosPerito";
@@ -118,6 +121,9 @@ export default function LaudoEditor() {
   const [sectionNavOpen, setSectionNavOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState("");
+  
+  // Progress tracking
+  const progress = useLaudoProgress(currentLaudo);
   
   // View mode state with localStorage persistence
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -273,8 +279,11 @@ export default function LaudoEditor() {
   const CardNav = () => (
     <ScrollArea className="h-full">
       <div className="space-y-1 p-2">
-        {consolidatedCards.map((card, index) => {
+        {consolidatedCards.map((card) => {
           const Icon = card.icon;
+          const cardProg = progress.cardProgress.find(p => p.cardId === card.id);
+          const isComplete = cardProg?.percentage === 100;
+          
           return (
             <button
               key={card.id}
@@ -287,21 +296,34 @@ export default function LaudoEditor() {
               )}
             >
               <div className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-lg",
+                "flex h-8 w-8 items-center justify-center rounded-lg relative",
                 activeCard === card.id
                   ? "bg-primary-foreground/20"
                   : "bg-muted"
               )}>
-                <Icon className="h-4 w-4" />
+                {isComplete ? (
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                ) : (
+                  <Icon className="h-4 w-4" />
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <span className="font-medium block truncate">{card.label}</span>
-                <span className={cn(
-                  "text-xs truncate block",
-                  activeCard === card.id ? "text-primary-foreground/70" : "text-muted-foreground"
-                )}>
-                  {card.sections.length} {card.sections.length === 1 ? 'seção' : 'seções'}
-                </span>
+                <div className="flex items-center gap-2">
+                  <Progress 
+                    value={cardProg?.percentage || 0} 
+                    className={cn(
+                      "h-1 flex-1",
+                      activeCard === card.id ? "[&>div]:bg-primary-foreground/70" : ""
+                    )}
+                  />
+                  <span className={cn(
+                    "text-xs",
+                    activeCard === card.id ? "text-primary-foreground/70" : "text-muted-foreground"
+                  )}>
+                    {cardProg?.percentage || 0}%
+                  </span>
+                </div>
               </div>
             </button>
           );
@@ -314,10 +336,20 @@ export default function LaudoEditor() {
     <div className="flex h-[calc(100vh-3.5rem)] lg:h-screen">
       {/* Desktop Card Navigation */}
       <aside className="hidden lg:flex w-64 flex-col border-r border-border bg-card">
-        <div className="p-4 border-b border-border">
+        <div className="p-4 border-b border-border space-y-3">
           <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">
             Seções do Laudo
           </h2>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">Progresso geral</span>
+              <span className="font-medium text-foreground">{progress.overallPercentage}%</span>
+            </div>
+            <Progress value={progress.overallPercentage} className="h-2" />
+            <p className="text-xs text-muted-foreground">
+              {progress.totalFilledFields} de {progress.totalFields} campos
+            </p>
+          </div>
         </div>
         <CardNav />
       </aside>
@@ -336,10 +368,17 @@ export default function LaudoEditor() {
                   </Button>
                 </SheetTrigger>
                 <SheetContent side="left" className="p-0 w-72">
-                  <div className="p-4 border-b border-border">
+                  <div className="p-4 border-b border-border space-y-3">
                     <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">
                       Seções do Laudo
                     </h2>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">Progresso geral</span>
+                        <span className="font-medium text-foreground">{progress.overallPercentage}%</span>
+                      </div>
+                      <Progress value={progress.overallPercentage} className="h-2" />
+                    </div>
                   </div>
                   <CardNav />
                 </SheetContent>
