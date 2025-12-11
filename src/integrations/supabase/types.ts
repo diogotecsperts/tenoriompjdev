@@ -14,9 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      impugnacoes: {
+        Row: {
+          created_at: string
+          id: string
+          laudo_id: string | null
+          processo_numero: string | null
+          quesitos: Json | null
+          status: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          laudo_id?: string | null
+          processo_numero?: string | null
+          quesitos?: Json | null
+          status?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          laudo_id?: string | null
+          processo_numero?: string | null
+          quesitos?: Json | null
+          status?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "impugnacoes_laudo_id_fkey"
+            columns: ["laudo_id"]
+            isOneToOne: false
+            referencedRelation: "laudos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       laudos: {
         Row: {
           afastamentos: string | null
+          anotacoes: string | null
           antecedentes: string | null
           auxilio_terceiros: string | null
           conclusao_analise: string | null
@@ -53,6 +95,7 @@ export type Database = {
           quesitos_reclamante: string | null
           reclamada: string | null
           reclamante: string | null
+          status: string | null
           tabela_susep: string | null
           title: string
           tratamentos: string | null
@@ -66,6 +109,7 @@ export type Database = {
         }
         Insert: {
           afastamentos?: string | null
+          anotacoes?: string | null
           antecedentes?: string | null
           auxilio_terceiros?: string | null
           conclusao_analise?: string | null
@@ -102,6 +146,7 @@ export type Database = {
           quesitos_reclamante?: string | null
           reclamada?: string | null
           reclamante?: string | null
+          status?: string | null
           tabela_susep?: string | null
           title?: string
           tratamentos?: string | null
@@ -115,6 +160,7 @@ export type Database = {
         }
         Update: {
           afastamentos?: string | null
+          anotacoes?: string | null
           antecedentes?: string | null
           auxilio_terceiros?: string | null
           conclusao_analise?: string | null
@@ -151,6 +197,7 @@ export type Database = {
           quesitos_reclamante?: string | null
           reclamada?: string | null
           reclamante?: string | null
+          status?: string | null
           tabela_susep?: string | null
           title?: string
           tratamentos?: string | null
@@ -161,6 +208,48 @@ export type Database = {
           vitima_nascimento?: string | null
           vitima_nome?: string | null
           vitima_profissao?: string | null
+        }
+        Relationships: []
+      }
+      modelos_laudo: {
+        Row: {
+          category: string
+          created_at: string
+          description: string | null
+          icon: string | null
+          id: string
+          is_favorite: boolean | null
+          template_data: Json | null
+          title: string
+          updated_at: string
+          usage_count: number | null
+          user_id: string
+        }
+        Insert: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          icon?: string | null
+          id?: string
+          is_favorite?: boolean | null
+          template_data?: Json | null
+          title: string
+          updated_at?: string
+          usage_count?: number | null
+          user_id: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          icon?: string | null
+          id?: string
+          is_favorite?: boolean | null
+          template_data?: Json | null
+          title?: string
+          updated_at?: string
+          usage_count?: number | null
+          user_id?: string
         }
         Relationships: []
       }

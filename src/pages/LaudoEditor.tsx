@@ -2,13 +2,32 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Button } from "@/components/ui/button";
-import { Save, FileText, Printer, ChevronLeft, ChevronRight, Menu } from "lucide-react";
+import { 
+  Save, 
+  FileText, 
+  Printer, 
+  ChevronLeft, 
+  ChevronRight, 
+  Menu,
+  StickyNote,
+  User,
+  FileCheck,
+  Stethoscope,
+  ClipboardCheck,
+  HelpCircle,
+  X
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { cn } from "@/lib/utils";
+
+// Import section components
 import { DadosPerito } from "@/components/laudo/sections/DadosPerito";
 import { DadosProcesso } from "@/components/laudo/sections/DadosProcesso";
 import { DocumentosAvaliacao } from "@/components/laudo/sections/DocumentosAvaliacao";
@@ -25,30 +44,73 @@ import { Conclusao } from "@/components/laudo/sections/Conclusao";
 import { AvaliacaoSequelas } from "@/components/laudo/sections/AvaliacaoSequelas";
 import { Quesitos } from "@/components/laudo/sections/Quesitos";
 
-const sections = [
-  { id: "perito", label: "Dados do Perito", component: DadosPerito },
-  { id: "processo", label: "Dados do Processo", component: DadosProcesso },
-  { id: "documentos", label: "Documentos", component: DocumentosAvaliacao },
-  { id: "vitima", label: "Dados da Vítima", component: DadosVitima },
-  { id: "acidente", label: "Dados do Acidente", component: DadosAcidente },
-  { id: "anamnese", label: "Anamnese", component: Anamnese },
-  { id: "antecedentes", label: "Antecedentes", component: AntecedentesPatologicos },
-  { id: "planejamento", label: "Planejamento", component: Planejamento },
-  { id: "laudos", label: "Laudos Médicos", component: LaudosMedicos },
-  { id: "exames", label: "Exames Complementares", component: ExamesComplementares },
-  { id: "exame-fisico", label: "Exame Físico", component: ExameFisico },
-  { id: "nexo", label: "Nexo Causal", component: NexoCausal },
-  { id: "conclusao", label: "Conclusão", component: Conclusao },
-  { id: "sequelas", label: "Avaliação de Sequelas", component: AvaliacaoSequelas },
-  { id: "quesitos", label: "Quesitos", component: Quesitos },
+// Consolidated cards structure
+const consolidatedCards = [
+  {
+    id: "preliminares",
+    label: "Informações Preliminares",
+    description: "Dados do perito, processo e documentos avaliados",
+    icon: User,
+    sections: [
+      { id: "perito", label: "Dados do Perito", component: DadosPerito },
+      { id: "processo", label: "Dados do Processo", component: DadosProcesso },
+      { id: "documentos", label: "Documentos Avaliados", component: DocumentosAvaliacao },
+    ],
+  },
+  {
+    id: "periciando",
+    label: "Documentação & Periciando",
+    description: "Dados da vítima, acidente e histórico clínico",
+    icon: FileCheck,
+    sections: [
+      { id: "vitima", label: "Dados da Vítima", component: DadosVitima },
+      { id: "acidente", label: "Dados do Acidente", component: DadosAcidente },
+      { id: "anamnese", label: "Anamnese", component: Anamnese },
+      { id: "antecedentes", label: "Antecedentes Patológicos", component: AntecedentesPatologicos },
+      { id: "planejamento", label: "Planejamento", component: Planejamento },
+    ],
+  },
+  {
+    id: "exame",
+    label: "Exame Clínico",
+    description: "Laudos médicos, exames e exame físico",
+    icon: Stethoscope,
+    sections: [
+      { id: "laudos", label: "Laudos Médicos", component: LaudosMedicos },
+      { id: "exames", label: "Exames Complementares", component: ExamesComplementares },
+      { id: "exame-fisico", label: "Exame Físico", component: ExameFisico },
+    ],
+  },
+  {
+    id: "conclusao",
+    label: "Conclusão Técnica",
+    description: "Nexo causal, conclusão e avaliação de sequelas",
+    icon: ClipboardCheck,
+    sections: [
+      { id: "nexo", label: "Nexo Causal", component: NexoCausal },
+      { id: "conclusao", label: "Conclusão", component: Conclusao },
+      { id: "sequelas", label: "Avaliação de Sequelas", component: AvaliacaoSequelas },
+    ],
+  },
+  {
+    id: "quesitos",
+    label: "Respostas aos Quesitos",
+    description: "Quesitos do juízo, reclamante e reclamada",
+    icon: HelpCircle,
+    sections: [
+      { id: "quesitos", label: "Quesitos", component: Quesitos },
+    ],
+  },
 ];
 
 export default function LaudoEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { currentLaudo, loadLaudo, saveLaudo, createLaudo } = useLaudo();
-  const [activeSection, setActiveSection] = useState("perito");
+  const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo } = useLaudo();
+  const [activeCard, setActiveCard] = useState("preliminares");
   const [sectionNavOpen, setSectionNavOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notes, setNotes] = useState("");
 
   useEffect(() => {
     const initializeLaudo = async () => {
@@ -65,7 +127,16 @@ export default function LaudoEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  useEffect(() => {
+    if (currentLaudo) {
+      setNotes((currentLaudo as any).anotacoes || "");
+    }
+  }, [currentLaudo]);
+
   const handleSave = () => {
+    if (currentLaudo) {
+      updateLaudo({ ...currentLaudo, anotacoes: notes } as any);
+    }
     saveLaudo();
   };
 
@@ -76,21 +147,21 @@ export default function LaudoEditor() {
     });
   };
 
-  const currentSectionIndex = sections.findIndex((s) => s.id === activeSection);
+  const currentCardIndex = consolidatedCards.findIndex((c) => c.id === activeCard);
 
-  const goToNextSection = () => {
-    if (currentSectionIndex < sections.length - 1) {
-      setActiveSection(sections[currentSectionIndex + 1].id);
+  const goToNextCard = () => {
+    if (currentCardIndex < consolidatedCards.length - 1) {
+      setActiveCard(consolidatedCards[currentCardIndex + 1].id);
     }
   };
 
-  const goToPreviousSection = () => {
-    if (currentSectionIndex > 0) {
-      setActiveSection(sections[currentSectionIndex - 1].id);
+  const goToPreviousCard = () => {
+    if (currentCardIndex > 0) {
+      setActiveCard(consolidatedCards[currentCardIndex - 1].id);
     }
   };
 
-  const ActiveComponent = sections.find((s) => s.id === activeSection)?.component || DadosPerito;
+  const currentCardData = consolidatedCards.find((c) => c.id === activeCard);
 
   if (!currentLaudo && id !== "new") {
     return (
@@ -103,48 +174,59 @@ export default function LaudoEditor() {
     );
   }
 
-  const SectionNav = () => (
+  const CardNav = () => (
     <ScrollArea className="h-full">
       <div className="space-y-1 p-2">
-        {sections.map((section, index) => (
-          <button
-            key={section.id}
-            onClick={() => {
-              setActiveSection(section.id);
-              setSectionNavOpen(false);
-            }}
-            className={cn(
-              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors text-left",
-              activeSection === section.id
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
-          >
-            <span className={cn(
-              "flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium",
-              activeSection === section.id
-                ? "bg-primary-foreground/20 text-primary-foreground"
-                : "bg-muted text-muted-foreground"
-            )}>
-              {index + 1}
-            </span>
-            <span className="truncate">{section.label}</span>
-          </button>
-        ))}
+        {consolidatedCards.map((card, index) => {
+          const Icon = card.icon;
+          return (
+            <button
+              key={card.id}
+              onClick={() => {
+                setActiveCard(card.id);
+                setSectionNavOpen(false);
+              }}
+              className={cn(
+                "w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm transition-colors text-left",
+                activeCard === card.id
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <div className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-lg",
+                activeCard === card.id
+                  ? "bg-primary-foreground/20"
+                  : "bg-muted"
+              )}>
+                <Icon className="h-4 w-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="font-medium block truncate">{card.label}</span>
+                <span className={cn(
+                  "text-xs truncate block",
+                  activeCard === card.id ? "text-primary-foreground/70" : "text-muted-foreground"
+                )}>
+                  {card.sections.length} {card.sections.length === 1 ? 'seção' : 'seções'}
+                </span>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </ScrollArea>
   );
 
   return (
     <div className="flex h-[calc(100vh-3.5rem)] lg:h-screen">
-      {/* Desktop Section Navigation */}
+      {/* Desktop Card Navigation */}
       <aside className="hidden lg:flex w-64 flex-col border-r border-border bg-card">
         <div className="p-4 border-b border-border">
           <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider">
             Seções do Laudo
           </h2>
         </div>
-        <SectionNav />
+        <CardNav />
       </aside>
 
       {/* Main Content */}
@@ -166,7 +248,7 @@ export default function LaudoEditor() {
                       Seções do Laudo
                     </h2>
                   </div>
-                  <SectionNav />
+                  <CardNav />
                 </SheetContent>
               </Sheet>
               
@@ -185,6 +267,20 @@ export default function LaudoEditor() {
             </div>
             
             <div className="flex items-center gap-2">
+              {/* Notes Button */}
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setNotesOpen(true)}
+                className="relative"
+              >
+                <StickyNote className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Anotações</span>
+                {notes.length > 0 && (
+                  <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-primary" />
+                )}
+              </Button>
+              
               <div className="relative">
                 <Button variant="outline" size="sm" onClick={handlePrint}>
                   <Printer className="h-4 w-4 sm:mr-2" />
@@ -205,43 +301,85 @@ export default function LaudoEditor() {
         {/* Content Area */}
         <main className="flex-1 overflow-auto p-4 lg:p-6 bg-background">
           <div className="mx-auto max-w-4xl">
-            <Card className="shadow-sm">
-              <CardHeader className="pb-4">
-                <CardTitle className="flex items-center gap-3">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-bold">
-                    {currentSectionIndex + 1}
-                  </span>
-                  {sections[currentSectionIndex]?.label}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ActiveComponent 
-                  currentIndex={currentSectionIndex}
-                  totalSections={sections.length}
-                  onNext={goToNextSection}
-                  onPrevious={goToPreviousSection}
-                />
-              </CardContent>
-            </Card>
+            {currentCardData && (
+              <Card className="shadow-sm">
+                <CardHeader className="pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+                      <currentCardData.icon className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <CardTitle>{currentCardData.label}</CardTitle>
+                      <CardDescription>{currentCardData.description}</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <Accordion 
+                    type="multiple" 
+                    defaultValue={currentCardData.sections.map(s => s.id)}
+                    className="space-y-4"
+                  >
+                    {currentCardData.sections.map((section, index) => {
+                      const SectionComponent = section.component;
+                      return (
+                        <AccordionItem 
+                          key={section.id} 
+                          value={section.id}
+                          className="border rounded-lg px-4"
+                        >
+                          <AccordionTrigger className="hover:no-underline py-4">
+                            <div className="flex items-center gap-3">
+                              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                                {index + 1}
+                              </span>
+                              <span className="font-medium">{section.label}</span>
+                            </div>
+                          </AccordionTrigger>
+                          <AccordionContent className="pb-4">
+                            <SectionComponent 
+                              currentIndex={index}
+                              totalSections={currentCardData.sections.length}
+                              onNext={() => {}}
+                              onPrevious={() => {}}
+                            />
+                          </AccordionContent>
+                        </AccordionItem>
+                      );
+                    })}
+                  </Accordion>
+                </CardContent>
+              </Card>
+            )}
 
-            {/* Section Navigation Footer */}
+            {/* Card Navigation Footer */}
             <div className="flex items-center justify-between mt-6 pb-6">
               <Button
                 variant="outline"
-                onClick={goToPreviousSection}
-                disabled={currentSectionIndex === 0}
+                onClick={goToPreviousCard}
+                disabled={currentCardIndex === 0}
               >
                 <ChevronLeft className="h-4 w-4 mr-2" />
                 Anterior
               </Button>
               
-              <span className="text-sm text-muted-foreground">
-                {currentSectionIndex + 1} de {sections.length}
-              </span>
+              <div className="flex gap-1">
+                {consolidatedCards.map((card, index) => (
+                  <button
+                    key={card.id}
+                    onClick={() => setActiveCard(card.id)}
+                    className={cn(
+                      "h-2 w-2 rounded-full transition-colors",
+                      activeCard === card.id ? "bg-primary" : "bg-muted hover:bg-muted-foreground/50"
+                    )}
+                    aria-label={`Ir para ${card.label}`}
+                  />
+                ))}
+              </div>
               
               <Button
-                onClick={goToNextSection}
-                disabled={currentSectionIndex === sections.length - 1}
+                onClick={goToNextCard}
+                disabled={currentCardIndex === consolidatedCards.length - 1}
               >
                 Próximo
                 <ChevronRight className="h-4 w-4 ml-2" />
@@ -250,6 +388,41 @@ export default function LaudoEditor() {
           </div>
         </main>
       </div>
+
+      {/* Notes Sheet */}
+      <Sheet open={notesOpen} onOpenChange={setNotesOpen}>
+        <SheetContent className="w-full sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <StickyNote className="h-5 w-5 text-primary" />
+              Anotações
+            </SheetTitle>
+            <SheetDescription>
+              Suas anotações pessoais sobre este laudo
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-6 space-y-4">
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Escreva suas anotações aqui..."
+              className="min-h-[400px] resize-none"
+            />
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-muted-foreground">
+                {notes.length} caracteres
+              </span>
+              <Button size="sm" onClick={() => {
+                handleSave();
+                setNotesOpen(false);
+              }}>
+                <Save className="h-4 w-4 mr-2" />
+                Salvar
+              </Button>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
