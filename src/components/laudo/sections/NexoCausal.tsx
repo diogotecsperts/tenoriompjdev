@@ -3,16 +3,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { SectionNavigation } from "../SectionNavigation";
 
-interface NexoCausalProps {
-  currentIndex: number;
-  totalSections: number;
-  onNext: () => void;
-  onPrevious: () => void;
-}
-
-export function NexoCausal({ currentIndex, totalSections, onNext, onPrevious }: NexoCausalProps) {
+export function NexoCausal() {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
@@ -55,12 +47,6 @@ export function NexoCausal({ currentIndex, totalSections, onNext, onPrevious }: 
             rows={8}
           />
         </div>
-        <SectionNavigation
-          currentIndex={currentIndex}
-          totalSections={totalSections}
-          onNext={onNext}
-          onPrevious={onPrevious}
-        />
       </CardContent>
     </Card>
   );

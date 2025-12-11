@@ -260,12 +260,7 @@ export default function LaudoEditor() {
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="pb-4">
-                  <SectionComponent 
-                    currentIndex={index}
-                    totalSections={card.sections.length}
-                    onNext={() => {}}
-                    onPrevious={() => {}}
-                  />
+                  <SectionComponent />
                 </AccordionContent>
               </AccordionItem>
             );

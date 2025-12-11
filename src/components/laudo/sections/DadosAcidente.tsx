@@ -2,16 +2,8 @@ import { useLaudo } from "@/contexts/LaudoContext";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { SectionNavigation } from "../SectionNavigation";
 
-interface DadosAcidenteProps {
-  currentIndex: number;
-  totalSections: number;
-  onNext: () => void;
-  onPrevious: () => void;
-}
-
-export function DadosAcidente({ currentIndex, totalSections, onNext, onPrevious }: DadosAcidenteProps) {
+export function DadosAcidente() {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
@@ -45,12 +37,6 @@ export function DadosAcidente({ currentIndex, totalSections, onNext, onPrevious 
             rows={8}
           />
         </div>
-        <SectionNavigation
-          currentIndex={currentIndex}
-          totalSections={totalSections}
-          onNext={onNext}
-          onPrevious={onPrevious}
-        />
       </CardContent>
     </Card>
   );

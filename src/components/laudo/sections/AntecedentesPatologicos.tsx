@@ -2,16 +2,8 @@ import { useLaudo } from "@/contexts/LaudoContext";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { SectionNavigation } from "../SectionNavigation";
 
-interface AntecedentesPatologicosProps {
-  currentIndex: number;
-  totalSections: number;
-  onNext: () => void;
-  onPrevious: () => void;
-}
-
-export function AntecedentesPatologicos({ currentIndex, totalSections, onNext, onPrevious }: AntecedentesPatologicosProps) {
+export function AntecedentesPatologicos() {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
@@ -55,12 +47,6 @@ export function AntecedentesPatologicos({ currentIndex, totalSections, onNext, o
             rows={4}
           />
         </div>
-        <SectionNavigation
-          currentIndex={currentIndex}
-          totalSections={totalSections}
-          onNext={onNext}
-          onPrevious={onPrevious}
-        />
       </CardContent>
     </Card>
   );

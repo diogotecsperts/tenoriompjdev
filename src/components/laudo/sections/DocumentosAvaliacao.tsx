@@ -2,7 +2,6 @@ import { useLaudo } from "@/contexts/LaudoContext";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { SectionNavigation } from "../SectionNavigation";
 
 const documentosOptions = [
   { id: "cat", label: "CAT - Comunicação de Acidente de Trabalho" },
@@ -11,14 +10,7 @@ const documentosOptions = [
   { id: "exames", label: "Exames Complementares" },
 ];
 
-interface DocumentosAvaliacaoProps {
-  currentIndex: number;
-  totalSections: number;
-  onNext: () => void;
-  onPrevious: () => void;
-}
-
-export function DocumentosAvaliacao({ currentIndex, totalSections, onNext, onPrevious }: DocumentosAvaliacaoProps) {
+export function DocumentosAvaliacao() {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
@@ -52,12 +44,6 @@ export function DocumentosAvaliacao({ currentIndex, totalSections, onNext, onPre
             </Label>
           </div>
         ))}
-        <SectionNavigation
-          currentIndex={currentIndex}
-          totalSections={totalSections}
-          onNext={onNext}
-          onPrevious={onPrevious}
-        />
       </CardContent>
     </Card>
   );
