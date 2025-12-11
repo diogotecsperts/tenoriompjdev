@@ -48,7 +48,7 @@ import { Quesitos } from "@/components/laudo/sections/Quesitos";
 const consolidatedCards = [
   {
     id: "preliminares",
-    label: "Informações Preliminares",
+    label: "Dados Preliminares",
     description: "Dados do perito, processo e documentos avaliados",
     icon: User,
     sections: [
@@ -59,7 +59,7 @@ const consolidatedCards = [
   },
   {
     id: "periciando",
-    label: "Documentação & Periciando",
+    label: "Dados do Periciando",
     description: "Dados da vítima, acidente e histórico clínico",
     icon: FileCheck,
     sections: [
