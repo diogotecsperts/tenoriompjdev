@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,8 @@ import {
   Stethoscope,
   ClipboardCheck,
   HelpCircle,
-  X
+  LayoutGrid,
+  Scroll
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
@@ -23,9 +24,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { cn } from "@/lib/utils";
+import { useScrollSpy } from "@/hooks/useScrollSpy";
+import { Toggle } from "@/components/ui/toggle";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 // Import section components
 import { DadosPerito } from "@/components/laudo/sections/DadosPerito";
@@ -103,6 +106,10 @@ const consolidatedCards = [
   },
 ];
 
+type ViewMode = "paginated" | "infinite";
+
+const VIEW_MODE_STORAGE_KEY = "laudo-editor-view-mode";
+
 export default function LaudoEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -111,6 +118,35 @@ export default function LaudoEditor() {
   const [sectionNavOpen, setSectionNavOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState("");
+  
+  // View mode state with localStorage persistence
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const stored = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+    return (stored as ViewMode) || "paginated";
+  });
+
+  // Memoize card IDs for scroll spy
+  const cardIds = useMemo(() => consolidatedCards.map(c => `card-${c.id}`), []);
+
+  // Scroll spy hook for infinite mode
+  const { activeId: scrollSpyActiveId, scrollToSection } = useScrollSpy({
+    sectionIds: cardIds,
+    offset: 120,
+    enabled: viewMode === "infinite",
+  });
+
+  // Sync scroll spy with activeCard in infinite mode
+  useEffect(() => {
+    if (viewMode === "infinite" && scrollSpyActiveId) {
+      const cardId = scrollSpyActiveId.replace("card-", "");
+      setActiveCard(cardId);
+    }
+  }, [scrollSpyActiveId, viewMode]);
+
+  // Persist view mode to localStorage
+  useEffect(() => {
+    localStorage.setItem(VIEW_MODE_STORAGE_KEY, viewMode);
+  }, [viewMode]);
 
   useEffect(() => {
     const initializeLaudo = async () => {
@@ -147,6 +183,10 @@ export default function LaudoEditor() {
     });
   };
 
+  const toggleViewMode = () => {
+    setViewMode(prev => prev === "paginated" ? "infinite" : "paginated");
+  };
+
   const currentCardIndex = consolidatedCards.findIndex((c) => c.id === activeCard);
 
   const goToNextCard = () => {
@@ -159,6 +199,15 @@ export default function LaudoEditor() {
     if (currentCardIndex > 0) {
       setActiveCard(consolidatedCards[currentCardIndex - 1].id);
     }
+  };
+
+  const handleCardNavClick = (cardId: string) => {
+    if (viewMode === "infinite") {
+      scrollToSection(`card-${cardId}`);
+    } else {
+      setActiveCard(cardId);
+    }
+    setSectionNavOpen(false);
   };
 
   const currentCardData = consolidatedCards.find((c) => c.id === activeCard);
@@ -174,6 +223,58 @@ export default function LaudoEditor() {
     );
   }
 
+  // Render a single card section
+  const renderCardSection = (card: typeof consolidatedCards[0]) => (
+    <Card key={card.id} id={`card-${card.id}`} className="shadow-sm scroll-mt-24">
+      <CardHeader className="pb-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+            <card.icon className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <CardTitle>{card.label}</CardTitle>
+            <CardDescription>{card.description}</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <Accordion 
+          type="multiple" 
+          defaultValue={card.sections.map(s => s.id)}
+          className="space-y-4"
+        >
+          {card.sections.map((section, index) => {
+            const SectionComponent = section.component;
+            return (
+              <AccordionItem 
+                key={section.id} 
+                value={section.id}
+                className="border rounded-lg px-4"
+              >
+                <AccordionTrigger className="hover:no-underline py-4">
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                      {index + 1}
+                    </span>
+                    <span className="font-medium">{section.label}</span>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="pb-4">
+                  <SectionComponent 
+                    currentIndex={index}
+                    totalSections={card.sections.length}
+                    onNext={() => {}}
+                    onPrevious={() => {}}
+                  />
+                </AccordionContent>
+              </AccordionItem>
+            );
+          })}
+        </Accordion>
+      </CardContent>
+    </Card>
+  );
+
   const CardNav = () => (
     <ScrollArea className="h-full">
       <div className="space-y-1 p-2">
@@ -182,10 +283,7 @@ export default function LaudoEditor() {
           return (
             <button
               key={card.id}
-              onClick={() => {
-                setActiveCard(card.id);
-                setSectionNavOpen(false);
-              }}
+              onClick={() => handleCardNavClick(card.id)}
               className={cn(
                 "w-full flex items-center gap-3 px-3 py-3 rounded-lg text-sm transition-colors text-left",
                 activeCard === card.id
@@ -267,6 +365,29 @@ export default function LaudoEditor() {
             </div>
             
             <div className="flex items-center gap-2">
+              {/* View Mode Toggle */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={toggleViewMode}
+                      className="h-9 w-9"
+                    >
+                      {viewMode === "paginated" ? (
+                        <Scroll className="h-4 w-4" />
+                      ) : (
+                        <LayoutGrid className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{viewMode === "paginated" ? "Modo scroll infinito" : "Modo paginado"}</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
               {/* Notes Button */}
               <Button 
                 variant="outline" 
@@ -301,90 +422,51 @@ export default function LaudoEditor() {
         {/* Content Area */}
         <main className="flex-1 overflow-auto p-4 lg:p-6 bg-background">
           <div className="mx-auto max-w-4xl">
-            {currentCardData && (
-              <Card className="shadow-sm">
-                <CardHeader className="pb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-                      <currentCardData.icon className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <CardTitle>{currentCardData.label}</CardTitle>
-                      <CardDescription>{currentCardData.description}</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <Accordion 
-                    type="multiple" 
-                    defaultValue={currentCardData.sections.map(s => s.id)}
-                    className="space-y-4"
-                  >
-                    {currentCardData.sections.map((section, index) => {
-                      const SectionComponent = section.component;
-                      return (
-                        <AccordionItem 
-                          key={section.id} 
-                          value={section.id}
-                          className="border rounded-lg px-4"
-                        >
-                          <AccordionTrigger className="hover:no-underline py-4">
-                            <div className="flex items-center gap-3">
-                              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                                {index + 1}
-                              </span>
-                              <span className="font-medium">{section.label}</span>
-                            </div>
-                          </AccordionTrigger>
-                          <AccordionContent className="pb-4">
-                            <SectionComponent 
-                              currentIndex={index}
-                              totalSections={currentCardData.sections.length}
-                              onNext={() => {}}
-                              onPrevious={() => {}}
-                            />
-                          </AccordionContent>
-                        </AccordionItem>
-                      );
-                    })}
-                  </Accordion>
-                </CardContent>
-              </Card>
-            )}
+            {viewMode === "paginated" ? (
+              // Paginated Mode - Show only active card
+              <>
+                {currentCardData && renderCardSection(currentCardData)}
 
-            {/* Card Navigation Footer */}
-            <div className="flex items-center justify-between mt-6 pb-6">
-              <Button
-                variant="outline"
-                onClick={goToPreviousCard}
-                disabled={currentCardIndex === 0}
-              >
-                <ChevronLeft className="h-4 w-4 mr-2" />
-                Anterior
-              </Button>
-              
-              <div className="flex gap-1">
-                {consolidatedCards.map((card, index) => (
-                  <button
-                    key={card.id}
-                    onClick={() => setActiveCard(card.id)}
-                    className={cn(
-                      "h-2 w-2 rounded-full transition-colors",
-                      activeCard === card.id ? "bg-primary" : "bg-muted hover:bg-muted-foreground/50"
-                    )}
-                    aria-label={`Ir para ${card.label}`}
-                  />
-                ))}
+                {/* Card Navigation Footer */}
+                <div className="flex items-center justify-between mt-6 pb-6">
+                  <Button
+                    variant="outline"
+                    onClick={goToPreviousCard}
+                    disabled={currentCardIndex === 0}
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-2" />
+                    Anterior
+                  </Button>
+                  
+                  <div className="flex gap-1">
+                    {consolidatedCards.map((card, index) => (
+                      <button
+                        key={card.id}
+                        onClick={() => setActiveCard(card.id)}
+                        className={cn(
+                          "h-2 w-2 rounded-full transition-colors",
+                          activeCard === card.id ? "bg-primary" : "bg-muted hover:bg-muted-foreground/50"
+                        )}
+                        aria-label={`Ir para ${card.label}`}
+                      />
+                    ))}
+                  </div>
+                  
+                  <Button
+                    onClick={goToNextCard}
+                    disabled={currentCardIndex === consolidatedCards.length - 1}
+                  >
+                    Próximo
+                    <ChevronRight className="h-4 w-4 ml-2" />
+                  </Button>
+                </div>
+              </>
+            ) : (
+              // Infinite Scroll Mode - Show all cards
+              <div className="space-y-8 pb-6">
+                {consolidatedCards.map(card => renderCardSection(card))}
               </div>
-              
-              <Button
-                onClick={goToNextCard}
-                disabled={currentCardIndex === consolidatedCards.length - 1}
-              >
-                Próximo
-                <ChevronRight className="h-4 w-4 ml-2" />
-              </Button>
-            </div>
+            )}
           </div>
         </main>
       </div>
