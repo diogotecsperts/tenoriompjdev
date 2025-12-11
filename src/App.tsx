@@ -13,7 +13,7 @@ import Dashboard from "./pages/Dashboard";
 import Historico from "./pages/Historico";
 import Modelos from "./pages/Modelos";
 import LaudoEditor from "./pages/LaudoEditor";
-import Profile from "./pages/Profile";
+import Configuracoes from "./pages/Configuracoes";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
@@ -91,7 +91,7 @@ const App = () => (
                   path="/configuracoes"
                   element={
                     <ProtectedWithLayout>
-                      <Profile />
+                      <Configuracoes />
                     </ProtectedWithLayout>
                   }
                 />
@@ -99,7 +99,7 @@ const App = () => (
                   path="/profile"
                   element={
                     <ProtectedWithLayout>
-                      <Profile />
+                      <Configuracoes />
                     </ProtectedWithLayout>
                   }
                 />
