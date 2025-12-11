@@ -10,6 +10,8 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import Historico from "./pages/Historico";
+import Modelos from "./pages/Modelos";
 import LaudoEditor from "./pages/LaudoEditor";
 import Profile from "./pages/Profile";
 import Admin from "./pages/Admin";
@@ -65,7 +67,7 @@ const App = () => (
                   path="/historico"
                   element={
                     <ProtectedWithLayout>
-                      <Dashboard />
+                      <Historico />
                     </ProtectedWithLayout>
                   }
                 />
@@ -73,7 +75,7 @@ const App = () => (
                   path="/modelos"
                   element={
                     <ProtectedWithLayout>
-                      <Dashboard />
+                      <Modelos />
                     </ProtectedWithLayout>
                   }
                 />
