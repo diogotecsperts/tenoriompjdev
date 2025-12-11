@@ -2,16 +2,8 @@ import { useLaudo } from "@/contexts/LaudoContext";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { SectionNavigation } from "../SectionNavigation";
 
-interface ExameFisicoProps {
-  currentIndex: number;
-  totalSections: number;
-  onNext: () => void;
-  onPrevious: () => void;
-}
-
-export function ExameFisico({ currentIndex, totalSections, onNext, onPrevious }: ExameFisicoProps) {
+export function ExameFisico() {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
@@ -32,12 +24,6 @@ export function ExameFisico({ currentIndex, totalSections, onNext, onPrevious }:
           onChange={(e) => updateLaudo({ exameFisico: e.target.value })}
           placeholder="Descreva o estado geral, inspeção, palpação, testes especiais, amplitude de movimentos, força muscular, sinais e sintomas observados..."
           rows={12}
-        />
-        <SectionNavigation
-          currentIndex={currentIndex}
-          totalSections={totalSections}
-          onNext={onNext}
-          onPrevious={onPrevious}
         />
       </CardContent>
     </Card>

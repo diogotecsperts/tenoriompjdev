@@ -2,16 +2,8 @@ import { useLaudo } from "@/contexts/LaudoContext";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { SectionNavigation } from "../SectionNavigation";
 
-interface ExamesComplementaresProps {
-  currentIndex: number;
-  totalSections: number;
-  onNext: () => void;
-  onPrevious: () => void;
-}
-
-export function ExamesComplementares({ currentIndex, totalSections, onNext, onPrevious }: ExamesComplementaresProps) {
+export function ExamesComplementares() {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
@@ -32,12 +24,6 @@ export function ExamesComplementares({ currentIndex, totalSections, onNext, onPr
           onChange={(e) => updateLaudo({ examesComplementares: e.target.value })}
           placeholder="Descreva os resultados de raio-X, tomografia, ressonância magnética, exames laboratoriais e outros exames realizados..."
           rows={10}
-        />
-        <SectionNavigation
-          currentIndex={currentIndex}
-          totalSections={totalSections}
-          onNext={onNext}
-          onPrevious={onPrevious}
         />
       </CardContent>
     </Card>
