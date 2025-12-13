@@ -625,14 +625,14 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
       <AlertDialog open={showExitDialog} onOpenChange={(open) => {
         if (!open) handleCancelExit();
       }}>
-        <AlertDialogContent className="max-w-lg">
+        <AlertDialogContent className="max-w-xl">
           <AlertDialogHeader>
             <AlertDialogTitle>Deseja salvar as alterações?</AlertDialogTitle>
             <AlertDialogDescription>
               Você está saindo do editor de laudo. Escolha uma opção abaixo:
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <AlertDialogFooter className="flex flex-col gap-2 sm:flex-row sm:justify-center sm:gap-3">
             <AlertDialogCancel onClick={handleCancelExit} className="mt-0">
               Continuar editando
             </AlertDialogCancel>
