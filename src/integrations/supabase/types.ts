@@ -321,6 +321,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_email_by_user_id: { Args: { p_user_id: string }; Returns: string }
       get_user_statistics: {
         Args: { target_user_id: string }
         Returns: {
