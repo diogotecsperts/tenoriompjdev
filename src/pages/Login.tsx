@@ -142,7 +142,7 @@ export default function Login() {
                       <Label htmlFor="login-email">ID ou E-mail</Label>
                       <div className="relative">
                         <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input id="login-email" type="text" name="email-field" placeholder="MED001 ou seu@email.com" value={email} onChange={e => setEmail(e.target.value)} onFocus={() => setEmailReadOnly(false)} className="pl-10 h-11" autoComplete="new-password" readOnly={emailReadOnly} required />
+                        <Input id="login-email" type="text" name="email-field" value={email} onChange={e => setEmail(e.target.value)} onFocus={() => setEmailReadOnly(false)} className="pl-10 h-11" autoComplete="new-password" readOnly={emailReadOnly} required placeholder="Digite seu ID ou email" />
                       </div>
                       <p className="text-xs text-muted-foreground">Use seu ID de usuário ou e-mail cadastrado</p>
                     </div>
