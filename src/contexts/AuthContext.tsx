@@ -11,6 +11,8 @@ interface ProfileData {
   especialidade: string | null;
   telefone: string | null;
   endereco: string | null;
+  user_id: string | null;
+  avatar_url: string | null;
 }
 
 interface UserRole {
@@ -24,9 +26,10 @@ interface AuthContextType {
   profile: ProfileData | null;
   userRole: 'admin' | 'user' | null;
   isAdmin: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
+  login: (identifier: string, password: string) => Promise<boolean>;
   signup: (email: string, password: string, fullName: string) => Promise<boolean>;
   logout: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
   loading: boolean;
 }
 
@@ -52,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setTimeout(async () => {
             const { data } = await supabase
               .from('profiles')
-              .select('nome, email, crm, especialidade, telefone, endereco')
+              .select('nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url')
               .eq('id', session.user.id)
               .single();
             
@@ -81,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (session?.user) {
         const { data } = await supabase
           .from('profiles')
-          .select('nome, email, crm, especialidade, telefone, endereco')
+          .select('nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url')
           .eq('id', session.user.id)
           .single();
         
@@ -143,10 +146,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const login = async (email: string, password: string): Promise<boolean> => {
+  const refreshProfile = async () => {
+    if (user) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url')
+        .eq('id', user.id)
+        .single();
+      if (data) {
+        setProfile(data);
+      }
+    }
+  };
+
+  const login = async (identifier: string, password: string): Promise<boolean> => {
     try {
+      let emailToUse = identifier;
+      
+      // Se não contém @, buscar email pelo user_id
+      if (!identifier.includes('@')) {
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('email')
+          .eq('user_id', identifier.toUpperCase())
+          .single();
+        
+        if (profileError || !profileData) {
+          toast({
+            variant: "destructive",
+            title: "ID não encontrado",
+            description: "Verifique o ID informado e tente novamente."
+          });
+          return false;
+        }
+        emailToUse = profileData.email;
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: emailToUse,
         password
       });
 
@@ -196,6 +233,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login, 
         signup, 
         logout,
+        refreshProfile,
         loading 
       }}
     >

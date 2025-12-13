@@ -35,7 +35,7 @@ import {
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function Configuracoes() {
-  const { user, profile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("perfil");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -47,6 +47,7 @@ export default function Configuracoes() {
     especialidade: "",
     telefone: "",
     endereco: "",
+    user_id: "",
   });
 
   // Notification preferences (local state - future feature)
@@ -75,10 +76,11 @@ export default function Configuracoes() {
         especialidade: profile.especialidade || "",
         telefone: profile.telefone || "",
         endereco: profile.endereco || "",
+        user_id: profile.user_id || "",
       });
       // Load avatar URL from profile
-      if ((profile as any).avatar_url) {
-        setAvatarUrl((profile as any).avatar_url);
+      if (profile.avatar_url) {
+        setAvatarUrl(profile.avatar_url);
       }
     }
   }, [profile]);
@@ -193,6 +195,7 @@ export default function Configuracoes() {
 
     setLoading(true);
     try {
+      // Atualizar profile
       const { error } = await supabase
         .from("profiles")
         .update({
@@ -201,10 +204,33 @@ export default function Configuracoes() {
           especialidade: formData.especialidade,
           telefone: formData.telefone,
           endereco: formData.endereco,
+          email: formData.email,
         })
         .eq("id", user.id);
 
       if (error) throw error;
+
+      // Se o email mudou, atualizar no auth também
+      if (formData.email !== user.email) {
+        const { error: authError } = await supabase.auth.updateUser({ 
+          email: formData.email 
+        });
+        if (authError) {
+          toast({
+            variant: "destructive",
+            title: "Erro ao atualizar e-mail",
+            description: "O perfil foi salvo, mas houve um erro ao atualizar o e-mail de login. " + authError.message,
+          });
+        } else {
+          toast({
+            title: "E-mail atualizado",
+            description: "Um link de confirmação foi enviado para o novo e-mail.",
+          });
+        }
+      }
+
+      // Atualizar contexto
+      await refreshProfile();
 
       toast({
         title: "Configurações salvas",
@@ -350,6 +376,35 @@ export default function Configuracoes() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
+                  {/* ID do Usuário - Somente leitura */}
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="user_id">ID do Usuário</Label>
+                      <Input
+                        id="user_id"
+                        value={formData.user_id}
+                        disabled
+                        className="bg-muted font-mono"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Use este ID ou seu e-mail para fazer login
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="email">E-mail</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={formData.email}
+                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        placeholder="seu@email.com"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Ao alterar, um link de confirmação será enviado
+                      </p>
+                    </div>
+                  </div>
+
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="nome">Nome Completo *</Label>
@@ -392,29 +447,14 @@ export default function Configuracoes() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="email">E-mail Profissional</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={formData.email}
-                        disabled
-                        className="bg-muted"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        O e-mail de login não pode ser alterado
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="endereco">Endereço do Consultório</Label>
-                      <Input
-                        id="endereco"
-                        value={formData.endereco}
-                        onChange={(e) => setFormData({ ...formData, endereco: e.target.value })}
-                        placeholder="Rua, número, cidade - UF"
-                      />
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="endereco">Endereço do Consultório</Label>
+                    <Input
+                      id="endereco"
+                      value={formData.endereco}
+                      onChange={(e) => setFormData({ ...formData, endereco: e.target.value })}
+                      placeholder="Rua, número, cidade - UF"
+                    />
                   </div>
                 </CardContent>
               </Card>
