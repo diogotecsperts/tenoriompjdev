@@ -133,7 +133,8 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
 
   // Register navigation guard when laudo is loaded
   useEffect(() => {
-    if (currentLaudo) {
+    // Only set up guard when we have a valid laudo ID (not during initial load)
+    if (currentLaudo?.id) {
       setGuarded(true);
       setOnNavigationRequest((destination: string) => {
         setPendingDestination(destination);
@@ -145,7 +146,7 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
       setGuarded(false);
       setOnNavigationRequest(null);
     };
-  }, [currentLaudo, setGuarded, setOnNavigationRequest]);
+  }, [currentLaudo?.id, setGuarded, setOnNavigationRequest]);
 
   // Handle browser back/refresh with beforeunload
   useEffect(() => {
@@ -621,25 +622,28 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
       </Sheet>
 
       {/* Exit Confirmation Dialog */}
-      <AlertDialog open={showExitDialog} onOpenChange={setShowExitDialog}>
-        <AlertDialogContent>
+      <AlertDialog open={showExitDialog} onOpenChange={(open) => {
+        if (!open) handleCancelExit();
+      }}>
+        <AlertDialogContent className="max-w-md">
           <AlertDialogHeader>
             <AlertDialogTitle>Deseja salvar as alterações?</AlertDialogTitle>
             <AlertDialogDescription>
               Você está saindo do editor de laudo. Escolha uma opção abaixo:
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
-            <AlertDialogCancel onClick={handleCancelExit}>
+          <AlertDialogFooter className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <AlertDialogCancel onClick={handleCancelExit} className="mt-0">
               Continuar editando
             </AlertDialogCancel>
             <Button 
               variant="destructive" 
               onClick={handleDiscardLaudo}
+              className="w-full sm:w-auto"
             >
               Descartar laudo
             </Button>
-            <AlertDialogAction onClick={handleSaveAndExit}>
+            <AlertDialogAction onClick={handleSaveAndExit} className="w-full sm:w-auto">
               Salvar como rascunho
             </AlertDialogAction>
           </AlertDialogFooter>
