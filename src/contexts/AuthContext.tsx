@@ -163,15 +163,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       let emailToUse = identifier;
       
-      // Se não contém @, buscar email pelo user_id
+      // Se não contém @, buscar email pelo user_id via RPC (permite acesso sem autenticação)
       if (!identifier.includes('@')) {
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('email')
-          .eq('user_id', identifier.toUpperCase())
-          .single();
+        const { data: emailData, error: rpcError } = await supabase.rpc(
+          'get_email_by_user_id' as any, 
+          { p_user_id: identifier }
+        );
         
-        if (profileError || !profileData) {
+        if (rpcError || !emailData) {
           toast({
             variant: "destructive",
             title: "ID não encontrado",
@@ -179,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
           return false;
         }
-        emailToUse = profileData.email;
+        emailToUse = emailData as string;
       }
 
       const { data, error } = await supabase.auth.signInWithPassword({

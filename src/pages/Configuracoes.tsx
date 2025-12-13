@@ -195,6 +195,37 @@ export default function Configuracoes() {
 
     setLoading(true);
     try {
+      // Validar user_id
+      if (formData.user_id && formData.user_id.length < 4) {
+        toast({
+          variant: "destructive",
+          title: "ID inválido",
+          description: "O ID deve ter pelo menos 4 caracteres.",
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Verificar se user_id já existe (se foi alterado)
+      if (formData.user_id && formData.user_id !== profile?.user_id) {
+        const { data: existingId } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("user_id", formData.user_id.toUpperCase())
+          .neq("id", user.id)
+          .single();
+
+        if (existingId) {
+          toast({
+            variant: "destructive",
+            title: "ID já em uso",
+            description: "Este ID já está sendo usado por outro usuário.",
+          });
+          setLoading(false);
+          return;
+        }
+      }
+
       // Atualizar profile
       const { error } = await supabase
         .from("profiles")
@@ -205,6 +236,7 @@ export default function Configuracoes() {
           telefone: formData.telefone,
           endereco: formData.endereco,
           email: formData.email,
+          user_id: formData.user_id?.toUpperCase() || null,
         })
         .eq("id", user.id);
 
@@ -376,18 +408,19 @@ export default function Configuracoes() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                  {/* ID do Usuário - Somente leitura */}
+                  {/* ID do Usuário - Editável */}
                   <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="user_id">ID do Usuário</Label>
                       <Input
                         id="user_id"
                         value={formData.user_id}
-                        disabled
-                        className="bg-muted font-mono"
+                        onChange={(e) => setFormData({ ...formData, user_id: e.target.value.toUpperCase() })}
+                        className="font-mono"
+                        placeholder="MED001"
                       />
                       <p className="text-xs text-muted-foreground">
-                        Use este ID ou seu e-mail para fazer login
+                        Mínimo 4 caracteres. Use este ID ou e-mail para login
                       </p>
                     </div>
                     <div className="space-y-2">
