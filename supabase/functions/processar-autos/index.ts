@@ -8,46 +8,91 @@ const corsHeaders = {
 // Modelo configurável - fácil trocar para gemini-2.5-pro se necessário
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash";
 
-const systemPrompt = `Você é um assistente especializado em analisar autos de processos trabalhistas brasileiros.
-Sua tarefa é extrair informações estruturadas do documento fornecido.
+const systemPrompt = `Analise os autos do processo trabalhista e extraia as informações principais.
 
-IMPORTANTE:
-- Extraia APENAS informações que estão explicitamente presentes no documento
-- Se uma informação não estiver presente, deixe o campo vazio ("")
-- NÃO invente ou suponha informações
-- Seja preciso com datas, números e nomes
-- CPFs devem ser formatados como XXX.XXX.XXX-XX
-- Datas devem estar no formato YYYY-MM-DD
+REGRAS:
+- Extraia APENAS o que está explícito no documento
+- Campos não encontrados devem ficar vazios ("")
+- Seja CONCISO nas descrições (máximo 200 caracteres)
+- CPF: XXX.XXX.XXX-XX
+- Datas: YYYY-MM-DD
+- CIDs: liste apenas os códigos, sem descrições
 
-Retorne um JSON válido com a seguinte estrutura:
+Retorne este JSON:
 {
-  "vitima": {
-    "nome": "",
-    "cpf": "",
-    "data_nascimento": "",
-    "profissao": "",
-    "escolaridade": ""
-  },
-  "processo": {
-    "numero": "",
-    "vara": "",
-    "reclamante": "",
-    "reclamada": ""
-  },
-  "acidente": {
-    "data": "",
-    "descricao": "",
-    "local": ""
-  },
-  "informacoes_medicas": {
-    "cids_mencionados": [],
-    "lesoes": "",
-    "tratamentos": "",
-    "afastamentos": ""
-  },
+  "vitima": {"nome":"","cpf":"","data_nascimento":"","profissao":"","escolaridade":""},
+  "processo": {"numero":"","vara":"","reclamante":"","reclamada":""},
+  "acidente": {"data":"","descricao":"","local":""},
+  "informacoes_medicas": {"cids_mencionados":[],"lesoes":"","tratamentos":"","afastamentos":""},
   "documentos_mencionados": [],
   "resumo": ""
 }`;
+
+// Helper to try to fix truncated JSON
+function tryFixTruncatedJson(jsonStr: string): object | null {
+  // First try parsing as-is
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    // Try to fix common truncation issues
+  }
+
+  let fixed = jsonStr.trim();
+  
+  // Remove markdown code blocks if present
+  fixed = fixed.replace(/^```json\s*/i, '').replace(/```\s*$/, '');
+  
+  // Count open brackets
+  const openBraces = (fixed.match(/{/g) || []).length;
+  const closeBraces = (fixed.match(/}/g) || []).length;
+  const openBrackets = (fixed.match(/\[/g) || []).length;
+  const closeBrackets = (fixed.match(/]/g) || []).length;
+
+  // If truncated in the middle of a string, try to close it
+  if (fixed.match(/"[^"]*$/)) {
+    fixed += '"';
+  }
+
+  // Add missing brackets
+  for (let i = 0; i < openBrackets - closeBrackets; i++) {
+    fixed += ']';
+  }
+  for (let i = 0; i < openBraces - closeBraces; i++) {
+    fixed += '}';
+  }
+
+  try {
+    return JSON.parse(fixed);
+  } catch {
+    console.error('Could not fix truncated JSON');
+    return null;
+  }
+}
+
+// Helper to create a valid structure with defaults
+function ensureValidStructure(data: any): object {
+  const defaultStructure = {
+    vitima: { nome: "", cpf: "", data_nascimento: "", profissao: "", escolaridade: "" },
+    processo: { numero: "", vara: "", reclamante: "", reclamada: "" },
+    acidente: { data: "", descricao: "", local: "" },
+    informacoes_medicas: { cids_mencionados: [], lesoes: "", tratamentos: "", afastamentos: "" },
+    documentos_mencionados: [],
+    resumo: ""
+  };
+
+  if (!data || typeof data !== 'object') {
+    return defaultStructure;
+  }
+
+  return {
+    vitima: { ...defaultStructure.vitima, ...(data.vitima || {}) },
+    processo: { ...defaultStructure.processo, ...(data.processo || {}) },
+    acidente: { ...defaultStructure.acidente, ...(data.acidente || {}) },
+    informacoes_medicas: { ...defaultStructure.informacoes_medicas, ...(data.informacoes_medicas || {}) },
+    documentos_mencionados: Array.isArray(data.documentos_mencionados) ? data.documentos_mencionados : [],
+    resumo: data.resumo || ""
+  };
+}
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -98,7 +143,7 @@ serve(async (req) => {
       generationConfig: {
         temperature: 0.1,
         topP: 0.95,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 16384,
         responseMimeType: "application/json"
       }
     };
@@ -123,7 +168,13 @@ serve(async (req) => {
     }
 
     const geminiData = await geminiResponse.json();
-    console.log('Gemini response received');
+    console.log('Gemini response received, finishReason:', geminiData.candidates?.[0]?.finishReason);
+
+    // Check for truncation
+    const finishReason = geminiData.candidates?.[0]?.finishReason;
+    if (finishReason === 'MAX_TOKENS') {
+      console.warn('Response was truncated due to max tokens limit');
+    }
 
     // Extract the generated content
     const generatedText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -136,17 +187,21 @@ serve(async (req) => {
       );
     }
 
-    // Parse the JSON response from Gemini
-    let extractedData;
-    try {
-      extractedData = JSON.parse(generatedText);
-    } catch (parseError) {
-      console.error('Failed to parse Gemini response as JSON:', generatedText);
+    console.log('Raw response length:', generatedText.length);
+
+    // Parse the JSON response from Gemini with truncation handling
+    let extractedData = tryFixTruncatedJson(generatedText);
+    
+    if (!extractedData) {
+      console.error('Failed to parse Gemini response as JSON:', generatedText.substring(0, 500));
       return new Response(
-        JSON.stringify({ error: 'Failed to parse extracted data', rawResponse: generatedText }),
+        JSON.stringify({ error: 'Failed to parse extracted data' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Ensure valid structure with all required fields
+    extractedData = ensureValidStructure(extractedData);
 
     console.log('Successfully extracted data from PDF');
 
@@ -154,7 +209,8 @@ serve(async (req) => {
       JSON.stringify({ 
         success: true, 
         data: extractedData,
-        model: GEMINI_MODEL 
+        model: GEMINI_MODEL,
+        truncated: finishReason === 'MAX_TOKENS'
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
