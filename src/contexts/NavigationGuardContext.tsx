@@ -7,7 +7,6 @@ interface NavigationGuardContextType {
   requestNavigation: (destination: string) => boolean;
   confirmNavigation: () => void;
   cancelNavigation: () => void;
-  onNavigationRequest: ((destination: string) => void) | null;
   setOnNavigationRequest: (handler: ((destination: string) => void) | null) => void;
 }
 
@@ -16,7 +15,12 @@ const NavigationGuardContext = createContext<NavigationGuardContextType | undefi
 export function NavigationGuardProvider({ children }: { children: ReactNode }) {
   const [isGuarded, setGuarded] = useState(false);
   const [pendingDestination, setPendingDestination] = useState<string | null>(null);
-  const [onNavigationRequest, setOnNavigationRequest] = useState<((destination: string) => void) | null>(null);
+  const [onNavigationRequest, setOnNavigationRequestState] = useState<((destination: string) => void) | null>(null);
+
+  // Wrap the setter to prevent React from executing the function immediately
+  const setOnNavigationRequest = useCallback((handler: ((destination: string) => void) | null) => {
+    setOnNavigationRequestState(() => handler);
+  }, []);
 
   const requestNavigation = useCallback((destination: string): boolean => {
     if (isGuarded && onNavigationRequest) {
@@ -43,7 +47,6 @@ export function NavigationGuardProvider({ children }: { children: ReactNode }) {
         requestNavigation,
         confirmNavigation,
         cancelNavigation,
-        onNavigationRequest,
         setOnNavigationRequest,
       }}
     >
