@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useBlocker } from "react-router-dom";
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Button } from "@/components/ui/button";
 import { 
@@ -26,6 +26,16 @@ import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle, SheetDescri
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useScrollSpy } from "@/hooks/useScrollSpy";
 import { Toggle } from "@/components/ui/toggle";
@@ -114,8 +124,57 @@ const VIEW_MODE_STORAGE_KEY = "laudo-editor-view-mode";
 export default function LaudoEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo } = useLaudo();
+const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaudo } = useLaudo();
   const [activeCard, setActiveCard] = useState("preliminares");
+  const [showExitDialog, setShowExitDialog] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
+
+  // Blocker to intercept navigation and show confirmation dialog
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+    return currentLocation.pathname !== nextLocation.pathname && !!currentLaudo;
+  });
+
+  // Handle blocker state changes
+  useEffect(() => {
+    if (blocker.state === "blocked") {
+      setShowExitDialog(true);
+      setPendingNavigation(() => () => blocker.proceed());
+    }
+  }, [blocker.state]);
+
+  const handleDiscardLaudo = async () => {
+    if (currentLaudo?.id) {
+      await deleteLaudo(currentLaudo.id);
+      toast({
+        title: "Laudo descartado",
+        description: "O laudo foi removido do histórico.",
+      });
+    }
+    setShowExitDialog(false);
+    if (pendingNavigation) {
+      pendingNavigation();
+    }
+  };
+
+  const handleSaveAndExit = async () => {
+    handleSave();
+    toast({
+      title: "Laudo salvo",
+      description: "O laudo foi salvo como rascunho.",
+    });
+    setShowExitDialog(false);
+    if (pendingNavigation) {
+      pendingNavigation();
+    }
+  };
+
+  const handleCancelExit = () => {
+    setShowExitDialog(false);
+    setPendingNavigation(null);
+    if (blocker.state === "blocked") {
+      blocker.reset();
+    }
+  };
   const [sectionNavOpen, setSectionNavOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState("");
@@ -543,6 +602,32 @@ export default function LaudoEditor() {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Exit Confirmation Dialog */}
+      <AlertDialog open={showExitDialog} onOpenChange={setShowExitDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Deseja salvar as alterações?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Você está saindo do editor de laudo. Escolha uma opção abaixo:
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+            <AlertDialogCancel onClick={handleCancelExit}>
+              Continuar editando
+            </AlertDialogCancel>
+            <Button 
+              variant="destructive" 
+              onClick={handleDiscardLaudo}
+            >
+              Descartar laudo
+            </Button>
+            <AlertDialogAction onClick={handleSaveAndExit}>
+              Salvar como rascunho
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
