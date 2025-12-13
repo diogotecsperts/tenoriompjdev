@@ -625,7 +625,7 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
       <AlertDialog open={showExitDialog} onOpenChange={(open) => {
         if (!open) handleCancelExit();
       }}>
-        <AlertDialogContent className="max-w-md">
+        <AlertDialogContent className="max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>Deseja salvar as alterações?</AlertDialogTitle>
             <AlertDialogDescription>
