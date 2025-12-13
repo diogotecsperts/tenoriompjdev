@@ -74,7 +74,7 @@ ESTRUTURA JSON A RETORNAR:
 }
 
 INSTRUÇÕES ESPECÍFICAS:
-1. VÍTIMA: Extraia todos os dados pessoais do periciando/reclamante
+1. VÍTIMA: Extraia todos os dados pessoais do periciando/reclamante. ATENÇÃO: "dominancia" é a MÃO DOMINANTE (destro, canhoto ou ambidestro), NÃO é gênero/sexo
 2. PROCESSO: Número completo do processo, vara, partes
 3. ACIDENTE: Data, descrição detalhada do evento, local
 4. DOCUMENTOS: Marque true se o tipo de documento foi mencionado/anexado
