@@ -1,6 +1,7 @@
-import { useEffect, useState, useMemo, useRef } from "react";
-import { useParams, useNavigate, useBlocker } from "react-router-dom";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { useLaudo } from "@/contexts/LaudoContext";
+import { useNavigationGuardContext } from "@/contexts/NavigationGuardContext";
 import { Button } from "@/components/ui/button";
 import { 
   Save, 
@@ -125,22 +126,39 @@ export default function LaudoEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaudo } = useLaudo();
+  const { setGuarded, setOnNavigationRequest } = useNavigationGuardContext();
   const [activeCard, setActiveCard] = useState("preliminares");
   const [showExitDialog, setShowExitDialog] = useState(false);
-  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
+  const [pendingDestination, setPendingDestination] = useState<string | null>(null);
 
-  // Blocker to intercept navigation and show confirmation dialog
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
-    return currentLocation.pathname !== nextLocation.pathname && !!currentLaudo;
-  });
-
-  // Handle blocker state changes
+  // Register navigation guard when laudo is loaded
   useEffect(() => {
-    if (blocker.state === "blocked") {
-      setShowExitDialog(true);
-      setPendingNavigation(() => () => blocker.proceed());
+    if (currentLaudo) {
+      setGuarded(true);
+      setOnNavigationRequest((destination: string) => {
+        setPendingDestination(destination);
+        setShowExitDialog(true);
+      });
     }
-  }, [blocker.state]);
+    
+    return () => {
+      setGuarded(false);
+      setOnNavigationRequest(null);
+    };
+  }, [currentLaudo, setGuarded, setOnNavigationRequest]);
+
+  // Handle browser back/refresh with beforeunload
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (currentLaudo) {
+        e.preventDefault();
+        e.returnValue = "Você tem alterações não salvas. Deseja sair?";
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [currentLaudo]);
 
   const handleDiscardLaudo = async () => {
     if (currentLaudo?.id) {
@@ -151,8 +169,9 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
       });
     }
     setShowExitDialog(false);
-    if (pendingNavigation) {
-      pendingNavigation();
+    setGuarded(false);
+    if (pendingDestination) {
+      navigate(pendingDestination);
     }
   };
 
@@ -163,17 +182,15 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
       description: "O laudo foi salvo como rascunho.",
     });
     setShowExitDialog(false);
-    if (pendingNavigation) {
-      pendingNavigation();
+    setGuarded(false);
+    if (pendingDestination) {
+      navigate(pendingDestination);
     }
   };
 
   const handleCancelExit = () => {
     setShowExitDialog(false);
-    setPendingNavigation(null);
-    if (blocker.state === "blocked") {
-      blocker.reset();
-    }
+    setPendingDestination(null);
   };
   const [sectionNavOpen, setSectionNavOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);

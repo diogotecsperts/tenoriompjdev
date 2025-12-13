@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { LaudoProvider } from "@/contexts/LaudoContext";
+import { NavigationGuardProvider } from "@/contexts/NavigationGuardContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Login from "./pages/Login";
@@ -38,6 +39,7 @@ const App = () => (
         <BrowserRouter>
           <AuthProvider>
             <LaudoProvider>
+              <NavigationGuardProvider>
               <Routes>
                 <Route path="/" element={<Login />} />
                 <Route
@@ -114,6 +116,7 @@ const App = () => (
                 />
                 <Route path="*" element={<NotFound />} />
               </Routes>
+              </NavigationGuardProvider>
             </LaudoProvider>
           </AuthProvider>
         </BrowserRouter>

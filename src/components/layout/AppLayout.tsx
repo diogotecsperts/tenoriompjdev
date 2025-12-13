@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useNavigationGuardContext } from "@/contexts/NavigationGuardContext";
 import {
   LayoutDashboard,
   FilePlus,
@@ -42,6 +43,7 @@ const toolMenuItems = [
 
 export function AppLayout({ children }: AppLayoutProps) {
   const { user, profile, logout } = useAuth();
+  const { isGuarded, requestNavigation } = useNavigationGuardContext();
   const location = useLocation();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
@@ -112,11 +114,23 @@ export function AppLayout({ children }: AppLayoutProps) {
         {mainMenuItems.map((item) => {
           const isActive = location.pathname === item.path || 
             (item.path === "/laudo/new" && location.pathname.startsWith("/laudo/"));
+          
+          const handleClick = (e: React.MouseEvent) => {
+            if (isGuarded && location.pathname.startsWith("/laudo/")) {
+              e.preventDefault();
+              if (!requestNavigation(item.path)) {
+                // Navigation blocked, dialog will be shown by LaudoEditor
+                return;
+              }
+            }
+            setMobileOpen(false);
+          };
+          
           return (
             <Link
               key={item.path}
               to={item.path}
-              onClick={() => setMobileOpen(false)}
+              onClick={handleClick}
               className={cn(
                 "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
                 isActive
@@ -143,11 +157,21 @@ export function AppLayout({ children }: AppLayoutProps) {
         {toolMenuItems.map((item) => {
           const isActive = item.path && location.pathname === item.path;
           if (item.path) {
+            const handleClick = (e: React.MouseEvent) => {
+              if (isGuarded && location.pathname.startsWith("/laudo/")) {
+                e.preventDefault();
+                if (!requestNavigation(item.path)) {
+                  return;
+                }
+              }
+              setMobileOpen(false);
+            };
+            
             return (
               <Link
                 key={item.label}
                 to={item.path}
-                onClick={() => setMobileOpen(false)}
+                onClick={handleClick}
                 className={cn(
                   "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
                   isActive
@@ -204,7 +228,15 @@ export function AppLayout({ children }: AppLayoutProps) {
         <div className="space-y-1">
           <Link
             to="/configuracoes"
-            onClick={() => setMobileOpen(false)}
+            onClick={(e) => {
+              if (isGuarded && location.pathname.startsWith("/laudo/")) {
+                e.preventDefault();
+                if (!requestNavigation("/configuracoes")) {
+                  return;
+                }
+              }
+              setMobileOpen(false);
+            }}
             className={cn(
               "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
               location.pathname === "/configuracoes"
