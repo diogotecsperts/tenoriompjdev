@@ -34,7 +34,6 @@ import { Progress } from "@/components/ui/progress";
 import { useLaudoProgress } from "@/hooks/useLaudoProgress";
 
 // Import section components
-import { DadosPerito } from "@/components/laudo/sections/DadosPerito";
 import { DadosProcesso } from "@/components/laudo/sections/DadosProcesso";
 import { DocumentosAvaliacao } from "@/components/laudo/sections/DocumentosAvaliacao";
 import { DadosVitima } from "@/components/laudo/sections/DadosVitima";
@@ -55,10 +54,9 @@ const consolidatedCards = [
   {
     id: "preliminares",
     label: "Dados Preliminares",
-    description: "Dados do perito, processo e documentos avaliados",
+    description: "Dados do processo e documentos avaliados",
     icon: User,
     sections: [
-      { id: "perito", label: "Dados do Perito", component: DadosPerito },
       { id: "processo", label: "Dados do Processo", component: DadosProcesso },
       { id: "documentos", label: "Documentos Avaliados", component: DocumentosAvaliacao },
     ],

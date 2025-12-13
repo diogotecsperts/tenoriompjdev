@@ -4,12 +4,6 @@ import { LaudoData } from "@/contexts/LaudoContext";
 // Define which fields belong to each card section
 const cardFields: Record<string, (keyof LaudoData)[]> = {
   preliminares: [
-    "peritoNome",
-    "peritoEspecialidade", 
-    "peritoCRM",
-    "peritoEmail",
-    "peritoTelefone",
-    "peritoEndereco",
     "processoNumero",
     "processoVara",
     "reclamante",
