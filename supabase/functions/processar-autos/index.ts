@@ -8,25 +8,92 @@ const corsHeaders = {
 // Modelo configurável - fácil trocar para gemini-2.5-pro se necessário
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash";
 
-const systemPrompt = `Analise os autos do processo trabalhista e extraia as informações principais.
+const systemPrompt = `Você é um assistente especializado em análise de processos trabalhistas para médicos peritos. Analise os autos do processo e extraia TODAS as informações disponíveis para preencher um laudo pericial completo.
 
-REGRAS:
-- Extraia APENAS o que está explícito no documento
-- Campos não encontrados devem ficar vazios ("")
-- Seja CONCISO nas descrições (máximo 200 caracteres)
-- CPF: XXX.XXX.XXX-XX
-- Datas: YYYY-MM-DD
-- CIDs: liste apenas os códigos, sem descrições
+REGRAS GERAIS:
+- Extraia APENAS o que está EXPLÍCITO no documento
+- Campos não encontrados = "" (string vazia) ou [] (array vazio)
+- Datas no formato: YYYY-MM-DD
+- CPF no formato: XXX.XXX.XXX-XX
+- CIDs: apenas códigos (ex: "J15.9", "M54.2")
+- Seja detalhado nos campos de texto (história, descrições)
 
-Retorne este JSON:
+ESTRUTURA JSON A RETORNAR:
 {
-  "vitima": {"nome":"","cpf":"","data_nascimento":"","profissao":"","escolaridade":""},
-  "processo": {"numero":"","vara":"","reclamante":"","reclamada":""},
-  "acidente": {"data":"","descricao":"","local":""},
-  "informacoes_medicas": {"cids_mencionados":[],"lesoes":"","tratamentos":"","afastamentos":""},
-  "documentos_mencionados": [],
+  "vitima": {
+    "nome": "",
+    "cpf": "",
+    "data_nascimento": "",
+    "profissao": "",
+    "escolaridade": "",
+    "dominancia": ""
+  },
+  "processo": {
+    "numero": "",
+    "vara": "",
+    "reclamante": "",
+    "reclamada": ""
+  },
+  "acidente": {
+    "data": "",
+    "descricao": "",
+    "local": ""
+  },
+  "documentos_checklist": {
+    "cat": false,
+    "prontuario": false,
+    "receitas": false,
+    "exames": false,
+    "laudos_anteriores": false,
+    "atestados": false,
+    "outros": []
+  },
+  "historico": {
+    "historia_atual": "",
+    "historico_ocupacional": "",
+    "antecedentes_patologicos": "",
+    "tratamentos_realizados": "",
+    "afastamentos": ""
+  },
+  "exame_clinico": {
+    "laudos_medicos": "",
+    "exames_complementares": "",
+    "lesoes_descritas": ""
+  },
+  "informacoes_medicas": {
+    "cids_mencionados": [],
+    "incapacidade_alegada": "",
+    "nexo_sugerido": ""
+  },
+  "quesitos": {
+    "juizo": "",
+    "reclamante": "",
+    "reclamada": ""
+  },
   "resumo": ""
-}`;
+}
+
+INSTRUÇÕES ESPECÍFICAS:
+1. VÍTIMA: Extraia todos os dados pessoais do periciando/reclamante
+2. PROCESSO: Número completo do processo, vara, partes
+3. ACIDENTE: Data, descrição detalhada do evento, local
+4. DOCUMENTOS: Marque true se o tipo de documento foi mencionado/anexado
+5. HISTÓRICO: 
+   - historia_atual: queixas atuais, sintomas relatados
+   - historico_ocupacional: funções exercidas, tempo de serviço, atividades
+   - antecedentes_patologicos: doenças prévias, cirurgias, condições anteriores
+   - tratamentos_realizados: medicamentos, fisioterapia, cirurgias feitas
+   - afastamentos: períodos de afastamento do trabalho, motivos
+6. EXAME CLÍNICO:
+   - laudos_medicos: resumo dos laudos médicos apresentados
+   - exames_complementares: resultados de exames (imagem, laboratoriais)
+   - lesoes_descritas: lesões mencionadas nos documentos
+7. INFORMAÇÕES MÉDICAS:
+   - cids_mencionados: lista de códigos CID encontrados
+   - incapacidade_alegada: tipo de incapacidade mencionada
+   - nexo_sugerido: "direto", "concausa", "agravamento" ou "" se não mencionado
+8. QUESITOS: Se houver quesitos no documento, copie-os integralmente separados por categoria
+9. RESUMO: Síntese breve do caso (máximo 300 caracteres)`;
 
 // Helper to try to fix truncated JSON
 function tryFixTruncatedJson(jsonStr: string): object | null {
@@ -72,11 +139,14 @@ function tryFixTruncatedJson(jsonStr: string): object | null {
 // Helper to create a valid structure with defaults
 function ensureValidStructure(data: any): object {
   const defaultStructure = {
-    vitima: { nome: "", cpf: "", data_nascimento: "", profissao: "", escolaridade: "" },
+    vitima: { nome: "", cpf: "", data_nascimento: "", profissao: "", escolaridade: "", dominancia: "" },
     processo: { numero: "", vara: "", reclamante: "", reclamada: "" },
     acidente: { data: "", descricao: "", local: "" },
-    informacoes_medicas: { cids_mencionados: [], lesoes: "", tratamentos: "", afastamentos: "" },
-    documentos_mencionados: [],
+    documentos_checklist: { cat: false, prontuario: false, receitas: false, exames: false, laudos_anteriores: false, atestados: false, outros: [] },
+    historico: { historia_atual: "", historico_ocupacional: "", antecedentes_patologicos: "", tratamentos_realizados: "", afastamentos: "" },
+    exame_clinico: { laudos_medicos: "", exames_complementares: "", lesoes_descritas: "" },
+    informacoes_medicas: { cids_mencionados: [], incapacidade_alegada: "", nexo_sugerido: "" },
+    quesitos: { juizo: "", reclamante: "", reclamada: "" },
     resumo: ""
   };
 
@@ -88,8 +158,11 @@ function ensureValidStructure(data: any): object {
     vitima: { ...defaultStructure.vitima, ...(data.vitima || {}) },
     processo: { ...defaultStructure.processo, ...(data.processo || {}) },
     acidente: { ...defaultStructure.acidente, ...(data.acidente || {}) },
+    documentos_checklist: { ...defaultStructure.documentos_checklist, ...(data.documentos_checklist || {}) },
+    historico: { ...defaultStructure.historico, ...(data.historico || {}) },
+    exame_clinico: { ...defaultStructure.exame_clinico, ...(data.exame_clinico || {}) },
     informacoes_medicas: { ...defaultStructure.informacoes_medicas, ...(data.informacoes_medicas || {}) },
-    documentos_mencionados: Array.isArray(data.documentos_mencionados) ? data.documentos_mencionados : [],
+    quesitos: { ...defaultStructure.quesitos, ...(data.quesitos || {}) },
     resumo: data.resumo || ""
   };
 }
