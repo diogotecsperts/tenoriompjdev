@@ -36,6 +36,7 @@ interface ExtractedData {
     data_nascimento: string;
     profissao: string;
     escolaridade: string;
+    dominancia: string;
   };
   processo: {
     numero: string;
@@ -48,13 +49,37 @@ interface ExtractedData {
     descricao: string;
     local: string;
   };
-  informacoes_medicas: {
-    cids_mencionados: string[];
-    lesoes: string;
-    tratamentos: string;
+  documentos_checklist: {
+    cat: boolean;
+    prontuario: boolean;
+    receitas: boolean;
+    exames: boolean;
+    laudos_anteriores: boolean;
+    atestados: boolean;
+    outros: string[];
+  };
+  historico: {
+    historia_atual: string;
+    historico_ocupacional: string;
+    antecedentes_patologicos: string;
+    tratamentos_realizados: string;
     afastamentos: string;
   };
-  documentos_mencionados: string[];
+  exame_clinico: {
+    laudos_medicos: string;
+    exames_complementares: string;
+    lesoes_descritas: string;
+  };
+  informacoes_medicas: {
+    cids_mencionados: string[];
+    incapacidade_alegada: string;
+    nexo_sugerido: string;
+  };
+  quesitos: {
+    juizo: string;
+    reclamante: string;
+    reclamada: string;
+  };
   resumo: string;
 }
 
@@ -208,17 +233,33 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     }
   };
 
+  // Build documentos array from checklist
+  const buildDocumentosArray = (checklist: ExtractedData['documentos_checklist']): string[] => {
+    const docs: string[] = [];
+    if (checklist.cat) docs.push('cat');
+    if (checklist.prontuario) docs.push('prontuario');
+    if (checklist.receitas) docs.push('receitas');
+    if (checklist.exames) docs.push('exames');
+    if (checklist.laudos_anteriores) docs.push('laudos_anteriores');
+    if (checklist.atestados) docs.push('atestados');
+    return docs;
+  };
+
   const createLaudo = async () => {
     if (!extractedData || !user) return;
 
     try {
       setProcessingStep("creating");
 
+      // Build documentos array from checklist
+      const documentosArray = buildDocumentosArray(extractedData.documentos_checklist);
+
       const laudoData = {
         user_id: user.id,
         title: extractedData.vitima.nome 
           ? `Laudo - ${extractedData.vitima.nome}` 
           : `Laudo - Processo ${extractedData.processo.numero || 'Novo'}`,
+        
         // Dados do perito (do perfil)
         perito_nome: profile?.nome || '',
         perito_crm: profile?.crm || '',
@@ -226,23 +267,48 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         perito_email: profile?.email || '',
         perito_telefone: profile?.telefone || '',
         perito_endereco: profile?.endereco || '',
+        
         // Dados do processo
         processo_numero: extractedData.processo.numero || '',
         processo_vara: extractedData.processo.vara || '',
         reclamante: extractedData.processo.reclamante || '',
         reclamada: extractedData.processo.reclamada || '',
-        // Dados da vítima
+        
+        // Dados da vítima - COMPLETO
         vitima_nome: extractedData.vitima.nome || '',
         vitima_profissao: extractedData.vitima.profissao || '',
         vitima_escolaridade: extractedData.vitima.escolaridade || '',
         vitima_nascimento: extractedData.vitima.data_nascimento || null,
+        vitima_dominancia: extractedData.vitima.dominancia || '',
+        
         // Dados do acidente
         data_acidente: extractedData.acidente.data || null,
         historia_acidente: extractedData.acidente.descricao || '',
-        // Informações médicas
-        tratamentos: extractedData.informacoes_medicas.tratamentos || '',
-        afastamentos: extractedData.informacoes_medicas.afastamentos || '',
+        
+        // Documentos - checkboxes
+        documentos: documentosArray,
+        
+        // Histórico - COMPLETO
+        historia_atual: extractedData.historico.historia_atual || '',
+        historico_ocupacional: extractedData.historico.historico_ocupacional || '',
+        antecedentes: extractedData.historico.antecedentes_patologicos || '',
+        tratamentos: extractedData.historico.tratamentos_realizados || '',
+        afastamentos: extractedData.historico.afastamentos || '',
+        
+        // Exame clínico
+        laudos_medicos: extractedData.exame_clinico.laudos_medicos || '',
+        exames_complementares: extractedData.exame_clinico.exames_complementares || '',
+        
+        // Conclusão
         conclusao_cid: extractedData.informacoes_medicas.cids_mencionados?.join(', ') || '',
+        conclusao_incapacidade: extractedData.informacoes_medicas.incapacidade_alegada || '',
+        nexo_causal_tipo: extractedData.informacoes_medicas.nexo_sugerido || '',
+        
+        // Quesitos - 3 abas
+        quesitos_juizo: extractedData.quesitos.juizo || '',
+        quesitos_reclamante: extractedData.quesitos.reclamante || '',
+        quesitos_reclamada: extractedData.quesitos.reclamada || '',
+        
         // Resumo nas anotações
         anotacoes: extractedData.resumo ? `[Resumo extraído automaticamente]\n${extractedData.resumo}` : '',
         status: 'rascunho'
@@ -287,14 +353,58 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     onOpenChange(false);
   };
 
+  // Count filled fields for preview
+  const countFilledFields = (): { filled: number; total: number } => {
+    if (!extractedData) return { filled: 0, total: 0 };
+    
+    let filled = 0;
+    let total = 0;
+    
+    // Count vitima fields
+    Object.values(extractedData.vitima).forEach(v => { total++; if (v) filled++; });
+    // Count processo fields
+    Object.values(extractedData.processo).forEach(v => { total++; if (v) filled++; });
+    // Count acidente fields
+    Object.values(extractedData.acidente).forEach(v => { total++; if (v) filled++; });
+    // Count historico fields
+    Object.values(extractedData.historico).forEach(v => { total++; if (v) filled++; });
+    // Count exame_clinico fields
+    Object.values(extractedData.exame_clinico).forEach(v => { total++; if (v) filled++; });
+    // Count quesitos
+    Object.values(extractedData.quesitos).forEach(v => { total++; if (v) filled++; });
+    // Count documentos
+    const docs = extractedData.documentos_checklist;
+    if (docs.cat) filled++;
+    if (docs.prontuario) filled++;
+    if (docs.receitas) filled++;
+    if (docs.exames) filled++;
+    if (docs.laudos_anteriores) filled++;
+    if (docs.atestados) filled++;
+    total += 6;
+    // CIDs
+    total++;
+    if (extractedData.informacoes_medicas.cids_mencionados?.length > 0) filled++;
+    
+    return { filled, total };
+  };
+
   const renderPreview = () => {
     if (!extractedData) return null;
+    
+    const { filled, total } = countFilledFields();
+    const percentage = Math.round((filled / total) * 100);
 
     return (
       <div className="space-y-4 max-h-[400px] overflow-y-auto">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Sparkles className="h-4 w-4 text-primary" />
-          Processado com {usedModel}
+        <div className="flex items-center justify-between text-sm">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Sparkles className="h-4 w-4 text-primary" />
+            Processado com {usedModel}
+          </div>
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-primary" />
+            <span className="font-medium text-primary">{filled}/{total} campos ({percentage}%)</span>
+          </div>
         </div>
 
         {/* Dados da Vítima */}
@@ -313,6 +423,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               )}
               {extractedData.vitima.data_nascimento && (
                 <div><span className="text-muted-foreground">Nascimento:</span> {extractedData.vitima.data_nascimento}</div>
+              )}
+              {extractedData.vitima.dominancia && (
+                <div><span className="text-muted-foreground">Dominância:</span> {extractedData.vitima.dominancia}</div>
               )}
             </div>
           </div>
@@ -354,6 +467,70 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           </div>
         )}
 
+        {/* Documentos Identificados */}
+        {(extractedData.documentos_checklist.cat || extractedData.documentos_checklist.prontuario || 
+          extractedData.documentos_checklist.receitas || extractedData.documentos_checklist.exames) && (
+          <div className="p-3 rounded-lg bg-muted/50">
+            <h4 className="font-medium text-sm mb-2">Documentos Identificados</h4>
+            <div className="flex flex-wrap gap-1">
+              {extractedData.documentos_checklist.cat && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">CAT</span>
+              )}
+              {extractedData.documentos_checklist.prontuario && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">Prontuário</span>
+              )}
+              {extractedData.documentos_checklist.receitas && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">Receitas</span>
+              )}
+              {extractedData.documentos_checklist.exames && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">Exames</span>
+              )}
+              {extractedData.documentos_checklist.laudos_anteriores && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">Laudos Anteriores</span>
+              )}
+              {extractedData.documentos_checklist.atestados && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">Atestados</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Histórico */}
+        {(extractedData.historico.historia_atual || extractedData.historico.historico_ocupacional) && (
+          <div className="p-3 rounded-lg bg-muted/50">
+            <h4 className="font-medium text-sm mb-2">Histórico</h4>
+            <div className="space-y-2 text-sm">
+              {extractedData.historico.historia_atual && (
+                <div><span className="text-muted-foreground">História Atual:</span> <span className="line-clamp-2">{extractedData.historico.historia_atual}</span></div>
+              )}
+              {extractedData.historico.historico_ocupacional && (
+                <div><span className="text-muted-foreground">Histórico Ocupacional:</span> <span className="line-clamp-2">{extractedData.historico.historico_ocupacional}</span></div>
+              )}
+              {extractedData.historico.antecedentes_patologicos && (
+                <div><span className="text-muted-foreground">Antecedentes:</span> <span className="line-clamp-2">{extractedData.historico.antecedentes_patologicos}</span></div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Quesitos */}
+        {(extractedData.quesitos.juizo || extractedData.quesitos.reclamante || extractedData.quesitos.reclamada) && (
+          <div className="p-3 rounded-lg bg-muted/50">
+            <h4 className="font-medium text-sm mb-2">Quesitos Encontrados</h4>
+            <div className="flex flex-wrap gap-1">
+              {extractedData.quesitos.juizo && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">Do Juízo</span>
+              )}
+              {extractedData.quesitos.reclamante && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">Do Reclamante</span>
+              )}
+              {extractedData.quesitos.reclamada && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">Da Reclamada</span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* CIDs */}
         {extractedData.informacoes_medicas.cids_mencionados?.length > 0 && (
           <div className="p-3 rounded-lg bg-muted/50">
@@ -365,6 +542,16 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                 </span>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Nexo Sugerido */}
+        {extractedData.informacoes_medicas.nexo_sugerido && (
+          <div className="p-3 rounded-lg bg-muted/50">
+            <h4 className="font-medium text-sm mb-2">Nexo Causal Sugerido</h4>
+            <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs capitalize">
+              {extractedData.informacoes_medicas.nexo_sugerido}
+            </span>
           </div>
         )}
 
