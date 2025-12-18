@@ -60,6 +60,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               .single();
             
             if (data) {
+              // Sincronizar email se houver diferença entre Auth e profiles
+              if (session.user.email && data.email !== session.user.email) {
+                await supabase
+                  .from('profiles')
+                  .update({ email: session.user.email })
+                  .eq('id', session.user.id);
+                data.email = session.user.email;
+              }
               setProfile(data);
             }
 
@@ -89,6 +97,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .single();
         
         if (data) {
+          // Sincronizar email se houver diferença entre Auth e profiles
+          if (session.user.email && data.email !== session.user.email) {
+            await supabase
+              .from('profiles')
+              .update({ email: session.user.email })
+              .eq('id', session.user.id);
+            data.email = session.user.email;
+          }
           setProfile(data);
         }
 
