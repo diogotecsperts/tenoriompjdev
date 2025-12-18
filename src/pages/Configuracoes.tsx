@@ -71,7 +71,8 @@ export default function Configuracoes() {
     if (profile) {
       setFormData({
         nome: profile.nome || "",
-        email: profile.email || "",
+        // Usar email do Auth como fonte oficial (sempre atualizado após confirmação)
+        email: user?.email || profile.email || "",
         crm: profile.crm || "",
         especialidade: profile.especialidade || "",
         telefone: profile.telefone || "",
