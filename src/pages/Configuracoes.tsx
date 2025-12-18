@@ -226,24 +226,33 @@ export default function Configuracoes() {
         }
       }
 
-      // Atualizar profile
+      // Verificar se o email está sendo alterado
+      const emailChanged = formData.email !== user.email;
+
+      // Atualizar profile (SEM o email se estiver mudando - será atualizado após confirmação)
+      const profileUpdate: Record<string, any> = {
+        nome: formData.nome,
+        crm: formData.crm,
+        especialidade: formData.especialidade,
+        telefone: formData.telefone,
+        endereco: formData.endereco,
+        user_id: formData.user_id?.toUpperCase() || null,
+      };
+
+      // Só incluir email se NÃO estiver mudando
+      if (!emailChanged) {
+        profileUpdate.email = formData.email;
+      }
+
       const { error } = await supabase
         .from("profiles")
-        .update({
-          nome: formData.nome,
-          crm: formData.crm,
-          especialidade: formData.especialidade,
-          telefone: formData.telefone,
-          endereco: formData.endereco,
-          email: formData.email,
-          user_id: formData.user_id?.toUpperCase() || null,
-        })
+        .update(profileUpdate)
         .eq("id", user.id);
 
       if (error) throw error;
 
-      // Se o email mudou, atualizar no auth também
-      if (formData.email !== user.email) {
+      // Se o email mudou, APENAS enviar para o Auth (não atualizar profiles)
+      if (emailChanged) {
         const { error: authError } = await supabase.auth.updateUser({ 
           email: formData.email 
         });
@@ -251,12 +260,14 @@ export default function Configuracoes() {
           toast({
             variant: "destructive",
             title: "Erro ao atualizar e-mail",
-            description: "O perfil foi salvo, mas houve um erro ao atualizar o e-mail de login. " + authError.message,
+            description: authError.message,
           });
         } else {
+          // Reverter o campo email no formulário para o valor atual
+          setFormData(prev => ({ ...prev, email: user.email || "" }));
           toast({
-            title: "E-mail atualizado",
-            description: "Um link de confirmação foi enviado para o novo e-mail.",
+            title: "Confirmação necessária",
+            description: "Um link foi enviado para o novo e-mail. Confirme para ativar a mudança.",
           });
         }
       }
