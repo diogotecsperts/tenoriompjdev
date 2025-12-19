@@ -63,19 +63,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               supabase.rpc('is_admin')
             ]);
             
-            if (profileResult.data) {
-              const profileData = profileResult.data;
-              // Sincronizar email se houver diferença entre Auth e profiles
-              if (session.user.email && profileData.email !== session.user.email) {
-                // Atualizar no banco em background (não bloquear)
-                supabase
-                  .from('profiles')
-                  .update({ email: session.user.email })
-                  .eq('id', session.user.id);
-                profileData.email = session.user.email;
-              }
-              setProfile(profileData);
+            // CRÍTICO: Verificar se o usuário tem perfil válido
+            if (!profileResult.data) {
+              console.error('Usuário autenticado sem perfil válido - fazendo logout');
+              await supabase.auth.signOut();
+              toast({
+                variant: "destructive",
+                title: "Conta inválida",
+                description: "Esta conta não possui um perfil válido. Entre em contato com o suporte.",
+              });
+              setSession(null);
+              setUser(null);
+              setProfile(null);
+              setUserRole(null);
+              setLoading(false);
+              return;
             }
+
+            const profileData = profileResult.data;
+            // Sincronizar email se houver diferença entre Auth e profiles
+            if (session.user.email && profileData.email !== session.user.email) {
+              // Atualizar no banco em background (não bloquear)
+              supabase
+                .from('profiles')
+                .update({ email: session.user.email })
+                .eq('id', session.user.id);
+              profileData.email = session.user.email;
+            }
+            setProfile(profileData);
 
             setUserRole(roleResult.data ? 'admin' : 'user');
           };
@@ -102,17 +117,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .eq('id', session.user.id)
           .single();
         
-        if (data) {
-          // Sincronizar email se houver diferença entre Auth e profiles
-          if (session.user.email && data.email !== session.user.email) {
-            await supabase
-              .from('profiles')
-              .update({ email: session.user.email })
-              .eq('id', session.user.id);
-            data.email = session.user.email;
-          }
-          setProfile(data);
+        // CRÍTICO: Verificar se o usuário tem perfil válido
+        if (!data) {
+          console.error('Usuário autenticado sem perfil válido (getSession) - fazendo logout');
+          await supabase.auth.signOut();
+          toast({
+            variant: "destructive",
+            title: "Conta inválida",
+            description: "Esta conta não possui um perfil válido. Entre em contato com o suporte.",
+          });
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          setUserRole(null);
+          setLoading(false);
+          return;
         }
+
+        // Sincronizar email se houver diferença entre Auth e profiles
+        if (session.user.email && data.email !== session.user.email) {
+          await supabase
+            .from('profiles')
+            .update({ email: session.user.email })
+            .eq('id', session.user.id);
+          data.email = session.user.email;
+        }
+        setProfile(data);
 
         // Fetch user role using is_admin RPC
         const { data: isAdminData } = await supabase.rpc('is_admin');
