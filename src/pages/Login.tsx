@@ -13,35 +13,36 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [emailReadOnly, setEmailReadOnly] = useState(true);
   const [passwordReadOnly, setPasswordReadOnly] = useState(true);
-  const {
-    login,
-    signup,
-    isAuthenticated,
-    loading
-  } = useAuth();
+
+  const { login, signup, isAuthenticated, profile, loading } = useAuth();
   const navigate = useNavigate();
+
   useEffect(() => {
-    // Só navegar quando loading terminou E está autenticado
-    if (!loading && isAuthenticated) {
+    // Evita "vai e volta" entre / e /dashboard enquanto o perfil ainda carrega
+    if (!loading && isAuthenticated && profile && !isNavigating) {
+      setIsNavigating(true);
       navigate("/dashboard", { replace: true });
     }
-  }, [loading, isAuthenticated, navigate]);
+  }, [loading, isAuthenticated, profile, isNavigating, navigate]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     await login(email, password);
     setIsLoading(false);
   };
+
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName || fullName.trim().length < 3) {
       toast({
         variant: "destructive",
         title: "Nome inválido",
-        description: "Por favor, insira seu nome completo."
+        description: "Por favor, insira seu nome completo.",
       });
       return;
     }
@@ -54,13 +55,17 @@ export default function Login() {
       setFullName("");
     }
   };
-  if (loading) {
-    return <div className="flex min-h-screen items-center justify-center bg-background">
+
+  // Mantém uma única tela de loading durante autenticação + carregamento do perfil + transição de rota
+  if (loading || isNavigating || (isAuthenticated && !profile)) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-center">
           <Stethoscope className="mx-auto mb-4 h-12 w-12 animate-pulse text-primary" />
           <p className="text-muted-foreground">Carregando...</p>
         </div>
-      </div>;
+      </div>
+    );
   }
   return <div className="flex min-h-screen">
       {/* Left Panel - Branding */}
