@@ -30,6 +30,87 @@ function ProtectedWithLayout({ children }: { children: React.ReactNode }) {
   );
 }
 
+function AppRoutes() {
+  return (
+    <Routes>
+      <Route path="/" element={<Login />} />
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedWithLayout>
+            <Dashboard />
+          </ProtectedWithLayout>
+        }
+      />
+      <Route
+        path="/laudo/new"
+        element={
+          <ProtectedWithLayout>
+            <LaudoEditor />
+          </ProtectedWithLayout>
+        }
+      />
+      <Route
+        path="/laudo/:id"
+        element={
+          <ProtectedWithLayout>
+            <LaudoEditor />
+          </ProtectedWithLayout>
+        }
+      />
+      <Route
+        path="/historico"
+        element={
+          <ProtectedWithLayout>
+            <Historico />
+          </ProtectedWithLayout>
+        }
+      />
+      <Route
+        path="/modelos"
+        element={
+          <ProtectedWithLayout>
+            <Modelos />
+          </ProtectedWithLayout>
+        }
+      />
+      <Route
+        path="/impugnacao"
+        element={
+          <ProtectedWithLayout>
+            <Impugnacao />
+          </ProtectedWithLayout>
+        }
+      />
+      <Route
+        path="/configuracoes"
+        element={
+          <ProtectedWithLayout>
+            <Configuracoes />
+          </ProtectedWithLayout>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedWithLayout>
+            <Configuracoes />
+          </ProtectedWithLayout>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedWithLayout>
+            <Admin />
+          </ProtectedWithLayout>
+        }
+      />
+      <Route path="*" element={<NotFound />} />
+    </Routes>
+  );
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
@@ -40,82 +121,7 @@ const App = () => (
           <AuthProvider>
             <LaudoProvider>
               <NavigationGuardProvider>
-              <Routes>
-                <Route path="/" element={<Login />} />
-                <Route
-                  path="/dashboard"
-                  element={
-                    <ProtectedWithLayout>
-                      <Dashboard />
-                    </ProtectedWithLayout>
-                  }
-                />
-                <Route
-                  path="/laudo/new"
-                  element={
-                    <ProtectedWithLayout>
-                      <LaudoEditor />
-                    </ProtectedWithLayout>
-                  }
-                />
-                <Route
-                  path="/laudo/:id"
-                  element={
-                    <ProtectedWithLayout>
-                      <LaudoEditor />
-                    </ProtectedWithLayout>
-                  }
-                />
-                <Route
-                  path="/historico"
-                  element={
-                    <ProtectedWithLayout>
-                      <Historico />
-                    </ProtectedWithLayout>
-                  }
-                />
-                <Route
-                  path="/modelos"
-                  element={
-                    <ProtectedWithLayout>
-                      <Modelos />
-                    </ProtectedWithLayout>
-                  }
-                />
-                <Route
-                  path="/impugnacao"
-                  element={
-                    <ProtectedWithLayout>
-                      <Impugnacao />
-                    </ProtectedWithLayout>
-                  }
-                />
-                <Route
-                  path="/configuracoes"
-                  element={
-                    <ProtectedWithLayout>
-                      <Configuracoes />
-                    </ProtectedWithLayout>
-                  }
-                />
-                <Route
-                  path="/profile"
-                  element={
-                    <ProtectedWithLayout>
-                      <Configuracoes />
-                    </ProtectedWithLayout>
-                  }
-                />
-                <Route
-                  path="/admin"
-                  element={
-                    <ProtectedWithLayout>
-                      <Admin />
-                    </ProtectedWithLayout>
-                  }
-                />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
+                <AppRoutes />
               </NavigationGuardProvider>
             </LaudoProvider>
           </AuthProvider>
