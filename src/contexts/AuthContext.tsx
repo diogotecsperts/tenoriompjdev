@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useRef, ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { User, Session } from "@supabase/supabase-js";
@@ -42,84 +42,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [userRole, setUserRole] = useState<'admin' | 'user' | null>(null);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  
+  // Flags para evitar chamadas duplicadas
+  const initialLoadDoneRef = useRef(false);
+  const isLoadingUserDataRef = useRef(false);
 
   useEffect(() => {
-    // Setup auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        // Load profile and role when user logs in
-        if (session?.user) {
-          // Usar Promise.all para carregar profile e role em paralelo
-          const loadUserData = async () => {
-            const [profileResult, roleResult] = await Promise.all([
-              supabase
-                .from('profiles')
-                .select('nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url')
-                .eq('id', session.user.id)
-                .single(),
-              supabase.rpc('is_admin')
-            ]);
-            
-            // CRÍTICO: Verificar se o usuário tem perfil válido
-            if (!profileResult.data) {
-              console.error('Usuário autenticado sem perfil válido - fazendo logout');
-              await supabase.auth.signOut();
-              toast({
-                variant: "destructive",
-                title: "Conta inválida",
-                description: "Esta conta não possui um perfil válido. Entre em contato com o suporte.",
-              });
-              setSession(null);
-              setUser(null);
-              setProfile(null);
-              setUserRole(null);
-              setLoading(false);
-              return;
-            }
+    // Função centralizada para carregar dados do usuário
+    const loadUserData = async (session: Session) => {
+      // Evitar chamadas duplicadas
+      if (isLoadingUserDataRef.current) return;
+      isLoadingUserDataRef.current = true;
 
-            const profileData = profileResult.data;
-            // Sincronizar email se houver diferença entre Auth e profiles
-            if (session.user.email && profileData.email !== session.user.email) {
-              // Atualizar no banco em background (não bloquear)
-              supabase
-                .from('profiles')
-                .update({ email: session.user.email })
-                .eq('id', session.user.id);
-              profileData.email = session.user.email;
-            }
-            setProfile(profileData);
-
-            setUserRole(roleResult.data ? 'admin' : 'user');
-          };
-          
-          loadUserData();
-        } else {
-          setProfile(null);
-          setUserRole(null);
-        }
-        
-        setLoading(false);
-      }
-    );
-
-    // Check for existing session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      
-      if (session?.user) {
-        const { data } = await supabase
-          .from('profiles')
-          .select('nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url')
-          .eq('id', session.user.id)
-          .single();
+      try {
+        const [profileResult, roleResult] = await Promise.all([
+          supabase
+            .from('profiles')
+            .select('nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url')
+            .eq('id', session.user.id)
+            .single(),
+          supabase.rpc('is_admin')
+        ]);
         
         // CRÍTICO: Verificar se o usuário tem perfil válido
-        if (!data) {
-          console.error('Usuário autenticado sem perfil válido (getSession) - fazendo logout');
+        if (!profileResult.data) {
+          console.error('Usuário autenticado sem perfil válido - fazendo logout');
           await supabase.auth.signOut();
           toast({
             variant: "destructive",
@@ -130,26 +77,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(null);
           setProfile(null);
           setUserRole(null);
-          setLoading(false);
           return;
         }
 
+        const profileData = profileResult.data;
         // Sincronizar email se houver diferença entre Auth e profiles
-        if (session.user.email && data.email !== session.user.email) {
-          await supabase
+        if (session.user.email && profileData.email !== session.user.email) {
+          // Atualizar no banco em background (não bloquear)
+          supabase
             .from('profiles')
             .update({ email: session.user.email })
             .eq('id', session.user.id);
-          data.email = session.user.email;
+          profileData.email = session.user.email;
         }
-        setProfile(data);
-
-        // Fetch user role using is_admin RPC
-        const { data: isAdminData } = await supabase.rpc('is_admin');
-        setUserRole(isAdminData ? 'admin' : 'user');
+        setProfile(profileData);
+        setUserRole(roleResult.data ? 'admin' : 'user');
+      } catch (error) {
+        console.error('Erro ao carregar dados do usuário:', error);
+      } finally {
+        isLoadingUserDataRef.current = false;
+        setLoading(false);
       }
+    };
+
+    // Setup auth state listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        // Ignorar durante o carregamento inicial para evitar chamadas duplicadas
+        if (!initialLoadDoneRef.current && event === 'INITIAL_SESSION') {
+          return;
+        }
+
+        setSession(session);
+        setUser(session?.user ?? null);
+        
+        if (session?.user) {
+          loadUserData(session);
+        } else {
+          setProfile(null);
+          setUserRole(null);
+          setLoading(false);
+        }
+      }
+    );
+
+    // Check for existing session (carregamento inicial)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      initialLoadDoneRef.current = true;
       
-      setLoading(false);
+      setSession(session);
+      setUser(session?.user ?? null);
+      
+      if (session?.user) {
+        await loadUserData(session);
+      } else {
+        setLoading(false);
+      }
     });
 
     return () => subscription.unsubscribe();

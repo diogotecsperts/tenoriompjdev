@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, memo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 
@@ -16,7 +16,7 @@ const COLORS = [
   "hsl(var(--chart-4))",
 ];
 
-export function TiposPericiaChart({ laudos }: TiposPericiaChartProps) {
+export const TiposPericiaChart = memo(function TiposPericiaChart({ laudos }: TiposPericiaChartProps) {
   // Mock data for demonstration - in real app, this would come from laudos
   const data = useMemo(() => {
     const total = laudos.length || 1;
@@ -83,4 +83,4 @@ export function TiposPericiaChart({ laudos }: TiposPericiaChartProps) {
       </CardContent>
     </Card>
   );
-}
+});
