@@ -46,35 +46,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Setup auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
         
         // Load profile and role when user logs in
         if (session?.user) {
-          setTimeout(async () => {
-            const { data } = await supabase
-              .from('profiles')
-              .select('nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url')
-              .eq('id', session.user.id)
-              .single();
+          // Usar Promise.all para carregar profile e role em paralelo
+          const loadUserData = async () => {
+            const [profileResult, roleResult] = await Promise.all([
+              supabase
+                .from('profiles')
+                .select('nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url')
+                .eq('id', session.user.id)
+                .single(),
+              supabase.rpc('is_admin')
+            ]);
             
-            if (data) {
+            if (profileResult.data) {
+              const profileData = profileResult.data;
               // Sincronizar email se houver diferença entre Auth e profiles
-              if (session.user.email && data.email !== session.user.email) {
-                await supabase
+              if (session.user.email && profileData.email !== session.user.email) {
+                // Atualizar no banco em background (não bloquear)
+                supabase
                   .from('profiles')
                   .update({ email: session.user.email })
                   .eq('id', session.user.id);
-                data.email = session.user.email;
+                profileData.email = session.user.email;
               }
-              setProfile(data);
+              setProfile(profileData);
             }
 
-            // Fetch user role using is_admin RPC
-            const { data: isAdminData } = await supabase.rpc('is_admin');
-            setUserRole(isAdminData ? 'admin' : 'user');
-          }, 0);
+            setUserRole(roleResult.data ? 'admin' : 'user');
+          };
+          
+          loadUserData();
         } else {
           setProfile(null);
           setUserRole(null);
