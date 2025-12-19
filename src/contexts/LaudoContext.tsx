@@ -166,15 +166,17 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     // Só recarregar se o usuário mudou de fato
-    if (user && user.id !== lastUserIdRef.current) {
-      lastUserIdRef.current = user.id;
+    const userId = user?.id;
+    if (userId && userId !== lastUserIdRef.current) {
+      lastUserIdRef.current = userId;
       refreshLaudos();
-    } else if (!user) {
+    } else if (!userId) {
       lastUserIdRef.current = null;
       setLaudos([]);
       setCurrentLaudo(null);
     }
-  }, [user, refreshLaudos]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const createLaudo = async (): Promise<string | null> => {
     if (!user) return null;

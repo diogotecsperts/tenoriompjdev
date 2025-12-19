@@ -24,10 +24,11 @@ export default function Login() {
   } = useAuth();
   const navigate = useNavigate();
   useEffect(() => {
-    if (isAuthenticated && !loading) {
-      navigate("/dashboard");
+    // Só navegar quando loading terminou E está autenticado
+    if (!loading && isAuthenticated) {
+      navigate("/dashboard", { replace: true });
     }
-  }, [isAuthenticated, loading, navigate]);
+  }, [loading, isAuthenticated, navigate]);
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
