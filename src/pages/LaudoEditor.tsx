@@ -43,6 +43,7 @@ import { Toggle } from "@/components/ui/toggle";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Progress } from "@/components/ui/progress";
 import { useLaudoProgress } from "@/hooks/useLaudoProgress";
+import { generateLaudoPDF, validateLaudoForPDF } from "@/utils/generateLaudoPDF";
 
 // Import section components
 import { DadosProcesso } from "@/components/laudo/sections/DadosProcesso";
@@ -262,11 +263,35 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
     saveLaudo();
   };
 
-  const handlePrint = () => {
-    toast({
-      title: "Funcionalidade em desenvolvimento",
-      description: "A geração de PDF estará disponível em breve.",
-    });
+  const handlePrint = async () => {
+    if (!currentLaudo) return;
+    
+    // Validate required fields
+    const validation = validateLaudoForPDF(currentLaudo);
+    
+    if (!validation.valid) {
+      toast({
+        variant: "destructive",
+        title: "Campos obrigatórios não preenchidos",
+        description: `Preencha: ${validation.missingFields.join(", ")}`,
+      });
+      return;
+    }
+    
+    try {
+      await generateLaudoPDF(currentLaudo);
+      toast({
+        title: "PDF gerado com sucesso",
+        description: "O laudo foi baixado para seu dispositivo.",
+      });
+    } catch (error) {
+      console.error("Erro ao gerar PDF:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao gerar PDF",
+        description: "Ocorreu um erro ao gerar o documento. Tente novamente.",
+      });
+    }
   };
 
   const toggleViewMode = () => {
