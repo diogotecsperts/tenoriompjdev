@@ -77,6 +77,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(null);
           setProfile(null);
           setUserRole(null);
+          isLoadingUserDataRef.current = false;
+          setLoading(false);
           return;
         }
 
@@ -231,7 +233,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (data.user) {
-        navigate("/dashboard");
+        // Navegação controlada pelo Login.tsx via useEffect
         return true;
       }
 
