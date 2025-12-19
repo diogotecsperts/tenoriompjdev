@@ -84,7 +84,7 @@ export default function Configuracoes() {
         setAvatarUrl(profile.avatar_url);
       }
     }
-  }, [profile]);
+  }, [profile, user]);
 
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
