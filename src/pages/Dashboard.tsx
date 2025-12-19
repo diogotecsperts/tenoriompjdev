@@ -20,12 +20,18 @@ import { PericiasCalendar } from "@/components/dashboard/PericiasCalendar";
 import { TiposPericiaChart } from "@/components/dashboard/TiposPericiaChart";
 import { ProximosCompromissosCards } from "@/components/dashboard/ProximosCompromissosCards";
 import { HistoricoRecenteTable } from "@/components/dashboard/HistoricoRecenteTable";
+import { DashboardSkeleton } from "@/components/dashboard/DashboardSkeleton";
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const { laudos, createLaudo, deleteLaudo } = useLaudo();
+  const { laudos, loading, createLaudo, deleteLaudo } = useLaudo();
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+
+  // Mostrar skeleton enquanto carrega os dados
+  if (loading) {
+    return <DashboardSkeleton />;
+  }
 
   const handleNewLaudo = async () => {
     const id = await createLaudo();
