@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./AuthContext";
 import { toast } from "@/hooks/use-toast";
@@ -74,10 +74,18 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
   const [laudos, setLaudos] = useState<LaudoData[]>([]);
   const [currentLaudo, setCurrentLaudo] = useState<LaudoData | null>(null);
   const [loading, setLoading] = useState(false);
+  
+  // Ref para evitar chamadas duplicadas de refreshLaudos
+  const isFetchingRef = useRef(false);
+  const lastUserIdRef = useRef<string | null>(null);
 
   // Carregar laudos do usuário
-  const refreshLaudos = async () => {
+  const refreshLaudos = useCallback(async () => {
     if (!user) return;
+    
+    // Evitar chamadas duplicadas
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
     
     setLoading(true);
     try {
@@ -152,17 +160,21 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
       });
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
-  };
+  }, [user]);
 
   useEffect(() => {
-    if (user) {
+    // Só recarregar se o usuário mudou de fato
+    if (user && user.id !== lastUserIdRef.current) {
+      lastUserIdRef.current = user.id;
       refreshLaudos();
-    } else {
+    } else if (!user) {
+      lastUserIdRef.current = null;
       setLaudos([]);
       setCurrentLaudo(null);
     }
-  }, [user]);
+  }, [user, refreshLaudos]);
 
   const createLaudo = async (): Promise<string | null> => {
     if (!user) return null;
