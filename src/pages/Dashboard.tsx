@@ -28,33 +28,25 @@ export default function Dashboard() {
   const { laudos, loading, createLaudo, deleteLaudo } = useLaudo();
   const [importDialogOpen, setImportDialogOpen] = useState(false);
 
-  // Mostrar skeleton enquanto carrega os dados
-  if (loading) {
-    return <DashboardSkeleton />;
-  }
-
-  const handleNewLaudo = async () => {
-    const id = await createLaudo();
-    if (id) {
-      navigate(`/laudo/${id}`);
-    }
-  };
-
-  // Calculate stats
+  // Calculate stats - TODOS OS HOOKS DEVEM VIR ANTES DE QUALQUER RETURN
   const totalLaudos = laudos.length;
-  const thisMonthLaudos = laudos.filter(l => {
-    const createdAt = new Date(l.updatedAt);
-    const now = new Date();
-    return createdAt.getMonth() === now.getMonth() && createdAt.getFullYear() === now.getFullYear();
-  }).length;
+  
+  const thisMonthLaudos = useMemo(() => {
+    return laudos.filter(l => {
+      const createdAt = new Date(l.updatedAt);
+      const now = new Date();
+      return createdAt.getMonth() === now.getMonth() && createdAt.getFullYear() === now.getFullYear();
+    }).length;
+  }, [laudos]);
 
-  // Get last month count for comparison
-  const lastMonthLaudos = laudos.filter(l => {
-    const createdAt = new Date(l.updatedAt);
-    const now = new Date();
-    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    return createdAt.getMonth() === lastMonth.getMonth() && createdAt.getFullYear() === lastMonth.getFullYear();
-  }).length;
+  const lastMonthLaudos = useMemo(() => {
+    return laudos.filter(l => {
+      const createdAt = new Date(l.updatedAt);
+      const now = new Date();
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      return createdAt.getMonth() === lastMonth.getMonth() && createdAt.getFullYear() === lastMonth.getFullYear();
+    }).length;
+  }, [laudos]);
 
   const percentChange = lastMonthLaudos > 0 
     ? Math.round(((thisMonthLaudos - lastMonthLaudos) / lastMonthLaudos) * 100)
@@ -77,6 +69,18 @@ export default function Dashboard() {
     
     return future;
   }, [laudos]);
+
+  // Mostrar skeleton enquanto carrega os dados - APÓS todos os hooks
+  if (loading) {
+    return <DashboardSkeleton />;
+  }
+
+  const handleNewLaudo = async () => {
+    const id = await createLaudo();
+    if (id) {
+      navigate(`/laudo/${id}`);
+    }
+  };
 
   return (
     <div className="p-6 lg:p-8 space-y-6">
