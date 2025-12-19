@@ -5,19 +5,24 @@ import { Loader2 } from "lucide-react";
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, profile, loading } = useAuth();
 
-  // Mostrar loading enquanto verifica autenticação
-  if (loading) {
+  // Mostrar loading enquanto verifica autenticação OU carrega perfil
+  // (evita o "vai e volta" / -> /dashboard -> / que causa piscadas)
+  if (loading || (isAuthenticated && !profile)) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }
 
-  // CRÍTICO: Verificar se está autenticado E tem perfil válido
-  if (!isAuthenticated || !profile) {
+  if (!isAuthenticated) {
     return <Navigate to="/" replace />;
   }
 
-  return <>{children}</>;
+  // Segurança extra: não renderizar rotas protegidas sem perfil
+  if (!profile) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>; 
 }

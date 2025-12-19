@@ -73,8 +73,8 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [laudos, setLaudos] = useState<LaudoData[]>([]);
   const [currentLaudo, setCurrentLaudo] = useState<LaudoData | null>(null);
-  const [loading, setLoading] = useState(false);
-  
+  const [loading, setLoading] = useState<boolean>(() => !!user);
+
   // Ref para evitar chamadas duplicadas de refreshLaudos
   const isFetchingRef = useRef(false);
   const lastUserIdRef = useRef<string | null>(null);
@@ -82,81 +82,81 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
   // Carregar laudos do usuário
   const refreshLaudos = useCallback(async () => {
     if (!user) return;
-    
+
     // Evitar chamadas duplicadas
     if (isFetchingRef.current) return;
     isFetchingRef.current = true;
-    
+
     setLoading(true);
     try {
       const { data, error } = await supabase
-        .from('laudos')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('updated_at', { ascending: false });
+        .from("laudos")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("updated_at", { ascending: false });
 
       if (error) throw error;
 
       if (data) {
-        const mappedLaudos = data.map(dbLaudo => ({
+        const mappedLaudos = data.map((dbLaudo) => ({
           id: dbLaudo.id,
           title: dbLaudo.title,
           createdAt: new Date(dbLaudo.created_at),
           updatedAt: new Date(dbLaudo.updated_at),
-          status: (dbLaudo as any).status || 'rascunho',
-          anotacoes: (dbLaudo as any).anotacoes || '',
-          peritoNome: dbLaudo.perito_nome || '',
-          peritoEspecialidade: dbLaudo.perito_especialidade || '',
-          peritoCRM: dbLaudo.perito_crm || '',
-          peritoEmail: dbLaudo.perito_email || '',
-          peritoTelefone: dbLaudo.perito_telefone || '',
-          peritoEndereco: dbLaudo.perito_endereco || '',
-          processoNumero: dbLaudo.processo_numero || '',
-          processoVara: dbLaudo.processo_vara || '',
-          reclamante: dbLaudo.reclamante || '',
-          reclamada: dbLaudo.reclamada || '',
-          dataAcidente: dbLaudo.data_acidente || '',
-          dataPericia: dbLaudo.data_pericia || '',
+          status: (dbLaudo as any).status || "rascunho",
+          anotacoes: (dbLaudo as any).anotacoes || "",
+          peritoNome: dbLaudo.perito_nome || "",
+          peritoEspecialidade: dbLaudo.perito_especialidade || "",
+          peritoCRM: dbLaudo.perito_crm || "",
+          peritoEmail: dbLaudo.perito_email || "",
+          peritoTelefone: dbLaudo.perito_telefone || "",
+          peritoEndereco: dbLaudo.perito_endereco || "",
+          processoNumero: dbLaudo.processo_numero || "",
+          processoVara: dbLaudo.processo_vara || "",
+          reclamante: dbLaudo.reclamante || "",
+          reclamada: dbLaudo.reclamada || "",
+          dataAcidente: dbLaudo.data_acidente || "",
+          dataPericia: dbLaudo.data_pericia || "",
           documentos: dbLaudo.documentos || [],
-          vitimaName: dbLaudo.vitima_nome || '',
-          vitimaEscolaridade: dbLaudo.vitima_escolaridade || '',
-          vitimaNascimento: dbLaudo.vitima_nascimento || '',
-          vitimaProfissao: dbLaudo.vitima_profissao || '',
-          vitimaDominancia: dbLaudo.vitima_dominancia || '',
-          historicoOcupacional: dbLaudo.historico_ocupacional || '',
-          historiaAcidente: dbLaudo.historia_acidente || '',
-          historiaAtual: dbLaudo.historia_atual || '',
-          antecedentes: dbLaudo.antecedentes || '',
-          tratamentos: dbLaudo.tratamentos || '',
-          afastamentos: dbLaudo.afastamentos || '',
+          vitimaName: dbLaudo.vitima_nome || "",
+          vitimaEscolaridade: dbLaudo.vitima_escolaridade || "",
+          vitimaNascimento: dbLaudo.vitima_nascimento || "",
+          vitimaProfissao: dbLaudo.vitima_profissao || "",
+          vitimaDominancia: dbLaudo.vitima_dominancia || "",
+          historicoOcupacional: dbLaudo.historico_ocupacional || "",
+          historiaAcidente: dbLaudo.historia_acidente || "",
+          historiaAtual: dbLaudo.historia_atual || "",
+          antecedentes: dbLaudo.antecedentes || "",
+          tratamentos: dbLaudo.tratamentos || "",
+          afastamentos: dbLaudo.afastamentos || "",
           planejamento: dbLaudo.planejamento || [],
-          laudosMedicos: dbLaudo.laudos_medicos || '',
-          examesComplementares: dbLaudo.exames_complementares || '',
-          exameFisico: dbLaudo.exame_fisico || '',
-          nexoCausalTipo: dbLaudo.nexo_causal_tipo || '',
-          nexoCausalJustificativa: dbLaudo.nexo_causal_justificativa || '',
-          conclusaoCID: dbLaudo.conclusao_cid || '',
-          conclusaoAnalise: dbLaudo.conclusao_analise || '',
-          conclusaoIncapacidade: dbLaudo.conclusao_incapacidade || '',
-          conclusaoStatus: dbLaudo.conclusao_status || '',
-          conclusaoJustificativa: dbLaudo.conclusao_justificativa || '',
-          conclusaoDestino: dbLaudo.conclusao_destino || '',
-          tabelaSUSEP: dbLaudo.tabela_susep || '',
-          danoEstetico: dbLaudo.dano_estetico || '',
-          auxilioTerceiros: dbLaudo.auxilio_terceiros || '',
-          quesitosJuizo: dbLaudo.quesitos_juizo || '',
-          quesitosReclamante: dbLaudo.quesitos_reclamante || '',
-          quesitosReclamada: dbLaudo.quesitos_reclamada || '',
+          laudosMedicos: dbLaudo.laudos_medicos || "",
+          examesComplementares: dbLaudo.exames_complementares || "",
+          exameFisico: dbLaudo.exame_fisico || "",
+          nexoCausalTipo: dbLaudo.nexo_causal_tipo || "",
+          nexoCausalJustificativa: dbLaudo.nexo_causal_justificativa || "",
+          conclusaoCID: dbLaudo.conclusao_cid || "",
+          conclusaoAnalise: dbLaudo.conclusao_analise || "",
+          conclusaoIncapacidade: dbLaudo.conclusao_incapacidade || "",
+          conclusaoStatus: dbLaudo.conclusao_status || "",
+          conclusaoJustificativa: dbLaudo.conclusao_justificativa || "",
+          conclusaoDestino: dbLaudo.conclusao_destino || "",
+          tabelaSUSEP: dbLaudo.tabela_susep || "",
+          danoEstetico: dbLaudo.dano_estetico || "",
+          auxilioTerceiros: dbLaudo.auxilio_terceiros || "",
+          quesitosJuizo: dbLaudo.quesitos_juizo || "",
+          quesitosReclamante: dbLaudo.quesitos_reclamante || "",
+          quesitosReclamada: dbLaudo.quesitos_reclamada || "",
         }));
-        
+
         setLaudos(mappedLaudos);
       }
     } catch (error: any) {
-      console.error('Erro ao carregar laudos:', error);
+      console.error("Erro ao carregar laudos:", error);
       toast({
         variant: "destructive",
         title: "Erro ao carregar laudos",
-        description: error.message
+        description: error.message,
       });
     } finally {
       setLoading(false);
@@ -165,18 +165,23 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   useEffect(() => {
-    // Só recarregar se o usuário mudou de fato
+    // Evita flash no primeiro render do Dashboard: coloca loading imediatamente ao trocar usuário
     const userId = user?.id;
+
     if (userId && userId !== lastUserIdRef.current) {
       lastUserIdRef.current = userId;
-      refreshLaudos();
-    } else if (!userId) {
+      setLoading(true);
+      void refreshLaudos();
+      return;
+    }
+
+    if (!userId) {
       lastUserIdRef.current = null;
       setLaudos([]);
       setCurrentLaudo(null);
+      setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [user?.id, refreshLaudos]);
 
   const createLaudo = async (): Promise<string | null> => {
     if (!user) return null;

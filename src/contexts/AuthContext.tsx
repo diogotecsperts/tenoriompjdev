@@ -46,6 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Flags para evitar chamadas duplicadas
   const initialLoadDoneRef = useRef(false);
   const isLoadingUserDataRef = useRef(false);
+  const loadedUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Função centralizada para carregar dados do usuário
@@ -57,16 +58,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const [profileResult, roleResult] = await Promise.all([
           supabase
-            .from('profiles')
-            .select('nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url')
-            .eq('id', session.user.id)
+            .from("profiles")
+            .select("nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url")
+            .eq("id", session.user.id)
             .single(),
-          supabase.rpc('is_admin')
+          supabase.rpc("is_admin"),
         ]);
-        
+
         // CRÍTICO: Verificar se o usuário tem perfil válido
         if (!profileResult.data) {
-          console.error('Usuário autenticado sem perfil válido - fazendo logout');
+          console.error("Usuário autenticado sem perfil válido - fazendo logout");
           await supabase.auth.signOut();
           toast({
             variant: "destructive",
@@ -77,6 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(null);
           setProfile(null);
           setUserRole(null);
+          loadedUserIdRef.current = null;
           isLoadingUserDataRef.current = false;
           setLoading(false);
           return;
@@ -86,16 +88,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Sincronizar email se houver diferença entre Auth e profiles
         if (session.user.email && profileData.email !== session.user.email) {
           // Atualizar no banco em background (não bloquear)
-          supabase
-            .from('profiles')
-            .update({ email: session.user.email })
-            .eq('id', session.user.id);
+          supabase.from("profiles").update({ email: session.user.email }).eq("id", session.user.id);
           profileData.email = session.user.email;
         }
         setProfile(profileData);
-        setUserRole(roleResult.data ? 'admin' : 'user');
+        setUserRole(roleResult.data ? "admin" : "user");
+        loadedUserIdRef.current = session.user.id;
       } catch (error) {
-        console.error('Erro ao carregar dados do usuário:', error);
+        console.error("Erro ao carregar dados do usuário:", error);
       } finally {
         isLoadingUserDataRef.current = false;
         setLoading(false);
@@ -103,36 +103,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     // Setup auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        // Ignorar durante o carregamento inicial para evitar chamadas duplicadas
-        if (!initialLoadDoneRef.current && event === 'INITIAL_SESSION') {
-          return;
-        }
-
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        if (session?.user) {
-          loadUserData(session);
-        } else {
-          setProfile(null);
-          setUserRole(null);
-          setLoading(false);
-        }
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      // Ignorar durante o carregamento inicial para evitar chamadas duplicadas
+      if (!initialLoadDoneRef.current && event === "INITIAL_SESSION") {
+        return;
       }
-    );
+
+      setSession(session);
+      setUser(session?.user ?? null);
+
+      if (session?.user) {
+        // Evita piscadas: só entra em modo "loading" quando realmente precisa carregar perfil
+        if (!isLoadingUserDataRef.current && loadedUserIdRef.current !== session.user.id) {
+          setLoading(true);
+          loadedUserIdRef.current = null;
+          loadUserData(session);
+        }
+      } else {
+        loadedUserIdRef.current = null;
+        setProfile(null);
+        setUserRole(null);
+        setLoading(false);
+      }
+    });
 
     // Check for existing session (carregamento inicial)
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       initialLoadDoneRef.current = true;
-      
+
       setSession(session);
       setUser(session?.user ?? null);
-      
+
       if (session?.user) {
+        // Garantir que o app não tente renderizar rotas protegidas antes do perfil
+        setLoading(true);
+        loadedUserIdRef.current = null;
         await loadUserData(session);
       } else {
+        loadedUserIdRef.current = null;
         setLoading(false);
       }
     });
