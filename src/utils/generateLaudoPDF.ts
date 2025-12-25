@@ -145,7 +145,44 @@ const addJudicialAddress = (doc: jsPDF, laudo: LaudoData, y: number): number => 
 
 // ========== CABEÇALHO E RODAPÉ ==========
 
-const addHeaderToPages = (doc: jsPDF, laudo: LaudoData) => {
+// Helper function to load image as base64
+const loadImageAsBase64 = (url: string): Promise<string | null> => {
+  return new Promise((resolve) => {
+    if (!url) {
+      resolve(null);
+      return;
+    }
+    
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          const dataURL = canvas.toDataURL("image/png");
+          resolve(dataURL);
+        } else {
+          resolve(null);
+        }
+      } catch {
+        resolve(null);
+      }
+    };
+    
+    img.onerror = () => {
+      resolve(null);
+    };
+    
+    img.src = url;
+  });
+};
+
+const addHeaderToPages = (doc: jsPDF, laudo: LaudoData, logoBase64: string | null) => {
   const pageCount = doc.getNumberOfPages();
   
   for (let i = 2; i <= pageCount; i++) {
@@ -155,11 +192,23 @@ const addHeaderToPages = (doc: jsPDF, laudo: LaudoData) => {
     doc.setFillColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
     doc.rect(0, 0, PAGE.width, 20, "F");
     
+    let textStartX = MARGINS.left;
+    
+    // Adicionar logo se existir
+    if (logoBase64) {
+      try {
+        doc.addImage(logoBase64, "PNG", MARGINS.left, 2, 16, 16);
+        textStartX = MARGINS.left + 20;
+      } catch {
+        // Se falhar, continua sem logo
+      }
+    }
+    
     // Nome do perito
     doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
-    doc.text(laudo.peritoNome || "MÉDICO PERITO", MARGINS.left, 12);
+    doc.text(laudo.peritoNome || "MÉDICO PERITO", textStartX, 12);
     
     // Especialidade e CRM
     doc.setFontSize(8);
@@ -213,6 +262,9 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   const doc = new jsPDF();
   let sectionNumber = 1;
   
+  // Carregar logo se existir
+  const logoBase64 = await loadImageAsBase64(laudo.peritoLogoUrl);
+  
   // ========== PÁGINA 1 - CAPA ==========
   
   // Borda dupla decorativa
@@ -226,18 +278,29 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   doc.setFillColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
   doc.rect(12, 12, 186, 40, "F");
   
+  // Adicionar logo na capa se existir
+  let textCenterX = 105;
+  if (logoBase64) {
+    try {
+      doc.addImage(logoBase64, "PNG", 20, 17, 30, 30);
+      textCenterX = 120; // Ajustar centro do texto se houver logo
+    } catch {
+      // Se falhar, continua sem logo
+    }
+  }
+  
   doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text(laudo.peritoNome?.toUpperCase() || "MÉDICO PERITO", 105, 28, { align: "center" });
+  doc.text(laudo.peritoNome?.toUpperCase() || "MÉDICO PERITO", textCenterX, 28, { align: "center" });
   
   doc.setFontSize(11);
   doc.setFont("helvetica", "normal");
   if (laudo.peritoEspecialidade) {
-    doc.text(laudo.peritoEspecialidade, 105, 38, { align: "center" });
+    doc.text(laudo.peritoEspecialidade, textCenterX, 38, { align: "center" });
   }
   if (laudo.peritoCRM) {
-    doc.text(`CRM: ${laudo.peritoCRM}`, 105, 46, { align: "center" });
+    doc.text(`CRM: ${laudo.peritoCRM}`, textCenterX, 46, { align: "center" });
   }
   
   // Título principal
@@ -704,7 +767,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // Adicionar cabeçalho e rodapé em todas as páginas (exceto capa)
-  addHeaderToPages(doc, laudo);
+  addHeaderToPages(doc, laudo, logoBase64);
   addFooterToPages(doc, laudo);
   
   // Gerar nome do arquivo

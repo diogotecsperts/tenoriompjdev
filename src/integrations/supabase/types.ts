@@ -307,6 +307,7 @@ export type Database = {
           endereco: string | null
           especialidade: string | null
           id: string
+          logo_url: string | null
           nome: string
           telefone: string | null
           updated_at: string | null
@@ -320,6 +321,7 @@ export type Database = {
           endereco?: string | null
           especialidade?: string | null
           id: string
+          logo_url?: string | null
           nome: string
           telefone?: string | null
           updated_at?: string | null
@@ -333,6 +335,7 @@ export type Database = {
           endereco?: string | null
           especialidade?: string | null
           id?: string
+          logo_url?: string | null
           nome?: string
           telefone?: string | null
           updated_at?: string | null
