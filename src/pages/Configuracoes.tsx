@@ -20,7 +20,8 @@ import {
   Download,
   Trash2,
   Shield,
-  Loader2
+  Loader2,
+  ImageIcon
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -39,7 +40,9 @@ export default function Configuracoes() {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("perfil");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [formData, setFormData] = useState({
     nome: "",
     email: "",
@@ -82,6 +85,10 @@ export default function Configuracoes() {
       // Load avatar URL from profile
       if (profile.avatar_url) {
         setAvatarUrl(profile.avatar_url);
+      }
+      // Load logo URL from profile
+      if ((profile as any).logo_url) {
+        setLogoUrl((profile as any).logo_url);
       }
     }
   }, [profile, user]);
@@ -188,6 +195,111 @@ export default function Configuracoes() {
       });
     } finally {
       setUploadingAvatar(false);
+    }
+  };
+
+  // Logo upload functions
+  const handleLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
+
+    // Validations
+    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      toast({ 
+        variant: "destructive", 
+        title: "Tipo de arquivo inválido", 
+        description: "Use arquivos JPG, PNG, GIF ou WebP" 
+      });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ 
+        variant: "destructive", 
+        title: "Arquivo muito grande", 
+        description: "O tamanho máximo é 5MB" 
+      });
+      return;
+    }
+
+    setUploadingLogo(true);
+    
+    try {
+      // Get file extension
+      const fileExt = file.name.split('.').pop();
+      const filePath = `${user.id}/logo.${fileExt}`;
+
+      // Upload to Storage
+      const { error: uploadError } = await supabase.storage
+        .from('perito-logos')
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data } = supabase.storage.from('perito-logos').getPublicUrl(filePath);
+      const newLogoUrl = `${data.publicUrl}?t=${Date.now()}`; // Cache bust
+
+      // Update in database
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ logo_url: newLogoUrl })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      setLogoUrl(newLogoUrl);
+      toast({ 
+        title: "Logo atualizada!", 
+        description: "Sua logo foi alterada com sucesso e aparecerá nos laudos." 
+      });
+    } catch (error: any) {
+      console.error("Erro no upload da logo:", error);
+      toast({ 
+        variant: "destructive", 
+        title: "Erro no upload", 
+        description: error.message 
+      });
+    } finally {
+      setUploadingLogo(false);
+      event.target.value = '';
+    }
+  };
+
+  const handleLogoRemove = async () => {
+    if (!user) return;
+
+    setUploadingLogo(true);
+
+    try {
+      // List and remove files from user folder
+      const { data: files } = await supabase.storage.from('perito-logos').list(user.id);
+      if (files?.length) {
+        await supabase.storage.from('perito-logos').remove(files.map(f => `${user.id}/${f.name}`));
+      }
+
+      // Clear URL in database
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ logo_url: null })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      setLogoUrl(null);
+      toast({ 
+        title: "Logo removida", 
+        description: "Sua logo foi removida dos laudos." 
+      });
+    } catch (error: any) {
+      console.error("Erro ao remover logo:", error);
+      toast({ 
+        variant: "destructive", 
+        title: "Erro ao remover", 
+        description: error.message 
+      });
+    } finally {
+      setUploadingLogo(false);
     }
   };
 
@@ -405,6 +517,75 @@ export default function Configuracoes() {
                       </div>
                       <p className="text-xs text-muted-foreground">
                         JPG, PNG ou GIF. Máximo 2MB.
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Logo Section */}
+              <Card className="shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <ImageIcon className="h-5 w-5" />
+                    Logo para Laudos
+                  </CardTitle>
+                  <CardDescription>
+                    Sua logo será exibida no cabeçalho dos laudos em PDF
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-6">
+                    <div className="h-24 w-40 rounded-lg border-2 border-dashed border-muted-foreground/25 flex items-center justify-center bg-muted/50 overflow-hidden">
+                      {logoUrl ? (
+                        <img 
+                          src={logoUrl} 
+                          alt="Logo" 
+                          className="h-full w-full object-contain p-2" 
+                        />
+                      ) : (
+                        <div className="text-center text-muted-foreground">
+                          <ImageIcon className="h-8 w-8 mx-auto mb-1 opacity-50" />
+                          <span className="text-xs">Sem logo</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="space-y-3">
+                      <div className="flex gap-2">
+                        {/* Hidden file input */}
+                        <input
+                          type="file"
+                          id="logo-upload"
+                          accept="image/jpeg,image/png,image/gif,image/webp"
+                          className="hidden"
+                          onChange={handleLogoUpload}
+                        />
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          disabled={uploadingLogo}
+                          onClick={() => document.getElementById('logo-upload')?.click()}
+                        >
+                          {uploadingLogo ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              Enviando...
+                            </>
+                          ) : logoUrl ? "Alterar logo" : "Adicionar logo"}
+                        </Button>
+                        {logoUrl && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            disabled={uploadingLogo}
+                            onClick={handleLogoRemove}
+                          >
+                            Remover
+                          </Button>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        JPG, PNG, GIF ou WebP. Máximo 5MB. Recomendado: 400x150px
                       </p>
                     </div>
                   </div>

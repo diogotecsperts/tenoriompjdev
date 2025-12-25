@@ -16,6 +16,7 @@ export interface LaudoData {
   peritoEmail: string;
   peritoTelefone: string;
   peritoEndereco: string;
+  peritoLogoUrl: string;
   processoNumero: string;
   processoVara: string;
   reclamante: string;
@@ -179,6 +180,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           descricaoTecnicaDoencas: (dbLaudo as any).descricao_tecnica_doencas || "",
           analiseIncapacidadeLaboral: (dbLaudo as any).analise_incapacidade_laboral || "",
           referenciasBibliograficas: (dbLaudo as any).referencias_bibliograficas || "",
+          peritoLogoUrl: "",
         }));
 
         setLaudos(mappedLaudos);
@@ -257,6 +259,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           peritoEmail: data.perito_email || '',
           peritoTelefone: data.perito_telefone || '',
           peritoEndereco: data.perito_endereco || '',
+          peritoLogoUrl: (profileData as any)?.logo_url || '',
           processoNumero: '',
           processoVara: '',
           reclamante: '',
@@ -355,6 +358,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           peritoEmail: data.perito_email || '',
           peritoTelefone: data.perito_telefone || '',
           peritoEndereco: data.perito_endereco || '',
+          peritoLogoUrl: '',
           processoNumero: data.processo_numero || '',
           processoVara: data.processo_vara || '',
           reclamante: data.reclamante || '',
