@@ -25,7 +25,7 @@ const MARGINS = {
   left: 20,
   right: 20,
   top: 45,      // Espaço para cabeçalho + 2 linhas vazias adicionais
-  bottom: 30,   // Espaço para rodapé
+  bottom: 45,   // Espaço para rodapé aumentado
 };
 
 const PAGE = {
@@ -229,40 +229,69 @@ const addHeaderToPages = async (doc: jsPDF, laudo: LaudoData, headerImageBase64:
   }
 };
 
-const addFooterToPages = (doc: jsPDF, laudo: LaudoData) => {
+const addFooterToPages = async (doc: jsPDF, laudo: LaudoData, logoImageBase64: string | null) => {
   const pageCount = doc.getNumberOfPages();
+  const footerHeight = 28; // Altura aumentada do rodapé
+  const footerY = PAGE.height - footerHeight;
+  
+  // Obter proporção da logo se disponível
+  let logoAspectRatio = 1;
+  if (logoImageBase64) {
+    try {
+      const dimensions = await getImageDimensions(logoImageBase64);
+      logoAspectRatio = dimensions.width / dimensions.height;
+    } catch {
+      // Usa fallback se falhar
+    }
+  }
   
   for (let i = 2; i <= pageCount; i++) {
     doc.setPage(i);
     
-    // Fundo do rodapé
+    // Fundo do rodapé (mais alto)
     doc.setFillColor(COLORS.footer.r, COLORS.footer.g, COLORS.footer.b);
-    doc.rect(0, PAGE.height - 18, PAGE.width, 18, "F");
+    doc.rect(0, footerY, PAGE.width, footerHeight, "F");
+    
+    // === LOGO NO CANTO ESQUERDO ===
+    if (logoImageBase64) {
+      try {
+        const logoHeight = footerHeight - 8; // Altura da logo com margem
+        const logoWidth = logoHeight * logoAspectRatio; // Mantém proporção
+        const logoX = MARGINS.left;
+        const logoYPos = footerY + 4; // Margem superior interna
+        
+        doc.addImage(logoImageBase64, "PNG", logoX, logoYPos, logoWidth, logoHeight);
+      } catch {
+        // Se falhar, continua sem logo
+      }
+    }
     
     doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
     
-    // Linha 1 - Nome do Perito (negrito, à direita)
+    // === TEXTOS NO LADO DIREITO ===
+    // Linha 1 - Nome do Perito (negrito)
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text(laudo.peritoNome || "Médico Perito", PAGE.width - MARGINS.right, PAGE.height - 12, { align: "right" });
+    doc.text(laudo.peritoNome || "Médico Perito", PAGE.width - MARGINS.right, footerY + 8, { align: "right" });
     
-    // Linha 2 - Especialidade + CRM (normal, à direita)
+    // Linha 2 - Especialidade + CRM
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     const cargoText = `${laudo.peritoEspecialidade || "Médico Perito Judicial"} - CRM ${laudo.peritoCRM || ""}`;
-    doc.text(cargoText, PAGE.width - MARGINS.right, PAGE.height - 8, { align: "right" });
+    doc.text(cargoText, PAGE.width - MARGINS.right, footerY + 13, { align: "right" });
     
-    // Linha 3 - Telefone | Email (normal, à direita)
+    // Linha 3 - Telefone | Email
     const contatoParts = [];
     if (laudo.peritoTelefone) contatoParts.push(laudo.peritoTelefone);
     if (laudo.peritoEmail) contatoParts.push(laudo.peritoEmail);
     if (contatoParts.length > 0) {
-      doc.text(contatoParts.join(" | "), PAGE.width - MARGINS.right, PAGE.height - 4, { align: "right" });
+      doc.text(contatoParts.join(" | "), PAGE.width - MARGINS.right, footerY + 18, { align: "right" });
     }
     
-    // Número da página (à esquerda para equilíbrio)
-    doc.setFontSize(7);
-    doc.text(`Página ${i} de ${pageCount}`, MARGINS.left, PAGE.height - 8, { align: "left" });
+    // Linha 4 - Número da página (abaixo do contato, menor e itálico para diferenciar)
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(6);
+    doc.text(`Página ${i} de ${pageCount}`, PAGE.width - MARGINS.right, footerY + 24, { align: "right" });
     
     doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   }
@@ -279,6 +308,9 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // Carregar imagem do cabeçalho (para páginas internas)
   const headerImageBase64 = await loadImageAsBase64("/cabecalho-perito.png");
+  
+  // Carregar logo do rodapé
+  const logoRodapeBase64 = await loadImageAsBase64("/logo-rodape.png");
   
   // ========== PÁGINA 1 - CAPA ==========
   
@@ -785,7 +817,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // Adicionar cabeçalho e rodapé em todas as páginas (exceto capa)
   await addHeaderToPages(doc, laudo, headerImageBase64);
-  addFooterToPages(doc, laudo);
+  await addFooterToPages(doc, laudo, logoRodapeBase64);
   
   // Gerar nome do arquivo
   const processNumber = laudo.processoNumero?.replace(/[^0-9]/g, "") || "sem-numero";
