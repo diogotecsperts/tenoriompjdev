@@ -52,6 +52,22 @@ export interface LaudoData {
   quesitosJuizo: string;
   quesitosReclamante: string;
   quesitosReclamada: string;
+  // Novos campos - Modelo completo de laudo
+  assistenteTecnicoReclamada: string;
+  assistenteTecnicoReclamante: string;
+  localPericia: string;
+  objetivoPericia: string;
+  resumoPeticaoInicial: string;
+  resumoContestacao: string;
+  metodologiaPericial: string;
+  dadosFuncionaisCargo: string;
+  dadosFuncionaisAdmissao: string;
+  dadosFuncionaisAfastamento: string;
+  descricaoPostoTrabalho: string;
+  descricaoAtividadesLaborais: string;
+  descricaoTecnicaDoencas: string;
+  analiseIncapacidadeLaboral: string;
+  referenciasBibliograficas: string;
 }
 
 interface LaudoContextType {
@@ -147,6 +163,22 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           quesitosJuizo: dbLaudo.quesitos_juizo || "",
           quesitosReclamante: dbLaudo.quesitos_reclamante || "",
           quesitosReclamada: dbLaudo.quesitos_reclamada || "",
+          // Novos campos
+          assistenteTecnicoReclamada: (dbLaudo as any).assistente_tecnico_reclamada || "",
+          assistenteTecnicoReclamante: (dbLaudo as any).assistente_tecnico_reclamante || "",
+          localPericia: (dbLaudo as any).local_pericia || "",
+          objetivoPericia: (dbLaudo as any).objetivo_pericia || "",
+          resumoPeticaoInicial: (dbLaudo as any).resumo_peticao_inicial || "",
+          resumoContestacao: (dbLaudo as any).resumo_contestacao || "",
+          metodologiaPericial: (dbLaudo as any).metodologia_pericial || "",
+          dadosFuncionaisCargo: (dbLaudo as any).dados_funcionais_cargo || "",
+          dadosFuncionaisAdmissao: (dbLaudo as any).dados_funcionais_admissao || "",
+          dadosFuncionaisAfastamento: (dbLaudo as any).dados_funcionais_afastamento || "",
+          descricaoPostoTrabalho: (dbLaudo as any).descricao_posto_trabalho || "",
+          descricaoAtividadesLaborais: (dbLaudo as any).descricao_atividades_laborais || "",
+          descricaoTecnicaDoencas: (dbLaudo as any).descricao_tecnica_doencas || "",
+          analiseIncapacidadeLaboral: (dbLaudo as any).analise_incapacidade_laboral || "",
+          referenciasBibliograficas: (dbLaudo as any).referencias_bibliograficas || "",
         }));
 
         setLaudos(mappedLaudos);
@@ -212,7 +244,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
 
       if (data) {
-        const newLaudo = {
+        const newLaudo: LaudoData = {
           id: data.id,
           title: data.title,
           createdAt: new Date(data.created_at),
@@ -261,6 +293,22 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           quesitosJuizo: '',
           quesitosReclamante: '',
           quesitosReclamada: '',
+          // Novos campos
+          assistenteTecnicoReclamada: '',
+          assistenteTecnicoReclamante: '',
+          localPericia: '',
+          objetivoPericia: '',
+          resumoPeticaoInicial: '',
+          resumoContestacao: '',
+          metodologiaPericial: (data as any).metodologia_pericial || '',
+          dadosFuncionaisCargo: '',
+          dadosFuncionaisAdmissao: '',
+          dadosFuncionaisAfastamento: '',
+          descricaoPostoTrabalho: '',
+          descricaoAtividadesLaborais: '',
+          descricaoTecnicaDoencas: '',
+          analiseIncapacidadeLaboral: '',
+          referenciasBibliograficas: (data as any).referencias_bibliograficas || '',
         };
         
         setCurrentLaudo(newLaudo);
@@ -294,7 +342,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
 
       if (data) {
-        const laudo = {
+        const laudo: LaudoData = {
           id: data.id,
           title: data.title,
           createdAt: new Date(data.created_at),
@@ -343,6 +391,22 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           quesitosJuizo: data.quesitos_juizo || '',
           quesitosReclamante: data.quesitos_reclamante || '',
           quesitosReclamada: data.quesitos_reclamada || '',
+          // Novos campos
+          assistenteTecnicoReclamada: (data as any).assistente_tecnico_reclamada || '',
+          assistenteTecnicoReclamante: (data as any).assistente_tecnico_reclamante || '',
+          localPericia: (data as any).local_pericia || '',
+          objetivoPericia: (data as any).objetivo_pericia || '',
+          resumoPeticaoInicial: (data as any).resumo_peticao_inicial || '',
+          resumoContestacao: (data as any).resumo_contestacao || '',
+          metodologiaPericial: (data as any).metodologia_pericial || '',
+          dadosFuncionaisCargo: (data as any).dados_funcionais_cargo || '',
+          dadosFuncionaisAdmissao: (data as any).dados_funcionais_admissao || '',
+          dadosFuncionaisAfastamento: (data as any).dados_funcionais_afastamento || '',
+          descricaoPostoTrabalho: (data as any).descricao_posto_trabalho || '',
+          descricaoAtividadesLaborais: (data as any).descricao_atividades_laborais || '',
+          descricaoTecnicaDoencas: (data as any).descricao_tecnica_doencas || '',
+          analiseIncapacidadeLaboral: (data as any).analise_incapacidade_laboral || '',
+          referenciasBibliograficas: (data as any).referencias_bibliograficas || '',
         };
         
         setCurrentLaudo(laudo);
@@ -419,6 +483,22 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           quesitos_juizo: currentLaudo.quesitosJuizo,
           quesitos_reclamante: currentLaudo.quesitosReclamante,
           quesitos_reclamada: currentLaudo.quesitosReclamada,
+          // Novos campos
+          assistente_tecnico_reclamada: currentLaudo.assistenteTecnicoReclamada,
+          assistente_tecnico_reclamante: currentLaudo.assistenteTecnicoReclamante,
+          local_pericia: currentLaudo.localPericia,
+          objetivo_pericia: currentLaudo.objetivoPericia,
+          resumo_peticao_inicial: currentLaudo.resumoPeticaoInicial,
+          resumo_contestacao: currentLaudo.resumoContestacao,
+          metodologia_pericial: currentLaudo.metodologiaPericial,
+          dados_funcionais_cargo: currentLaudo.dadosFuncionaisCargo,
+          dados_funcionais_admissao: currentLaudo.dadosFuncionaisAdmissao || null,
+          dados_funcionais_afastamento: currentLaudo.dadosFuncionaisAfastamento || null,
+          descricao_posto_trabalho: currentLaudo.descricaoPostoTrabalho,
+          descricao_atividades_laborais: currentLaudo.descricaoAtividadesLaborais,
+          descricao_tecnica_doencas: currentLaudo.descricaoTecnicaDoencas,
+          analise_incapacidade_laboral: currentLaudo.analiseIncapacidadeLaboral,
+          referencias_bibliograficas: currentLaudo.referenciasBibliograficas,
         } as any)
         .eq('id', currentLaudo.id)
         .eq('user_id', user.id);

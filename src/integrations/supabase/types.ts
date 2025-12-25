@@ -58,8 +58,11 @@ export type Database = {
       laudos: {
         Row: {
           afastamentos: string | null
+          analise_incapacidade_laboral: string | null
           anotacoes: string | null
           antecedentes: string | null
+          assistente_tecnico_reclamada: string | null
+          assistente_tecnico_reclamante: string | null
           auxilio_terceiros: string | null
           conclusao_analise: string | null
           conclusao_cid: string | null
@@ -68,9 +71,15 @@ export type Database = {
           conclusao_justificativa: string | null
           conclusao_status: string | null
           created_at: string | null
+          dados_funcionais_admissao: string | null
+          dados_funcionais_afastamento: string | null
+          dados_funcionais_cargo: string | null
           dano_estetico: string | null
           data_acidente: string | null
           data_pericia: string | null
+          descricao_atividades_laborais: string | null
+          descricao_posto_trabalho: string | null
+          descricao_tecnica_doencas: string | null
           documentos: string[] | null
           exame_fisico: string | null
           exames_complementares: string | null
@@ -79,8 +88,11 @@ export type Database = {
           historico_ocupacional: string | null
           id: string
           laudos_medicos: string | null
+          local_pericia: string | null
+          metodologia_pericial: string | null
           nexo_causal_justificativa: string | null
           nexo_causal_tipo: string | null
+          objetivo_pericia: string | null
           perito_crm: string | null
           perito_email: string | null
           perito_endereco: string | null
@@ -95,6 +107,9 @@ export type Database = {
           quesitos_reclamante: string | null
           reclamada: string | null
           reclamante: string | null
+          referencias_bibliograficas: string | null
+          resumo_contestacao: string | null
+          resumo_peticao_inicial: string | null
           status: string | null
           tabela_susep: string | null
           title: string
@@ -109,8 +124,11 @@ export type Database = {
         }
         Insert: {
           afastamentos?: string | null
+          analise_incapacidade_laboral?: string | null
           anotacoes?: string | null
           antecedentes?: string | null
+          assistente_tecnico_reclamada?: string | null
+          assistente_tecnico_reclamante?: string | null
           auxilio_terceiros?: string | null
           conclusao_analise?: string | null
           conclusao_cid?: string | null
@@ -119,9 +137,15 @@ export type Database = {
           conclusao_justificativa?: string | null
           conclusao_status?: string | null
           created_at?: string | null
+          dados_funcionais_admissao?: string | null
+          dados_funcionais_afastamento?: string | null
+          dados_funcionais_cargo?: string | null
           dano_estetico?: string | null
           data_acidente?: string | null
           data_pericia?: string | null
+          descricao_atividades_laborais?: string | null
+          descricao_posto_trabalho?: string | null
+          descricao_tecnica_doencas?: string | null
           documentos?: string[] | null
           exame_fisico?: string | null
           exames_complementares?: string | null
@@ -130,8 +154,11 @@ export type Database = {
           historico_ocupacional?: string | null
           id?: string
           laudos_medicos?: string | null
+          local_pericia?: string | null
+          metodologia_pericial?: string | null
           nexo_causal_justificativa?: string | null
           nexo_causal_tipo?: string | null
+          objetivo_pericia?: string | null
           perito_crm?: string | null
           perito_email?: string | null
           perito_endereco?: string | null
@@ -146,6 +173,9 @@ export type Database = {
           quesitos_reclamante?: string | null
           reclamada?: string | null
           reclamante?: string | null
+          referencias_bibliograficas?: string | null
+          resumo_contestacao?: string | null
+          resumo_peticao_inicial?: string | null
           status?: string | null
           tabela_susep?: string | null
           title?: string
@@ -160,8 +190,11 @@ export type Database = {
         }
         Update: {
           afastamentos?: string | null
+          analise_incapacidade_laboral?: string | null
           anotacoes?: string | null
           antecedentes?: string | null
+          assistente_tecnico_reclamada?: string | null
+          assistente_tecnico_reclamante?: string | null
           auxilio_terceiros?: string | null
           conclusao_analise?: string | null
           conclusao_cid?: string | null
@@ -170,9 +203,15 @@ export type Database = {
           conclusao_justificativa?: string | null
           conclusao_status?: string | null
           created_at?: string | null
+          dados_funcionais_admissao?: string | null
+          dados_funcionais_afastamento?: string | null
+          dados_funcionais_cargo?: string | null
           dano_estetico?: string | null
           data_acidente?: string | null
           data_pericia?: string | null
+          descricao_atividades_laborais?: string | null
+          descricao_posto_trabalho?: string | null
+          descricao_tecnica_doencas?: string | null
           documentos?: string[] | null
           exame_fisico?: string | null
           exames_complementares?: string | null
@@ -181,8 +220,11 @@ export type Database = {
           historico_ocupacional?: string | null
           id?: string
           laudos_medicos?: string | null
+          local_pericia?: string | null
+          metodologia_pericial?: string | null
           nexo_causal_justificativa?: string | null
           nexo_causal_tipo?: string | null
+          objetivo_pericia?: string | null
           perito_crm?: string | null
           perito_email?: string | null
           perito_endereco?: string | null
@@ -197,6 +239,9 @@ export type Database = {
           quesitos_reclamante?: string | null
           reclamada?: string | null
           reclamante?: string | null
+          referencias_bibliograficas?: string | null
+          resumo_contestacao?: string | null
+          resumo_peticao_inicial?: string | null
           status?: string | null
           tabela_susep?: string | null
           title?: string

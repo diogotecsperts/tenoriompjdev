@@ -16,7 +16,8 @@ export function DadosProcesso() {
           Informações sobre o processo judicial e as partes envolvidas
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-6">
+        {/* Dados básicos do processo */}
         <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="processoNumero">Número do Processo</Label>
@@ -37,6 +38,8 @@ export function DadosProcesso() {
             />
           </div>
         </div>
+
+        {/* Partes */}
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="reclamante">Reclamante</Label>
@@ -57,24 +60,67 @@ export function DadosProcesso() {
             />
           </div>
         </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="dataAcidente">Data do Acidente</Label>
-            <Input
-              id="dataAcidente"
-              type="date"
-              value={currentLaudo.dataAcidente}
-              onChange={(e) => updateLaudo({ dataAcidente: e.target.value })}
-            />
+
+        {/* Assistentes Técnicos */}
+        <div className="space-y-4">
+          <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">
+            Assistentes Técnicos
+          </h4>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="assistenteTecnicoReclamante">Assistente Técnico do Reclamante</Label>
+              <Input
+                id="assistenteTecnicoReclamante"
+                value={currentLaudo.assistenteTecnicoReclamante || ""}
+                onChange={(e) => updateLaudo({ assistenteTecnicoReclamante: e.target.value })}
+                placeholder="Nome e CRM do assistente técnico"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="assistenteTecnicoReclamada">Assistente Técnico da Reclamada</Label>
+              <Input
+                id="assistenteTecnicoReclamada"
+                value={currentLaudo.assistenteTecnicoReclamada || ""}
+                onChange={(e) => updateLaudo({ assistenteTecnicoReclamada: e.target.value })}
+                placeholder="Nome e CRM do assistente técnico"
+              />
+            </div>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="dataPericia">Data da Perícia</Label>
-            <Input
-              id="dataPericia"
-              type="date"
-              value={currentLaudo.dataPericia}
-              onChange={(e) => updateLaudo({ dataPericia: e.target.value })}
-            />
+        </div>
+
+        {/* Data e Local da Perícia */}
+        <div className="space-y-4">
+          <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">
+            Perícia
+          </h4>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="dataPericia">Data da Perícia</Label>
+              <Input
+                id="dataPericia"
+                type="date"
+                value={currentLaudo.dataPericia}
+                onChange={(e) => updateLaudo({ dataPericia: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="dataAcidente">Data do Acidente</Label>
+              <Input
+                id="dataAcidente"
+                type="date"
+                value={currentLaudo.dataAcidente}
+                onChange={(e) => updateLaudo({ dataAcidente: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2 md:col-span-1">
+              <Label htmlFor="localPericia">Local da Perícia</Label>
+              <Input
+                id="localPericia"
+                value={currentLaudo.localPericia || ""}
+                onChange={(e) => updateLaudo({ localPericia: e.target.value })}
+                placeholder="Endereço do local da perícia"
+              />
+            </div>
           </div>
         </div>
       </CardContent>
