@@ -24,7 +24,7 @@ const COLORS = {
 const MARGINS = {
   left: 20,
   right: 20,
-  top: 35,      // Espaço para cabeçalho
+  top: 45,      // Espaço para cabeçalho + 2 linhas vazias adicionais
   bottom: 30,   // Espaço para rodapé
 };
 
