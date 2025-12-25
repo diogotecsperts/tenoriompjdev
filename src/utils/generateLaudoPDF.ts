@@ -12,13 +12,13 @@ declare module "jspdf" {
 
 // ========== CONSTANTES DE CONFIGURAÇÃO ==========
 const COLORS = {
-  primary: { r: 0, g: 51, b: 102 },      // Azul escuro
-  secondary: { r: 51, g: 51, b: 51 },    // Cinza escuro
-  text: { r: 0, g: 0, b: 0 },            // Preto
-  muted: { r: 100, g: 100, b: 100 },     // Cinza
-  white: { r: 255, g: 255, b: 255 },     // Branco
-  background: { r: 245, g: 245, b: 245 }, // Cinza claro
-  footer: { r: 45, g: 45, b: 45 },       // Cinza escuro para rodapé
+  primary: { r: 27, g: 54, b: 101 },       // #1B3665 - Azul Institucional
+  secondary: { r: 31, g: 41, b: 55 },      // #1F2937 - Cinza chumbo
+  text: { r: 31, g: 41, b: 55 },           // #1F2937 - Texto principal
+  muted: { r: 75, g: 85, b: 99 },          // #4B5563 - Texto secundário
+  white: { r: 255, g: 255, b: 255 },       // Branco puro
+  background: { r: 243, g: 244, b: 246 },  // #F3F4F6 - Fundo box
+  footer: { r: 75, g: 85, b: 99 },         // #4B5563 - Rodapé
 };
 
 const MARGINS = {
@@ -268,137 +268,131 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // ========== PÁGINA 1 - CAPA ==========
   
-  // Borda dupla decorativa
+  // Moldura única grossa (border-4 ≈ 1.5mm)
   doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
-  doc.setLineWidth(2);
-  doc.rect(10, 10, 190, 277);
-  doc.setLineWidth(0.5);
-  doc.rect(12, 12, 186, 273);
+  doc.setLineWidth(1.5);
+  doc.rect(8, 8, 194, 281, "S");
   
-  // Cabeçalho azul com informações do perito
+  // Cabeçalho azul com informações do perito (py-8 ≈ padding generoso)
   doc.setFillColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
-  doc.rect(12, 12, 186, 40, "F");
+  doc.rect(12, 12, 186, 38, "F");
   
   // Adicionar logo na capa se existir
   let textCenterX = 105;
   if (logoBase64) {
     try {
-      doc.addImage(logoBase64, "PNG", 20, 17, 30, 30);
-      textCenterX = 120; // Ajustar centro do texto se houver logo
+      doc.addImage(logoBase64, "PNG", 20, 17, 28, 28);
+      textCenterX = 118;
     } catch {
       // Se falhar, continua sem logo
     }
   }
   
+  // Nome do perito (text-xl, bold, uppercase)
   doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
-  doc.setFontSize(16);
+  doc.setFontSize(15);
   doc.setFont("helvetica", "bold");
   doc.text(laudo.peritoNome?.toUpperCase() || "MÉDICO PERITO", textCenterX, 28, { align: "center" });
   
-  doc.setFontSize(11);
+  // CRM com opacidade 90% (simular com cor mais clara)
+  doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
-  if (laudo.peritoEspecialidade) {
-    doc.text(laudo.peritoEspecialidade, textCenterX, 38, { align: "center" });
-  }
+  doc.setTextColor(230, 230, 235); // Branco com ~90% opacidade
   if (laudo.peritoCRM) {
-    doc.text(`CRM: ${laudo.peritoCRM}`, textCenterX, 46, { align: "center" });
+    doc.text(`CRM: ${laudo.peritoCRM}`, textCenterX, 40, { align: "center" });
   }
   
-  // Título principal
+  // Título principal "LAUDO PERICIAL" (text-4xl, bold, cor primária)
   doc.setTextColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
   doc.setFontSize(32);
   doc.setFont("helvetica", "bold");
-  doc.text("LAUDO PERICIAL", 105, 95, { align: "center" });
-  doc.setFontSize(20);
-  doc.text("MÉDICO", 105, 110, { align: "center" });
+  doc.text("LAUDO PERICIAL", 105, 85, { align: "center" });
   
-  // Linha decorativa
+  // Subtítulo "MÉDICO" com tracking-widest (letter-spacing simulado)
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.text("M É D I C O", 105, 100, { align: "center" });
+  
+  // Linha decorativa mais grossa (border-t-4 ≈ 1.5mm, w-2/3)
   doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
-  doc.setLineWidth(1);
-  doc.line(45, 125, 165, 125);
+  doc.setLineWidth(1.5);
+  doc.line(50, 115, 160, 115);
   
-  // Informações do processo
+  // ===== Grid de Informações (Metadados do Processo) =====
+  // Layout: grid grid-cols-[1fr_3fr] - colunas alinhadas
   doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   doc.setFontSize(11);
-  let coverY = 145;
   
-  if (laudo.processoNumero) {
-    doc.setFont("helvetica", "bold");
-    const labelProcesso = "Processo nº: ";
-    const labelProcessoWidth = doc.getTextWidth(labelProcesso);
-    doc.text(labelProcesso, 40, coverY);
-    doc.setFont("helvetica", "normal");
-    doc.text(laudo.processoNumero, 40 + labelProcessoWidth, coverY);
-    coverY += 10;
-  }
+  const labelColX = 40;       // Posição fixa dos labels
+  const valueColX = 78;       // Posição fixa dos valores
+  const gridMaxWidth = 90;    // Largura máxima para valores
+  let coverY = 135;
   
-  if (laudo.processoVara) {
+  const addGridRow = (label: string, value: string | undefined | null): void => {
+    if (!value) return;
     doc.setFont("helvetica", "bold");
-    const labelVara = "Vara: ";
-    const labelVaraWidth = doc.getTextWidth(labelVara);
-    doc.text(labelVara, 40, coverY);
-    doc.setFont("helvetica", "normal");
-    const varaLines = doc.splitTextToSize(laudo.processoVara, 130 - labelVaraWidth);
-    doc.text(varaLines, 40 + labelVaraWidth, coverY);
-    coverY += varaLines.length * 6 + 8;
-  }
-  
-  if (laudo.reclamante) {
-    doc.setFont("helvetica", "bold");
-    const labelReclamante = "Reclamante: ";
-    const labelReclamanteWidth = doc.getTextWidth(labelReclamante);
-    doc.text(labelReclamante, 40, coverY);
-    doc.setFont("helvetica", "normal");
-    const reclamanteLines = doc.splitTextToSize(laudo.reclamante, 130 - labelReclamanteWidth);
-    doc.text(reclamanteLines, 40 + labelReclamanteWidth, coverY);
-    coverY += reclamanteLines.length * 6 + 5;
-  }
-  
-  if (laudo.reclamada) {
-    doc.setFont("helvetica", "bold");
-    const labelReclamada = "Reclamada: ";
-    const labelReclamadaWidth = doc.getTextWidth(labelReclamada);
-    doc.text(labelReclamada, 40, coverY);
-    doc.setFont("helvetica", "normal");
-    const reclamadaLines = doc.splitTextToSize(laudo.reclamada, 130 - labelReclamadaWidth);
-    doc.text(reclamadaLines, 40 + labelReclamadaWidth, coverY);
-    coverY += reclamadaLines.length * 6 + 10;
-  }
-  
-  // Box do periciando
-  if (laudo.vitimaName) {
-    doc.setFillColor(COLORS.background.r, COLORS.background.g, COLORS.background.b);
-    doc.roundedRect(30, coverY, 150, 35, 3, 3, "F");
-    doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
-    doc.setLineWidth(0.5);
-    doc.roundedRect(30, coverY, 150, 35, 3, 3, "S");
-    
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
-    doc.text("PERICIANDO(A)", 105, coverY + 12, { align: "center" });
-    doc.setFontSize(14);
     doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
-    doc.text(laudo.vitimaName.toUpperCase(), 105, coverY + 26, { align: "center" });
+    doc.text(`${label}:`, labelColX, coverY);
+    
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(COLORS.secondary.r, COLORS.secondary.g, COLORS.secondary.b);
+    const lines = doc.splitTextToSize(value, gridMaxWidth);
+    doc.text(lines, valueColX, coverY);
+    coverY += lines.length * 5 + 8;
+  };
+  
+  addGridRow("Processo nº", laudo.processoNumero);
+  addGridRow("Vara", laudo.processoVara);
+  addGridRow("Reclamante", laudo.reclamante);
+  addGridRow("Reclamada", laudo.reclamada);
+  
+  // ===== Box de Destaque (Periciando) =====
+  if (laudo.vitimaName) {
+    coverY = Math.max(coverY + 5, 200); // Garantir espaçamento mínimo
+    const boxWidth = 140;  // ~80% da largura do conteúdo
+    const boxX = (PAGE.width - boxWidth) / 2;  // Centralizado (mx-auto)
+    const boxHeight = 38;
+    
+    // Fundo cinza suave (bg-gray-100)
+    doc.setFillColor(COLORS.background.r, COLORS.background.g, COLORS.background.b);
+    doc.roundedRect(boxX, coverY, boxWidth, boxHeight, 5, 5, "F");
+    
+    // Borda mais grossa (border-2, rounded-xl)
+    doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
+    doc.setLineWidth(0.75);
+    doc.roundedRect(boxX, coverY, boxWidth, boxHeight, 5, 5, "S");
+    
+    // Rótulo com tracking-widest (text-xs, uppercase, text-gray-500)
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
+    doc.text("P E R I C I A N D O ( A )", 105, coverY + 13, { align: "center" });
+    
+    // Nome maior (text-2xl, font-black)
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+    doc.text(laudo.vitimaName.toUpperCase(), 105, coverY + 28, { align: "center" });
   }
   
-  // Data da perícia
-  doc.setFontSize(10);
+  // ===== Rodapé da Capa =====
+  // Data da perícia (centralizada)
+  doc.setFontSize(11);
   doc.setFont("helvetica", "normal");
+  doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
   const examDate = laudo.dataPericia ? formatDate(laudo.dataPericia) : formatDate(new Date().toISOString());
   doc.text(`Data da Perícia: ${examDate}`, 105, 255, { align: "center" });
   
-  // Contato no rodapé da capa
-  doc.setFontSize(8);
-  doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
+  // Contato separado por pipe (text-sm, cinza médio)
+  doc.setFontSize(9);
   const contactParts = [];
   if (laudo.peritoEmail) contactParts.push(laudo.peritoEmail);
   if (laudo.peritoTelefone) contactParts.push(`Tel: ${laudo.peritoTelefone}`);
   if (contactParts.length > 0) {
-    doc.text(contactParts.join("  |  "), 105, 270, { align: "center" });
+    doc.text(contactParts.join("  |  "), 105, 268, { align: "center" });
   }
   if (laudo.peritoEndereco) {
-    doc.text(laudo.peritoEndereco, 105, 278, { align: "center" });
+    doc.text(laudo.peritoEndereco, 105, 277, { align: "center" });
   }
   
   // ========== CORPO DO LAUDO ==========
