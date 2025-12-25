@@ -183,24 +183,46 @@ const loadImageAsBase64 = (url: string): Promise<string | null> => {
   });
 };
 
+// Função para obter dimensões reais da imagem
+const getImageDimensions = (base64: string): Promise<{ width: number; height: number }> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.width, height: img.height });
+    img.onerror = reject;
+    img.src = base64;
+  });
+};
+
 const addHeaderToPages = async (doc: jsPDF, laudo: LaudoData, headerImageBase64: string | null) => {
   const pageCount = doc.getNumberOfPages();
+  
+  if (!headerImageBase64) return;
+  
+  // Obter dimensões reais da imagem para manter proporção correta
+  let aspectRatio = 0.133; // Fallback
+  try {
+    const dimensions = await getImageDimensions(headerImageBase64);
+    aspectRatio = dimensions.height / dimensions.width;
+  } catch {
+    // Usa fallback se falhar
+  }
   
   for (let i = 2; i <= pageCount; i++) {
     doc.setPage(i);
     
-    if (headerImageBase64) {
-      try {
-        // Calcular dimensões proporcionais para aproveitar a largura do documento
-        const imgWidth = PAGE.contentWidth; // Largura do conteúdo (170mm)
-        const imgHeight = imgWidth * 0.12; // Proporção aproximada do cabeçalho
-        const xPos = MARGINS.left; // Alinhado com margem esquerda
-        const yPos = 5; // Margem superior de 5mm
-        
-        doc.addImage(headerImageBase64, "PNG", xPos, yPos, imgWidth, imgHeight);
-      } catch {
-        // Se falhar, não adiciona cabeçalho
-      }
+    try {
+      // Largura máxima desejada e altura proporcional
+      const maxWidth = 140; // mm
+      const imgWidth = maxWidth;
+      const imgHeight = imgWidth * aspectRatio; // Proporção REAL da imagem
+      
+      // Centralizar horizontalmente na página
+      const xPos = (PAGE.width - imgWidth) / 2;
+      const yPos = 5; // Margem superior
+      
+      doc.addImage(headerImageBase64, "PNG", xPos, yPos, imgWidth, imgHeight);
+    } catch {
+      // Se falhar, não adiciona cabeçalho
     }
     
     doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
