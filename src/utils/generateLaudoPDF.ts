@@ -115,9 +115,10 @@ const addLabeledField = (doc: jsPDF, label: string, value: string, y: number): n
   if (!value) return y;
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  doc.text(`${label}: `, MARGINS.left, y);
+  const labelText = `${label}: `;
+  const labelWidth = doc.getTextWidth(labelText) + 2; // Calcular ANTES de mudar fonte + buffer
+  doc.text(labelText, MARGINS.left, y);
   doc.setFont("helvetica", "normal");
-  const labelWidth = doc.getTextWidth(`${label}: `);
   const valueLines = doc.splitTextToSize(value, PAGE.contentWidth - labelWidth);
   doc.text(valueLines, MARGINS.left + labelWidth, y);
   return y + (valueLines.length * 5) + 3;
@@ -323,36 +324,44 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   if (laudo.processoNumero) {
     doc.setFont("helvetica", "bold");
-    doc.text("Processo nº:", 40, coverY);
+    const labelProcesso = "Processo nº: ";
+    const labelProcessoWidth = doc.getTextWidth(labelProcesso);
+    doc.text(labelProcesso, 40, coverY);
     doc.setFont("helvetica", "normal");
-    doc.text(laudo.processoNumero, 80, coverY);
+    doc.text(laudo.processoNumero, 40 + labelProcessoWidth, coverY);
     coverY += 10;
   }
   
   if (laudo.processoVara) {
     doc.setFont("helvetica", "bold");
-    doc.text("Vara:", 40, coverY);
+    const labelVara = "Vara: ";
+    const labelVaraWidth = doc.getTextWidth(labelVara);
+    doc.text(labelVara, 40, coverY);
     doc.setFont("helvetica", "normal");
-    const varaLines = doc.splitTextToSize(laudo.processoVara, 100);
-    doc.text(varaLines, 80, coverY);
+    const varaLines = doc.splitTextToSize(laudo.processoVara, 130 - labelVaraWidth);
+    doc.text(varaLines, 40 + labelVaraWidth, coverY);
     coverY += varaLines.length * 6 + 8;
   }
   
   if (laudo.reclamante) {
     doc.setFont("helvetica", "bold");
-    doc.text("Reclamante:", 40, coverY);
+    const labelReclamante = "Reclamante: ";
+    const labelReclamanteWidth = doc.getTextWidth(labelReclamante);
+    doc.text(labelReclamante, 40, coverY);
     doc.setFont("helvetica", "normal");
-    const reclamanteLines = doc.splitTextToSize(laudo.reclamante, 100);
-    doc.text(reclamanteLines, 80, coverY);
+    const reclamanteLines = doc.splitTextToSize(laudo.reclamante, 130 - labelReclamanteWidth);
+    doc.text(reclamanteLines, 40 + labelReclamanteWidth, coverY);
     coverY += reclamanteLines.length * 6 + 5;
   }
   
   if (laudo.reclamada) {
     doc.setFont("helvetica", "bold");
-    doc.text("Reclamada:", 40, coverY);
+    const labelReclamada = "Reclamada: ";
+    const labelReclamadaWidth = doc.getTextWidth(labelReclamada);
+    doc.text(labelReclamada, 40, coverY);
     doc.setFont("helvetica", "normal");
-    const reclamadaLines = doc.splitTextToSize(laudo.reclamada, 100);
-    doc.text(reclamadaLines, 80, coverY);
+    const reclamadaLines = doc.splitTextToSize(laudo.reclamada, 130 - labelReclamadaWidth);
+    doc.text(reclamadaLines, 40 + labelReclamadaWidth, coverY);
     coverY += reclamadaLines.length * 6 + 10;
   }
   
