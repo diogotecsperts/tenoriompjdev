@@ -582,15 +582,10 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
                 )}
               </Button>
               
-              <div className="relative">
-                <Button variant="outline" size="sm" onClick={handlePrint}>
-                  <Printer className="h-4 w-4 sm:mr-2" />
-                  <span className="hidden sm:inline">Gerar PDF</span>
-                </Button>
-                <Badge variant="secondary" className="absolute -top-2 -right-2 text-[10px] px-1.5 py-0.5">
-                  Em breve
-                </Badge>
-              </div>
+              <Button variant="outline" size="sm" onClick={handlePrint}>
+                <Printer className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Gerar PDF</span>
+              </Button>
               <Button size="sm" onClick={handleSave}>
                 <Save className="h-4 w-4 sm:mr-2" />
                 <span className="hidden sm:inline">Salvar</span>
