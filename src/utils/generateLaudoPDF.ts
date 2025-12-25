@@ -10,7 +10,32 @@ declare module "jspdf" {
   }
 }
 
-// Helper function to format dates
+// ========== CONSTANTES DE CONFIGURAÇÃO ==========
+const COLORS = {
+  primary: { r: 0, g: 51, b: 102 },      // Azul escuro
+  secondary: { r: 51, g: 51, b: 51 },    // Cinza escuro
+  text: { r: 0, g: 0, b: 0 },            // Preto
+  muted: { r: 100, g: 100, b: 100 },     // Cinza
+  white: { r: 255, g: 255, b: 255 },     // Branco
+  background: { r: 245, g: 245, b: 245 }, // Cinza claro
+  footer: { r: 45, g: 45, b: 45 },       // Cinza escuro para rodapé
+};
+
+const MARGINS = {
+  left: 20,
+  right: 20,
+  top: 35,      // Espaço para cabeçalho
+  bottom: 30,   // Espaço para rodapé
+};
+
+const PAGE = {
+  width: 210,
+  height: 297,
+  contentWidth: 170,
+};
+
+// ========== FUNÇÕES AUXILIARES ==========
+
 const formatDate = (dateString: string): string => {
   if (!dateString) return "";
   try {
@@ -25,7 +50,6 @@ const formatDate = (dateString: string): string => {
   }
 };
 
-// Helper function to calculate age from birth date
 const calculateAge = (birthDate: string): string => {
   if (!birthDate) return "";
   try {
@@ -42,141 +66,203 @@ const calculateAge = (birthDate: string): string => {
   }
 };
 
-// Helper to add section title
+// Adiciona título de seção com numeração
 const addSectionTitle = (doc: jsPDF, title: string, y: number): number => {
   doc.setFontSize(12);
   doc.setFont("helvetica", "bold");
-  doc.setTextColor(0, 51, 102);
-  doc.text(title, 20, y);
-  doc.setDrawColor(0, 51, 102);
-  doc.line(20, y + 2, 190, y + 2);
-  doc.setTextColor(0, 0, 0);
+  doc.setTextColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
+  doc.text(title.toUpperCase(), MARGINS.left, y);
+  doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
+  doc.setLineWidth(0.5);
+  doc.line(MARGINS.left, y + 2, PAGE.width - MARGINS.right, y + 2);
+  doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   doc.setFont("helvetica", "normal");
-  return y + 10;
+  return y + 12;
 };
 
-// Helper to add paragraph text with word wrap
-const addParagraph = (doc: jsPDF, text: string, y: number, maxWidth: number = 170): number => {
+// Adiciona subtítulo
+const addSubtitle = (doc: jsPDF, title: string, y: number): number => {
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(COLORS.secondary.r, COLORS.secondary.g, COLORS.secondary.b);
+  doc.text(title, MARGINS.left, y);
+  doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+  doc.setFont("helvetica", "normal");
+  return y + 7;
+};
+
+// Adiciona parágrafo com quebra de linha
+const addParagraph = (doc: jsPDF, text: string, y: number, maxWidth: number = PAGE.contentWidth): number => {
   if (!text) return y;
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   const lines = doc.splitTextToSize(text, maxWidth);
-  doc.text(lines, 20, y);
+  doc.text(lines, MARGINS.left, y);
   return y + (lines.length * 5) + 5;
 };
 
-// Helper to check if we need a new page
+// Verifica necessidade de nova página
 const checkNewPage = (doc: jsPDF, currentY: number, neededSpace: number = 40): number => {
-  if (currentY > 270 - neededSpace) {
+  if (currentY > PAGE.height - MARGINS.bottom - neededSpace) {
     doc.addPage();
-    return 30;
+    return MARGINS.top;
   }
   return currentY;
 };
 
-// Helper to add labeled field
+// Adiciona campo com label
 const addLabeledField = (doc: jsPDF, label: string, value: string, y: number): number => {
+  if (!value) return y;
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
-  doc.text(`${label}: `, 20, y);
+  doc.text(`${label}: `, MARGINS.left, y);
   doc.setFont("helvetica", "normal");
   const labelWidth = doc.getTextWidth(`${label}: `);
-  const valueLines = doc.splitTextToSize(value || "Não informado", 170 - labelWidth);
-  doc.text(valueLines, 20 + labelWidth, y);
+  const valueLines = doc.splitTextToSize(value, PAGE.contentWidth - labelWidth);
+  doc.text(valueLines, MARGINS.left + labelWidth, y);
   return y + (valueLines.length * 5) + 3;
 };
 
-// Add header to each page
-const addHeader = (doc: jsPDF, laudo: LaudoData) => {
+// Adiciona texto de endereçamento judicial
+const addJudicialAddress = (doc: jsPDF, laudo: LaudoData, y: number): number => {
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "bold");
+  doc.text("EXCELENTÍSSIMO(A) SENHOR(A) DOUTOR(A) JUIZ(A) DE DIREITO DA", MARGINS.left, y);
+  y += 6;
+  doc.text(laudo.processoVara?.toUpperCase() || "[VARA]", MARGINS.left, y);
+  y += 15;
+  
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Processo nº: ${laudo.processoNumero || "[NÚMERO]"}`, MARGINS.left, y);
+  y += 6;
+  doc.text(`Reclamante: ${laudo.reclamante || "[RECLAMANTE]"}`, MARGINS.left, y);
+  y += 6;
+  doc.text(`Reclamada: ${laudo.reclamada || "[RECLAMADA]"}`, MARGINS.left, y);
+  
+  return y + 15;
+};
+
+// ========== CABEÇALHO E RODAPÉ ==========
+
+const addHeaderToPages = (doc: jsPDF, laudo: LaudoData) => {
   const pageCount = doc.getNumberOfPages();
   
   for (let i = 2; i <= pageCount; i++) {
     doc.setPage(i);
     
-    // Header line
-    doc.setDrawColor(0, 51, 102);
-    doc.setLineWidth(0.5);
-    doc.line(20, 15, 190, 15);
+    // Fundo do cabeçalho
+    doc.setFillColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
+    doc.rect(0, 0, PAGE.width, 20, "F");
     
-    // Perito info in header
+    // Nome do perito
+    doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.text(laudo.peritoNome || "MÉDICO PERITO", MARGINS.left, 12);
+    
+    // Especialidade e CRM
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 100, 100);
-    doc.text(`${laudo.peritoNome} | CRM: ${laudo.peritoCRM} | ${laudo.peritoEspecialidade}`, 20, 12);
-    doc.text(`Processo: ${laudo.processoNumero}`, 190, 12, { align: "right" });
+    const rightInfo = `${laudo.peritoEspecialidade || ""} | CRM: ${laudo.peritoCRM || ""}`;
+    doc.text(rightInfo, PAGE.width - MARGINS.right, 12, { align: "right" });
     
-    doc.setTextColor(0, 0, 0);
+    // Linha decorativa abaixo do cabeçalho
+    doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
+    doc.setLineWidth(0.5);
+    doc.line(MARGINS.left, 25, PAGE.width - MARGINS.right, 25);
+    
+    doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   }
 };
 
-// Add page numbers
-const addPageNumbers = (doc: jsPDF) => {
+const addFooterToPages = (doc: jsPDF, laudo: LaudoData) => {
   const pageCount = doc.getNumberOfPages();
   
-  for (let i = 1; i <= pageCount; i++) {
+  for (let i = 2; i <= pageCount; i++) {
     doc.setPage(i);
-    doc.setFontSize(9);
+    
+    // Fundo do rodapé
+    doc.setFillColor(COLORS.footer.r, COLORS.footer.g, COLORS.footer.b);
+    doc.rect(0, PAGE.height - 18, PAGE.width, 18, "F");
+    
+    // Informações de contato
+    doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
+    doc.setFontSize(7);
     doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 100, 100);
-    doc.text(`Página ${i} de ${pageCount}`, 105, 290, { align: "center" });
-    doc.setTextColor(0, 0, 0);
+    
+    const contactParts = [];
+    if (laudo.peritoEmail) contactParts.push(`E-mail: ${laudo.peritoEmail}`);
+    if (laudo.peritoTelefone) contactParts.push(`Tel: ${laudo.peritoTelefone}`);
+    if (laudo.peritoEndereco) contactParts.push(laudo.peritoEndereco);
+    
+    const contactText = contactParts.join("  |  ");
+    doc.text(contactText, PAGE.width / 2, PAGE.height - 10, { align: "center" });
+    
+    // Número da página
+    doc.setFontSize(8);
+    doc.text(`Página ${i} de ${pageCount}`, PAGE.width - MARGINS.right, PAGE.height - 5, { align: "right" });
+    
+    doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   }
 };
+
+// ========== FUNÇÃO PRINCIPAL ==========
 
 export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   const doc = new jsPDF();
+  let sectionNumber = 1;
   
-  // ========== CAPA ==========
-  // Border
-  doc.setDrawColor(0, 51, 102);
+  // ========== PÁGINA 1 - CAPA ==========
+  
+  // Borda dupla decorativa
+  doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
   doc.setLineWidth(2);
   doc.rect(10, 10, 190, 277);
   doc.setLineWidth(0.5);
   doc.rect(12, 12, 186, 273);
   
-  // Header with perito info
-  doc.setFillColor(0, 51, 102);
-  doc.rect(12, 12, 186, 35, "F");
+  // Cabeçalho azul com informações do perito
+  doc.setFillColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
+  doc.rect(12, 12, 186, 40, "F");
   
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(14);
+  doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
+  doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text(laudo.peritoNome || "MÉDICO PERITO", 105, 25, { align: "center" });
+  doc.text(laudo.peritoNome?.toUpperCase() || "MÉDICO PERITO", 105, 28, { align: "center" });
   
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  if (laudo.peritoEspecialidade) {
-    doc.text(laudo.peritoEspecialidade, 105, 32, { align: "center" });
-  }
-  if (laudo.peritoCRM) {
-    doc.text(`CRM: ${laudo.peritoCRM}`, 105, 39, { align: "center" });
-  }
-  
-  // Main title
-  doc.setTextColor(0, 51, 102);
-  doc.setFontSize(28);
-  doc.setFont("helvetica", "bold");
-  doc.text("LAUDO PERICIAL", 105, 90, { align: "center" });
-  doc.setFontSize(18);
-  doc.text("MÉDICO", 105, 102, { align: "center" });
-  
-  // Decorative line
-  doc.setDrawColor(0, 51, 102);
-  doc.setLineWidth(1);
-  doc.line(50, 115, 160, 115);
-  
-  // Process info
-  doc.setTextColor(0, 0, 0);
   doc.setFontSize(11);
   doc.setFont("helvetica", "normal");
+  if (laudo.peritoEspecialidade) {
+    doc.text(laudo.peritoEspecialidade, 105, 38, { align: "center" });
+  }
+  if (laudo.peritoCRM) {
+    doc.text(`CRM: ${laudo.peritoCRM}`, 105, 46, { align: "center" });
+  }
   
-  let coverY = 135;
+  // Título principal
+  doc.setTextColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
+  doc.setFontSize(32);
+  doc.setFont("helvetica", "bold");
+  doc.text("LAUDO PERICIAL", 105, 95, { align: "center" });
+  doc.setFontSize(20);
+  doc.text("MÉDICO", 105, 110, { align: "center" });
+  
+  // Linha decorativa
+  doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
+  doc.setLineWidth(1);
+  doc.line(45, 125, 165, 125);
+  
+  // Informações do processo
+  doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+  doc.setFontSize(11);
+  let coverY = 145;
   
   if (laudo.processoNumero) {
     doc.setFont("helvetica", "bold");
     doc.text("Processo nº:", 40, coverY);
     doc.setFont("helvetica", "normal");
-    doc.text(laudo.processoNumero, 75, coverY);
+    doc.text(laudo.processoNumero, 80, coverY);
     coverY += 10;
   }
   
@@ -184,18 +270,17 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
     doc.setFont("helvetica", "bold");
     doc.text("Vara:", 40, coverY);
     doc.setFont("helvetica", "normal");
-    doc.text(laudo.processoVara, 75, coverY);
-    coverY += 10;
+    const varaLines = doc.splitTextToSize(laudo.processoVara, 100);
+    doc.text(varaLines, 80, coverY);
+    coverY += varaLines.length * 6 + 8;
   }
-  
-  coverY += 10;
   
   if (laudo.reclamante) {
     doc.setFont("helvetica", "bold");
     doc.text("Reclamante:", 40, coverY);
     doc.setFont("helvetica", "normal");
-    const reclamanteLines = doc.splitTextToSize(laudo.reclamante, 110);
-    doc.text(reclamanteLines, 75, coverY);
+    const reclamanteLines = doc.splitTextToSize(laudo.reclamante, 100);
+    doc.text(reclamanteLines, 80, coverY);
     coverY += reclamanteLines.length * 6 + 5;
   }
   
@@ -203,56 +288,79 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
     doc.setFont("helvetica", "bold");
     doc.text("Reclamada:", 40, coverY);
     doc.setFont("helvetica", "normal");
-    const reclamadaLines = doc.splitTextToSize(laudo.reclamada, 110);
-    doc.text(reclamadaLines, 75, coverY);
-    coverY += reclamadaLines.length * 6 + 5;
+    const reclamadaLines = doc.splitTextToSize(laudo.reclamada, 100);
+    doc.text(reclamadaLines, 80, coverY);
+    coverY += reclamadaLines.length * 6 + 10;
   }
   
-  // Periciando box
+  // Box do periciando
   if (laudo.vitimaName) {
-    doc.setFillColor(245, 245, 245);
-    doc.roundedRect(30, coverY + 10, 150, 30, 3, 3, "F");
+    doc.setFillColor(COLORS.background.r, COLORS.background.g, COLORS.background.b);
+    doc.roundedRect(30, coverY, 150, 35, 3, 3, "F");
+    doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(30, coverY, 150, 35, 3, 3, "S");
+    
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
-    doc.text("PERICIANDO", 105, coverY + 20, { align: "center" });
-    doc.setFontSize(12);
-    doc.text(laudo.vitimaName, 105, coverY + 32, { align: "center" });
+    doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
+    doc.text("PERICIANDO(A)", 105, coverY + 12, { align: "center" });
+    doc.setFontSize(14);
+    doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+    doc.text(laudo.vitimaName.toUpperCase(), 105, coverY + 26, { align: "center" });
   }
   
-  // Date at bottom
+  // Data da perícia
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
-  const examDate = laudo.dataPericia ? formatDate(laudo.dataPericia) : new Date().toLocaleDateString("pt-BR");
-  doc.text(`Data da Perícia: ${examDate}`, 105, 260, { align: "center" });
+  const examDate = laudo.dataPericia ? formatDate(laudo.dataPericia) : formatDate(new Date().toISOString());
+  doc.text(`Data da Perícia: ${examDate}`, 105, 255, { align: "center" });
   
-  // Perito contact at bottom
+  // Contato no rodapé da capa
   doc.setFontSize(8);
-  doc.setTextColor(100, 100, 100);
-  if (laudo.peritoEmail) {
-    doc.text(laudo.peritoEmail, 105, 272, { align: "center" });
+  doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
+  const contactParts = [];
+  if (laudo.peritoEmail) contactParts.push(laudo.peritoEmail);
+  if (laudo.peritoTelefone) contactParts.push(`Tel: ${laudo.peritoTelefone}`);
+  if (contactParts.length > 0) {
+    doc.text(contactParts.join("  |  "), 105, 270, { align: "center" });
   }
-  if (laudo.peritoTelefone) {
-    doc.text(`Tel: ${laudo.peritoTelefone}`, 105, 278, { align: "center" });
+  if (laudo.peritoEndereco) {
+    doc.text(laudo.peritoEndereco, 105, 278, { align: "center" });
   }
   
   // ========== CORPO DO LAUDO ==========
   doc.addPage();
-  let y = 30;
+  let y = MARGINS.top;
   
-  // 1. PREÂMBULO
-  y = addSectionTitle(doc, "1. PREÂMBULO", y);
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
+  // Endereçamento judicial
+  y = addJudicialAddress(doc, laudo, y);
   
-  const preambulo = `O presente laudo foi elaborado por ${laudo.peritoNome || "[NOME DO PERITO]"}, ${laudo.peritoEspecialidade || "Médico Perito"}, inscrito no CRM sob o número ${laudo.peritoCRM || "[CRM]"}, nomeado Perito Judicial nos autos do processo nº ${laudo.processoNumero || "[NÚMERO DO PROCESSO]"}, em trâmite na ${laudo.processoVara || "[VARA]"}, tendo por objetivo realizar avaliação médico-pericial do(a) Reclamante ${laudo.vitimaName || laudo.reclamante || "[NOME]"}.`;
+  // 1. OBJETIVO DA PERÍCIA
+  if (laudo.objetivoPericia) {
+    y = checkNewPage(doc, y, 50);
+    y = addSectionTitle(doc, `${sectionNumber}. OBJETIVO DA PERÍCIA`, y);
+    y = addParagraph(doc, laudo.objetivoPericia, y);
+    sectionNumber++;
+  }
   
-  y = addParagraph(doc, preambulo, y);
-  y += 5;
+  // 2. ASSISTENTES TÉCNICOS
+  if (laudo.assistenteTecnicoReclamante || laudo.assistenteTecnicoReclamada) {
+    y = checkNewPage(doc, y, 40);
+    y = addSectionTitle(doc, `${sectionNumber}. ASSISTENTES TÉCNICOS`, y);
+    if (laudo.assistenteTecnicoReclamante) {
+      y = addLabeledField(doc, "Assistente do Reclamante", laudo.assistenteTecnicoReclamante, y);
+    }
+    if (laudo.assistenteTecnicoReclamada) {
+      y = addLabeledField(doc, "Assistente da Reclamada", laudo.assistenteTecnicoReclamada, y);
+    }
+    y += 5;
+    sectionNumber++;
+  }
   
-  // 2. IDENTIFICAÇÃO DO PERICIANDO
-  y = checkNewPage(doc, y, 50);
-  y = addSectionTitle(doc, "2. IDENTIFICAÇÃO DO PERICIANDO", y);
-  
+  // 3. IDENTIFICAÇÃO DO PERICIANDO
+  y = checkNewPage(doc, y, 60);
+  y = addSectionTitle(doc, `${sectionNumber}. IDENTIFICAÇÃO DO PERICIANDO`, y);
   y = addLabeledField(doc, "Nome", laudo.vitimaName || laudo.reclamante, y);
   if (laudo.vitimaNascimento) {
     y = addLabeledField(doc, "Data de Nascimento", `${formatDate(laudo.vitimaNascimento)} (${calculateAge(laudo.vitimaNascimento)})`, y);
@@ -261,116 +369,159 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   y = addLabeledField(doc, "Escolaridade", laudo.vitimaEscolaridade, y);
   y = addLabeledField(doc, "Dominância", laudo.vitimaDominancia, y);
   y += 5;
+  sectionNumber++;
   
-  // 3. HISTÓRICO DO CASO
-  y = checkNewPage(doc, y, 40);
-  y = addSectionTitle(doc, "3. HISTÓRICO DO CASO", y);
+  // 4. RESUMO DA PETIÇÃO INICIAL
+  if (laudo.resumoPeticaoInicial) {
+    y = checkNewPage(doc, y, 50);
+    y = addSectionTitle(doc, `${sectionNumber}. RESUMO DA PETIÇÃO INICIAL`, y);
+    y = addParagraph(doc, laudo.resumoPeticaoInicial, y);
+    sectionNumber++;
+  }
+  
+  // 5. RESUMO DA CONTESTAÇÃO
+  if (laudo.resumoContestacao) {
+    y = checkNewPage(doc, y, 50);
+    y = addSectionTitle(doc, `${sectionNumber}. RESUMO DA CONTESTAÇÃO`, y);
+    y = addParagraph(doc, laudo.resumoContestacao, y);
+    sectionNumber++;
+  }
+  
+  // 6. METODOLOGIA PERICIAL
+  if (laudo.metodologiaPericial) {
+    y = checkNewPage(doc, y, 50);
+    y = addSectionTitle(doc, `${sectionNumber}. METODOLOGIA PERICIAL`, y);
+    y = addParagraph(doc, laudo.metodologiaPericial, y);
+    sectionNumber++;
+  }
+  
+  // 7. DADOS DO POSTO DE TRABALHO
+  const hasDadosPosto = laudo.dadosFuncionaisCargo || laudo.descricaoPostoTrabalho || laudo.descricaoAtividadesLaborais;
+  if (hasDadosPosto) {
+    y = checkNewPage(doc, y, 60);
+    y = addSectionTitle(doc, `${sectionNumber}. DADOS DO POSTO DE TRABALHO`, y);
+    
+    if (laudo.dadosFuncionaisCargo) {
+      y = addLabeledField(doc, "Cargo/Função", laudo.dadosFuncionaisCargo, y);
+    }
+    if (laudo.dadosFuncionaisAdmissao) {
+      y = addLabeledField(doc, "Data de Admissão", formatDate(laudo.dadosFuncionaisAdmissao), y);
+    }
+    if (laudo.dadosFuncionaisAfastamento) {
+      y = addLabeledField(doc, "Data de Afastamento", formatDate(laudo.dadosFuncionaisAfastamento), y);
+    }
+    
+    if (laudo.descricaoPostoTrabalho) {
+      y = checkNewPage(doc, y);
+      y = addSubtitle(doc, "Descrição do Posto de Trabalho:", y);
+      y = addParagraph(doc, laudo.descricaoPostoTrabalho, y);
+    }
+    
+    if (laudo.descricaoAtividadesLaborais) {
+      y = checkNewPage(doc, y);
+      y = addSubtitle(doc, "Atividades Laborais:", y);
+      y = addParagraph(doc, laudo.descricaoAtividadesLaborais, y);
+    }
+    sectionNumber++;
+  }
+  
+  // 8. ANAMNESE / HISTÓRICO
+  y = checkNewPage(doc, y, 50);
+  y = addSectionTitle(doc, `${sectionNumber}. ANAMNESE`, y);
   
   if (laudo.dataAcidente) {
     y = addLabeledField(doc, "Data do Acidente/Evento", formatDate(laudo.dataAcidente), y);
   }
   
   if (laudo.historiaAcidente) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("Descrição do Acidente:", 20, y);
-    y += 5;
+    y = checkNewPage(doc, y);
+    y = addSubtitle(doc, "Descrição do Acidente:", y);
     y = addParagraph(doc, laudo.historiaAcidente, y);
   }
   
   if (laudo.historicoOcupacional) {
     y = checkNewPage(doc, y);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("Histórico Ocupacional:", 20, y);
-    y += 5;
+    y = addSubtitle(doc, "Histórico Ocupacional:", y);
     y = addParagraph(doc, laudo.historicoOcupacional, y);
   }
   
-  // 4. ANAMNESE
-  y = checkNewPage(doc, y, 40);
-  y = addSectionTitle(doc, "4. ANAMNESE", y);
-  
   if (laudo.historiaAtual) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("Queixas Atuais:", 20, y);
-    y += 5;
+    y = checkNewPage(doc, y);
+    y = addSubtitle(doc, "Queixas Atuais:", y);
     y = addParagraph(doc, laudo.historiaAtual, y);
   }
   
   if (laudo.tratamentos) {
     y = checkNewPage(doc, y);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("Tratamentos Realizados:", 20, y);
-    y += 5;
+    y = addSubtitle(doc, "Tratamentos Realizados:", y);
     y = addParagraph(doc, laudo.tratamentos, y);
   }
   
   if (laudo.afastamentos) {
     y = checkNewPage(doc, y);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("Afastamentos:", 20, y);
-    y += 5;
+    y = addSubtitle(doc, "Afastamentos:", y);
     y = addParagraph(doc, laudo.afastamentos, y);
   }
+  sectionNumber++;
   
+  // 9. ANTECEDENTES PATOLÓGICOS
   if (laudo.antecedentes) {
-    y = checkNewPage(doc, y);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("Antecedentes Patológicos:", 20, y);
-    y += 5;
+    y = checkNewPage(doc, y, 40);
+    y = addSectionTitle(doc, `${sectionNumber}. ANTECEDENTES PATOLÓGICOS`, y);
     y = addParagraph(doc, laudo.antecedentes, y);
+    sectionNumber++;
   }
   
-  // 5. DOCUMENTOS ANALISADOS
+  // 10. DOCUMENTOS ANALISADOS
   if (laudo.documentos && laudo.documentos.length > 0) {
-    y = checkNewPage(doc, y, 40);
-    y = addSectionTitle(doc, "5. DOCUMENTOS ANALISADOS", y);
+    y = checkNewPage(doc, y, 50);
+    y = addSectionTitle(doc, `${sectionNumber}. DOCUMENTOS ANALISADOS`, y);
     
     laudo.documentos.forEach((doc_item, index) => {
       y = checkNewPage(doc, y);
       doc.setFontSize(10);
-      doc.text(`${index + 1}. ${doc_item}`, 25, y);
+      doc.text(`${index + 1}. ${doc_item}`, MARGINS.left + 5, y);
       y += 6;
     });
     y += 5;
+    sectionNumber++;
   }
   
-  // 6. LAUDOS MÉDICOS APRESENTADOS
+  // 11. LAUDOS MÉDICOS APRESENTADOS
   if (laudo.laudosMedicos) {
     y = checkNewPage(doc, y, 40);
-    y = addSectionTitle(doc, "6. LAUDOS MÉDICOS APRESENTADOS", y);
+    y = addSectionTitle(doc, `${sectionNumber}. LAUDOS MÉDICOS APRESENTADOS`, y);
     y = addParagraph(doc, laudo.laudosMedicos, y);
+    sectionNumber++;
   }
   
-  // 7. EXAMES COMPLEMENTARES
+  // 12. EXAMES COMPLEMENTARES
   if (laudo.examesComplementares) {
     y = checkNewPage(doc, y, 40);
-    y = addSectionTitle(doc, "7. EXAMES COMPLEMENTARES", y);
+    y = addSectionTitle(doc, `${sectionNumber}. EXAMES COMPLEMENTARES`, y);
     y = addParagraph(doc, laudo.examesComplementares, y);
+    sectionNumber++;
   }
   
-  // 8. EXAME FÍSICO
+  // 13. EXAME FÍSICO
   if (laudo.exameFisico) {
     y = checkNewPage(doc, y, 40);
-    y = addSectionTitle(doc, "8. EXAME FÍSICO", y);
+    y = addSectionTitle(doc, `${sectionNumber}. EXAME FÍSICO`, y);
     y = addParagraph(doc, laudo.exameFisico, y);
+    sectionNumber++;
   }
   
-  // 9. DISCUSSÃO E ANÁLISE
-  if (laudo.conclusaoAnalise) {
+  // 14. DESCRIÇÃO TÉCNICA DAS DOENÇAS
+  if (laudo.descricaoTecnicaDoencas) {
     y = checkNewPage(doc, y, 40);
-    y = addSectionTitle(doc, "9. DISCUSSÃO E ANÁLISE", y);
-    y = addParagraph(doc, laudo.conclusaoAnalise, y);
+    y = addSectionTitle(doc, `${sectionNumber}. DESCRIÇÃO TÉCNICA DAS DOENÇAS`, y);
+    y = addParagraph(doc, laudo.descricaoTecnicaDoencas, y);
+    sectionNumber++;
   }
   
-  // 10. NEXO CAUSAL
-  y = checkNewPage(doc, y, 40);
-  y = addSectionTitle(doc, "10. NEXO CAUSAL", y);
+  // 15. NEXO CAUSAL
+  y = checkNewPage(doc, y, 50);
+  y = addSectionTitle(doc, `${sectionNumber}. NEXO CAUSAL`, y);
   
   if (laudo.nexoCausalTipo) {
     const nexoMap: Record<string, string> = {
@@ -383,36 +534,50 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   if (laudo.nexoCausalJustificativa) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("Justificativa:", 20, y);
-    y += 5;
+    y = checkNewPage(doc, y);
+    y = addSubtitle(doc, "Justificativa:", y);
     y = addParagraph(doc, laudo.nexoCausalJustificativa, y);
   }
+  sectionNumber++;
   
-  // 11. AVALIAÇÃO DE SEQUELAS
+  // 16. ANÁLISE DA INCAPACIDADE LABORAL
+  if (laudo.analiseIncapacidadeLaboral) {
+    y = checkNewPage(doc, y, 40);
+    y = addSectionTitle(doc, `${sectionNumber}. ANÁLISE DA INCAPACIDADE LABORAL`, y);
+    y = addParagraph(doc, laudo.analiseIncapacidadeLaboral, y);
+    sectionNumber++;
+  }
+  
+  // 17. AVALIAÇÃO DE SEQUELAS
   const hasSequelas = laudo.tabelaSUSEP || laudo.danoEstetico || laudo.auxilioTerceiros;
   if (hasSequelas) {
     y = checkNewPage(doc, y, 50);
-    y = addSectionTitle(doc, "11. AVALIAÇÃO DE SEQUELAS", y);
+    y = addSectionTitle(doc, `${sectionNumber}. AVALIAÇÃO DE SEQUELAS`, y);
     
     if (laudo.tabelaSUSEP) {
       y = addLabeledField(doc, "Tabela SUSEP", laudo.tabelaSUSEP, y);
     }
-    
     if (laudo.danoEstetico) {
       y = addLabeledField(doc, "Dano Estético", laudo.danoEstetico, y);
     }
-    
     if (laudo.auxilioTerceiros) {
       y = addLabeledField(doc, "Auxílio de Terceiros", laudo.auxilioTerceiros, y);
     }
     y += 5;
+    sectionNumber++;
   }
   
-  // 12. CONCLUSÃO
-  y = checkNewPage(doc, y, 60);
-  y = addSectionTitle(doc, "12. CONCLUSÃO", y);
+  // 18. DISCUSSÃO E ANÁLISE
+  if (laudo.conclusaoAnalise) {
+    y = checkNewPage(doc, y, 40);
+    y = addSectionTitle(doc, `${sectionNumber}. DISCUSSÃO E ANÁLISE`, y);
+    y = addParagraph(doc, laudo.conclusaoAnalise, y);
+    sectionNumber++;
+  }
+  
+  // 19. CONCLUSÃO
+  y = checkNewPage(doc, y, 70);
+  y = addSectionTitle(doc, `${sectionNumber}. CONCLUSÃO`, y);
   
   if (laudo.conclusaoCID) {
     y = addLabeledField(doc, "CID-10 Sugerido", laudo.conclusaoCID, y);
@@ -445,59 +610,61 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   if (laudo.conclusaoJustificativa) {
     y = checkNewPage(doc, y);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.text("Justificativa:", 20, y);
-    y += 5;
+    y = addSubtitle(doc, "Justificativa:", y);
     y = addParagraph(doc, laudo.conclusaoJustificativa, y);
   }
+  sectionNumber++;
   
-  // 13. RESPOSTAS AOS QUESITOS
+  // 20. RESPOSTAS AOS QUESITOS
   const hasQuesitos = laudo.quesitosJuizo || laudo.quesitosReclamante || laudo.quesitosReclamada;
   if (hasQuesitos) {
     y = checkNewPage(doc, y, 40);
-    y = addSectionTitle(doc, "13. RESPOSTAS AOS QUESITOS", y);
+    y = addSectionTitle(doc, `${sectionNumber}. RESPOSTAS AOS QUESITOS`, y);
+    
+    let subSection = 1;
     
     if (laudo.quesitosJuizo) {
       y = checkNewPage(doc, y);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("13.1 Quesitos do Juízo", 20, y);
-      y += 7;
+      y = addSubtitle(doc, `${sectionNumber}.${subSection} Quesitos do Juízo`, y);
       y = addParagraph(doc, laudo.quesitosJuizo, y);
+      subSection++;
     }
     
     if (laudo.quesitosReclamante) {
       y = checkNewPage(doc, y);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("13.2 Quesitos do Reclamante", 20, y);
-      y += 7;
+      y = addSubtitle(doc, `${sectionNumber}.${subSection} Quesitos do Reclamante`, y);
       y = addParagraph(doc, laudo.quesitosReclamante, y);
+      subSection++;
     }
     
     if (laudo.quesitosReclamada) {
       y = checkNewPage(doc, y);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      doc.text("13.3 Quesitos da Reclamada", 20, y);
-      y += 7;
+      y = addSubtitle(doc, `${sectionNumber}.${subSection} Quesitos da Reclamada`, y);
       y = addParagraph(doc, laudo.quesitosReclamada, y);
     }
+    sectionNumber++;
+  }
+  
+  // 21. REFERÊNCIAS BIBLIOGRÁFICAS
+  if (laudo.referenciasBibliograficas) {
+    y = checkNewPage(doc, y, 50);
+    y = addSectionTitle(doc, `${sectionNumber}. REFERÊNCIAS BIBLIOGRÁFICAS`, y);
+    y = addParagraph(doc, laudo.referenciasBibliograficas, y);
+    sectionNumber++;
   }
   
   // ========== ENCERRAMENTO ==========
-  y = checkNewPage(doc, y, 80);
-  y += 10;
+  y = checkNewPage(doc, y, 100);
+  y += 15;
   
   doc.setFontSize(10);
   doc.setFont("helvetica", "italic");
   const encerramento = "Nada mais havendo a relatar, encerra-se o presente laudo pericial, que vai assinado digitalmente pelo perito responsável.";
   y = addParagraph(doc, encerramento, y);
   
-  y += 15;
+  y += 20;
   
-  // Local and date
+  // Local e data
   doc.setFont("helvetica", "normal");
   const today = new Date().toLocaleDateString("pt-BR", {
     day: "2-digit",
@@ -513,16 +680,17 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
     doc.text(today, 105, y, { align: "center" });
   }
   
-  y += 30;
+  y += 35;
   
-  // Signature line
-  doc.setDrawColor(0, 0, 0);
+  // Linha de assinatura
+  doc.setDrawColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+  doc.setLineWidth(0.5);
   doc.line(55, y, 155, y);
   
   y += 8;
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.text(laudo.peritoNome || "MÉDICO PERITO", 105, y, { align: "center" });
+  doc.setFontSize(12);
+  doc.text(laudo.peritoNome?.toUpperCase() || "MÉDICO PERITO", 105, y, { align: "center" });
   
   y += 6;
   doc.setFont("helvetica", "normal");
@@ -535,11 +703,11 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
     doc.text(`CRM: ${laudo.peritoCRM}`, 105, y, { align: "center" });
   }
   
-  // Add headers and page numbers
-  addHeader(doc, laudo);
-  addPageNumbers(doc);
+  // Adicionar cabeçalho e rodapé em todas as páginas (exceto capa)
+  addHeaderToPages(doc, laudo);
+  addFooterToPages(doc, laudo);
   
-  // Generate filename
+  // Gerar nome do arquivo
   const processNumber = laudo.processoNumero?.replace(/[^0-9]/g, "") || "sem-numero";
   const periciandoName = (laudo.vitimaName || laudo.reclamante || "periciando")
     .normalize("NFD")
@@ -549,11 +717,11 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   const filename = `laudo-pericial-${processNumber}-${periciandoName}.pdf`;
   
-  // Download the PDF
+  // Download do PDF
   doc.save(filename);
 };
 
-// Validation function to check required fields
+// Função de validação de campos obrigatórios
 export const validateLaudoForPDF = (laudo: LaudoData): { valid: boolean; missingFields: string[] } => {
   const requiredFields: { key: keyof LaudoData; label: string }[] = [
     { key: "peritoNome", label: "Nome do Perito" },
