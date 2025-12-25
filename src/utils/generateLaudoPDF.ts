@@ -236,22 +236,30 @@ const addFooterToPages = (doc: jsPDF, laudo: LaudoData) => {
     doc.setFillColor(COLORS.footer.r, COLORS.footer.g, COLORS.footer.b);
     doc.rect(0, PAGE.height - 18, PAGE.width, 18, "F");
     
-    // Informações de contato
     doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
-    doc.setFontSize(7);
-    doc.setFont("helvetica", "normal");
     
-    const contactParts = [];
-    if (laudo.peritoEmail) contactParts.push(`E-mail: ${laudo.peritoEmail}`);
-    if (laudo.peritoTelefone) contactParts.push(`Tel: ${laudo.peritoTelefone}`);
-    if (laudo.peritoEndereco) contactParts.push(laudo.peritoEndereco);
-    
-    const contactText = contactParts.join("  |  ");
-    doc.text(contactText, PAGE.width / 2, PAGE.height - 10, { align: "center" });
-    
-    // Número da página
+    // Linha 1 - Nome do Perito (negrito, à direita)
+    doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text(`Página ${i} de ${pageCount}`, PAGE.width - MARGINS.right, PAGE.height - 5, { align: "right" });
+    doc.text(laudo.peritoNome || "Médico Perito", PAGE.width - MARGINS.right, PAGE.height - 14, { align: "right" });
+    
+    // Linha 2 - Especialidade + CRM (normal, à direita)
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    const cargoText = `${laudo.peritoEspecialidade || "Médico Perito Judicial"} - CRM ${laudo.peritoCRM || ""}`;
+    doc.text(cargoText, PAGE.width - MARGINS.right, PAGE.height - 10, { align: "right" });
+    
+    // Linha 3 - Telefone | Email (normal, à direita)
+    const contatoParts = [];
+    if (laudo.peritoTelefone) contatoParts.push(laudo.peritoTelefone);
+    if (laudo.peritoEmail) contatoParts.push(laudo.peritoEmail);
+    if (contatoParts.length > 0) {
+      doc.text(contatoParts.join(" | "), PAGE.width - MARGINS.right, PAGE.height - 6, { align: "right" });
+    }
+    
+    // Número da página (à esquerda para equilíbrio)
+    doc.setFontSize(7);
+    doc.text(`Página ${i} de ${pageCount}`, MARGINS.left, PAGE.height - 10, { align: "left" });
     
     doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   }
