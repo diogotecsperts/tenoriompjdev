@@ -60,17 +60,37 @@ import { NexoCausal } from "@/components/laudo/sections/NexoCausal";
 import { Conclusao } from "@/components/laudo/sections/Conclusao";
 import { AvaliacaoSequelas } from "@/components/laudo/sections/AvaliacaoSequelas";
 import { Quesitos } from "@/components/laudo/sections/Quesitos";
+// Novas seções
+import { ObjetivoPericia } from "@/components/laudo/sections/ObjetivoPericia";
+import { ResumoAutos } from "@/components/laudo/sections/ResumoAutos";
+import { MetodologiaPericial } from "@/components/laudo/sections/MetodologiaPericial";
+import { DadosPostoTrabalho } from "@/components/laudo/sections/DadosPostoTrabalho";
+import { DescricaoTecnicaDoencas } from "@/components/laudo/sections/DescricaoTecnicaDoencas";
+import { AnaliseIncapacidade } from "@/components/laudo/sections/AnaliseIncapacidade";
+import { ReferenciasBibliograficas } from "@/components/laudo/sections/ReferenciasBibliograficas";
+import { BookOpen, Briefcase } from "lucide-react";
 
-// Consolidated cards structure
+// Consolidated cards structure - Reorganizado conforme modelo profissional
 const consolidatedCards = [
   {
     id: "preliminares",
     label: "Dados Preliminares",
-    description: "Dados do processo e documentos avaliados",
+    description: "Dados do processo, objetivo e documentos avaliados",
     icon: User,
     sections: [
       { id: "processo", label: "Dados do Processo", component: DadosProcesso },
+      { id: "objetivo", label: "Objetivo da Perícia", component: ObjetivoPericia },
       { id: "documentos", label: "Documentos Avaliados", component: DocumentosAvaliacao },
+    ],
+  },
+  {
+    id: "resumo-autos",
+    label: "Resumo dos Autos",
+    description: "Resumo da petição inicial e contestação",
+    icon: FileText,
+    sections: [
+      { id: "resumo", label: "Resumo dos Autos", component: ResumoAutos },
+      { id: "metodologia", label: "Metodologia Pericial", component: MetodologiaPericial },
     ],
   },
   {
@@ -87,6 +107,15 @@ const consolidatedCards = [
     ],
   },
   {
+    id: "posto-trabalho",
+    label: "Posto de Trabalho",
+    description: "Dados funcionais e descrição das atividades",
+    icon: Briefcase,
+    sections: [
+      { id: "dados-posto", label: "Dados do Posto de Trabalho", component: DadosPostoTrabalho },
+    ],
+  },
+  {
     id: "exame",
     label: "Exame Clínico",
     description: "Laudos médicos, exames e exame físico",
@@ -98,23 +127,34 @@ const consolidatedCards = [
     ],
   },
   {
-    id: "conclusao",
-    label: "Conclusão Técnica",
-    description: "Nexo causal, conclusão e avaliação de sequelas",
+    id: "analise-tecnica",
+    label: "Análise Técnica",
+    description: "Descrição das doenças, nexo causal e incapacidade",
     icon: ClipboardCheck,
     sections: [
+      { id: "descricao-doencas", label: "Descrição Técnica das Doenças", component: DescricaoTecnicaDoencas },
       { id: "nexo", label: "Nexo Causal", component: NexoCausal },
-      { id: "conclusao", label: "Conclusão", component: Conclusao },
-      { id: "sequelas", label: "Avaliação de Sequelas", component: AvaliacaoSequelas },
+      { id: "analise-incapacidade", label: "Análise da Incapacidade", component: AnaliseIncapacidade },
     ],
   },
   {
-    id: "quesitos",
-    label: "Respostas aos Quesitos",
-    description: "Quesitos do juízo, reclamante e reclamada",
-    icon: HelpCircle,
+    id: "conclusao",
+    label: "Conclusão",
+    description: "Conclusão, sequelas e quesitos",
+    icon: CheckCircle2,
     sections: [
+      { id: "conclusao", label: "Conclusão", component: Conclusao },
+      { id: "sequelas", label: "Avaliação de Sequelas", component: AvaliacaoSequelas },
       { id: "quesitos", label: "Quesitos", component: Quesitos },
+    ],
+  },
+  {
+    id: "referencias",
+    label: "Referências",
+    description: "Referências bibliográficas utilizadas",
+    icon: BookOpen,
+    sections: [
+      { id: "referencias", label: "Referências Bibliográficas", component: ReferenciasBibliograficas },
     ],
   },
 ];
