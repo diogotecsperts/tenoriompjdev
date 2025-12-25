@@ -18,7 +18,7 @@ const COLORS = {
   muted: { r: 75, g: 85, b: 99 },          // #4B5563 - Texto secundário
   white: { r: 255, g: 255, b: 255 },       // Branco puro
   background: { r: 243, g: 244, b: 246 },  // #F3F4F6 - Fundo box
-  footer: { r: 75, g: 85, b: 99 },         // #4B5563 - Rodapé
+  footer: { r: 96, g: 97, b: 97 },         // #606161 - Rodapé (cinza neutro)
 };
 
 const MARGINS = {
