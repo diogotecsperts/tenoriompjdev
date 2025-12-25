@@ -2,15 +2,24 @@ import { useMemo } from "react";
 import { LaudoData } from "@/contexts/LaudoContext";
 
 // Define which fields belong to each card section
+// Atualizado para incluir os novos campos do modelo completo
 const cardFields: Record<string, (keyof LaudoData)[]> = {
   preliminares: [
     "processoNumero",
     "processoVara",
     "reclamante",
     "reclamada",
-    "dataAcidente",
     "dataPericia",
     "documentos",
+    "assistenteTecnicoReclamante",
+    "assistenteTecnicoReclamada",
+    "localPericia",
+    "objetivoPericia",
+  ],
+  "resumo-autos": [
+    "resumoPeticaoInicial",
+    "resumoContestacao",
+    "metodologiaPericial",
   ],
   periciando: [
     "vitimaName",
@@ -18,22 +27,33 @@ const cardFields: Record<string, (keyof LaudoData)[]> = {
     "vitimaNascimento",
     "vitimaProfissao",
     "vitimaDominancia",
-    "historicoOcupacional",
+    "dataAcidente",
     "historiaAcidente",
+    "historicoOcupacional",
     "historiaAtual",
     "antecedentes",
     "tratamentos",
     "afastamentos",
-    "planejamento",
+  ],
+  "posto-trabalho": [
+    "dadosFuncionaisCargo",
+    "dadosFuncionaisAdmissao",
+    "dadosFuncionaisAfastamento",
+    "descricaoPostoTrabalho",
+    "descricaoAtividadesLaborais",
   ],
   exame: [
     "laudosMedicos",
     "examesComplementares",
     "exameFisico",
   ],
-  conclusao: [
+  "analise-tecnica": [
+    "descricaoTecnicaDoencas",
     "nexoCausalTipo",
     "nexoCausalJustificativa",
+    "analiseIncapacidadeLaboral",
+  ],
+  conclusao: [
     "conclusaoCID",
     "conclusaoAnalise",
     "conclusaoIncapacidade",
@@ -43,12 +63,25 @@ const cardFields: Record<string, (keyof LaudoData)[]> = {
     "tabelaSUSEP",
     "danoEstetico",
     "auxilioTerceiros",
-  ],
-  quesitos: [
     "quesitosJuizo",
     "quesitosReclamante",
     "quesitosReclamada",
   ],
+  referencias: [
+    "referenciasBibliograficas",
+  ],
+};
+
+// Labels amigáveis para cada card
+const cardLabels: Record<string, string> = {
+  preliminares: "Dados Preliminares",
+  "resumo-autos": "Resumo dos Autos",
+  periciando: "Dados do Periciando",
+  "posto-trabalho": "Posto de Trabalho",
+  exame: "Exame Clínico",
+  "analise-tecnica": "Análise Técnica",
+  conclusao: "Conclusão",
+  referencias: "Referências",
 };
 
 function isFieldFilled(value: any): boolean {
@@ -60,6 +93,7 @@ function isFieldFilled(value: any): boolean {
 
 export interface CardProgress {
   cardId: string;
+  cardLabel: string;
   filledFields: number;
   totalFields: number;
   percentage: number;
@@ -101,6 +135,7 @@ export function useLaudoProgress(laudo: LaudoData | null): LaudoProgress {
 
       cardProgress.push({
         cardId,
+        cardLabel: cardLabels[cardId] || cardId,
         filledFields: filledInCard,
         totalFields: fields.length,
         percentage: Math.round((filledInCard / fields.length) * 100),
