@@ -63,6 +63,7 @@ export type Database = {
           antecedentes: string | null
           assistente_tecnico_reclamada: string | null
           assistente_tecnico_reclamante: string | null
+          atestados_detalhados: Json | null
           auxilio_terceiros: string | null
           conclusao_analise: string | null
           conclusao_cid: string | null
@@ -80,9 +81,11 @@ export type Database = {
           descricao_atividades_laborais: string | null
           descricao_posto_trabalho: string | null
           descricao_tecnica_doencas: string | null
+          diagnostico_cids: Json | null
           documentos: string[] | null
           exame_fisico: string | null
           exames_complementares: string | null
+          fatores_individuais: string | null
           historia_acidente: string | null
           historia_atual: string | null
           historico_ocupacional: string | null
@@ -129,6 +132,7 @@ export type Database = {
           antecedentes?: string | null
           assistente_tecnico_reclamada?: string | null
           assistente_tecnico_reclamante?: string | null
+          atestados_detalhados?: Json | null
           auxilio_terceiros?: string | null
           conclusao_analise?: string | null
           conclusao_cid?: string | null
@@ -146,9 +150,11 @@ export type Database = {
           descricao_atividades_laborais?: string | null
           descricao_posto_trabalho?: string | null
           descricao_tecnica_doencas?: string | null
+          diagnostico_cids?: Json | null
           documentos?: string[] | null
           exame_fisico?: string | null
           exames_complementares?: string | null
+          fatores_individuais?: string | null
           historia_acidente?: string | null
           historia_atual?: string | null
           historico_ocupacional?: string | null
@@ -195,6 +201,7 @@ export type Database = {
           antecedentes?: string | null
           assistente_tecnico_reclamada?: string | null
           assistente_tecnico_reclamante?: string | null
+          atestados_detalhados?: Json | null
           auxilio_terceiros?: string | null
           conclusao_analise?: string | null
           conclusao_cid?: string | null
@@ -212,9 +219,11 @@ export type Database = {
           descricao_atividades_laborais?: string | null
           descricao_posto_trabalho?: string | null
           descricao_tecnica_doencas?: string | null
+          diagnostico_cids?: Json | null
           documentos?: string[] | null
           exame_fisico?: string | null
           exames_complementares?: string | null
+          fatores_individuais?: string | null
           historia_acidente?: string | null
           historia_atual?: string | null
           historico_ocupacional?: string | null

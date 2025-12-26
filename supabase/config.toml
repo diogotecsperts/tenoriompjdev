@@ -2,3 +2,6 @@ project_id = "tpiaceyooekujzsvsyid"
 
 [functions.processar-autos]
 verify_jwt = true
+
+[functions.gerar-resumos]
+verify_jwt = true
