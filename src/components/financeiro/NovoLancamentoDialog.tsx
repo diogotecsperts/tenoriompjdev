@@ -143,14 +143,14 @@ export function NovoLancamentoDialog({
       const payload: Record<string, unknown> = {
         user_id: user?.id,
         descricao: data.descricao,
-        laudo_id: data.laudo_id || null,
+        laudo_id: data.laudo_id && data.laudo_id !== "_none" ? data.laudo_id : null,
         valor_honorarios: parseFloat(data.valor_honorarios) || 0,
         valor_despesas: parseFloat(data.valor_despesas) || 0,
-        tipo_despesa: data.tipo_despesa || null,
+        tipo_despesa: data.tipo_despesa && data.tipo_despesa !== "_none" ? data.tipo_despesa : null,
         data_vencimento: data.data_vencimento || null,
         data_pagamento: data.data_pagamento || null,
         status: data.status || "pendente",
-        forma_pagamento: data.forma_pagamento || null,
+        forma_pagamento: data.forma_pagamento && data.forma_pagamento !== "_none" ? data.forma_pagamento : null,
         observacoes: data.observacoes || "",
       };
 
@@ -229,7 +229,7 @@ export function NovoLancamentoDialog({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="">Nenhum</SelectItem>
+                      <SelectItem value="_none">Nenhum</SelectItem>
                       {laudos.map((laudo) => (
                         <SelectItem key={laudo.id} value={laudo.id}>
                           {laudo.processoNumero || laudo.title} 
@@ -300,7 +300,7 @@ export function NovoLancamentoDialog({
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      <SelectItem value="">Nenhum</SelectItem>
+                      <SelectItem value="_none">Nenhum</SelectItem>
                       {tiposDespesa.map((tipo) => (
                         <SelectItem key={tipo.value} value={tipo.value}>
                           {tipo.label}
@@ -384,7 +384,7 @@ export function NovoLancamentoDialog({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">Nenhuma</SelectItem>
+                        <SelectItem value="_none">Nenhuma</SelectItem>
                         {formasPagamento.map((forma) => (
                           <SelectItem key={forma.value} value={forma.value}>
                             {forma.label}
