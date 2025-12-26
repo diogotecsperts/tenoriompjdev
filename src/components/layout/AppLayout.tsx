@@ -10,6 +10,7 @@ import {
   FileDown,
   FileOutput,
   Scale,
+  DollarSign,
   Settings,
   LogOut,
   User,
@@ -33,6 +34,7 @@ const mainMenuItems = [
   { icon: FilePlus, label: "Nova Perícia", path: "/laudo/new" },
   { icon: History, label: "Histórico", path: "/historico" },
   { icon: FileText, label: "Modelos de Laudos", path: "/modelos" },
+  { icon: DollarSign, label: "Financeiro", path: "/financeiro" },
 ];
 
 const toolMenuItems = [

@@ -2,6 +2,8 @@ import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLaudo } from "@/contexts/LaudoContext";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { 
@@ -21,12 +23,49 @@ import { TiposPericiaChart } from "@/components/dashboard/TiposPericiaChart";
 import { ProximosCompromissosCards } from "@/components/dashboard/ProximosCompromissosCards";
 import { HistoricoRecenteTable } from "@/components/dashboard/HistoricoRecenteTable";
 import { DashboardSkeleton } from "@/components/dashboard/DashboardSkeleton";
+import { startOfMonth, endOfMonth } from "date-fns";
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { profile } = useAuth();
+  const { user, profile } = useAuth();
   const { laudos, loading, createLaudo, deleteLaudo } = useLaudo();
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+
+  // Fetch financial data
+  const { data: financeiro = [] } = useQuery({
+    queryKey: ["financeiro-dashboard", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("financeiro")
+        .select("*");
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user?.id,
+  });
+
+  // Calculate financial stats
+  const financeStats = useMemo(() => {
+    const now = new Date();
+    const thisMonthStart = startOfMonth(now);
+    const thisMonthEnd = endOfMonth(now);
+
+    const thisMonthFinanceiro = financeiro.filter(l => {
+      const date = new Date(l.created_at);
+      return date >= thisMonthStart && date <= thisMonthEnd;
+    });
+
+    const faturamentoMes = thisMonthFinanceiro.reduce(
+      (sum, l) => sum + (Number(l.valor_honorarios) || 0), 
+      0
+    );
+
+    const totalPendente = financeiro
+      .filter(l => l.status === "pendente")
+      .reduce((sum, l) => sum + (Number(l.valor_honorarios) || 0), 0);
+
+    return { faturamentoMes, totalPendente };
+  }, [financeiro]);
 
   // Calculate stats - TODOS OS HOOKS DEVEM VIR ANTES DE QUALQUER RETURN
   const totalLaudos = laudos.length;
@@ -162,15 +201,20 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm">
+        <Card className="shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate('/financeiro')}>
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <p className="text-sm font-medium text-muted-foreground">Faturamento Est.</p>
+                <p className="text-sm font-medium text-muted-foreground">Faturamento (Mês)</p>
                 <p className="text-2xl font-bold text-foreground">
-                  R$ {(thisMonthLaudos * 1500).toLocaleString('pt-BR')}
+                  R$ {financeStats.faturamentoMes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </p>
-                <p className="text-xs text-muted-foreground">Atualizado hoje</p>
+                <p className="text-xs text-muted-foreground">
+                  {financeStats.totalPendente > 0 
+                    ? `R$ ${financeStats.totalPendente.toLocaleString('pt-BR')} a receber`
+                    : "Clique para gerenciar"
+                  }
+                </p>
               </div>
               <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
                 <DollarSign className="h-6 w-6 text-primary" />
