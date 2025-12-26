@@ -80,6 +80,17 @@ interface ExtractedData {
     reclamante: string;
     reclamada: string;
   };
+  textos_brutos: {
+    peticao_inicial: string;
+    contestacao: string;
+  };
+  resumos_ia: {
+    resumo_peticao: string;
+    resumo_contestacao: string;
+    descricao_doencas: string;
+    nexo_causal: string;
+    incapacidade: string;
+  };
   resumo: string;
 }
 
@@ -308,6 +319,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         quesitos_juizo: extractedData.quesitos.juizo || '',
         quesitos_reclamante: extractedData.quesitos.reclamante || '',
         quesitos_reclamada: extractedData.quesitos.reclamada || '',
+        
+        // RESUMOS GERADOS POR IA
+        resumo_peticao_inicial: extractedData.resumos_ia?.resumo_peticao || '',
+        resumo_contestacao: extractedData.resumos_ia?.resumo_contestacao || '',
+        descricao_tecnica_doencas: extractedData.resumos_ia?.descricao_doencas || '',
+        nexo_causal_justificativa: extractedData.resumos_ia?.nexo_causal || '',
+        analise_incapacidade_laboral: extractedData.resumos_ia?.incapacidade || '',
         
         // Resumo nas anotações
         anotacoes: extractedData.resumo ? `[Resumo extraído automaticamente]\n${extractedData.resumo}` : '',
@@ -555,10 +573,56 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           </div>
         )}
 
+        {/* Resumos Gerados por IA */}
+        {extractedData.resumos_ia && (
+          <div className="p-3 rounded-lg bg-primary/5 border border-primary/20">
+            <h4 className="font-medium text-sm mb-2 flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              Resumos Gerados por IA
+            </h4>
+            <div className="flex flex-wrap gap-1">
+              {extractedData.resumos_ia.resumo_peticao && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">
+                  ✓ Resumo Petição Inicial
+                </span>
+              )}
+              {extractedData.resumos_ia.resumo_contestacao && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">
+                  ✓ Resumo Contestação
+                </span>
+              )}
+              {extractedData.resumos_ia.descricao_doencas && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">
+                  ✓ Descrição Técnica Doenças
+                </span>
+              )}
+              {extractedData.resumos_ia.nexo_causal && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">
+                  ✓ Análise Nexo Causal
+                </span>
+              )}
+              {extractedData.resumos_ia.incapacidade && (
+                <span className="px-2 py-0.5 bg-primary/10 text-primary rounded text-xs">
+                  ✓ Análise Incapacidade
+                </span>
+              )}
+              {!extractedData.resumos_ia.resumo_peticao && 
+               !extractedData.resumos_ia.resumo_contestacao && 
+               !extractedData.resumos_ia.descricao_doencas &&
+               !extractedData.resumos_ia.nexo_causal &&
+               !extractedData.resumos_ia.incapacidade && (
+                <span className="text-xs text-muted-foreground">
+                  Nenhum resumo gerado (dados insuficientes no documento)
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Resumo */}
         {extractedData.resumo && (
           <div className="p-3 rounded-lg bg-muted/50">
-            <h4 className="font-medium text-sm mb-2">Resumo</h4>
+            <h4 className="font-medium text-sm mb-2">Resumo Geral</h4>
             <p className="text-sm text-muted-foreground">{extractedData.resumo}</p>
           </div>
         )}
@@ -647,17 +711,47 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
         {/* Analyzing State */}
         {processingStep === "analyzing" && (
-          <div className="py-12 flex flex-col items-center gap-4">
+          <div className="py-8 flex flex-col items-center gap-4">
             <div className="relative">
               <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
                 <Sparkles className="h-8 w-8 text-primary animate-pulse" />
               </div>
             </div>
             <div className="text-center">
-              <p className="font-medium">Analisando documento com IA...</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                Extraindo informações do processo
+              <p className="font-medium">Processando documento com IA...</p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Este processo pode levar alguns minutos
               </p>
+            </div>
+            <div className="w-full max-w-xs space-y-2 mt-2">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <CheckCircle2 className="h-4 w-4 text-primary" />
+                <span>Extraindo dados do documento</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <span>Gerando resumos via IA</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground/50">
+                <div className="h-4 w-4" />
+                <span>Resumo da petição inicial</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground/50">
+                <div className="h-4 w-4" />
+                <span>Resumo da contestação</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground/50">
+                <div className="h-4 w-4" />
+                <span>Descrição técnica das doenças</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground/50">
+                <div className="h-4 w-4" />
+                <span>Análise do nexo causal</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground/50">
+                <div className="h-4 w-4" />
+                <span>Análise de incapacidade</span>
+              </div>
             </div>
           </div>
         )}

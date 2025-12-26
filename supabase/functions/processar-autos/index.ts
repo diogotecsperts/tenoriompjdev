@@ -70,6 +70,10 @@ ESTRUTURA JSON A RETORNAR:
     "reclamante": "",
     "reclamada": ""
   },
+  "textos_brutos": {
+    "peticao_inicial": "",
+    "contestacao": ""
+  },
   "resumo": ""
 }
 
@@ -93,7 +97,11 @@ INSTRUÇÕES ESPECÍFICAS:
    - incapacidade_alegada: tipo de incapacidade mencionada
    - nexo_sugerido: "direto", "concausa", "agravamento" ou "" se não mencionado
 8. QUESITOS: Se houver quesitos no documento, copie-os integralmente separados por categoria
-9. RESUMO: Síntese breve do caso (máximo 300 caracteres)`;
+9. TEXTOS BRUTOS - MUITO IMPORTANTE:
+   - peticao_inicial: Copie o TEXTO COMPLETO da petição inicial (a íntegra ou o máximo possível)
+   - contestacao: Copie o TEXTO COMPLETO da contestação (a íntegra ou o máximo possível)
+   - Esses textos serão usados para gerar resumos técnicos posteriormente
+10. RESUMO: Síntese breve do caso (máximo 300 caracteres)`;
 
 // Helper to try to fix truncated JSON
 function tryFixTruncatedJson(jsonStr: string): object | null {
@@ -147,6 +155,7 @@ function ensureValidStructure(data: any): object {
     exame_clinico: { laudos_medicos: "", exames_complementares: "", lesoes_descritas: "" },
     informacoes_medicas: { cids_mencionados: [], incapacidade_alegada: "", nexo_sugerido: "" },
     quesitos: { juizo: "", reclamante: "", reclamada: "" },
+    textos_brutos: { peticao_inicial: "", contestacao: "" },
     resumo: ""
   };
 
@@ -163,8 +172,219 @@ function ensureValidStructure(data: any): object {
     exame_clinico: { ...defaultStructure.exame_clinico, ...(data.exame_clinico || {}) },
     informacoes_medicas: { ...defaultStructure.informacoes_medicas, ...(data.informacoes_medicas || {}) },
     quesitos: { ...defaultStructure.quesitos, ...(data.quesitos || {}) },
+    textos_brutos: { ...defaultStructure.textos_brutos, ...(data.textos_brutos || {}) },
     resumo: data.resumo || ""
   };
+}
+
+// Generate AI summaries using gerar-resumos function internally
+async function gerarResumosIA(extractedData: any): Promise<{
+  resumo_peticao: string;
+  resumo_contestacao: string;
+  descricao_doencas: string;
+  nexo_causal: string;
+  incapacidade: string;
+}> {
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  if (!LOVABLE_API_KEY) {
+    console.warn('LOVABLE_API_KEY not configured, skipping AI summaries');
+    return {
+      resumo_peticao: '',
+      resumo_contestacao: '',
+      descricao_doencas: '',
+      nexo_causal: '',
+      incapacidade: ''
+    };
+  }
+
+  const results = {
+    resumo_peticao: '',
+    resumo_contestacao: '',
+    descricao_doencas: '',
+    nexo_causal: '',
+    incapacidade: ''
+  };
+
+  // Build context from extracted data
+  const contexto = {
+    peticaoInicial: extractedData.textos_brutos?.peticao_inicial || '',
+    contestacao: extractedData.textos_brutos?.contestacao || '',
+    cids: extractedData.informacoes_medicas?.cids_mencionados?.join(', ') || '',
+    postoTrabalho: '', // Not extracted yet
+    atividadesLaborais: '', // Not extracted yet
+    historicoOcupacional: extractedData.historico?.historico_ocupacional || '',
+    exameFisico: '', // Not extracted yet
+    examesComplementares: extractedData.exame_clinico?.exames_complementares || '',
+    antecedentes: extractedData.historico?.antecedentes_patologicos || '',
+    tratamentos: extractedData.historico?.tratamentos_realizados || '',
+    historiaAcidente: extractedData.acidente?.descricao || '',
+    historiaAtual: extractedData.historico?.historia_atual || ''
+  };
+
+  // Define which summaries to generate based on available data
+  const summariesToGenerate: Array<{ tipo: string; shouldGenerate: boolean }> = [
+    { tipo: 'resumo_peticao', shouldGenerate: !!contexto.peticaoInicial },
+    { tipo: 'resumo_contestacao', shouldGenerate: !!contexto.contestacao },
+    { tipo: 'descricao_doencas', shouldGenerate: !!contexto.cids },
+    { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || !!contexto.historicoOcupacional || !!contexto.historiaAcidente },
+    { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares }
+  ];
+
+  // Generate summaries in parallel
+  const promises = summariesToGenerate
+    .filter(s => s.shouldGenerate)
+    .map(async ({ tipo }) => {
+      try {
+        console.log(`Generating AI summary: ${tipo}`);
+        
+        const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash',
+            messages: [
+              { 
+                role: 'system', 
+                content: 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.' 
+              },
+              { role: 'user', content: getPromptForType(tipo, contexto) }
+            ],
+          }),
+        });
+
+        if (!response.ok) {
+          console.error(`Failed to generate ${tipo}: ${response.status}`);
+          return { tipo, texto: '' };
+        }
+
+        const data = await response.json();
+        const texto = data.choices?.[0]?.message?.content || '';
+        console.log(`Successfully generated ${tipo}`);
+        return { tipo, texto };
+      } catch (error) {
+        console.error(`Error generating ${tipo}:`, error);
+        return { tipo, texto: '' };
+      }
+    });
+
+  const generatedSummaries = await Promise.all(promises);
+  
+  for (const { tipo, texto } of generatedSummaries) {
+    if (tipo in results) {
+      (results as any)[tipo] = texto;
+    }
+  }
+
+  return results;
+}
+
+// Get prompt based on summary type
+function getPromptForType(tipo: string, ctx: any): string {
+  const prompts: Record<string, string> = {
+    resumo_peticao: `
+Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da petição inicial para um laudo pericial médico trabalhista.
+
+Texto da Petição Inicial:
+${ctx.peticaoInicial || 'Não informado'}
+
+Instruções:
+- Resuma os pontos principais alegados pelo reclamante
+- Destaque as doenças/lesões mencionadas
+- Identifique os nexos causais alegados
+- Mencione os pedidos principais
+- Use linguagem técnica e imparcial
+- Máximo 3 parágrafos
+`,
+    resumo_contestacao: `
+Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da contestação para um laudo pericial médico trabalhista.
+
+Texto da Contestação:
+${ctx.contestacao || 'Não informado'}
+
+Instruções:
+- Resuma os pontos principais alegados pela reclamada
+- Destaque os argumentos contrários ao nexo causal
+- Identifique documentos ou evidências mencionadas
+- Mencione os pedidos de improcedência
+- Use linguagem técnica e imparcial
+- Máximo 3 parágrafos
+`,
+    descricao_doencas: `
+Você é um perito médico especialista em medicina do trabalho. Elabore uma descrição técnica detalhada das doenças identificadas para um laudo pericial.
+
+CIDs identificados:
+${ctx.cids || 'Não informado'}
+
+Informações adicionais:
+- Posto de trabalho: ${ctx.postoTrabalho || 'Não informado'}
+- Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
+- Histórico ocupacional: ${ctx.historicoOcupacional || 'Não informado'}
+
+Instruções:
+Para cada CID mencionado, forneça:
+1. Nome da doença e código CID-10
+2. Definição técnica
+3. Etiologia (causas possíveis)
+4. Sintomas característicos
+5. Fatores de risco ocupacionais (quando aplicável)
+6. Relação com atividades laborais descritas
+
+Use linguagem técnica médica apropriada para laudo pericial.
+`,
+    nexo_causal: `
+Você é um perito médico especialista em medicina do trabalho. Elabore uma análise técnica do nexo causal para um laudo pericial médico trabalhista.
+
+Dados para análise:
+- CIDs/Diagnósticos: ${ctx.cids || 'Não informado'}
+- Posto de trabalho: ${ctx.postoTrabalho || 'Não informado'}
+- Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
+- Histórico ocupacional: ${ctx.historicoOcupacional || 'Não informado'}
+- História do acidente/doença: ${ctx.historiaAcidente || 'Não informado'}
+- História atual: ${ctx.historiaAtual || 'Não informado'}
+- Exame físico: ${ctx.exameFisico || 'Não informado'}
+- Exames complementares: ${ctx.examesComplementares || 'Não informado'}
+- Antecedentes patológicos: ${ctx.antecedentes || 'Não informado'}
+
+Instruções:
+Analise o nexo causal utilizando os critérios de Bradford-Hill e Simonin:
+1. Plausibilidade biológica
+2. Força da associação
+3. Temporalidade
+4. Consistência
+5. Especificidade
+6. Gradiente dose-resposta
+
+Classifique o nexo como: Direto, Concausa, Agravamento ou Sem Nexo Causal.
+Fundamente tecnicamente sua conclusão citando evidências clínicas e documentais.
+`,
+    incapacidade: `
+Você é um perito médico especialista em medicina do trabalho. Elabore uma análise técnica da incapacidade laboral para um laudo pericial.
+
+Dados para análise:
+- CIDs/Diagnósticos: ${ctx.cids || 'Não informado'}
+- Exame físico: ${ctx.exameFisico || 'Não informado'}
+- Exames complementares: ${ctx.examesComplementares || 'Não informado'}
+- Tratamentos realizados: ${ctx.tratamentos || 'Não informado'}
+- Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
+- Posto de trabalho: ${ctx.postoTrabalho || 'Não informado'}
+
+Instruções:
+Analise a capacidade laboral considerando:
+1. Tipo de incapacidade (parcial/total, temporária/permanente)
+2. Limitações funcionais identificadas no exame físico
+3. Compatibilidade com a função exercida
+4. Possibilidade de reabilitação profissional
+5. Necessidade de readaptação de função
+6. Impacto nas atividades de vida diária
+
+Fundamente tecnicamente sua análise com base nos achados clínicos e exames.
+`
+  };
+
+  return prompts[tipo] || '';
 }
 
 serve(async (req) => {
@@ -194,7 +414,7 @@ serve(async (req) => {
 
     console.log(`Processing PDF: ${fileName}, size: ${pdfBase64.length} chars`);
 
-    // Call Gemini API with PDF
+    // Step 1: Call Gemini API with PDF to extract data
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
     const geminiRequest = {
@@ -216,7 +436,7 @@ serve(async (req) => {
       generationConfig: {
         temperature: 0.1,
         topP: 0.95,
-        maxOutputTokens: 16384,
+        maxOutputTokens: 32768,
         responseMimeType: "application/json"
       }
     };
@@ -277,6 +497,14 @@ serve(async (req) => {
     extractedData = ensureValidStructure(extractedData);
 
     console.log('Successfully extracted data from PDF');
+
+    // Step 2: Generate AI summaries based on extracted data
+    console.log('Starting AI summary generation...');
+    const resumosIA = await gerarResumosIA(extractedData);
+    console.log('AI summaries generated successfully');
+
+    // Add resumos_ia to the response
+    (extractedData as any).resumos_ia = resumosIA;
 
     return new Response(
       JSON.stringify({ 
