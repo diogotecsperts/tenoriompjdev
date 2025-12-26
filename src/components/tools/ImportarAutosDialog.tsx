@@ -175,6 +175,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setSelectedFile(file);
   };
 
+  const [analysisStep, setAnalysisStep] = useState<string>("");
+
   const processFile = async () => {
     if (!selectedFile || !user) return;
 
@@ -204,6 +206,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
       // Step 2: Convert to base64 and send to edge function
       setProcessingStep("analyzing");
+      setAnalysisStep("Convertendo documento...");
 
       const arrayBuffer = await selectedFile.arrayBuffer();
       const base64 = btoa(
@@ -213,25 +216,83 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         )
       );
 
-      const { data: functionData, error: functionError } = await supabase.functions.invoke('processar-autos', {
-        body: { 
-          pdfBase64: base64,
-          fileName: selectedFile.name
+      setAnalysisStep("Enviando para análise com IA...");
+
+      // Use fetch with AbortController for 5-minute timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes
+
+      // Get session for auth token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      // Simulate progress steps during analysis
+      const progressSteps = [
+        { step: "Extraindo dados do documento...", delay: 3000 },
+        { step: "Identificando informações do processo...", delay: 6000 },
+        { step: "Analisando histórico médico...", delay: 10000 },
+        { step: "Gerando resumo da petição inicial...", delay: 15000 },
+        { step: "Gerando resumo da contestação...", delay: 25000 },
+        { step: "Gerando descrição técnica das doenças...", delay: 35000 },
+        { step: "Analisando nexo causal...", delay: 50000 },
+        { step: "Analisando incapacidade laboral...", delay: 70000 },
+        { step: "Finalizando análise...", delay: 90000 },
+      ];
+
+      let stepIndex = 0;
+      const stepInterval = setInterval(() => {
+        if (stepIndex < progressSteps.length) {
+          setAnalysisStep(progressSteps[stepIndex].step);
+          stepIndex++;
         }
-      });
+      }, 8000);
 
-      if (functionError) {
-        console.error('Function error:', functionError);
-        throw new Error('Falha ao processar documento com IA');
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/processar-autos`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+              'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+            },
+            body: JSON.stringify({ 
+              pdfBase64: base64,
+              fileName: selectedFile.name
+            }),
+            signal: controller.signal,
+          }
+        );
+
+        clearTimeout(timeoutId);
+        clearInterval(stepInterval);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Function error:', errorText);
+          throw new Error('Falha ao processar documento com IA');
+        }
+
+        const functionData = await response.json();
+
+        if (!functionData.success) {
+          throw new Error(functionData.error || 'Erro ao extrair dados');
+        }
+
+        setExtractedData(functionData.data);
+        setUsedModel(functionData.model);
+        setProcessingStep("preview");
+        setAnalysisStep("");
+
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        clearInterval(stepInterval);
+        
+        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+          throw new Error('O processamento excedeu o tempo limite de 5 minutos. Tente com um PDF menor.');
+        }
+        throw fetchError;
       }
-
-      if (!functionData.success) {
-        throw new Error(functionData.error || 'Erro ao extrair dados');
-      }
-
-      setExtractedData(functionData.data);
-      setUsedModel(functionData.model);
-      setProcessingStep("preview");
 
     } catch (error) {
       console.error('Processing error:', error);
@@ -241,6 +302,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         description: error instanceof Error ? error.message : "Erro desconhecido",
       });
       setProcessingStep("idle");
+      setAnalysisStep("");
     }
   };
 
@@ -368,6 +430,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setUploadProgress(0);
     setExtractedData(null);
     setUsedModel("");
+    setAnalysisStep("");
     onOpenChange(false);
   };
 
@@ -719,38 +782,22 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             </div>
             <div className="text-center">
               <p className="font-medium">Processando documento com IA...</p>
-              <p className="text-sm text-muted-foreground mt-2">
-                Este processo pode levar alguns minutos
+              <p className="text-sm text-muted-foreground mt-1">
+                Este processo pode levar até 3 minutos
+              </p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                (timeout: 5 minutos)
               </p>
             </div>
             <div className="w-full max-w-xs space-y-2 mt-2">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <CheckCircle2 className="h-4 w-4 text-primary" />
-                <span>Extraindo dados do documento</span>
+              <div className="flex items-center gap-2 text-sm bg-primary/5 rounded-lg p-2">
+                <Loader2 className="h-4 w-4 animate-spin text-primary flex-shrink-0" />
+                <span className="text-primary font-medium">
+                  {analysisStep || "Iniciando processamento..."}
+                </span>
               </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
-                <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                <span>Gerando resumos via IA</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground/50">
-                <div className="h-4 w-4" />
-                <span>Resumo da petição inicial</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground/50">
-                <div className="h-4 w-4" />
-                <span>Resumo da contestação</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground/50">
-                <div className="h-4 w-4" />
-                <span>Descrição técnica das doenças</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground/50">
-                <div className="h-4 w-4" />
-                <span>Análise do nexo causal</span>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-muted-foreground/50">
-                <div className="h-4 w-4" />
-                <span>Análise de incapacidade</span>
+              <div className="text-xs text-muted-foreground/70 text-center mt-4">
+                Por favor, aguarde. Não feche esta janela.
               </div>
             </div>
           </div>
