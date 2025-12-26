@@ -16,6 +16,7 @@ import Modelos from "./pages/Modelos";
 import LaudoEditor from "./pages/LaudoEditor";
 import Configuracoes from "./pages/Configuracoes";
 import Impugnacao from "./pages/Impugnacao";
+import Financeiro from "./pages/Financeiro";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
@@ -79,6 +80,14 @@ function AppRoutes() {
         element={
           <ProtectedWithLayout>
             <Impugnacao />
+          </ProtectedWithLayout>
+        }
+      />
+      <Route
+        path="/financeiro"
+        element={
+          <ProtectedWithLayout>
+            <Financeiro />
           </ProtectedWithLayout>
         }
       />

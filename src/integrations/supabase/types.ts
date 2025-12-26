@@ -14,6 +14,69 @@ export type Database = {
   }
   public: {
     Tables: {
+      financeiro: {
+        Row: {
+          created_at: string
+          data_pagamento: string | null
+          data_vencimento: string | null
+          descricao: string
+          forma_pagamento: Database["public"]["Enums"]["forma_pagamento"] | null
+          id: string
+          laudo_id: string | null
+          observacoes: string | null
+          status: Database["public"]["Enums"]["status_pagamento"]
+          tipo_despesa: Database["public"]["Enums"]["tipo_despesa"] | null
+          updated_at: string
+          user_id: string
+          valor_despesas: number | null
+          valor_honorarios: number | null
+        }
+        Insert: {
+          created_at?: string
+          data_pagamento?: string | null
+          data_vencimento?: string | null
+          descricao: string
+          forma_pagamento?:
+            | Database["public"]["Enums"]["forma_pagamento"]
+            | null
+          id?: string
+          laudo_id?: string | null
+          observacoes?: string | null
+          status?: Database["public"]["Enums"]["status_pagamento"]
+          tipo_despesa?: Database["public"]["Enums"]["tipo_despesa"] | null
+          updated_at?: string
+          user_id: string
+          valor_despesas?: number | null
+          valor_honorarios?: number | null
+        }
+        Update: {
+          created_at?: string
+          data_pagamento?: string | null
+          data_vencimento?: string | null
+          descricao?: string
+          forma_pagamento?:
+            | Database["public"]["Enums"]["forma_pagamento"]
+            | null
+          id?: string
+          laudo_id?: string | null
+          observacoes?: string | null
+          status?: Database["public"]["Enums"]["status_pagamento"]
+          tipo_despesa?: Database["public"]["Enums"]["tipo_despesa"] | null
+          updated_at?: string
+          user_id?: string
+          valor_despesas?: number | null
+          valor_honorarios?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "financeiro_laudo_id_fkey"
+            columns: ["laudo_id"]
+            isOneToOne: false
+            referencedRelation: "laudos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       impugnacoes: {
         Row: {
           created_at: string
@@ -119,6 +182,7 @@ export type Database = {
           tratamentos: string | null
           updated_at: string | null
           user_id: string
+          valor_honorarios: number | null
           vitima_dominancia: string | null
           vitima_escolaridade: string | null
           vitima_nascimento: string | null
@@ -188,6 +252,7 @@ export type Database = {
           tratamentos?: string | null
           updated_at?: string | null
           user_id: string
+          valor_honorarios?: number | null
           vitima_dominancia?: string | null
           vitima_escolaridade?: string | null
           vitima_nascimento?: string | null
@@ -257,6 +322,7 @@ export type Database = {
           tratamentos?: string | null
           updated_at?: string | null
           user_id?: string
+          valor_honorarios?: number | null
           vitima_dominancia?: string | null
           vitima_escolaridade?: string | null
           vitima_nascimento?: string | null
@@ -397,6 +463,21 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "user"
+      forma_pagamento:
+        | "pix"
+        | "transferencia"
+        | "dinheiro"
+        | "cheque"
+        | "cartao"
+        | "boleto"
+      status_pagamento: "pendente" | "recebido" | "atrasado" | "cancelado"
+      tipo_despesa:
+        | "combustivel"
+        | "hospedagem"
+        | "alimentacao"
+        | "material"
+        | "transporte"
+        | "outros"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -525,6 +606,23 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "user"],
+      forma_pagamento: [
+        "pix",
+        "transferencia",
+        "dinheiro",
+        "cheque",
+        "cartao",
+        "boleto",
+      ],
+      status_pagamento: ["pendente", "recebido", "atrasado", "cancelado"],
+      tipo_despesa: [
+        "combustivel",
+        "hospedagem",
+        "alimentacao",
+        "material",
+        "transporte",
+        "outros",
+      ],
     },
   },
 } as const
