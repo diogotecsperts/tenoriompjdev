@@ -32,12 +32,12 @@ export function DadosPerito() {
 
       if (data) {
         updateLaudo({
-          perito_nome: data.nome || "",
-          perito_crm: data.crm || "",
-          perito_especialidade: data.especialidade || "",
-          perito_email: data.email || "",
-          perito_telefone: data.telefone || "",
-          perito_endereco: data.endereco || "",
+          peritoNome: data.nome || "",
+          peritoCRM: data.crm || "",
+          peritoEspecialidade: data.especialidade || "",
+          peritoEmail: data.email || "",
+          peritoTelefone: data.telefone || "",
+          peritoEndereco: data.endereco || "",
         });
         toast({
           title: "Dados sincronizados",
@@ -75,62 +75,62 @@ export function DadosPerito() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label htmlFor="perito_nome">Nome do Perito</Label>
+          <Label htmlFor="peritoNome">Nome do Perito</Label>
           <Input
-            id="perito_nome"
-            value={currentLaudo?.perito_nome || ""}
-            onChange={(e) => handleChange("perito_nome", e.target.value)}
+            id="peritoNome"
+            value={currentLaudo?.peritoNome || ""}
+            onChange={(e) => handleChange("peritoNome", e.target.value)}
             placeholder="Dr. João Silva"
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="perito_crm">CRM</Label>
+          <Label htmlFor="peritoCRM">CRM</Label>
           <Input
-            id="perito_crm"
-            value={currentLaudo?.perito_crm || ""}
-            onChange={(e) => handleChange("perito_crm", e.target.value)}
+            id="peritoCRM"
+            value={currentLaudo?.peritoCRM || ""}
+            onChange={(e) => handleChange("peritoCRM", e.target.value)}
             placeholder="12345/SP"
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="perito_especialidade">Especialidade</Label>
+          <Label htmlFor="peritoEspecialidade">Especialidade</Label>
           <Input
-            id="perito_especialidade"
-            value={currentLaudo?.perito_especialidade || ""}
-            onChange={(e) => handleChange("perito_especialidade", e.target.value)}
+            id="peritoEspecialidade"
+            value={currentLaudo?.peritoEspecialidade || ""}
+            onChange={(e) => handleChange("peritoEspecialidade", e.target.value)}
             placeholder="Medicina do Trabalho"
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="perito_email">E-mail</Label>
+          <Label htmlFor="peritoEmail">E-mail</Label>
           <Input
-            id="perito_email"
+            id="peritoEmail"
             type="email"
-            value={currentLaudo?.perito_email || ""}
-            onChange={(e) => handleChange("perito_email", e.target.value)}
+            value={currentLaudo?.peritoEmail || ""}
+            onChange={(e) => handleChange("peritoEmail", e.target.value)}
             placeholder="perito@email.com"
           />
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="perito_telefone">Telefone</Label>
+          <Label htmlFor="peritoTelefone">Telefone</Label>
           <Input
-            id="perito_telefone"
-            value={currentLaudo?.perito_telefone || ""}
-            onChange={(e) => handleChange("perito_telefone", e.target.value)}
+            id="peritoTelefone"
+            value={currentLaudo?.peritoTelefone || ""}
+            onChange={(e) => handleChange("peritoTelefone", e.target.value)}
             placeholder="(11) 99999-9999"
           />
         </div>
 
         <div className="space-y-2 md:col-span-2">
-          <Label htmlFor="perito_endereco">Endereço</Label>
+          <Label htmlFor="peritoEndereco">Endereço</Label>
           <Input
-            id="perito_endereco"
-            value={currentLaudo?.perito_endereco || ""}
-            onChange={(e) => handleChange("perito_endereco", e.target.value)}
+            id="peritoEndereco"
+            value={currentLaudo?.peritoEndereco || ""}
+            onChange={(e) => handleChange("peritoEndereco", e.target.value)}
             placeholder="Rua Exemplo, 123 - Centro - São Paulo/SP"
           />
         </div>
