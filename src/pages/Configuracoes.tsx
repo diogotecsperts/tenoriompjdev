@@ -53,6 +53,12 @@ export default function Configuracoes() {
     user_id: "",
   });
 
+  // Password change states
+  const [senhaAtual, setSenhaAtual] = useState("");
+  const [novaSenha, setNovaSenha] = useState("");
+  const [confirmarSenha, setConfirmarSenha] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
+
   // Notification preferences (local state - future feature)
   const [notifications, setNotifications] = useState({
     emailLaudoConcluido: true,
@@ -404,6 +410,95 @@ export default function Configuracoes() {
     }
   };
 
+  const handleChangePassword = async () => {
+    if (!user?.email) {
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Usuário não identificado.",
+      });
+      return;
+    }
+
+    // Validações
+    if (!senhaAtual || !novaSenha || !confirmarSenha) {
+      toast({
+        variant: "destructive",
+        title: "Campos obrigatórios",
+        description: "Preencha todos os campos de senha.",
+      });
+      return;
+    }
+
+    if (novaSenha.length < 6) {
+      toast({
+        variant: "destructive",
+        title: "Senha muito curta",
+        description: "A nova senha deve ter pelo menos 6 caracteres.",
+      });
+      return;
+    }
+
+    if (novaSenha !== confirmarSenha) {
+      toast({
+        variant: "destructive",
+        title: "Senhas não coincidem",
+        description: "A nova senha e a confirmação devem ser iguais.",
+      });
+      return;
+    }
+
+    setChangingPassword(true);
+
+    try {
+      // Verificar senha atual re-autenticando
+      const { error: authError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: senhaAtual,
+      });
+
+      if (authError) {
+        toast({
+          variant: "destructive",
+          title: "Senha atual incorreta",
+          description: "Verifique sua senha atual e tente novamente.",
+        });
+        setChangingPassword(false);
+        return;
+      }
+
+      // Atualizar para nova senha
+      const { error } = await supabase.auth.updateUser({ 
+        password: novaSenha 
+      });
+
+      if (error) {
+        toast({
+          variant: "destructive",
+          title: "Erro ao alterar senha",
+          description: error.message,
+        });
+      } else {
+        toast({
+          title: "Senha alterada!",
+          description: "Sua senha foi atualizada com sucesso.",
+        });
+        // Limpar campos
+        setSenhaAtual("");
+        setNovaSenha("");
+        setConfirmarSenha("");
+      }
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Erro inesperado",
+        description: error.message || "Não foi possível alterar a senha.",
+      });
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
   const userInitials = formData.nome
     ? formData.nome
         .split(" ")
@@ -699,21 +794,58 @@ export default function Configuracoes() {
                 <CardContent className="space-y-4">
                   <div className="grid gap-4 md:grid-cols-3">
                     <div className="space-y-2">
-                      <Label>Senha Atual</Label>
-                      <Input type="password" disabled placeholder="••••••••" />
+                      <Label htmlFor="senhaAtual">Senha Atual</Label>
+                      <Input 
+                        id="senhaAtual"
+                        type="password" 
+                        value={senhaAtual}
+                        onChange={(e) => setSenhaAtual(e.target.value)}
+                        placeholder="Digite sua senha atual"
+                        disabled={changingPassword}
+                      />
                     </div>
                     <div className="space-y-2">
-                      <Label>Nova Senha</Label>
-                      <Input type="password" disabled placeholder="••••••••" />
+                      <Label htmlFor="novaSenha">Nova Senha</Label>
+                      <Input 
+                        id="novaSenha"
+                        type="password" 
+                        value={novaSenha}
+                        onChange={(e) => setNovaSenha(e.target.value)}
+                        placeholder="Mínimo 6 caracteres"
+                        disabled={changingPassword}
+                      />
                     </div>
                     <div className="space-y-2">
-                      <Label>Confirmar</Label>
-                      <Input type="password" disabled placeholder="••••••••" />
+                      <Label htmlFor="confirmarSenha">Confirmar</Label>
+                      <Input 
+                        id="confirmarSenha"
+                        type="password" 
+                        value={confirmarSenha}
+                        onChange={(e) => setConfirmarSenha(e.target.value)}
+                        placeholder="Repita a nova senha"
+                        disabled={changingPassword}
+                      />
                     </div>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Funcionalidade de alteração de senha em desenvolvimento
-                  </p>
+                  <div className="flex justify-end">
+                    <Button 
+                      onClick={handleChangePassword} 
+                      disabled={changingPassword || !senhaAtual || !novaSenha || !confirmarSenha}
+                      variant="outline"
+                    >
+                      {changingPassword ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Alterando...
+                        </>
+                      ) : (
+                        <>
+                          <Shield className="mr-2 h-4 w-4" />
+                          Alterar Senha
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
 
