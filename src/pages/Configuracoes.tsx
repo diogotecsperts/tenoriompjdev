@@ -448,16 +448,25 @@ export default function Configuracoes() {
       return;
     }
 
+    if (senhaAtual === novaSenha) {
+      toast({
+        variant: "destructive",
+        title: "Mesma senha",
+        description: "A nova senha deve ser diferente da senha atual.",
+      });
+      return;
+    }
+
     setChangingPassword(true);
 
     try {
-      // Verificar senha atual re-autenticando
-      const { error: authError } = await supabase.auth.signInWithPassword({
+      // Passo 1: Verificar senha atual fazendo login
+      const { data: signInData, error: authError } = await supabase.auth.signInWithPassword({
         email: user.email,
         password: senhaAtual,
       });
 
-      if (authError) {
+      if (authError || !signInData?.session) {
         toast({
           variant: "destructive",
           title: "Senha atual incorreta",
@@ -467,28 +476,44 @@ export default function Configuracoes() {
         return;
       }
 
-      // Atualizar para nova senha
-      const { error } = await supabase.auth.updateUser({ 
+      // Passo 2: Aguardar um momento para a sessão ser estabelecida
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Passo 3: Atualizar para nova senha (agora com sessão ativa confirmada)
+      const { data: updateData, error: updateError } = await supabase.auth.updateUser({ 
         password: novaSenha 
       });
 
-      if (error) {
+      if (updateError) {
+        console.error("Erro updateUser:", updateError);
         toast({
           variant: "destructive",
           title: "Erro ao alterar senha",
-          description: error.message,
+          description: updateError.message,
         });
-      } else {
+        return;
+      }
+
+      // Passo 4: Verificar se a atualização foi bem-sucedida
+      if (updateData?.user) {
+        console.log("Senha atualizada com sucesso para:", updateData.user.email);
         toast({
-          title: "Senha alterada!",
-          description: "Sua senha foi atualizada com sucesso.",
+          title: "Senha alterada com sucesso!",
+          description: "Use sua nova senha no próximo login.",
         });
         // Limpar campos
         setSenhaAtual("");
         setNovaSenha("");
         setConfirmarSenha("");
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Erro inesperado",
+          description: "A senha pode não ter sido alterada. Tente novamente.",
+        });
       }
     } catch (error: any) {
+      console.error("Erro na alteração de senha:", error);
       toast({
         variant: "destructive",
         title: "Erro inesperado",
