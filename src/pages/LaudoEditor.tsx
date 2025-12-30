@@ -68,6 +68,7 @@ import { DadosPostoTrabalho } from "@/components/laudo/sections/DadosPostoTrabal
 import { DescricaoTecnicaDoencas } from "@/components/laudo/sections/DescricaoTecnicaDoencas";
 import { AnaliseIncapacidade } from "@/components/laudo/sections/AnaliseIncapacidade";
 import { ReferenciasBibliograficas } from "@/components/laudo/sections/ReferenciasBibliograficas";
+import { DadosPerito } from "@/components/laudo/sections/DadosPerito";
 import { BookOpen, Briefcase } from "lucide-react";
 
 // Consolidated cards structure - Reorganizado conforme modelo profissional
@@ -78,6 +79,7 @@ const consolidatedCards = [
     description: "Dados do processo, objetivo e documentos avaliados",
     icon: User,
     sections: [
+      { id: "perito", label: "Dados do Perito", component: DadosPerito },
       { id: "processo", label: "Dados do Processo", component: DadosProcesso },
       { id: "objetivo", label: "Objetivo da Perícia", component: ObjetivoPericia },
       { id: "documentos", label: "Documentos Avaliados", component: DocumentosAvaliacao },
