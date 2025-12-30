@@ -1,11 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Modelo configurável - fácil trocar para gemini-2.5-pro se necessário
+// Modelo configurável
 const GEMINI_MODEL = Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash";
 
 const systemPrompt = `Você é um assistente especializado em análise de processos trabalhistas para médicos peritos. Analise os autos do processo e extraia TODAS as informações disponíveis para preencher um laudo pericial completo.
@@ -105,7 +106,6 @@ INSTRUÇÕES ESPECÍFICAS:
 
 // Helper to try to fix truncated JSON
 function tryFixTruncatedJson(jsonStr: string): object | null {
-  // First try parsing as-is
   try {
     return JSON.parse(jsonStr);
   } catch {
@@ -113,22 +113,17 @@ function tryFixTruncatedJson(jsonStr: string): object | null {
   }
 
   let fixed = jsonStr.trim();
-  
-  // Remove markdown code blocks if present
   fixed = fixed.replace(/^```json\s*/i, '').replace(/```\s*$/, '');
   
-  // Count open brackets
   const openBraces = (fixed.match(/{/g) || []).length;
   const closeBraces = (fixed.match(/}/g) || []).length;
   const openBrackets = (fixed.match(/\[/g) || []).length;
   const closeBrackets = (fixed.match(/]/g) || []).length;
 
-  // If truncated in the middle of a string, try to close it
   if (fixed.match(/"[^"]*$/)) {
     fixed += '"';
   }
 
-  // Add missing brackets
   for (let i = 0; i < openBrackets - closeBrackets; i++) {
     fixed += ']';
   }
@@ -175,110 +170,6 @@ function ensureValidStructure(data: any): object {
     textos_brutos: { ...defaultStructure.textos_brutos, ...(data.textos_brutos || {}) },
     resumo: data.resumo || ""
   };
-}
-
-// Generate AI summaries using gerar-resumos function internally
-async function gerarResumosIA(extractedData: any): Promise<{
-  resumo_peticao: string;
-  resumo_contestacao: string;
-  descricao_doencas: string;
-  nexo_causal: string;
-  incapacidade: string;
-}> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  if (!LOVABLE_API_KEY) {
-    console.warn('LOVABLE_API_KEY not configured, skipping AI summaries');
-    return {
-      resumo_peticao: '',
-      resumo_contestacao: '',
-      descricao_doencas: '',
-      nexo_causal: '',
-      incapacidade: ''
-    };
-  }
-
-  const results = {
-    resumo_peticao: '',
-    resumo_contestacao: '',
-    descricao_doencas: '',
-    nexo_causal: '',
-    incapacidade: ''
-  };
-
-  // Build context from extracted data
-  const contexto = {
-    peticaoInicial: extractedData.textos_brutos?.peticao_inicial || '',
-    contestacao: extractedData.textos_brutos?.contestacao || '',
-    cids: extractedData.informacoes_medicas?.cids_mencionados?.join(', ') || '',
-    postoTrabalho: '', // Not extracted yet
-    atividadesLaborais: '', // Not extracted yet
-    historicoOcupacional: extractedData.historico?.historico_ocupacional || '',
-    exameFisico: '', // Not extracted yet
-    examesComplementares: extractedData.exame_clinico?.exames_complementares || '',
-    antecedentes: extractedData.historico?.antecedentes_patologicos || '',
-    tratamentos: extractedData.historico?.tratamentos_realizados || '',
-    historiaAcidente: extractedData.acidente?.descricao || '',
-    historiaAtual: extractedData.historico?.historia_atual || ''
-  };
-
-  // Define which summaries to generate based on available data
-  const summariesToGenerate: Array<{ tipo: string; shouldGenerate: boolean }> = [
-    { tipo: 'resumo_peticao', shouldGenerate: !!contexto.peticaoInicial },
-    { tipo: 'resumo_contestacao', shouldGenerate: !!contexto.contestacao },
-    { tipo: 'descricao_doencas', shouldGenerate: !!contexto.cids },
-    { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || !!contexto.historicoOcupacional || !!contexto.historiaAcidente },
-    { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares }
-  ];
-
-  // Generate summaries in parallel
-  const promises = summariesToGenerate
-    .filter(s => s.shouldGenerate)
-    .map(async ({ tipo }) => {
-      try {
-        console.log(`Generating AI summary: ${tipo}`);
-        
-        const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'google/gemini-2.5-flash',
-            messages: [
-              { 
-                role: 'system', 
-                content: 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.' 
-              },
-              { role: 'user', content: getPromptForType(tipo, contexto) }
-            ],
-          }),
-        });
-
-        if (!response.ok) {
-          console.error(`Failed to generate ${tipo}: ${response.status}`);
-          return { tipo, texto: '' };
-        }
-
-        const data = await response.json();
-        const texto = data.choices?.[0]?.message?.content || '';
-        console.log(`Successfully generated ${tipo}`);
-        return { tipo, texto };
-      } catch (error) {
-        console.error(`Error generating ${tipo}:`, error);
-        return { tipo, texto: '' };
-      }
-    });
-
-  const generatedSummaries = await Promise.all(promises);
-  
-  for (const { tipo, texto } of generatedSummaries) {
-    if (tipo in results) {
-      (results as any)[tipo] = texto;
-    }
-  }
-
-  return results;
 }
 
 // Get prompt based on summary type
@@ -387,39 +278,156 @@ Fundamente tecnicamente sua análise com base nos achados clínicos e exames.
   return prompts[tipo] || '';
 }
 
-serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+// Generate AI summaries using Lovable AI
+async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: string): Promise<{
+  resumo_peticao: string;
+  resumo_contestacao: string;
+  descricao_doencas: string;
+  nexo_causal: string;
+  incapacidade: string;
+}> {
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  if (!LOVABLE_API_KEY) {
+    console.warn('LOVABLE_API_KEY not configured, skipping AI summaries');
+    return {
+      resumo_peticao: '',
+      resumo_contestacao: '',
+      descricao_doencas: '',
+      nexo_causal: '',
+      incapacidade: ''
+    };
   }
 
-  try {
-    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-    if (!GEMINI_API_KEY) {
-      console.error('GEMINI_API_KEY not configured');
-      return new Response(
-        JSON.stringify({ error: 'API key not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+  const results = {
+    resumo_peticao: '',
+    resumo_contestacao: '',
+    descricao_doencas: '',
+    nexo_causal: '',
+    incapacidade: ''
+  };
+
+  const contexto = {
+    peticaoInicial: extractedData.textos_brutos?.peticao_inicial || '',
+    contestacao: extractedData.textos_brutos?.contestacao || '',
+    cids: extractedData.informacoes_medicas?.cids_mencionados?.join(', ') || '',
+    postoTrabalho: '',
+    atividadesLaborais: '',
+    historicoOcupacional: extractedData.historico?.historico_ocupacional || '',
+    exameFisico: '',
+    examesComplementares: extractedData.exame_clinico?.exames_complementares || '',
+    antecedentes: extractedData.historico?.antecedentes_patologicos || '',
+    tratamentos: extractedData.historico?.tratamentos_realizados || '',
+    historiaAcidente: extractedData.acidente?.descricao || '',
+    historiaAtual: extractedData.historico?.historia_atual || ''
+  };
+
+  const summariesToGenerate: Array<{ tipo: string; shouldGenerate: boolean; step: string; progress: number }> = [
+    { tipo: 'resumo_peticao', shouldGenerate: !!contexto.peticaoInicial, step: 'Gerando resumo da petição inicial...', progress: 50 },
+    { tipo: 'resumo_contestacao', shouldGenerate: !!contexto.contestacao, step: 'Gerando resumo da contestação...', progress: 60 },
+    { tipo: 'descricao_doencas', shouldGenerate: !!contexto.cids, step: 'Gerando descrição técnica das doenças...', progress: 70 },
+    { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || !!contexto.historicoOcupacional || !!contexto.historiaAcidente, step: 'Analisando nexo causal...', progress: 80 },
+    { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares, step: 'Analisando incapacidade laboral...', progress: 90 }
+  ];
+
+  // Generate summaries sequentially with progress updates
+  for (const { tipo, shouldGenerate, step, progress } of summariesToGenerate) {
+    if (!shouldGenerate) continue;
+
+    try {
+      // Update progress
+      await supabaseAdmin
+        .from('import_jobs')
+        .update({ 
+          progress, 
+          current_step: step,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', jobId);
+
+      console.log(`Generating AI summary: ${tipo}`);
+      
+      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [
+            { 
+              role: 'system', 
+              content: 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.' 
+            },
+            { role: 'user', content: getPromptForType(tipo, contexto) }
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        console.error(`Failed to generate ${tipo}: ${response.status}`);
+        continue;
+      }
+
+      const data = await response.json();
+      const texto = data.choices?.[0]?.message?.content || '';
+      console.log(`Successfully generated ${tipo}`);
+      
+      if (tipo in results) {
+        (results as any)[tipo] = texto;
+      }
+    } catch (error) {
+      console.error(`Error generating ${tipo}:`, error);
     }
+  }
 
-    const { pdfBase64, fileName } = await req.json();
+  return results;
+}
 
-    if (!pdfBase64) {
-      return new Response(
-        JSON.stringify({ error: 'No PDF content provided' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+// Background processing function
+async function processarPDFBackground(
+  jobId: string,
+  pdfBase64: string,
+  fileName: string,
+  supabaseAdmin: any
+) {
+  try {
+    // Update progress: Starting
+    await supabaseAdmin
+      .from('import_jobs')
+      .update({ 
+        progress: 5, 
+        current_step: 'Enviando PDF para análise...',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', jobId);
+
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY não configurada");
     }
 
     console.log(`Processing PDF: ${fileName}, size: ${pdfBase64.length} chars`);
 
-    // Step 1: Call Gemini API with PDF to extract data
+    // Update progress: Calling Gemini
+    await supabaseAdmin
+      .from('import_jobs')
+      .update({ 
+        progress: 10, 
+        current_step: 'Extraindo dados do PDF com IA...',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', jobId);
+
+    console.log(`Calling Gemini API with model: ${GEMINI_MODEL}`);
+    
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
-    const geminiRequest = {
-      contents: [
-        {
+    const geminiResponse = await fetch(geminiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
           parts: [
             {
               inlineData: {
@@ -427,98 +435,202 @@ serve(async (req) => {
                 data: pdfBase64
               }
             },
-            {
-              text: systemPrompt
-            }
+            { text: systemPrompt }
           ]
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          topP: 0.95,
+          maxOutputTokens: 32768,
+          responseMimeType: "application/json"
         }
-      ],
-      generationConfig: {
-        temperature: 0.1,
-        topP: 0.95,
-        maxOutputTokens: 32768,
-        responseMimeType: "application/json"
-      }
-    };
-
-    console.log(`Calling Gemini API with model: ${GEMINI_MODEL}`);
-
-    const geminiResponse = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(geminiRequest),
+      })
     });
 
     if (!geminiResponse.ok) {
       const errorText = await geminiResponse.text();
-      console.error('Gemini API error:', geminiResponse.status, errorText);
-      return new Response(
-        JSON.stringify({ error: 'Failed to process PDF with AI', details: errorText }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      console.error("Gemini API error:", geminiResponse.status, errorText);
+      throw new Error(`Erro na API Gemini: ${geminiResponse.status}`);
     }
 
     const geminiData = await geminiResponse.json();
-    console.log('Gemini response received, finishReason:', geminiData.candidates?.[0]?.finishReason);
-
-    // Check for truncation
     const finishReason = geminiData.candidates?.[0]?.finishReason;
-    if (finishReason === 'MAX_TOKENS') {
-      console.warn('Response was truncated due to max tokens limit');
+    console.log(`Gemini response received, finishReason: ${finishReason}`);
+
+    if (finishReason === "MAX_TOKENS") {
+      console.warn("Response was truncated due to max tokens limit");
     }
 
-    // Extract the generated content
     const generatedText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
-
     if (!generatedText) {
-      console.error('No content in Gemini response:', JSON.stringify(geminiData));
-      return new Response(
-        JSON.stringify({ error: 'No content extracted from PDF' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      console.error("No content in Gemini response:", JSON.stringify(geminiData).substring(0, 500));
+      throw new Error("Resposta inválida da IA - nenhum conteúdo extraído");
     }
 
-    console.log('Raw response length:', generatedText.length);
+    console.log(`Raw response length: ${generatedText.length}`);
 
-    // Parse the JSON response from Gemini with truncation handling
+    // Update progress: Processing response
+    await supabaseAdmin
+      .from('import_jobs')
+      .update({ 
+        progress: 40, 
+        current_step: 'Processando dados extraídos...',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', jobId);
+
+    // Parse JSON
     let extractedData = tryFixTruncatedJson(generatedText);
-    
     if (!extractedData) {
-      console.error('Failed to parse Gemini response as JSON:', generatedText.substring(0, 500));
-      return new Response(
-        JSON.stringify({ error: 'Failed to parse extracted data' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      console.error("Failed to parse Gemini response as JSON:", generatedText.substring(0, 500));
+      throw new Error("Não foi possível processar a resposta da IA");
     }
 
-    // Ensure valid structure with all required fields
     extractedData = ensureValidStructure(extractedData);
+    console.log("Successfully extracted data from PDF");
 
-    console.log('Successfully extracted data from PDF');
+    // Generate AI summaries with progress updates
+    console.log("Starting AI summary generation...");
+    const resumosIA = await gerarResumosIA(extractedData, supabaseAdmin, jobId);
+    console.log("AI summaries generated successfully");
 
-    // Step 2: Generate AI summaries based on extracted data
-    console.log('Starting AI summary generation...');
-    const resumosIA = await gerarResumosIA(extractedData);
-    console.log('AI summaries generated successfully');
-
-    // Add resumos_ia to the response
+    // Add resumos to extracted data
     (extractedData as any).resumos_ia = resumosIA;
 
+    // Update progress: Finalizing
+    await supabaseAdmin
+      .from('import_jobs')
+      .update({ 
+        progress: 95, 
+        current_step: 'Finalizando processamento...',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', jobId);
+
+    // Build result
+    const result = {
+      success: true,
+      data: extractedData,
+      model: GEMINI_MODEL,
+      truncated: finishReason === "MAX_TOKENS"
+    };
+
+    // Save result as completed
+    await supabaseAdmin
+      .from('import_jobs')
+      .update({ 
+        status: 'completed',
+        progress: 100, 
+        current_step: 'Processamento concluído!',
+        result: result,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', jobId);
+
+    console.log(`Job ${jobId} completed successfully`);
+
+  } catch (error) {
+    console.error(`Job ${jobId} failed:`, error);
+    
+    const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido no processamento';
+    
+    // Save error
+    await supabaseAdmin
+      .from('import_jobs')
+      .update({ 
+        status: 'failed',
+        error: errorMessage,
+        current_step: 'Erro no processamento',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', jobId);
+  }
+}
+
+serve(async (req) => {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const { pdfBase64, fileName } = await req.json();
+
+    if (!pdfBase64 || !fileName) {
+      return new Response(
+        JSON.stringify({ error: "pdfBase64 e fileName são obrigatórios" }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Create Supabase admin client
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Get user_id from auth token
+    const authHeader = req.headers.get('Authorization');
+    let userId: string | null = null;
+
+    if (authHeader) {
+      const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+      const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } }
+      });
+      
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      userId = user?.id || null;
+    }
+
+    if (!userId) {
+      return new Response(
+        JSON.stringify({ error: "Usuário não autenticado" }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Create job record
+    const { data: job, error: jobError } = await supabaseAdmin
+      .from('import_jobs')
+      .insert({
+        user_id: userId,
+        status: 'processing',
+        progress: 0,
+        current_step: 'Iniciando processamento...'
+      })
+      .select('id')
+      .single();
+
+    if (jobError || !job) {
+      console.error("Error creating job:", jobError);
+      return new Response(
+        JSON.stringify({ error: "Erro ao criar job de processamento" }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const jobId = job.id;
+    console.log(`Created job ${jobId} for user ${userId}`);
+
+    // Start background processing using EdgeRuntime.waitUntil
+    // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
+    EdgeRuntime.waitUntil(processarPDFBackground(jobId, pdfBase64, fileName, supabaseAdmin));
+
+    // Return immediately with jobId
     return new Response(
       JSON.stringify({ 
-        success: true, 
-        data: extractedData,
-        model: GEMINI_MODEL,
-        truncated: finishReason === 'MAX_TOKENS'
+        jobId,
+        message: "Processamento iniciado. Use o endpoint check-import-status para acompanhar." 
       }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { 
+        status: 202, 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      }
     );
 
   } catch (error: unknown) {
-    console.error('Error processing PDF:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    console.error("Error in processar-autos:", error);
+    const errorMessage = error instanceof Error ? error.message : 'Erro interno';
     return new Response(
       JSON.stringify({ error: errorMessage }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
