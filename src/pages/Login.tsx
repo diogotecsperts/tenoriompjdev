@@ -1,13 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Stethoscope, Lock, Mail, User, Eye, EyeOff } from "lucide-react";
+import { Stethoscope, Lock, Mail, User, Eye, EyeOff, Settings } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,12 +24,41 @@ export default function Login() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Evita "vai e volta" entre / e /dashboard enquanto o perfil ainda carrega
-    if (!loading && isAuthenticated && profile && !isNavigating) {
-      setIsNavigating(true);
-      navigate("/dashboard", { replace: true });
+    const checkDevAndNavigate = async () => {
+      if (!loading && isAuthenticated && profile && !isNavigating) {
+        // Check if user is developer and in dev mode
+        if (devMode) {
+          const { data: isDev } = await supabase.rpc("is_developer");
+          if (isDev) {
+            setIsNavigating(true);
+            navigate("/dev-panel", { replace: true });
+            return;
+          }
+        }
+        setIsNavigating(true);
+        navigate("/dashboard", { replace: true });
+      }
+    };
+    checkDevAndNavigate();
+  }, [loading, isAuthenticated, profile, isNavigating, navigate, devMode]);
+
+  const handleDevClick = () => {
+    devClickCountRef.current += 1;
+    if (devClickTimeoutRef.current) clearTimeout(devClickTimeoutRef.current);
+    
+    if (devClickCountRef.current >= 3) {
+      setDevMode(!devMode);
+      devClickCountRef.current = 0;
+      toast({
+        title: devMode ? "Modo normal" : "Modo Desenvolvedor",
+        description: devMode ? "Voltando ao login padrão" : "Acesso de desenvolvedor ativado",
+      });
+    } else {
+      devClickTimeoutRef.current = setTimeout(() => {
+        devClickCountRef.current = 0;
+      }, 500);
     }
-  }, [loading, isAuthenticated, profile, isNavigating, navigate]);
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,6 +255,21 @@ export default function Login() {
               </a>
             </p>
           </div>
+
+          {/* Dev Mode Button - Discreet */}
+          <button
+            onClick={handleDevClick}
+            className={cn(
+              "fixed bottom-4 right-4 p-2 rounded-full transition-all",
+              devMode 
+                ? "bg-primary/20 text-primary" 
+                : "opacity-30 hover:opacity-50 text-muted-foreground"
+            )}
+            type="button"
+            aria-label="Developer mode"
+          >
+            <Settings className="h-4 w-4" />
+          </button>
         </div>
       </div>
     </div>;

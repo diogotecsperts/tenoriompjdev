@@ -8,6 +8,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { LaudoProvider } from "@/contexts/LaudoContext";
 import { NavigationGuardProvider } from "@/contexts/NavigationGuardContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { DevProtectedRoute } from "@/components/DevProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -18,6 +19,7 @@ import Configuracoes from "./pages/Configuracoes";
 import Impugnacao from "./pages/Impugnacao";
 import Financeiro from "./pages/Financeiro";
 import Admin from "./pages/Admin";
+import DevPanel from "./pages/DevPanel";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -113,6 +115,14 @@ function AppRoutes() {
           <ProtectedWithLayout>
             <Admin />
           </ProtectedWithLayout>
+        }
+      />
+      <Route
+        path="/dev-panel"
+        element={
+          <DevProtectedRoute>
+            <DevPanel />
+          </DevProtectedRoute>
         }
       />
       <Route path="*" element={<NotFound />} />
