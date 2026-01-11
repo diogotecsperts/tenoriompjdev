@@ -2,7 +2,6 @@ import { useState } from "react";
 import { 
   LayoutDashboard, 
   Users, 
-  Cpu, 
   FileText, 
   Settings, 
   LogOut,
@@ -17,11 +16,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { DevDashboard } from "@/components/dev-panel/DevDashboard";
 import { DevUsersList } from "@/components/dev-panel/DevUsersList";
-import { DevAIConfig } from "@/components/dev-panel/DevAIConfig";
 import { DevLogs } from "@/components/dev-panel/DevLogs";
-import { DevSystemConfig } from "@/components/dev-panel/DevSystemConfig";
+import { DevSettings } from "@/components/dev-panel/DevSettings";
 
-type DevTab = "dashboard" | "users" | "ai" | "logs" | "system";
+type DevTab = "dashboard" | "users" | "logs" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -32,9 +30,8 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "users", label: "Usuários", icon: Users },
-  { id: "ai", label: "IA & Modelos", icon: Cpu },
   { id: "logs", label: "Logs & Métricas", icon: FileText },
-  { id: "system", label: "Sistema", icon: Settings },
+  { id: "settings", label: "Configurações", icon: Settings },
 ];
 
 export default function DevPanel() {
@@ -54,12 +51,10 @@ export default function DevPanel() {
         return <DevDashboard />;
       case "users":
         return <DevUsersList />;
-      case "ai":
-        return <DevAIConfig />;
       case "logs":
         return <DevLogs />;
-      case "system":
-        return <DevSystemConfig />;
+      case "settings":
+        return <DevSettings />;
       default:
         return <DevDashboard />;
     }
