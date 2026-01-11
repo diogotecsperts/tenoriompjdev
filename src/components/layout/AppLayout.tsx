@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigationGuardContext } from "@/contexts/NavigationGuardContext";
+import { supabase } from "@/integrations/supabase/client";
 import {
   LayoutDashboard,
   FilePlus,
@@ -16,6 +17,7 @@ import {
   User,
   ChevronLeft,
   Menu,
+  Terminal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -52,6 +54,17 @@ export function AppLayout({ children }: AppLayoutProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [gerarLaudoDialogOpen, setGerarLaudoDialogOpen] = useState(false);
+  const [isDeveloper, setIsDeveloper] = useState(false);
+
+  useEffect(() => {
+    const checkDevRole = async () => {
+      if (user) {
+        const { data } = await supabase.rpc("is_developer");
+        setIsDeveloper(data === true);
+      }
+    };
+    checkDevRole();
+  }, [user]);
 
   const handleSignOut = async () => {
     await logout();
@@ -249,6 +262,27 @@ export function AppLayout({ children }: AppLayoutProps) {
             <Settings className="h-4 w-4 flex-shrink-0" />
             {!collapsed && <span>Configurações</span>}
           </Link>
+          {isDeveloper && (
+            <Link
+              to="/dev-panel"
+              onClick={(e) => {
+                if (isGuarded && location.pathname.startsWith("/laudo/")) {
+                  e.preventDefault();
+                  if (!requestNavigation("/dev-panel")) {
+                    return;
+                  }
+                }
+                setMobileOpen(false);
+              }}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                "text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <Terminal className="h-4 w-4 flex-shrink-0" />
+              {!collapsed && <span>DevPanel</span>}
+            </Link>
+          )}
           <button
             onClick={handleSignOut}
             className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors w-full text-left text-muted-foreground hover:bg-destructive/10 hover:text-destructive"

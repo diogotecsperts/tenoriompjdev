@@ -8,7 +8,8 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
-  Terminal
+  Terminal,
+  Stethoscope
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -120,6 +121,17 @@ export default function DevPanel() {
               {profile.nome}
             </div>
           )}
+          <Button
+            variant="ghost"
+            className={cn(
+              "w-full justify-start gap-3",
+              sidebarCollapsed && "justify-center px-2"
+            )}
+            onClick={() => navigate("/dashboard")}
+          >
+            <Stethoscope className="h-5 w-5 flex-shrink-0" />
+            {!sidebarCollapsed && <span>Dashboard Médico</span>}
+          </Button>
           <Button
             variant="ghost"
             className={cn(
