@@ -19,6 +19,9 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [emailReadOnly, setEmailReadOnly] = useState(true);
   const [passwordReadOnly, setPasswordReadOnly] = useState(true);
+  const [devMode, setDevMode] = useState(false);
+  const devClickCountRef = useRef(0);
+  const devClickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const { login, signup, isAuthenticated, profile, loading } = useAuth();
   const navigate = useNavigate();
