@@ -11,6 +11,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { DevProtectedRoute } from "@/components/DevProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { GlobalErrorListener } from "@/components/GlobalErrorListener";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Historico from "./pages/Historico";
@@ -127,6 +128,7 @@ const App = () => (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
         <TooltipProvider>
+          <GlobalErrorListener />
           <Toaster />
           <Sonner />
           <BrowserRouter>

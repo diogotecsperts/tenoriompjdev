@@ -49,11 +49,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadedUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // Timeout de segurança para evitar loading infinito (10 segundos)
+    const PROFILE_LOAD_TIMEOUT = 10000;
+
     // Função centralizada para carregar dados do usuário
     const loadUserData = async (session: Session) => {
       // Evitar chamadas duplicadas
       if (isLoadingUserDataRef.current) return;
       isLoadingUserDataRef.current = true;
+
+      // Timeout de segurança
+      const timeoutId = setTimeout(() => {
+        if (isLoadingUserDataRef.current) {
+          console.error("Timeout ao carregar perfil - forçando fim do loading");
+          isLoadingUserDataRef.current = false;
+          setLoading(false);
+          toast({
+            variant: "destructive",
+            title: "Erro ao carregar perfil",
+            description: "Tempo esgotado. Tente recarregar a página.",
+          });
+        }
+      }, PROFILE_LOAD_TIMEOUT);
 
       try {
         const [profileResult, roleResult] = await Promise.all([
@@ -64,6 +81,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .single(),
           supabase.rpc("is_admin"),
         ]);
+
+        clearTimeout(timeoutId);
 
         // CRÍTICO: Verificar se o usuário tem perfil válido
         if (!profileResult.data) {
@@ -95,7 +114,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUserRole(roleResult.data ? "admin" : "user");
         loadedUserIdRef.current = session.user.id;
       } catch (error) {
+        clearTimeout(timeoutId);
         console.error("Erro ao carregar dados do usuário:", error);
+        toast({
+          variant: "destructive",
+          title: "Erro ao carregar perfil",
+          description: "Não foi possível carregar seus dados. Tente recarregar.",
+        });
       } finally {
         isLoadingUserDataRef.current = false;
         setLoading(false);
