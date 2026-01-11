@@ -12,13 +12,15 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { Loader2 } from "lucide-react";
+import { Loader2, Shield } from "lucide-react";
 
 interface DevUserSettingsProps {
   userId: string;
   userName: string;
+  userRoles: string[];
   onSaved: () => void;
   onCancel: () => void;
 }
@@ -36,6 +38,12 @@ interface UserSettings {
     gerar_resumos: boolean;
     assistente_ia: boolean;
   };
+}
+
+interface RolesState {
+  user: boolean;
+  admin: boolean;
+  developer: boolean;
 }
 
 const AI_PROVIDERS = [
@@ -103,16 +111,30 @@ const DEFAULT_SETTINGS: UserSettings = {
 export function DevUserSettings({
   userId,
   userName,
+  userRoles,
   onSaved,
   onCancel,
 }: DevUserSettingsProps) {
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
+  const [roles, setRoles] = useState<RolesState>({
+    user: userRoles.includes("user"),
+    admin: userRoles.includes("admin"),
+    developer: userRoles.includes("developer"),
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchSettings();
   }, [userId]);
+
+  useEffect(() => {
+    setRoles({
+      user: userRoles.includes("user"),
+      admin: userRoles.includes("admin"),
+      developer: userRoles.includes("developer"),
+    });
+  }, [userRoles]);
 
   const fetchSettings = async () => {
     setLoading(true);
@@ -148,6 +170,57 @@ export function DevUserSettings({
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRoleChange = async (role: "user" | "admin" | "developer", checked: boolean) => {
+    try {
+      if (checked) {
+        // Add role
+        const { error } = await supabase
+          .from("user_roles")
+          .insert({ user_id: userId, role });
+        
+        if (error) {
+          if (error.code === "23505") {
+            // Duplicate, already exists
+            toast({
+              title: "Info",
+              description: `Usuário já possui a role ${role}`,
+            });
+          } else {
+            throw error;
+          }
+        } else {
+          setRoles({ ...roles, [role]: true });
+          toast({
+            title: "Sucesso",
+            description: `Role ${role} adicionada`,
+          });
+        }
+      } else {
+        // Remove role
+        const { error } = await supabase
+          .from("user_roles")
+          .delete()
+          .eq("user_id", userId)
+          .eq("role", role);
+
+        if (error) throw error;
+
+        setRoles({ ...roles, [role]: false });
+        toast({
+          title: "Sucesso",
+          description: `Role ${role} removida`,
+        });
+      }
+    } catch (error) {
+      console.error("Error updating role:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Falha ao atualizar role",
+      });
     }
   };
 
@@ -214,6 +287,54 @@ export function DevUserSettings({
 
   return (
     <div className="space-y-6">
+      {/* Roles Section */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Shield className="h-5 w-5 text-primary" />
+          <h3 className="text-lg font-semibold">Roles do Usuário</h3>
+        </div>
+        
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="flex items-center space-x-2 p-3 rounded-lg border border-border">
+            <Checkbox
+              id="role-user"
+              checked={roles.user}
+              onCheckedChange={(checked) => handleRoleChange("user", checked as boolean)}
+            />
+            <Label htmlFor="role-user" className="flex-1 cursor-pointer">
+              <div className="font-medium">User</div>
+              <div className="text-xs text-muted-foreground">Acesso básico</div>
+            </Label>
+          </div>
+
+          <div className="flex items-center space-x-2 p-3 rounded-lg border border-border bg-primary/5">
+            <Checkbox
+              id="role-admin"
+              checked={roles.admin}
+              onCheckedChange={(checked) => handleRoleChange("admin", checked as boolean)}
+            />
+            <Label htmlFor="role-admin" className="flex-1 cursor-pointer">
+              <div className="font-medium">Admin</div>
+              <div className="text-xs text-muted-foreground">Gerenciar usuários</div>
+            </Label>
+          </div>
+
+          <div className="flex items-center space-x-2 p-3 rounded-lg border border-destructive/50 bg-destructive/5">
+            <Checkbox
+              id="role-developer"
+              checked={roles.developer}
+              onCheckedChange={(checked) => handleRoleChange("developer", checked as boolean)}
+            />
+            <Label htmlFor="role-developer" className="flex-1 cursor-pointer">
+              <div className="font-medium">Developer</div>
+              <div className="text-xs text-muted-foreground">Acesso total</div>
+            </Label>
+          </div>
+        </div>
+      </div>
+
+      <Separator />
+
       {/* AI Provider */}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Configurações de IA</h3>
