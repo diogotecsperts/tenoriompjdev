@@ -14,6 +14,48 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_usage_logs: {
+        Row: {
+          created_at: string | null
+          error_message: string | null
+          id: string
+          latency_ms: number | null
+          model: string
+          prompt_type: string | null
+          provider: string
+          success: boolean | null
+          tokens_input: number | null
+          tokens_output: number | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          latency_ms?: number | null
+          model: string
+          prompt_type?: string | null
+          provider: string
+          success?: boolean | null
+          tokens_input?: number | null
+          tokens_output?: number | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          latency_ms?: number | null
+          model?: string
+          prompt_type?: string | null
+          provider?: string
+          success?: boolean | null
+          tokens_input?: number | null
+          tokens_output?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       financeiro: {
         Row: {
           created_at: string
@@ -454,6 +496,30 @@ export type Database = {
         }
         Relationships: []
       }
+      system_config: {
+        Row: {
+          description: string | null
+          id: string
+          updated_at: string | null
+          updated_by: string | null
+          value: Json
+        }
+        Insert: {
+          description?: string | null
+          id: string
+          updated_at?: string | null
+          updated_by?: string | null
+          value: Json
+        }
+        Update: {
+          description?: string | null
+          id?: string
+          updated_at?: string | null
+          updated_by?: string | null
+          value?: Json
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string | null
@@ -471,6 +537,54 @@ export type Database = {
           created_at?: string | null
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_settings: {
+        Row: {
+          ai_max_tokens: number | null
+          ai_model: string | null
+          ai_provider: string | null
+          ai_requests_used: number | null
+          ai_temperature: number | null
+          created_at: string | null
+          custom_api_key: string | null
+          features_enabled: Json | null
+          id: string
+          last_reset_date: string | null
+          monthly_ai_limit: number | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          ai_max_tokens?: number | null
+          ai_model?: string | null
+          ai_provider?: string | null
+          ai_requests_used?: number | null
+          ai_temperature?: number | null
+          created_at?: string | null
+          custom_api_key?: string | null
+          features_enabled?: Json | null
+          id?: string
+          last_reset_date?: string | null
+          monthly_ai_limit?: number | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          ai_max_tokens?: number | null
+          ai_model?: string | null
+          ai_provider?: string | null
+          ai_requests_used?: number | null
+          ai_temperature?: number | null
+          created_at?: string | null
+          custom_api_key?: string | null
+          features_enabled?: Json | null
+          id?: string
+          last_reset_date?: string | null
+          monthly_ai_limit?: number | null
+          updated_at?: string | null
           user_id?: string
         }
         Relationships: []
@@ -496,6 +610,7 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: never; Returns: boolean }
+      is_developer: { Args: never; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "user" | "developer"
