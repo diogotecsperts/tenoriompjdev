@@ -1,5 +1,5 @@
 import React, { Component, ReactNode } from "react";
-import { AlertTriangle, RefreshCw, Home } from "lucide-react";
+import { AlertTriangle, RefreshCw, Home, Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -11,12 +11,22 @@ interface State {
   hasError: boolean;
   error: Error | null;
   errorInfo: React.ErrorInfo | null;
+  copied: boolean;
 }
+
+// Função segura para verificar ambiente dev (Vite)
+const isDev = (): boolean => {
+  try {
+    return import.meta.env?.DEV === true;
+  } catch {
+    return false;
+  }
+};
 
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
+    this.state = { hasError: false, error: null, errorInfo: null, copied: false };
   }
 
   static getDerivedStateFromError(error: Error): Partial<State> {
@@ -36,8 +46,29 @@ export class ErrorBoundary extends Component<Props, State> {
     window.location.href = "/";
   };
 
+  handleCopyError = async () => {
+    const { error, errorInfo } = this.state;
+    const details = [
+      `Error: ${error?.toString() || "Unknown error"}`,
+      `Stack: ${error?.stack || "No stack trace"}`,
+      `Component Stack: ${errorInfo?.componentStack || "No component stack"}`,
+      `URL: ${window.location.href}`,
+      `Time: ${new Date().toISOString()}`,
+    ].join("\n\n");
+
+    try {
+      await navigator.clipboard.writeText(details);
+      this.setState({ copied: true });
+      setTimeout(() => this.setState({ copied: false }), 2000);
+    } catch {
+      console.error("Failed to copy error details");
+    }
+  };
+
   render() {
     if (this.state.hasError) {
+      const showDevDetails = isDev() && this.state.error;
+
       return (
         <div className="min-h-screen flex items-center justify-center bg-background p-4">
           <Card className="w-full max-w-md">
@@ -51,13 +82,28 @@ export class ErrorBoundary extends Component<Props, State> {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {process.env.NODE_ENV === "development" && this.state.error && (
+              {showDevDetails && (
                 <div className="rounded-md bg-muted p-3 text-sm">
-                  <p className="font-medium text-destructive">
-                    {this.state.error.toString()}
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-medium text-destructive text-xs">Detalhes do erro (dev)</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2"
+                      onClick={this.handleCopyError}
+                    >
+                      {this.state.copied ? (
+                        <Check className="h-3 w-3" />
+                      ) : (
+                        <Copy className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </div>
+                  <p className="font-medium text-destructive break-words">
+                    {this.state.error?.toString()}
                   </p>
                   {this.state.errorInfo && (
-                    <pre className="mt-2 max-h-32 overflow-auto text-xs text-muted-foreground">
+                    <pre className="mt-2 max-h-32 overflow-auto text-xs text-muted-foreground whitespace-pre-wrap">
                       {this.state.errorInfo.componentStack}
                     </pre>
                   )}
