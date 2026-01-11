@@ -38,6 +38,7 @@ interface UserWithSettings extends UserProfile {
   ai_model?: string;
   ai_requests_used?: number;
   monthly_ai_limit?: number;
+  roles: string[];
 }
 
 export function DevUsersList() {
@@ -71,15 +72,26 @@ export function DevUsersList() {
         console.error("Error fetching settings:", settingsError);
       }
 
-      // Merge profiles with settings
+      // Fetch user roles
+      const { data: roles, error: rolesError } = await supabase
+        .from("user_roles")
+        .select("user_id, role");
+
+      if (rolesError) {
+        console.error("Error fetching roles:", rolesError);
+      }
+
+      // Merge profiles with settings and roles
       const usersWithSettings = (profiles || []).map((profile) => {
         const userSettings = settings?.find((s) => s.user_id === profile.id);
+        const userRoles = roles?.filter((r) => r.user_id === profile.id).map((r) => r.role) || [];
         return {
           ...profile,
           ai_provider: userSettings?.ai_provider || "lovable",
           ai_model: userSettings?.ai_model || "google/gemini-3-flash-preview",
           ai_requests_used: userSettings?.ai_requests_used || 0,
           monthly_ai_limit: userSettings?.monthly_ai_limit || 100,
+          roles: userRoles,
         };
       });
 
@@ -113,6 +125,17 @@ export function DevUsersList() {
     fetchUsers();
     setSettingsOpen(false);
     setSelectedUser(null);
+  };
+
+  const getRoleBadgeVariant = (role: string): "default" | "secondary" | "outline" | "destructive" => {
+    switch (role) {
+      case "developer":
+        return "destructive";
+      case "admin":
+        return "default";
+      default:
+        return "outline";
+    }
   };
 
   if (loading) {
@@ -163,7 +186,7 @@ export function DevUsersList() {
               <TableRow>
                 <TableHead>Usuário</TableHead>
                 <TableHead>ID</TableHead>
-                <TableHead>CRM</TableHead>
+                <TableHead>Roles</TableHead>
                 <TableHead>Provider IA</TableHead>
                 <TableHead>Uso IA</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
@@ -195,7 +218,19 @@ export function DevUsersList() {
                     <TableCell>
                       <Badge variant="outline">{user.user_id || "N/A"}</Badge>
                     </TableCell>
-                    <TableCell>{user.crm || "-"}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-1">
+                        {user.roles.length > 0 ? (
+                          user.roles.map((role) => (
+                            <Badge key={role} variant={getRoleBadgeVariant(role)}>
+                              {role}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <Badge 
                         variant={user.ai_provider === "lovable" ? "default" : "secondary"}
@@ -227,7 +262,7 @@ export function DevUsersList() {
 
       {/* User Settings Dialog */}
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               Configurações: {selectedUser?.nome}
@@ -237,6 +272,7 @@ export function DevUsersList() {
             <DevUserSettings
               userId={selectedUser.id}
               userName={selectedUser.nome}
+              userRoles={selectedUser.roles}
               onSaved={handleSettingsSaved}
               onCancel={() => setSettingsOpen(false)}
             />
