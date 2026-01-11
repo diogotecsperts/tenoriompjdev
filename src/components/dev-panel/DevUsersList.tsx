@@ -17,11 +17,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { supabase } from "@/integrations/supabase/client";
-import { Search, Settings, RefreshCw, User } from "lucide-react";
+import { Search, Settings, RefreshCw, User, Trash2, AlertTriangle, Loader2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/hooks/use-toast";
 import { DevUserSettings } from "./DevUserSettings";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface UserProfile {
   id: string;
@@ -41,12 +52,28 @@ interface UserWithSettings extends UserProfile {
   roles: string[];
 }
 
+interface UserDataCount {
+  laudos: number;
+  financeiro: number;
+  modelos: number;
+  impugnacoes: number;
+}
+
 export function DevUsersList() {
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<UserWithSettings[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedUser, setSelectedUser] = useState<UserWithSettings | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  
+  // Delete dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<UserWithSettings | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [userDataCount, setUserDataCount] = useState<UserDataCount | null>(null);
+  const [loadingDataCount, setLoadingDataCount] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -108,6 +135,31 @@ export function DevUsersList() {
     }
   };
 
+  const fetchUserDataCount = async (userId: string) => {
+    setLoadingDataCount(true);
+    try {
+      // Fetch counts in parallel
+      const [laudosRes, financeiroRes, modelosRes, impugnacoesRes] = await Promise.all([
+        supabase.from("laudos").select("id", { count: "exact", head: true }).eq("user_id", userId),
+        supabase.from("financeiro").select("id", { count: "exact", head: true }).eq("user_id", userId),
+        supabase.from("modelos_laudo").select("id", { count: "exact", head: true }).eq("user_id", userId),
+        supabase.from("impugnacoes").select("id", { count: "exact", head: true }).eq("user_id", userId),
+      ]);
+
+      setUserDataCount({
+        laudos: laudosRes.count || 0,
+        financeiro: financeiroRes.count || 0,
+        modelos: modelosRes.count || 0,
+        impugnacoes: impugnacoesRes.count || 0,
+      });
+    } catch (error) {
+      console.error("Error fetching user data count:", error);
+      setUserDataCount(null);
+    } finally {
+      setLoadingDataCount(false);
+    }
+  };
+
   const filteredUsers = users.filter(
     (user) =>
       user.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -125,6 +177,72 @@ export function DevUsersList() {
     fetchUsers();
     setSettingsOpen(false);
     setSelectedUser(null);
+  };
+
+  const openDeleteDialog = (user: UserWithSettings) => {
+    // Prevent self-deletion
+    if (user.id === currentUser?.id) {
+      toast({
+        variant: "destructive",
+        title: "Ação não permitida",
+        description: "Você não pode excluir sua própria conta.",
+      });
+      return;
+    }
+    
+    setUserToDelete(user);
+    setDeleteConfirmText("");
+    setDeleteDialogOpen(true);
+    fetchUserDataCount(user.id);
+  };
+
+  const handleDeleteUser = async () => {
+    if (!userToDelete || deleteConfirmText !== "EXCLUIR") return;
+
+    setDeleting(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) {
+        throw new Error("Não autenticado");
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-user`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${sessionData.session.access_token}`,
+          },
+          body: JSON.stringify({ userId: userToDelete.id }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Erro ao excluir usuário");
+      }
+
+      toast({
+        title: "Usuário excluído",
+        description: `${userToDelete.nome} foi removido permanentemente.`,
+      });
+
+      setDeleteDialogOpen(false);
+      setUserToDelete(null);
+      setDeleteConfirmText("");
+      fetchUsers();
+    } catch (error) {
+      console.error("Error deleting user:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao excluir",
+        description: error instanceof Error ? error.message : "Falha ao excluir usuário",
+      });
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const getRoleBadgeVariant = (role: string): "default" | "secondary" | "outline" | "destructive" => {
@@ -244,13 +362,24 @@ export function DevUsersList() {
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openSettings(user)}
-                      >
-                        <Settings className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openSettings(user)}
+                        >
+                          <Settings className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openDeleteDialog(user)}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                          disabled={user.id === currentUser?.id}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -279,6 +408,82 @@ export function DevUsersList() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Excluir Usuário
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-4">
+                <p>
+                  Você está prestes a excluir permanentemente:
+                </p>
+                
+                <div className="bg-muted p-3 rounded-lg space-y-1">
+                  <p className="font-medium text-foreground">{userToDelete?.nome}</p>
+                  <p className="text-sm">{userToDelete?.email}</p>
+                </div>
+
+                <div className="bg-destructive/10 border border-destructive/20 p-3 rounded-lg">
+                  <p className="text-sm font-medium text-destructive mb-2">
+                    Esta ação irá remover PERMANENTEMENTE:
+                  </p>
+                  {loadingDataCount ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Carregando dados...
+                    </div>
+                  ) : userDataCount ? (
+                    <ul className="text-sm space-y-1 text-foreground">
+                      <li>• {userDataCount.laudos} laudo(s)</li>
+                      <li>• {userDataCount.financeiro} lançamento(s) financeiro(s)</li>
+                      <li>• {userDataCount.modelos} modelo(s) de laudo</li>
+                      <li>• {userDataCount.impugnacoes} impugnação(ões)</li>
+                      <li>• Configurações e dados pessoais</li>
+                      <li>• Arquivos de storage (avatars, logos, PDFs)</li>
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Dados não disponíveis</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">
+                    Digite <span className="font-mono bg-muted px-1 rounded">EXCLUIR</span> para confirmar:
+                  </p>
+                  <Input
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    placeholder="Digite EXCLUIR"
+                    className="font-mono"
+                  />
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteUser}
+              disabled={deleteConfirmText !== "EXCLUIR" || deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Excluindo...
+                </>
+              ) : (
+                "Excluir Usuário"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
