@@ -10,6 +10,7 @@ import { NavigationGuardProvider } from "@/contexts/NavigationGuardContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { DevProtectedRoute } from "@/components/DevProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Historico from "./pages/Historico";
@@ -18,7 +19,6 @@ import LaudoEditor from "./pages/LaudoEditor";
 import Configuracoes from "./pages/Configuracoes";
 import Impugnacao from "./pages/Impugnacao";
 import Financeiro from "./pages/Financeiro";
-import Admin from "./pages/Admin";
 import DevPanel from "./pages/DevPanel";
 import NotFound from "./pages/NotFound";
 
@@ -110,14 +110,6 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/admin"
-        element={
-          <ProtectedWithLayout>
-            <Admin />
-          </ProtectedWithLayout>
-        }
-      />
-      <Route
         path="/dev-panel"
         element={
           <DevProtectedRoute>
@@ -131,23 +123,25 @@ function AppRoutes() {
 }
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <AuthProvider>
-            <LaudoProvider>
-              <NavigationGuardProvider>
-                <AppRoutes />
-              </NavigationGuardProvider>
-            </LaudoProvider>
-          </AuthProvider>
-        </BrowserRouter>
-      </TooltipProvider>
-    </ThemeProvider>
-  </QueryClientProvider>
+  <ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <AuthProvider>
+              <LaudoProvider>
+                <NavigationGuardProvider>
+                  <AppRoutes />
+                </NavigationGuardProvider>
+              </LaudoProvider>
+            </AuthProvider>
+          </BrowserRouter>
+        </TooltipProvider>
+      </ThemeProvider>
+    </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;
