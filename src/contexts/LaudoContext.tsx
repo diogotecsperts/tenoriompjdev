@@ -3,6 +3,23 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./AuthContext";
 import { toast } from "@/hooks/use-toast";
 
+// AI Metadata interface for tracking AI usage per laudo
+export interface AIMetadata {
+  importDate: string;
+  pdfExtraction: {
+    provider: string;
+    model: string;
+    durationMs?: number;
+  };
+  summaries: {
+    provider: string;
+    model: string;
+    durationMs?: number;
+    generated?: string[];
+  };
+  totalDurationMs?: number;
+}
+
 export interface LaudoData {
   id: string;
   title: string;
@@ -69,6 +86,8 @@ export interface LaudoData {
   descricaoTecnicaDoencas: string;
   analiseIncapacidadeLaboral: string;
   referenciasBibliograficas: string;
+  // AI metadata for tracking import AI usage
+  aiMetadata?: AIMetadata;
 }
 
 interface LaudoContextType {
@@ -180,6 +199,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           descricaoTecnicaDoencas: (dbLaudo as any).descricao_tecnica_doencas || "",
           analiseIncapacidadeLaboral: (dbLaudo as any).analise_incapacidade_laboral || "",
           referenciasBibliograficas: (dbLaudo as any).referencias_bibliograficas || "",
+          aiMetadata: (dbLaudo as any).ai_metadata || undefined,
           peritoLogoUrl: "",
         }));
 
@@ -411,6 +431,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           descricaoTecnicaDoencas: (data as any).descricao_tecnica_doencas || '',
           analiseIncapacidadeLaboral: (data as any).analise_incapacidade_laboral || '',
           referenciasBibliograficas: (data as any).referencias_bibliograficas || '',
+          aiMetadata: (data as any).ai_metadata || undefined,
         };
         
         setCurrentLaudo(laudo);

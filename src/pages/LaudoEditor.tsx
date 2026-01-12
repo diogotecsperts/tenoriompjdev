@@ -44,6 +44,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Progress } from "@/components/ui/progress";
 import { useLaudoProgress } from "@/hooks/useLaudoProgress";
 import { generateLaudoPDF, validateLaudoForPDF } from "@/utils/generateLaudoPDF";
+import { AIInfoModal } from "@/components/laudo/AIInfoModal";
 
 // Import section components
 import { DadosProcesso } from "@/components/laudo/sections/DadosProcesso";
@@ -240,6 +241,11 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState("");
   
+  // Secret AI Info Modal state
+  const [showAIInfoModal, setShowAIInfoModal] = useState(false);
+  const [secretClickCount, setSecretClickCount] = useState(0);
+  const secretClickTimeout = useRef<NodeJS.Timeout | null>(null);
+  
   // Progress tracking
   const progress = useLaudoProgress(currentLaudo);
   
@@ -298,6 +304,40 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
     }
   }, [currentLaudo]);
 
+  // Secret click detection - 5 rapid clicks to show AI info
+  useEffect(() => {
+    if (secretClickCount >= 5) {
+      if (currentLaudo?.aiMetadata) {
+        setShowAIInfoModal(true);
+      } else {
+        toast({
+          title: "Sem dados de IA",
+          description: "Este laudo não foi importado com IA.",
+        });
+      }
+      setSecretClickCount(0);
+    }
+  }, [secretClickCount, currentLaudo?.aiMetadata]);
+
+  // Keyboard shortcut Ctrl+Shift+A for AI info
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'A') {
+        e.preventDefault();
+        if (currentLaudo?.aiMetadata) {
+          setShowAIInfoModal(true);
+        } else {
+          toast({
+            title: "Sem dados de IA",
+            description: "Este laudo não foi importado com IA.",
+          });
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentLaudo?.aiMetadata]);
+
   const handleSave = () => {
     if (currentLaudo) {
       updateLaudo({ ...currentLaudo, anotacoes: notes } as any);
@@ -336,9 +376,31 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
     }
   };
 
-  const toggleViewMode = () => {
+  // Handle view mode toggle with secret click counting
+  const handleViewModeClick = () => {
+    // Normal toggle functionality
     setViewMode(prev => prev === "paginated" ? "infinite" : "paginated");
+    
+    // Secret click counting
+    setSecretClickCount(prev => prev + 1);
+    
+    // Reset after 2 seconds of no clicks
+    if (secretClickTimeout.current) {
+      clearTimeout(secretClickTimeout.current);
+    }
+    secretClickTimeout.current = setTimeout(() => {
+      setSecretClickCount(0);
+    }, 2000);
   };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (secretClickTimeout.current) {
+        clearTimeout(secretClickTimeout.current);
+      }
+    };
+  }, []);
 
   const currentCardIndex = consolidatedCards.findIndex((c) => c.id === activeCard);
 
@@ -554,13 +616,17 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
                     <Button
                       variant="outline"
                       size="icon"
-                      onClick={toggleViewMode}
-                      className="h-9 w-9"
+                      onClick={handleViewModeClick}
+                      className="h-9 w-9 relative"
                     >
                       {viewMode === "paginated" ? (
                         <Scroll className="h-4 w-4" />
                       ) : (
                         <LayoutGrid className="h-4 w-4" />
+                      )}
+                      {/* Subtle indicator when AI metadata exists */}
+                      {currentLaudo?.aiMetadata && (
+                        <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-primary/40" />
                       )}
                     </Button>
                   </TooltipTrigger>
@@ -711,6 +777,13 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Secret AI Info Modal */}
+      <AIInfoModal
+        open={showAIInfoModal}
+        onOpenChange={setShowAIInfoModal}
+        aiMetadata={currentLaudo?.aiMetadata || null}
+      />
     </div>
   );
 }
