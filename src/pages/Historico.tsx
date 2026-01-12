@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
@@ -91,6 +92,8 @@ export default function Historico() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [editingObservacoes, setEditingObservacoes] = useState<{ id: string; value: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState({ current: 0, total: 0 });
 
   const handleOpenLaudo = (id: string) => {
     loadLaudo(id);
@@ -116,15 +119,32 @@ export default function Historico() {
   };
 
   const handleBulkDelete = async () => {
-    const count = selectedIds.size;
-    for (const id of selectedIds) {
-      await deleteLaudo(id);
+    const idsToDelete = Array.from(selectedIds);
+    const total = idsToDelete.length;
+    
+    setIsDeleting(true);
+    setDeleteProgress({ current: 0, total });
+    
+    let successCount = 0;
+    
+    for (let i = 0; i < idsToDelete.length; i++) {
+      setDeleteProgress({ current: i + 1, total });
+      try {
+        await deleteLaudo(idsToDelete[i]);
+        successCount++;
+      } catch (error) {
+        console.error(`Erro ao excluir laudo ${idsToDelete[i]}:`, error);
+      }
     }
+    
+    setIsDeleting(false);
+    setDeleteProgress({ current: 0, total: 0 });
     setSelectedIds(new Set());
     setBulkDeleteDialogOpen(false);
+    
     toast({
       title: "Perícias excluídas",
-      description: `${count} perícia(s) foram removidas com sucesso.`,
+      description: `${successCount} de ${total} perícia(s) foram removidas com sucesso.`,
     });
   };
 
@@ -287,7 +307,7 @@ export default function Historico() {
       </Card>
 
       {/* Bulk Delete Dialog */}
-      <AlertDialog open={bulkDeleteDialogOpen} onOpenChange={setBulkDeleteDialogOpen}>
+      <AlertDialog open={bulkDeleteDialogOpen} onOpenChange={(open) => !isDeleting && setBulkDeleteDialogOpen(open)}>
         <AlertDialogContent className="max-w-md">
           <AlertDialogHeader>
             <div className="flex items-center gap-3 mb-2">
@@ -295,39 +315,55 @@ export default function Historico() {
                 <AlertTriangle className="h-6 w-6 text-destructive" />
               </div>
               <AlertDialogTitle className="text-xl">
-                Excluir {selectedIds.size} perícia{selectedIds.size > 1 ? 's' : ''}?
+                {isDeleting 
+                  ? `Excluindo ${deleteProgress.current} de ${deleteProgress.total}...`
+                  : `Excluir ${selectedIds.size} perícia${selectedIds.size > 1 ? 's' : ''}?`
+                }
               </AlertDialogTitle>
             </div>
             <AlertDialogDescription asChild>
               <div className="space-y-3">
-                <p>
-                  Você está prestes a excluir permanentemente{' '}
-                  <strong>{selectedIds.size}</strong>{' '}
-                  {selectedIds.size > 1 ? 'perícias' : 'perícia'}.
-                </p>
-                
-                <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
-                  <p className="text-amber-800 text-sm font-medium flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4" />
-                    Atenção: Esta ação é irreversível!
-                  </p>
-                  <ul className="text-amber-700 text-xs mt-2 space-y-1 list-disc list-inside">
-                    <li>Todos os dados serão removidos permanentemente</li>
-                    <li>Não será possível recuperar as informações</li>
-                    <li>Documentos e anotações vinculados serão perdidos</li>
-                  </ul>
-                </div>
+                {isDeleting ? (
+                  <div className="space-y-3">
+                    <p>Aguarde enquanto as perícias são excluídas...</p>
+                    <Progress value={(deleteProgress.current / deleteProgress.total) * 100} className="h-2" />
+                    <p className="text-xs text-muted-foreground text-center">
+                      {deleteProgress.current} de {deleteProgress.total} concluído(s)
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <p>
+                      Você está prestes a excluir permanentemente{' '}
+                      <strong>{selectedIds.size}</strong>{' '}
+                      {selectedIds.size > 1 ? 'perícias' : 'perícia'}.
+                    </p>
+                    
+                    <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
+                      <p className="text-amber-800 text-sm font-medium flex items-center gap-2">
+                        <AlertTriangle className="h-4 w-4" />
+                        Atenção: Esta ação é irreversível!
+                      </p>
+                      <ul className="text-amber-700 text-xs mt-2 space-y-1 list-disc list-inside">
+                        <li>Todos os dados serão removidos permanentemente</li>
+                        <li>Não será possível recuperar as informações</li>
+                        <li>Documentos e anotações vinculados serão perdidos</li>
+                      </ul>
+                    </div>
+                  </>
+                )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction 
               onClick={handleBulkDelete}
               className="bg-destructive hover:bg-destructive/90"
+              disabled={isDeleting}
             >
               <Trash2 className="mr-2 h-4 w-4" />
-              Sim, excluir {selectedIds.size > 1 ? 'todas' : ''}
+              {isDeleting ? "Excluindo..." : `Sim, excluir ${selectedIds.size > 1 ? 'todas' : ''}`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -563,7 +563,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
 
       if (error) throw error;
 
-      setLaudos(laudos.filter(l => l.id !== id));
+      setLaudos(prevLaudos => prevLaudos.filter(l => l.id !== id));
       
       toast({
         title: "Laudo excluído",
@@ -592,7 +592,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
 
       // Update local state
-      setLaudos(laudos.map(l => l.id === id ? { ...l, title: newTitle } : l));
+      setLaudos(prevLaudos => prevLaudos.map(l => l.id === id ? { ...l, title: newTitle } : l));
       if (currentLaudo?.id === id) {
         setCurrentLaudo({ ...currentLaudo, title: newTitle });
       }
@@ -624,7 +624,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
 
       // Update local state
-      setLaudos(laudos.map(l => l.id === id ? { ...l, observacoesHistorico: observacoes } : l));
+      setLaudos(prevLaudos => prevLaudos.map(l => l.id === id ? { ...l, observacoesHistorico: observacoes } : l));
       if (currentLaudo?.id === id) {
         setCurrentLaudo({ ...currentLaudo, observacoesHistorico: observacoes });
       }
