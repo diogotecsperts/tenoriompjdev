@@ -505,7 +505,26 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         analise_incapacidade_laboral: extractedData.resumos_ia?.incapacidade || '',
         
         anotacoes: extractedData.resumo ? `[Resumo extraído automaticamente]\n${extractedData.resumo}` : '',
-        status: 'rascunho'
+        status: 'rascunho',
+        
+        // AI Metadata for tracking
+        ai_metadata: aiUsage ? {
+          importDate: new Date().toISOString(),
+          pdfExtraction: {
+            provider: aiUsage.pdfExtraction.provider,
+            model: aiUsage.pdfExtraction.model,
+            durationMs: aiUsage.pdfExtraction.durationMs
+          },
+          summaries: {
+            provider: aiUsage.summaries.provider,
+            model: aiUsage.summaries.model,
+            durationMs: aiUsage.summaries.durationMs,
+            generated: ['resumo_peticao', 'resumo_contestacao', 'descricao_doencas', 'nexo_causal', 'incapacidade'].filter(
+              key => extractedData.resumos_ia?.[key as keyof typeof extractedData.resumos_ia]
+            )
+          },
+          totalDurationMs: aiUsage.totalDurationMs
+        } : null
       };
 
       const { data: newLaudo, error } = await supabase

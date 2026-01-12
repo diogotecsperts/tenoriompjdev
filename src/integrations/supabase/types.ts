@@ -259,6 +259,7 @@ export type Database = {
       laudos: {
         Row: {
           afastamentos: string | null
+          ai_metadata: Json | null
           analise_incapacidade_laboral: string | null
           anotacoes: string | null
           antecedentes: string | null
@@ -329,6 +330,7 @@ export type Database = {
         }
         Insert: {
           afastamentos?: string | null
+          ai_metadata?: Json | null
           analise_incapacidade_laboral?: string | null
           anotacoes?: string | null
           antecedentes?: string | null
@@ -399,6 +401,7 @@ export type Database = {
         }
         Update: {
           afastamentos?: string | null
+          ai_metadata?: Json | null
           analise_incapacidade_laboral?: string | null
           anotacoes?: string | null
           antecedentes?: string | null
