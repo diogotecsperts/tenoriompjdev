@@ -32,6 +32,10 @@ import {
   Play,
   XCircle,
   CheckCircle2,
+  Plus,
+  Copy,
+  Trash2,
+  Star,
 } from "lucide-react";
 
 interface ProviderInfo {
@@ -177,11 +181,132 @@ export function DevSettings() {
   
   // Custom model input for providers with customModelInput=true
   const [customModelInputs, setCustomModelInputs] = useState<Record<string, string>>({});
+  
+  // Favorite models by provider
+  const [favoriteModels, setFavoriteModels] = useState<Record<string, string[]>>({
+    openrouter: [],
+    groq: []
+  });
+  const [copiedModel, setCopiedModel] = useState<string | null>(null);
 
   useEffect(() => {
     fetchConfig();
     fetchApiKeys();
+    fetchFavoriteModels();
   }, []);
+
+  const fetchFavoriteModels = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("system_config")
+        .select("id, value")
+        .in("id", ["favorite_models_openrouter", "favorite_models_groq"]);
+
+      if (error) throw error;
+
+      if (data) {
+        const favorites: Record<string, string[]> = { openrouter: [], groq: [] };
+        data.forEach((item) => {
+          const providerId = item.id.replace("favorite_models_", "");
+          try {
+            favorites[providerId] = Array.isArray(item.value) ? item.value : JSON.parse(item.value as string);
+          } catch {
+            favorites[providerId] = [];
+          }
+        });
+        setFavoriteModels(favorites);
+      }
+    } catch (error) {
+      console.error("Error fetching favorite models:", error);
+    }
+  };
+
+  const addFavoriteModel = async (providerId: string, model: string) => {
+    if (!model.trim()) {
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Digite um identificador de modelo válido",
+      });
+      return;
+    }
+
+    const current = favoriteModels[providerId] || [];
+    if (current.includes(model.trim())) {
+      toast({
+        variant: "destructive",
+        title: "Já existe",
+        description: "Este modelo já está nos favoritos",
+      });
+      return;
+    }
+
+    const updated = [...current, model.trim()];
+    
+    try {
+      const { error } = await supabase
+        .from("system_config")
+        .upsert({
+          id: `favorite_models_${providerId}`,
+          value: updated,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (error) throw error;
+
+      setFavoriteModels((prev) => ({ ...prev, [providerId]: updated }));
+      toast({
+        title: "Adicionado",
+        description: "Modelo adicionado aos favoritos",
+      });
+    } catch (error) {
+      console.error("Error adding favorite model:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Falha ao adicionar modelo aos favoritos",
+      });
+    }
+  };
+
+  const removeFavoriteModel = async (providerId: string, model: string) => {
+    const updated = (favoriteModels[providerId] || []).filter((m) => m !== model);
+    
+    try {
+      const { error } = await supabase
+        .from("system_config")
+        .upsert({
+          id: `favorite_models_${providerId}`,
+          value: updated,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (error) throw error;
+
+      setFavoriteModels((prev) => ({ ...prev, [providerId]: updated }));
+      toast({
+        title: "Removido",
+        description: "Modelo removido dos favoritos",
+      });
+    } catch (error) {
+      console.error("Error removing favorite model:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Falha ao remover modelo dos favoritos",
+      });
+    }
+  };
+
+  const copyModelId = (model: string) => {
+    navigator.clipboard.writeText(model);
+    setCopiedModel(model);
+    toast({
+      title: "Copiado",
+      description: "Identificador copiado para área de transferência",
+    });
+    setTimeout(() => setCopiedModel(null), 2000);
+  };
 
   const fetchConfig = async () => {
     try {
@@ -773,13 +898,88 @@ export function DevSettings() {
               <>
                 <div className="space-y-2">
                   <Label>Nome do Modelo</Label>
-                  <Input
-                    value={config.default_ai_model}
-                    onChange={(e) => setConfig({ ...config, default_ai_model: e.target.value })}
-                    placeholder={getActiveProvider()?.modelPlaceholder}
-                    className="w-full md:w-96"
-                  />
+                  <div className="flex gap-2 items-center">
+                    <Input
+                      value={config.default_ai_model}
+                      onChange={(e) => setConfig({ ...config, default_ai_model: e.target.value })}
+                      placeholder={getActiveProvider()?.modelPlaceholder}
+                      className="w-full md:w-96"
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => addFavoriteModel(config.default_ai_provider, config.default_ai_model)}
+                      disabled={!config.default_ai_model.trim()}
+                      title="Adicionar aos favoritos"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                    {config.default_ai_model && (
+                      <Badge variant="secondary" className="flex items-center gap-1 shrink-0">
+                        <Check className="h-3 w-3" />
+                        Definido
+                      </Badge>
+                    )}
+                  </div>
                 </div>
+
+                {/* Favorite Models List */}
+                {favoriteModels[config.default_ai_provider]?.length > 0 && (
+                  <div className="space-y-2">
+                    <Label className="text-sm text-muted-foreground flex items-center gap-1">
+                      <Star className="h-3 w-3 text-yellow-500" />
+                      Meus modelos favoritos:
+                    </Label>
+                    <div className="flex flex-col gap-1">
+                      {favoriteModels[config.default_ai_provider].map((model) => (
+                        <div
+                          key={model}
+                          className={cn(
+                            "flex items-center justify-between p-2 rounded-md border text-sm group cursor-pointer hover:bg-muted/50 transition-colors",
+                            config.default_ai_model === model && "border-primary bg-primary/5"
+                          )}
+                          onClick={() => setConfig({ ...config, default_ai_model: model })}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Star className="h-3 w-3 text-yellow-500 shrink-0" />
+                            <span className="font-mono text-xs truncate">{model}</span>
+                          </div>
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                copyModelId(model);
+                              }}
+                              title="Copiar identificador"
+                            >
+                              {copiedModel === model ? (
+                                <Check className="h-3 w-3 text-green-500" />
+                              ) : (
+                                <Copy className="h-3 w-3" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-destructive hover:text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeFavoriteModel(config.default_ai_provider, model);
+                              }}
+                              title="Remover dos favoritos"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label className="text-sm text-muted-foreground">Sugestões populares:</Label>
                   <div className="flex flex-wrap gap-2">
@@ -884,12 +1084,85 @@ export function DevSettings() {
               <div className="space-y-2">
                 <Label>Modelo de Fallback</Label>
                 {fallbackProviderHasCustomInput() ? (
-                  <div className="space-y-2">
-                    <Input
-                      value={config.fallback_ai_model}
-                      onChange={(e) => setConfig({ ...config, fallback_ai_model: e.target.value })}
-                      placeholder={getFallbackProvider()?.modelPlaceholder}
-                    />
+                  <div className="space-y-3">
+                    <div className="flex gap-2 items-center">
+                      <Input
+                        value={config.fallback_ai_model}
+                        onChange={(e) => setConfig({ ...config, fallback_ai_model: e.target.value })}
+                        placeholder={getFallbackProvider()?.modelPlaceholder}
+                      />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => addFavoriteModel(config.fallback_ai_provider, config.fallback_ai_model)}
+                        disabled={!config.fallback_ai_model.trim()}
+                        title="Adicionar aos favoritos"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                      {config.fallback_ai_model && (
+                        <Badge variant="secondary" className="flex items-center gap-1 shrink-0 text-xs">
+                          <Check className="h-3 w-3" />
+                          Definido
+                        </Badge>
+                      )}
+                    </div>
+                    
+                    {/* Favorite Models for Fallback */}
+                    {favoriteModels[config.fallback_ai_provider]?.length > 0 && (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Star className="h-3 w-3 text-yellow-500" />
+                          Favoritos:
+                        </Label>
+                        <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
+                          {favoriteModels[config.fallback_ai_provider].map((model) => (
+                            <div
+                              key={model}
+                              className={cn(
+                                "flex items-center justify-between p-1.5 rounded-md border text-xs group cursor-pointer hover:bg-muted/50 transition-colors",
+                                config.fallback_ai_model === model && "border-primary bg-primary/5"
+                              )}
+                              onClick={() => setConfig({ ...config, fallback_ai_model: model })}
+                            >
+                              <div className="flex items-center gap-1 min-w-0">
+                                <Star className="h-2.5 w-2.5 text-yellow-500 shrink-0" />
+                                <span className="font-mono truncate">{model}</span>
+                              </div>
+                              <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    copyModelId(model);
+                                  }}
+                                >
+                                  {copiedModel === model ? (
+                                    <Check className="h-2.5 w-2.5 text-green-500" />
+                                  ) : (
+                                    <Copy className="h-2.5 w-2.5" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5 text-destructive hover:text-destructive"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeFavoriteModel(config.fallback_ai_provider, model);
+                                  }}
+                                >
+                                  <Trash2 className="h-2.5 w-2.5" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
                     <div className="flex flex-wrap gap-1">
                       {getFallbackProviderModels().slice(0, 4).map((model) => (
                         <Button
