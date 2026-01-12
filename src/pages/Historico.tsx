@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
   TableBody,
@@ -46,6 +47,17 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { 
   Search, 
@@ -57,7 +69,9 @@ import {
   Download,
   Filter,
   Plus,
-  AlertTriangle
+  AlertTriangle,
+  MessageSquare,
+  Save
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -67,7 +81,7 @@ const ITEMS_PER_PAGE = 10;
 
 export default function Historico() {
   const navigate = useNavigate();
-  const { laudos, deleteLaudo, loadLaudo } = useLaudo();
+  const { laudos, deleteLaudo, loadLaudo, updateObservacoes } = useLaudo();
   const { toast } = useToast();
   
   const [searchTerm, setSearchTerm] = useState("");
@@ -76,6 +90,7 @@ export default function Historico() {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
+  const [editingObservacoes, setEditingObservacoes] = useState<{ id: string; value: string } | null>(null);
 
   const handleOpenLaudo = (id: string) => {
     loadLaudo(id);
@@ -135,13 +150,26 @@ export default function Historico() {
     }
   };
 
+  // Handle save observacoes
+  const handleSaveObservacoes = async () => {
+    if (!editingObservacoes) return;
+    
+    await updateObservacoes(editingObservacoes.id, editingObservacoes.value);
+    toast({
+      title: "Observação salva",
+      description: "A observação foi atualizada com sucesso.",
+    });
+    setEditingObservacoes(null);
+  };
+
   // Filtered and paginated laudos
   const filteredLaudos = useMemo(() => {
     return laudos.filter(laudo => {
       const matchesSearch = searchTerm === "" || 
         laudo.vitimaName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         laudo.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        laudo.processoNumero?.toLowerCase().includes(searchTerm.toLowerCase());
+        laudo.processoNumero?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (laudo as any).observacoesHistorico?.toLowerCase().includes(searchTerm.toLowerCase());
       
       const matchesStatus = statusFilter === "all" || 
         (statusFilter === "rascunho" && !laudo.conclusaoStatus) ||
@@ -334,11 +362,12 @@ export default function Historico() {
                       onCheckedChange={(checked) => toggleSelectAll(!!checked)}
                     />
                   </TableHead>
-                  <TableHead className="w-[280px]">PERICIADO</TableHead>
+                  <TableHead className="w-[240px]">PERICIADO</TableHead>
                   <TableHead>Nº PROCESSO</TableHead>
                   <TableHead>TIPO</TableHead>
                   <TableHead>DATA PERÍCIA</TableHead>
                   <TableHead>STATUS</TableHead>
+                  <TableHead className="w-[180px]">OBSERVAÇÕES</TableHead>
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -385,6 +414,88 @@ export default function Historico() {
                     </TableCell>
                     <TableCell>
                       {getStatusBadge(laudo.conclusaoStatus)}
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <TooltipProvider>
+                        <Popover
+                          open={editingObservacoes?.id === laudo.id}
+                          onOpenChange={(open) => {
+                            if (open) {
+                              setEditingObservacoes({
+                                id: laudo.id,
+                                value: (laudo as any).observacoesHistorico || ""
+                              });
+                            } else {
+                              setEditingObservacoes(null);
+                            }
+                          }}
+                        >
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-full justify-start gap-2 text-left font-normal"
+                                >
+                                  {(laudo as any).observacoesHistorico ? (
+                                    <>
+                                      <MessageSquare className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                                      <span className="truncate max-w-[100px] text-xs">
+                                        {(laudo as any).observacoesHistorico}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <MessageSquare className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                                      <span className="text-xs text-muted-foreground">Adicionar</span>
+                                    </>
+                                  )}
+                                </Button>
+                              </PopoverTrigger>
+                            </TooltipTrigger>
+                            {(laudo as any).observacoesHistorico && (
+                              <TooltipContent side="top" className="max-w-[300px]">
+                                <p className="text-sm">{(laudo as any).observacoesHistorico}</p>
+                              </TooltipContent>
+                            )}
+                          </Tooltip>
+                          <PopoverContent className="w-80" align="start">
+                            <div className="space-y-3">
+                              <div className="space-y-1">
+                                <h4 className="font-medium text-sm">Observações</h4>
+                                <p className="text-xs text-muted-foreground">
+                                  Adicione notas para identificar este laudo
+                                </p>
+                              </div>
+                              <Textarea
+                                placeholder="Ex: Caso urgente, revisão pendente..."
+                                value={editingObservacoes?.value || ""}
+                                onChange={(e) => setEditingObservacoes(prev => 
+                                  prev ? { ...prev, value: e.target.value } : null
+                                )}
+                                className="min-h-[80px] text-sm"
+                              />
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setEditingObservacoes(null)}
+                                >
+                                  Cancelar
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={handleSaveObservacoes}
+                                >
+                                  <Save className="h-3.5 w-3.5 mr-1.5" />
+                                  Salvar
+                                </Button>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </TooltipProvider>
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>

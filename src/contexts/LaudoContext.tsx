@@ -27,6 +27,7 @@ export interface LaudoData {
   updatedAt: Date;
   status: string;
   anotacoes: string;
+  observacoesHistorico: string; // Nova coluna para observações no histórico
   peritoNome: string;
   peritoEspecialidade: string;
   peritoCRM: string;
@@ -100,6 +101,7 @@ interface LaudoContextType {
   saveLaudo: () => Promise<void>;
   deleteLaudo: (id: string) => Promise<void>;
   renameLaudo: (id: string, newTitle: string) => Promise<void>;
+  updateObservacoes: (id: string, observacoes: string) => Promise<void>;
   refreshLaudos: () => Promise<void>;
 }
 
@@ -141,6 +143,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           updatedAt: new Date(dbLaudo.updated_at),
           status: (dbLaudo as any).status || "rascunho",
           anotacoes: (dbLaudo as any).anotacoes || "",
+          observacoesHistorico: (dbLaudo as any).observacoes_historico || "",
           peritoNome: dbLaudo.perito_nome || "",
           peritoEspecialidade: dbLaudo.perito_especialidade || "",
           peritoCRM: dbLaudo.perito_crm || "",
@@ -273,6 +276,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           updatedAt: new Date(data.updated_at),
           status: 'rascunho',
           anotacoes: '',
+          observacoesHistorico: '',
           peritoNome: data.perito_nome || '',
           peritoEspecialidade: data.perito_especialidade || '',
           peritoCRM: data.perito_crm || '',
@@ -372,6 +376,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           updatedAt: new Date(data.updated_at),
           status: (data as any).status || 'rascunho',
           anotacoes: (data as any).anotacoes || '',
+          observacoesHistorico: (data as any).observacoes_historico || '',
           peritoNome: data.perito_nome || '',
           peritoEspecialidade: data.perito_especialidade || '',
           peritoCRM: data.perito_crm || '',
@@ -606,6 +611,33 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateObservacoes = async (id: string, observacoes: string) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('laudos')
+        .update({ observacoes_historico: observacoes } as any)
+        .eq('id', id)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setLaudos(laudos.map(l => l.id === id ? { ...l, observacoesHistorico: observacoes } : l));
+      if (currentLaudo?.id === id) {
+        setCurrentLaudo({ ...currentLaudo, observacoesHistorico: observacoes });
+      }
+    } catch (error: any) {
+      console.error('Erro ao atualizar observações:', error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao atualizar observações",
+        description: error.message
+      });
+    }
+  };
+
   return (
     <LaudoContext.Provider
       value={{
@@ -618,6 +650,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
         saveLaudo,
         deleteLaudo,
         renameLaudo,
+        updateObservacoes,
         refreshLaudos,
       }}
     >

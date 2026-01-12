@@ -135,7 +135,11 @@ export function HistoricoRecenteTable({ laudos, onDelete, onViewAll }: Historico
             </TableHeader>
             <TableBody>
               {filteredLaudos.map((laudo) => (
-                <TableRow key={laudo.id} className="group">
+                <TableRow 
+                  key={laudo.id} 
+                  className="group cursor-pointer hover:bg-muted/50 transition-colors"
+                  onClick={() => handleOpenLaudo(laudo.id)}
+                >
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <Avatar className="h-8 w-8">
@@ -159,7 +163,7 @@ export function HistoricoRecenteTable({ laudos, onDelete, onViewAll }: Historico
                   <TableCell>
                     {getStatusBadge(laudo.conclusaoStatus)}
                   </TableCell>
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button 

@@ -169,18 +169,46 @@ const VIEW_MODE_STORAGE_KEY = "laudo-editor-view-mode";
 export default function LaudoEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaudo } = useLaudo();
+  const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaudo } = useLaudo();
   const { setGuarded, setOnNavigationRequest } = useNavigationGuardContext();
   const [activeCard, setActiveCard] = useState("preliminares");
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [pendingDestination, setPendingDestination] = useState<string | null>(null);
+  
+  // Dirty state tracking - reference to original laudo state when loaded
+  const originalLaudoRef = useRef<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  // Register navigation guard when laudo is loaded
+  // Function to check if there are actual changes
+  const checkForChanges = useCallback(() => {
+    if (!currentLaudo || !originalLaudoRef.current) return false;
+    // Compare relevant fields only (exclude timestamps and metadata)
+    const currentSnapshot = JSON.stringify({
+      ...currentLaudo,
+      createdAt: undefined,
+      updatedAt: undefined,
+    });
+    return currentSnapshot !== originalLaudoRef.current;
+  }, [currentLaudo]);
+
+  // Update hasUnsavedChanges whenever currentLaudo changes
   useEffect(() => {
-    // Only set up guard when we have a valid laudo ID (not during initial load)
+    if (currentLaudo && originalLaudoRef.current) {
+      setHasUnsavedChanges(checkForChanges());
+    }
+  }, [currentLaudo, checkForChanges]);
+
+  // Register navigation guard - only when there are unsaved changes
+  useEffect(() => {
     if (currentLaudo?.id) {
-      setGuarded(true);
+      setGuarded(hasUnsavedChanges);
       setOnNavigationRequest((destination: string) => {
+        // If no changes, navigate directly
+        if (!hasUnsavedChanges) {
+          navigate(destination);
+          return;
+        }
+        // Otherwise show dialog
         setPendingDestination(destination);
         setShowExitDialog(true);
       });
@@ -190,12 +218,12 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
       setGuarded(false);
       setOnNavigationRequest(null);
     };
-  }, [currentLaudo?.id, setGuarded, setOnNavigationRequest]);
+  }, [currentLaudo?.id, hasUnsavedChanges, setGuarded, setOnNavigationRequest, navigate]);
 
-  // Handle browser back/refresh with beforeunload
+  // Handle browser back/refresh with beforeunload - only if unsaved changes
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (currentLaudo) {
+      if (hasUnsavedChanges) {
         e.preventDefault();
         e.returnValue = "Você tem alterações não salvas. Deseja sair?";
       }
@@ -203,7 +231,7 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [currentLaudo]);
+  }, [hasUnsavedChanges]);
 
   const handleDiscardLaudo = async () => {
     if (currentLaudo?.id) {
@@ -286,7 +314,7 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
   useEffect(() => {
     const initializeLaudo = async () => {
       if (id && id !== "new") {
-        loadLaudo(id);
+        await loadLaudo(id);
       } else if (id === "new" || !id) {
         const newId = await createLaudo();
         if (newId) {
@@ -298,11 +326,25 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Set original reference when laudo is loaded and sync notes
   useEffect(() => {
     if (currentLaudo) {
       setNotes((currentLaudo as any).anotacoes || "");
+      // Set original reference for dirty state detection
+      if (!originalLaudoRef.current || originalLaudoRef.current !== JSON.stringify({
+        ...currentLaudo,
+        createdAt: undefined,
+        updatedAt: undefined,
+      })) {
+        originalLaudoRef.current = JSON.stringify({
+          ...currentLaudo,
+          createdAt: undefined,
+          updatedAt: undefined,
+        });
+        setHasUnsavedChanges(false);
+      }
     }
-  }, [currentLaudo]);
+  }, [currentLaudo?.id]); // Only reset when loading a new laudo
 
   // Secret click detection - 5 rapid clicks to show AI info
   useEffect(() => {
@@ -338,11 +380,21 @@ const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaud
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [currentLaudo?.aiMetadata]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (currentLaudo) {
       updateLaudo({ ...currentLaudo, anotacoes: notes } as any);
     }
-    saveLaudo();
+    await saveLaudo();
+    // Update reference after save to reflect saved state
+    if (currentLaudo) {
+      originalLaudoRef.current = JSON.stringify({
+        ...currentLaudo,
+        anotacoes: notes,
+        createdAt: undefined,
+        updatedAt: undefined,
+      });
+      setHasUnsavedChanges(false);
+    }
   };
 
   const handlePrint = async () => {
