@@ -42,6 +42,9 @@ interface ProviderInfo {
   requiresKey: boolean;
   color: string;
   keyPlaceholder?: string;
+  customModelInput?: boolean;
+  modelPlaceholder?: string;
+  modelDocsUrl?: string;
 }
 
 interface SystemConfig {
@@ -104,17 +107,26 @@ const AI_PROVIDERS: ProviderInfo[] = [
   {
     id: "groq",
     name: "Groq",
-    description: "Inferência ultra-rápida com open-source.",
-    models: ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"],
+    description: "Inferência ultra-rápida com modelos open-source.",
+    models: [
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant",
+      "llama-3.2-90b-vision-preview",
+      "mixtral-8x7b-32768",
+      "gemma2-9b-it"
+    ],
     requiresKey: true,
     color: "hsl(280, 87%, 65%)",
     keyPlaceholder: "gsk_...",
+    customModelInput: true,
+    modelPlaceholder: "llama-3.3-70b-versatile",
+    modelDocsUrl: "https://console.groq.com/docs/models",
   },
   {
     id: "deepseek",
     name: "DeepSeek",
     description: "Modelos de alta qualidade com preços competitivos.",
-    models: ["deepseek-chat", "deepseek-coder"],
+    models: ["deepseek-chat", "deepseek-coder", "deepseek-reasoner"],
     requiresKey: true,
     color: "hsl(200, 95%, 48%)",
     keyPlaceholder: "sk-...",
@@ -122,11 +134,21 @@ const AI_PROVIDERS: ProviderInfo[] = [
   {
     id: "openrouter",
     name: "OpenRouter",
-    description: "Gateway unificado com múltiplos providers.",
-    models: ["openai/gpt-4o", "anthropic/claude-3.5-sonnet", "google/gemini-pro"],
+    description: "Gateway unificado com 200+ modelos de diversos providers.",
+    models: [
+      "openai/gpt-4o",
+      "anthropic/claude-3.5-sonnet",
+      "google/gemini-2.0-flash-001",
+      "meta-llama/llama-3.3-70b-instruct",
+      "thudm/glm-4-air-250414:free",
+      "deepseek/deepseek-r1:free"
+    ],
     requiresKey: true,
     color: "hsl(340, 82%, 52%)",
     keyPlaceholder: "sk-or-...",
+    customModelInput: true,
+    modelPlaceholder: "provider/model-name ou provider/model:variant",
+    modelDocsUrl: "https://openrouter.ai/models",
   },
 ];
 
@@ -152,6 +174,9 @@ export function DevSettings() {
   // Test connection states
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
+  
+  // Custom model input for providers with customModelInput=true
+  const [customModelInputs, setCustomModelInputs] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetchConfig();
@@ -488,6 +513,24 @@ export function DevSettings() {
     return provider?.models || [];
   };
 
+  const activeProviderHasCustomInput = () => {
+    const provider = AI_PROVIDERS.find((p) => p.id === config.default_ai_provider);
+    return provider?.customModelInput || false;
+  };
+
+  const fallbackProviderHasCustomInput = () => {
+    const provider = AI_PROVIDERS.find((p) => p.id === config.fallback_ai_provider);
+    return provider?.customModelInput || false;
+  };
+
+  const getActiveProvider = () => {
+    return AI_PROVIDERS.find((p) => p.id === config.default_ai_provider);
+  };
+
+  const getFallbackProvider = () => {
+    return AI_PROVIDERS.find((p) => p.id === config.fallback_ai_provider);
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -719,25 +762,72 @@ export function DevSettings() {
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Modelo Padrão</CardTitle>
             <CardDescription>
-              Selecione o modelo padrão do provider {AI_PROVIDERS.find(p => p.id === config.default_ai_provider)?.name}
+              {activeProviderHasCustomInput() 
+                ? `Digite qualquer modelo compatível com ${getActiveProvider()?.name} ou selecione uma sugestão`
+                : `Selecione o modelo padrão do provider ${getActiveProvider()?.name}`
+              }
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <Select
-              value={config.default_ai_model}
-              onValueChange={(value) => setConfig({ ...config, default_ai_model: value })}
-            >
-              <SelectTrigger className="w-full md:w-80">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {getActiveProviderModels().map((model) => (
-                  <SelectItem key={model} value={model}>
-                    {model}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <CardContent className="space-y-4">
+            {activeProviderHasCustomInput() ? (
+              <>
+                <div className="space-y-2">
+                  <Label>Nome do Modelo</Label>
+                  <Input
+                    value={config.default_ai_model}
+                    onChange={(e) => setConfig({ ...config, default_ai_model: e.target.value })}
+                    placeholder={getActiveProvider()?.modelPlaceholder}
+                    className="w-full md:w-96"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm text-muted-foreground">Sugestões populares:</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {getActiveProviderModels().map((model) => (
+                      <Button
+                        key={model}
+                        variant={config.default_ai_model === model ? "default" : "outline"}
+                        size="sm"
+                        className="text-xs h-7"
+                        onClick={() => setConfig({ ...config, default_ai_model: model })}
+                      >
+                        {model}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                {getActiveProvider()?.modelDocsUrl && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Globe className="h-3 w-3" />
+                    Ver todos os modelos em{" "}
+                    <a
+                      href={getActiveProvider()?.modelDocsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      {getActiveProvider()?.modelDocsUrl?.replace("https://", "")}
+                    </a>
+                  </p>
+                )}
+              </>
+            ) : (
+              <Select
+                value={config.default_ai_model}
+                onValueChange={(value) => setConfig({ ...config, default_ai_model: value })}
+              >
+                <SelectTrigger className="w-full md:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {getActiveProviderModels().map((model) => (
+                    <SelectItem key={model} value={model}>
+                      {model}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -793,21 +883,44 @@ export function DevSettings() {
 
               <div className="space-y-2">
                 <Label>Modelo de Fallback</Label>
-                <Select
-                  value={config.fallback_ai_model}
-                  onValueChange={(value) => setConfig({ ...config, fallback_ai_model: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {getFallbackProviderModels().map((model) => (
-                      <SelectItem key={model} value={model}>
-                        {model}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {fallbackProviderHasCustomInput() ? (
+                  <div className="space-y-2">
+                    <Input
+                      value={config.fallback_ai_model}
+                      onChange={(e) => setConfig({ ...config, fallback_ai_model: e.target.value })}
+                      placeholder={getFallbackProvider()?.modelPlaceholder}
+                    />
+                    <div className="flex flex-wrap gap-1">
+                      {getFallbackProviderModels().slice(0, 4).map((model) => (
+                        <Button
+                          key={model}
+                          variant={config.fallback_ai_model === model ? "default" : "outline"}
+                          size="sm"
+                          className="text-xs h-6"
+                          onClick={() => setConfig({ ...config, fallback_ai_model: model })}
+                        >
+                          {model.length > 25 ? model.slice(0, 25) + "..." : model}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <Select
+                    value={config.fallback_ai_model}
+                    onValueChange={(value) => setConfig({ ...config, fallback_ai_model: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getFallbackProviderModels().map((model) => (
+                        <SelectItem key={model} value={model}>
+                          {model}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             </div>
 
