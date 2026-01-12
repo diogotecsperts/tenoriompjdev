@@ -280,11 +280,18 @@ const summarySystemPrompt = 'Você é um perito médico especialista em medicina
 
 // Generate AI summaries using configured AI provider
 async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: string): Promise<{
-  resumo_peticao: string;
-  resumo_contestacao: string;
-  descricao_doencas: string;
-  nexo_causal: string;
-  incapacidade: string;
+  resumos: {
+    resumo_peticao: string;
+    resumo_contestacao: string;
+    descricao_doencas: string;
+    nexo_causal: string;
+    incapacidade: string;
+  };
+  aiInfo: {
+    provider: string;
+    model: string;
+    summariesGenerated: number;
+  };
 }> {
   const results = {
     resumo_peticao: '',
@@ -300,7 +307,10 @@ async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: str
 
   if (!aiConfig.apiKey) {
     console.warn('[gerarResumosIA] No API key configured, skipping AI summaries');
-    return results;
+    return {
+      resumos: results,
+      aiInfo: { provider: 'none', model: 'none', summariesGenerated: 0 }
+    };
   }
 
   const contexto = {
@@ -325,6 +335,8 @@ async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: str
     { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || !!contexto.historicoOcupacional || !!contexto.historiaAcidente, step: 'Analisando nexo causal...', progress: 80 },
     { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares, step: 'Analisando incapacidade laboral...', progress: 90 }
   ];
+
+  let summariesGenerated = 0;
 
   // Generate summaries sequentially with progress updates
   for (const { tipo, shouldGenerate, step, progress } of summariesToGenerate) {
@@ -352,13 +364,21 @@ async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: str
       
       if (tipo in results) {
         (results as any)[tipo] = result.text;
+        summariesGenerated++;
       }
     } catch (error) {
       console.error(`[gerarResumosIA] Error generating ${tipo}:`, error);
     }
   }
 
-  return results;
+  return {
+    resumos: results,
+    aiInfo: {
+      provider: aiConfig.provider,
+      model: aiConfig.model,
+      summariesGenerated
+    }
+  };
 }
 
 // Background processing function
@@ -435,11 +455,11 @@ async function processarPDFBackground(
 
     // Generate AI summaries with progress updates
     console.log("[processar-autos] Starting AI summary generation...");
-    const resumosIA = await gerarResumosIA(extractedData, supabaseAdmin, jobId);
+    const resumosResult = await gerarResumosIA(extractedData, supabaseAdmin, jobId);
     console.log("[processar-autos] AI summaries generated successfully");
 
     // Add resumos to extracted data
-    (extractedData as any).resumos_ia = resumosIA;
+    (extractedData as any).resumos_ia = resumosResult.resumos;
 
     // Update progress: Finalizing
     await supabaseAdmin
@@ -451,11 +471,22 @@ async function processarPDFBackground(
       })
       .eq('id', jobId);
 
-    // Build result
+    // Build result with detailed AI usage info
     const result = {
       success: true,
       data: extractedData,
-      model: modelUsed,
+      aiUsage: {
+        pdfExtraction: {
+          provider: 'gemini',
+          model: modelUsed,
+          note: 'Gemini Vision é obrigatório para processar PDFs nativamente'
+        },
+        summaries: {
+          provider: resumosResult.aiInfo.provider,
+          model: resumosResult.aiInfo.model,
+          count: resumosResult.aiInfo.summariesGenerated
+        }
+      },
       truncated: visionResult.finishReason === "MAX_TOKENS"
     };
 
