@@ -20,8 +20,10 @@ import {
   Sparkles,
   Eye,
   Cpu,
-  Clock
+  Clock,
+  AlertTriangle
 } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -605,8 +607,31 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     const { filled, total } = countFilledFields();
     const percentage = Math.round((filled / total) * 100);
 
+    // Check for incomplete extraction
+    const isIncompleteExtraction = aiUsage && (
+      aiUsage.summaries.count < 3 || 
+      aiUsage.summaries.provider === 'none'
+    );
+
     return (
       <div className="space-y-4 max-h-[400px] overflow-y-auto">
+        {/* Warning for incomplete extraction */}
+        {isIncompleteExtraction && (
+          <Alert variant="destructive" className="border-yellow-500/50 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Extração parcial</AlertTitle>
+            <AlertDescription>
+              Alguns campos não puderam ser extraídos automaticamente. 
+              O documento pode estar incompleto ou muito extenso para processar completamente.
+              {aiUsage && aiUsage.summaries.count < 5 && (
+                <span className="block mt-1 font-medium">
+                  Apenas {aiUsage.summaries.count} de 5 resumos foram gerados.
+                </span>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* AI Usage Breakdown */}
         {aiUsage && (
           <div className="p-3 rounded-lg bg-muted/30 border border-border">
@@ -661,10 +686,22 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                     {formatDuration(aiUsage.summaries.durationMs)}
                   </div>
                 )}
-                {aiUsage.summaries.count > 0 && (
-                  <div className="text-xs text-green-500 flex items-center gap-1 mt-1">
-                    <CheckCircle2 className="h-3 w-3" />
-                    {aiUsage.summaries.count} textos gerados
+                {aiUsage.summaries.count > 0 ? (
+                  <div className={cn(
+                    "text-xs flex items-center gap-1 mt-1",
+                    aiUsage.summaries.count >= 3 ? "text-green-500" : "text-yellow-500"
+                  )}>
+                    {aiUsage.summaries.count >= 3 ? (
+                      <CheckCircle2 className="h-3 w-3" />
+                    ) : (
+                      <AlertTriangle className="h-3 w-3" />
+                    )}
+                    {aiUsage.summaries.count} de 5 textos gerados
+                  </div>
+                ) : (
+                  <div className="text-xs text-yellow-500 flex items-center gap-1 mt-1">
+                    <AlertTriangle className="h-3 w-3" />
+                    Nenhum resumo gerado
                   </div>
                 )}
               </div>
