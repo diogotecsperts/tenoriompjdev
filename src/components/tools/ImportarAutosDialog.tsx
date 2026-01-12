@@ -21,7 +21,8 @@ import {
   Eye,
   Cpu,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
@@ -137,6 +138,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const [isDeveloper, setIsDeveloper] = useState(false);
   const [aiConfig, setAiConfig] = useState<AIConfigDisplay | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
 
   // Check if user is developer and fetch AI config
   useEffect(() => {
@@ -334,7 +337,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       setProcessingStep("uploading");
       setUploadProgress(0);
 
-      const filePath = `${user.id}/${Date.now()}-${selectedFile.name}`;
+      const filePathToUpload = `${user.id}/${Date.now()}-${selectedFile.name}`;
       
       const progressInterval = setInterval(() => {
         setUploadProgress(prev => Math.min(prev + 10, 90));
@@ -342,7 +345,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
       const { error: uploadError } = await supabase.storage
         .from('processos-pdf')
-        .upload(filePath, selectedFile);
+        .upload(filePathToUpload, selectedFile);
 
       clearInterval(progressInterval);
       setUploadProgress(100);
@@ -351,6 +354,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         console.error('Upload error:', uploadError);
         throw new Error('Falha ao enviar arquivo');
       }
+
+      // Store file path for potential retry
+      setCurrentFilePath(filePathToUpload);
 
       // Step 2: Convert to base64 and start async processing
       setProcessingStep("analyzing");
@@ -382,7 +388,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           },
           body: JSON.stringify({ 
             pdfBase64: base64,
-            fileName: selectedFile.name
+            fileName: selectedFile.name,
+            filePath: filePathToUpload
           }),
         }
       );
@@ -572,7 +579,92 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setAiUsage(null);
     setAnalysisStep("");
     setAnalysisProgress(0);
+    setIsRetrying(false);
+    setCurrentFilePath(null);
     onOpenChange(false);
+  };
+
+  // Retry processing for incomplete extractions
+  const handleRetry = async () => {
+    if (!currentFilePath || !user || !selectedFile) {
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Não é possível reprocessar: arquivo não encontrado.",
+      });
+      return;
+    }
+
+    setIsRetrying(true);
+    setProcessingStep("analyzing");
+    setAnalysisStep("Reprocessando documento...");
+    setAnalysisProgress(0);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/processar-autos`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ 
+            retryFilePath: currentFilePath,
+            fileName: selectedFile.name
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Retry function error:', errorText);
+        throw new Error('Falha ao iniciar reprocessamento');
+      }
+
+      const { jobId } = await response.json();
+      console.log('Retry job started:', jobId);
+
+      // Start polling for status
+      setAnalysisStep("Reprocessando documento...");
+
+      pollingRef.current = setInterval(async () => {
+        try {
+          const isDone = await checkJobStatus(jobId);
+          if (isDone && pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+            setIsRetrying(false);
+          }
+        } catch (error) {
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
+          console.error('Retry processing error:', error);
+          toast({
+            variant: "destructive",
+            title: "Erro no reprocessamento",
+            description: error instanceof Error ? error.message : "Erro desconhecido",
+          });
+          setProcessingStep("preview");
+          setIsRetrying(false);
+        }
+      }, 3000);
+
+    } catch (error) {
+      console.error('Retry error:', error);
+      toast({
+        variant: "destructive",
+        title: "Erro no reprocessamento",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+      });
+      setProcessingStep("preview");
+      setIsRetrying(false);
+    }
   };
 
   const countFilledFields = (): { filled: number; total: number } => {
@@ -615,20 +707,38 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
     return (
       <div className="space-y-4 max-h-[400px] overflow-y-auto">
-        {/* Warning for incomplete extraction */}
+        {/* Warning for incomplete extraction with retry option */}
         {isIncompleteExtraction && (
           <Alert variant="destructive" className="border-yellow-500/50 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400">
             <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>Extração parcial</AlertTitle>
-            <AlertDescription>
-              Alguns campos não puderam ser extraídos automaticamente. 
-              O documento pode estar incompleto ou muito extenso para processar completamente.
-              {aiUsage && aiUsage.summaries.count < 5 && (
-                <span className="block mt-1 font-medium">
-                  Apenas {aiUsage.summaries.count} de 5 resumos foram gerados.
-                </span>
-              )}
-            </AlertDescription>
+            <div className="flex-1">
+              <AlertTitle className="flex items-center justify-between">
+                <span>Extração parcial</span>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleRetry}
+                  disabled={isRetrying || !currentFilePath}
+                  className="h-7 text-xs border-yellow-500/50 hover:bg-yellow-500/20"
+                >
+                  {isRetrying ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                  )}
+                  Tentar novamente
+                </Button>
+              </AlertTitle>
+              <AlertDescription>
+                Alguns campos não puderam ser extraídos automaticamente. 
+                O documento pode estar incompleto ou muito extenso para processar completamente.
+                {aiUsage && aiUsage.summaries.count < 5 && (
+                  <span className="block mt-1 font-medium">
+                    Apenas {aiUsage.summaries.count} de 5 resumos foram gerados.
+                  </span>
+                )}
+              </AlertDescription>
+            </div>
           </Alert>
         )}
 
