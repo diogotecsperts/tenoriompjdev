@@ -316,7 +316,9 @@ async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: str
   const contexto = {
     peticaoInicial: extractedData.textos_brutos?.peticao_inicial || '',
     contestacao: extractedData.textos_brutos?.contestacao || '',
-    cids: extractedData.informacoes_medicas?.cids_mencionados?.join(', ') || '',
+    cids: Array.isArray(extractedData.informacoes_medicas?.cids_mencionados) && extractedData.informacoes_medicas.cids_mencionados.length > 0
+      ? extractedData.informacoes_medicas.cids_mencionados.join(', ') 
+      : '',
     postoTrabalho: '',
     atividadesLaborais: '',
     historicoOcupacional: extractedData.historico?.historico_ocupacional || '',
@@ -325,16 +327,47 @@ async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: str
     antecedentes: extractedData.historico?.antecedentes_patologicos || '',
     tratamentos: extractedData.historico?.tratamentos_realizados || '',
     historiaAcidente: extractedData.acidente?.descricao || '',
-    historiaAtual: extractedData.historico?.historia_atual || ''
+    historiaAtual: extractedData.historico?.historia_atual || '',
+    laudosMedicos: extractedData.exame_clinico?.laudos_medicos || '',
+    lesoesDescritas: extractedData.exame_clinico?.lesoes_descritas || ''
   };
+
+  // Log context availability for debugging
+  console.log('[gerarResumosIA] Contexto disponível:', {
+    peticaoInicial: contexto.peticaoInicial ? `${contexto.peticaoInicial.length} chars` : 'VAZIO',
+    contestacao: contexto.contestacao ? `${contexto.contestacao.length} chars` : 'VAZIO',
+    cids: contexto.cids || 'VAZIO',
+    historicoOcupacional: contexto.historicoOcupacional ? `${contexto.historicoOcupacional.length} chars` : 'VAZIO',
+    historiaAcidente: contexto.historiaAcidente ? `${contexto.historiaAcidente.length} chars` : 'VAZIO',
+    historiaAtual: contexto.historiaAtual ? `${contexto.historiaAtual.length} chars` : 'VAZIO',
+    examesComplementares: contexto.examesComplementares ? `${contexto.examesComplementares.length} chars` : 'VAZIO',
+    laudosMedicos: contexto.laudosMedicos ? `${contexto.laudosMedicos.length} chars` : 'VAZIO',
+    lesoesDescritas: contexto.lesoesDescritas ? `${contexto.lesoesDescritas.length} chars` : 'VAZIO',
+    antecedentes: contexto.antecedentes ? `${contexto.antecedentes.length} chars` : 'VAZIO',
+    tratamentos: contexto.tratamentos ? `${contexto.tratamentos.length} chars` : 'VAZIO'
+  });
+
+  // More flexible conditions - generate summaries if we have ANY relevant context
+  const hasHistoryContext = !!contexto.historiaAtual || !!contexto.historiaAcidente || !!contexto.historicoOcupacional;
+  const hasMedicalContext = !!contexto.cids || !!contexto.examesComplementares || !!contexto.laudosMedicos || !!contexto.lesoesDescritas;
 
   const summariesToGenerate: Array<{ tipo: string; shouldGenerate: boolean; step: string; progress: number }> = [
     { tipo: 'resumo_peticao', shouldGenerate: !!contexto.peticaoInicial, step: 'Gerando resumo da petição inicial...', progress: 50 },
     { tipo: 'resumo_contestacao', shouldGenerate: !!contexto.contestacao, step: 'Gerando resumo da contestação...', progress: 60 },
-    { tipo: 'descricao_doencas', shouldGenerate: !!contexto.cids, step: 'Gerando descrição técnica das doenças...', progress: 70 },
-    { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || !!contexto.historicoOcupacional || !!contexto.historiaAcidente, step: 'Analisando nexo causal...', progress: 80 },
-    { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares, step: 'Analisando incapacidade laboral...', progress: 90 }
+    // descricao_doencas: gerar se tiver CIDs, ou se tiver histórico ou dados médicos relevantes
+    { tipo: 'descricao_doencas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando descrição técnica das doenças...', progress: 70 },
+    // nexo_causal: gerar se tiver qualquer contexto relevante
+    { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Analisando nexo causal...', progress: 80 },
+    // incapacidade: gerar se tiver CIDs, exames, histórico ou dados médicos
+    { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares || hasHistoryContext || hasMedicalContext, step: 'Analisando incapacidade laboral...', progress: 90 }
   ];
+
+  // Log which summaries will be generated vs skipped
+  for (const { tipo, shouldGenerate } of summariesToGenerate) {
+    if (!shouldGenerate) {
+      console.log(`[gerarResumosIA] Pulando ${tipo} - dados insuficientes`);
+    }
+  }
 
   let summariesGenerated = 0;
 
