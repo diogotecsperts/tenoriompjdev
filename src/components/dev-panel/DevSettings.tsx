@@ -28,6 +28,10 @@ import {
   Check,
   Globe,
   Cpu,
+  Shield,
+  Play,
+  XCircle,
+  CheckCircle2,
 } from "lucide-react";
 
 interface ProviderInfo {
@@ -43,6 +47,8 @@ interface ProviderInfo {
 interface SystemConfig {
   default_ai_provider: string;
   default_ai_model: string;
+  fallback_ai_provider: string;
+  fallback_ai_model: string;
   maintenance_mode: boolean;
   max_pdf_size_mb: number;
   allowed_ai_providers: string[];
@@ -50,6 +56,13 @@ interface SystemConfig {
 
 interface ApiKeys {
   [key: string]: string;
+}
+
+interface TestResult {
+  success: boolean;
+  latencyMs?: number;
+  error?: string;
+  testedAt?: Date;
 }
 
 const AI_PROVIDERS: ProviderInfo[] = [
@@ -120,6 +133,8 @@ const AI_PROVIDERS: ProviderInfo[] = [
 const DEFAULT_CONFIG: SystemConfig = {
   default_ai_provider: "lovable",
   default_ai_model: "google/gemini-3-flash-preview",
+  fallback_ai_provider: "lovable",
+  fallback_ai_model: "google/gemini-2.5-flash",
   maintenance_mode: false,
   max_pdf_size_mb: 50,
   allowed_ai_providers: ["lovable", "openai", "gemini", "claude", "groq", "deepseek", "openrouter"],
@@ -133,6 +148,10 @@ export function DevSettings() {
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  
+  // Test connection states
+  const [testingProvider, setTestingProvider] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, TestResult>>({});
 
   useEffect(() => {
     fetchConfig();
@@ -156,6 +175,8 @@ export function DevSettings() {
         setConfig({
           default_ai_provider: configMap.default_ai_provider || DEFAULT_CONFIG.default_ai_provider,
           default_ai_model: configMap.default_ai_model || DEFAULT_CONFIG.default_ai_model,
+          fallback_ai_provider: configMap.fallback_ai_provider || DEFAULT_CONFIG.fallback_ai_provider,
+          fallback_ai_model: configMap.fallback_ai_model || DEFAULT_CONFIG.fallback_ai_model,
           maintenance_mode: configMap.maintenance_mode || DEFAULT_CONFIG.maintenance_mode,
           max_pdf_size_mb: configMap.max_pdf_size_mb || DEFAULT_CONFIG.max_pdf_size_mb,
           allowed_ai_providers: configMap.allowed_ai_providers || DEFAULT_CONFIG.allowed_ai_providers,
@@ -202,6 +223,8 @@ export function DevSettings() {
       const updates = [
         { id: "default_ai_provider", value: config.default_ai_provider },
         { id: "default_ai_model", value: config.default_ai_model },
+        { id: "fallback_ai_provider", value: config.fallback_ai_provider },
+        { id: "fallback_ai_model", value: config.fallback_ai_model },
         { id: "maintenance_mode", value: config.maintenance_mode },
         { id: "max_pdf_size_mb", value: config.max_pdf_size_mb },
         { id: "allowed_ai_providers", value: config.allowed_ai_providers },
@@ -294,6 +317,11 @@ export function DevSettings() {
         return updated;
       });
       setSavedApiKeys((prev) => ({ ...prev, [providerId]: false }));
+      setTestResults((prev) => {
+        const updated = { ...prev };
+        delete updated[providerId];
+        return updated;
+      });
       toast({
         title: "Sucesso",
         description: "API Key removida",
@@ -305,6 +333,92 @@ export function DevSettings() {
         title: "Erro",
         description: "Falha ao remover API Key",
       });
+    }
+  };
+
+  const testConnection = async (providerId: string) => {
+    const provider = AI_PROVIDERS.find(p => p.id === providerId);
+    if (!provider) return;
+
+    // Check if key is required and available
+    if (provider.requiresKey && !savedApiKeys[providerId]) {
+      toast({
+        variant: "destructive",
+        title: "API Key necessária",
+        description: `Configure uma API Key para testar ${provider.name}`,
+      });
+      return;
+    }
+
+    setTestingProvider(providerId);
+    
+    try {
+      const startTime = Date.now();
+      
+      const { data, error } = await supabase.functions.invoke('test-ai-connection', {
+        body: {
+          provider: providerId,
+          model: provider.models[0],
+          apiKey: provider.requiresKey ? apiKeys[providerId] : null
+        }
+      });
+
+      const latencyMs = Date.now() - startTime;
+
+      if (error) {
+        setTestResults((prev) => ({
+          ...prev,
+          [providerId]: {
+            success: false,
+            error: error.message,
+            testedAt: new Date()
+          }
+        }));
+        toast({
+          variant: "destructive",
+          title: "Teste falhou",
+          description: error.message,
+        });
+      } else if (data?.success) {
+        setTestResults((prev) => ({
+          ...prev,
+          [providerId]: {
+            success: true,
+            latencyMs: data.latencyMs || latencyMs,
+            testedAt: new Date()
+          }
+        }));
+        toast({
+          title: "Conexão OK",
+          description: `${provider.name} respondeu em ${data.latencyMs || latencyMs}ms`,
+        });
+      } else {
+        setTestResults((prev) => ({
+          ...prev,
+          [providerId]: {
+            success: false,
+            error: data?.error || 'Erro desconhecido',
+            testedAt: new Date()
+          }
+        }));
+        toast({
+          variant: "destructive",
+          title: "Teste falhou",
+          description: data?.error || 'Erro desconhecido',
+        });
+      }
+    } catch (error) {
+      console.error("Error testing connection:", error);
+      setTestResults((prev) => ({
+        ...prev,
+        [providerId]: {
+          success: false,
+          error: error instanceof Error ? error.message : 'Erro de conexão',
+          testedAt: new Date()
+        }
+      }));
+    } finally {
+      setTestingProvider(null);
     }
   };
 
@@ -369,6 +483,11 @@ export function DevSettings() {
     return provider?.models || [];
   };
 
+  const getFallbackProviderModels = () => {
+    const provider = AI_PROVIDERS.find((p) => p.id === config.fallback_ai_provider);
+    return provider?.models || [];
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -425,6 +544,8 @@ export function DevSettings() {
             const isActive = config.default_ai_provider === provider.id;
             const hasKey = savedApiKeys[provider.id];
             const isAllowed = config.allowed_ai_providers.includes(provider.id);
+            const testResult = testResults[provider.id];
+            const isTesting = testingProvider === provider.id;
 
             return (
               <Card
@@ -546,6 +667,47 @@ export function DevSettings() {
                       Integrado
                     </Badge>
                   )}
+
+                  {/* Test Connection Button */}
+                  <div
+                    className="pt-2 border-t"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => testConnection(provider.id)}
+                        disabled={isTesting || (provider.requiresKey && !hasKey)}
+                      >
+                        {isTesting ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Play className="h-3 w-3 mr-1" />
+                        )}
+                        Testar
+                      </Button>
+                      
+                      {testResult && (
+                        <div className="flex items-center gap-1 text-xs">
+                          {testResult.success ? (
+                            <>
+                              <CheckCircle2 className="h-3 w-3 text-green-500" />
+                              <span className="text-green-600">{testResult.latencyMs}ms</span>
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="h-3 w-3 text-destructive" />
+                              <span className="text-destructive truncate max-w-20" title={testResult.error}>
+                                Erro
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             );
@@ -576,6 +738,119 @@ export function DevSettings() {
                 ))}
               </SelectContent>
             </Select>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Separator />
+
+      {/* Section: Fallback AI Configuration */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <Shield className="h-5 w-5 text-primary" />
+          <h2 className="text-xl font-semibold">IA de Fallback (Segunda IA)</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Quando a IA principal falhar, esta será usada automaticamente como backup.
+        </p>
+
+        <Card>
+          <CardContent className="pt-6 space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Provider de Fallback</Label>
+                <Select
+                  value={config.fallback_ai_provider}
+                  onValueChange={(value) => {
+                    const provider = AI_PROVIDERS.find(p => p.id === value);
+                    if (provider?.requiresKey && !savedApiKeys[value]) {
+                      toast({
+                        variant: "destructive",
+                        title: "API Key necessária",
+                        description: `Configure uma API Key para usar ${provider.name} como fallback`,
+                      });
+                      return;
+                    }
+                    setConfig({ 
+                      ...config, 
+                      fallback_ai_provider: value,
+                      fallback_ai_model: AI_PROVIDERS.find(p => p.id === value)?.models[0] || ""
+                    });
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AI_PROVIDERS.filter(p => !p.requiresKey || savedApiKeys[p.id]).map((provider) => (
+                      <SelectItem key={provider.id} value={provider.id}>
+                        {provider.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Modelo de Fallback</Label>
+                <Select
+                  value={config.fallback_ai_model}
+                  onValueChange={(value) => setConfig({ ...config, fallback_ai_model: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getFallbackProviderModels().map((model) => (
+                      <SelectItem key={model} value={model}>
+                        {model}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-4 border-t">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => testConnection(config.fallback_ai_provider)}
+                  disabled={testingProvider === config.fallback_ai_provider}
+                >
+                  {testingProvider === config.fallback_ai_provider ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Play className="h-4 w-4 mr-2" />
+                  )}
+                  Testar Fallback
+                </Button>
+                
+                {testResults[config.fallback_ai_provider] && (
+                  <div className="flex items-center gap-1 text-sm">
+                    {testResults[config.fallback_ai_provider].success ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <span className="text-green-600">
+                          OK ({testResults[config.fallback_ai_provider].latencyMs}ms)
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="h-4 w-4 text-destructive" />
+                        <span className="text-destructive">Falhou</span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Zap className="h-4 w-4" />
+                <span>Lovable AI não requer API Key (recomendado)</span>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -685,16 +960,20 @@ export function DevSettings() {
               Usa o gateway integrado para acessar modelos Gemini e GPT.
             </li>
             <li>
+              <strong>Sistema de Fallback:</strong> Se a IA principal falhar (timeout, erro de API, etc.),
+              o sistema automaticamente tentará a IA de fallback configurada.
+            </li>
+            <li>
               Providers externos requerem uma <strong>API key global</strong> configurada nos cards acima.
               Essas keys são usadas quando o usuário não tem uma key própria.
             </li>
             <li>
-              As configurações de IA de cada usuário podem ser ajustadas na aba
-              <strong> Usuários</strong>, clicando no botão de configurações.
+              Use o botão <strong>Testar</strong> em cada card para verificar se a conexão está funcionando
+              antes de ativar o provider.
             </li>
             <li>
               O sistema registra todas as requisições de IA na tabela de logs,
-              permitindo análise de uso e custos na aba <strong>Logs & Métricas</strong>.
+              incluindo se usou fallback, latência, e erros na aba <strong>IA</strong>.
             </li>
           </ul>
         </CardContent>

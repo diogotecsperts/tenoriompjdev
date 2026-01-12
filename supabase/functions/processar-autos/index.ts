@@ -344,7 +344,9 @@ async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: str
       console.log(`[gerarResumosIA] Generating: ${tipo} with ${aiConfig.provider}/${aiConfig.model}`);
       
       const prompt = getPromptForType(tipo, contexto);
-      const result = await callAI(aiConfig, summarySystemPrompt, prompt);
+      const result = await callAI(aiConfig, summarySystemPrompt, prompt, {
+        promptType: tipo
+      });
       
       console.log(`[gerarResumosIA] Successfully generated ${tipo}`);
       
@@ -394,7 +396,9 @@ async function processarPDFBackground(
     // Use the shared Gemini Vision function that respects DevPanel config
     console.log(`[processar-autos] Calling Gemini Vision for PDF extraction...`);
     
-    const visionResult = await callGeminiVision(pdfBase64, systemPrompt);
+    const visionResult = await callGeminiVision(pdfBase64, systemPrompt, {
+      promptType: 'pdf_extraction'
+    });
     modelUsed = visionResult.model;
     
     console.log(`[processar-autos] Gemini Vision response - Model: ${modelUsed}, FinishReason: ${visionResult.finishReason}`);
