@@ -9,7 +9,8 @@ import {
   ChevronRight,
   Terminal,
   Stethoscope,
-  AlertTriangle
+  AlertTriangle,
+  Cpu
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,8 +21,10 @@ import { DevUsersList } from "@/components/dev-panel/DevUsersList";
 import { DevLogs } from "@/components/dev-panel/DevLogs";
 import { DevSettings } from "@/components/dev-panel/DevSettings";
 import DevErrorLogs from "@/components/dev-panel/DevErrorLogs";
+import { DevAIStatus } from "@/components/dev-panel/DevAIStatus";
+import { DevAIUsageLogs } from "@/components/dev-panel/DevAIUsageLogs";
 
-type DevTab = "dashboard" | "users" | "logs" | "errors" | "settings";
+type DevTab = "dashboard" | "users" | "logs" | "errors" | "ai" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -34,6 +37,7 @@ const navItems: NavItem[] = [
   { id: "users", label: "Usuários", icon: Users },
   { id: "logs", label: "Logs & Métricas", icon: FileText },
   { id: "errors", label: "Erros", icon: AlertTriangle },
+  { id: "ai", label: "Inteligência Artificial", icon: Cpu },
   { id: "settings", label: "Configurações", icon: Settings },
 ];
 
@@ -58,6 +62,13 @@ export default function DevPanel() {
         return <DevLogs />;
       case "errors":
         return <DevErrorLogs />;
+      case "ai":
+        return (
+          <div className="space-y-6">
+            <DevAIStatus />
+            <DevAIUsageLogs />
+          </div>
+        );
       case "settings":
         return <DevSettings />;
       default:
