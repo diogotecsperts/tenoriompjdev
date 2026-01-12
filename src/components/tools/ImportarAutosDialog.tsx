@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
 import { 
   Upload, 
   FileText, 
@@ -17,7 +18,8 @@ import {
   AlertCircle,
   Loader2,
   Sparkles,
-  Eye
+  Eye,
+  Cpu
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
@@ -94,6 +96,11 @@ interface ExtractedData {
   resumo: string;
 }
 
+interface AIConfigDisplay {
+  provider: string;
+  model: string;
+}
+
 type ProcessingStep = "idle" | "uploading" | "analyzing" | "preview" | "creating";
 
 export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogProps) {
@@ -107,7 +114,46 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const [usedModel, setUsedModel] = useState<string>("");
   const [analysisStep, setAnalysisStep] = useState<string>("");
   const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [isDeveloper, setIsDeveloper] = useState(false);
+  const [aiConfig, setAiConfig] = useState<AIConfigDisplay | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Check if user is developer and fetch AI config
+  useEffect(() => {
+    const checkDeveloperAndFetchConfig = async () => {
+      if (!user) return;
+
+      try {
+        // Check developer role
+        const { data: devData } = await supabase.rpc("is_developer");
+        setIsDeveloper(devData === true);
+
+        // Fetch AI configuration from system_config
+        const { data: configData } = await supabase
+          .from('system_config')
+          .select('id, value')
+          .in('id', ['default_ai_provider', 'default_ai_model']);
+
+        if (configData && configData.length > 0) {
+          const config: Record<string, any> = {};
+          configData.forEach(item => {
+            config[item.id] = item.value;
+          });
+          
+          const provider = config.default_ai_provider || 'lovable';
+          const model = config.default_ai_model || 'google/gemini-2.5-flash';
+          
+          setAiConfig({ provider, model });
+        }
+      } catch (err) {
+        console.error("Error checking developer role or AI config:", err);
+      }
+    };
+
+    if (open) {
+      checkDeveloperAndFetchConfig();
+    }
+  }, [user, open]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -122,6 +168,24 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     if (bytes < 1024) return bytes + " B";
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
     return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  };
+
+  const formatProviderName = (provider: string) => {
+    const names: Record<string, string> = {
+      lovable: 'Lovable AI',
+      gemini: 'Google Gemini',
+      openai: 'OpenAI',
+      claude: 'Anthropic Claude',
+      groq: 'Groq',
+      deepseek: 'DeepSeek',
+      openrouter: 'OpenRouter'
+    };
+    return names[provider] || provider.charAt(0).toUpperCase() + provider.slice(1);
+  };
+
+  const formatModelName = (model: string) => {
+    // Remove prefixes like "google/" for cleaner display
+    return model.replace('google/', '').replace('openai/', '');
   };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -640,15 +704,38 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                     <p className="text-xs text-muted-foreground mt-2">
                       Máximo 20MB • Apenas PDF
                     </p>
+                    
+                    {/* Developer-only AI Config Badge */}
+                    {isDeveloper && aiConfig && (
+                      <div className="flex items-center justify-center gap-2 mt-4">
+                        <Badge variant="outline" className="flex items-center gap-1.5 text-xs">
+                          <Cpu className="h-3 w-3" />
+                          <span className="font-medium">{formatProviderName(aiConfig.provider)}</span>
+                          <span className="text-muted-foreground">•</span>
+                          <span>{formatModelName(aiConfig.model)}</span>
+                        </Badge>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
 
               {selectedFile && (
-                <Button onClick={processFile} className="w-full">
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  Processar com IA
-                </Button>
+                <div className="space-y-2">
+                  {/* Developer-only AI Config Badge when file is selected */}
+                  {isDeveloper && aiConfig && (
+                    <div className="flex items-center justify-center">
+                      <Badge variant="secondary" className="flex items-center gap-1.5 text-xs">
+                        <Cpu className="h-3 w-3" />
+                        <span>{formatProviderName(aiConfig.provider)} • {formatModelName(aiConfig.model)}</span>
+                      </Badge>
+                    </div>
+                  )}
+                  <Button onClick={processFile} className="w-full">
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Processar com IA
+                  </Button>
+                </div>
               )}
             </>
           )}
@@ -677,6 +764,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               <div className="text-center">
                 <p className="font-medium">Analisando documento com IA</p>
                 <p className="text-sm text-muted-foreground mt-1">{analysisStep}</p>
+                {isDeveloper && aiConfig && (
+                  <Badge variant="outline" className="mt-2 text-xs">
+                    <Cpu className="h-3 w-3 mr-1" />
+                    {formatProviderName(aiConfig.provider)} • {formatModelName(aiConfig.model)}
+                  </Badge>
+                )}
               </div>
               <Progress value={analysisProgress} className="h-2" />
               <p className="text-xs text-center text-muted-foreground">

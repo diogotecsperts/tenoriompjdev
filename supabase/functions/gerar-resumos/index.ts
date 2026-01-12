@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { getAIConfig, callAI } from "../_shared/ai-config.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -128,6 +129,8 @@ Fundamente tecnicamente sua análise com base nos achados clínicos e exames.
 `
 };
 
+const systemPrompt = 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.';
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -144,66 +147,59 @@ serve(async (req) => {
       );
     }
 
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    if (!LOVABLE_API_KEY) {
-      console.error('LOVABLE_API_KEY not configured');
+    // Buscar configuração de IA dinamicamente
+    const aiConfig = await getAIConfig();
+    console.log(`[gerar-resumos] Using AI Config - Provider: ${aiConfig.provider}, Model: ${aiConfig.model}`);
+
+    if (!aiConfig.apiKey) {
+      console.error('[gerar-resumos] No API key configured');
       return new Response(
-        JSON.stringify({ error: 'API key não configurada' }),
+        JSON.stringify({ error: 'API key não configurada para o provider selecionado' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     const prompt = prompts[tipo](contexto);
-    console.log(`Gerando resumo do tipo: ${tipo}`);
+    console.log(`[gerar-resumos] Gerando resumo do tipo: ${tipo}`);
 
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          { 
-            role: 'system', 
-            content: 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.' 
-          },
-          { role: 'user', content: prompt }
-        ],
-      }),
-    });
+    try {
+      const result = await callAI(aiConfig, systemPrompt, prompt);
+      
+      console.log(`[gerar-resumos] Resumo gerado com sucesso - Provider: ${result.provider}, Model: ${result.model}`);
 
-    if (!response.ok) {
-      if (response.status === 429) {
+      return new Response(
+        JSON.stringify({ 
+          texto: result.text,
+          provider: result.provider,
+          model: result.model
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    } catch (aiError) {
+      console.error('[gerar-resumos] AI call error:', aiError);
+      
+      // Verificar erros específicos
+      const errorMessage = aiError instanceof Error ? aiError.message : 'Erro desconhecido';
+      
+      if (errorMessage.includes('429')) {
         return new Response(
           JSON.stringify({ error: 'Limite de requisições excedido. Tente novamente em alguns minutos.' }),
           { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      if (response.status === 402) {
+      
+      if (errorMessage.includes('402')) {
         return new Response(
           JSON.stringify({ error: 'Créditos insuficientes. Adicione créditos ao seu workspace.' }),
           { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      const errorText = await response.text();
-      console.error('AI gateway error:', response.status, errorText);
+
       return new Response(
-        JSON.stringify({ error: 'Erro ao gerar resumo' }),
+        JSON.stringify({ error: `Erro ao gerar resumo: ${errorMessage}` }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-
-    const data = await response.json();
-    const generatedText = data.choices?.[0]?.message?.content || '';
-
-    console.log(`Resumo gerado com sucesso para tipo: ${tipo}`);
-
-    return new Response(
-      JSON.stringify({ texto: generatedText }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
 
   } catch (error) {
     console.error('Error in gerar-resumos function:', error);
