@@ -298,6 +298,7 @@ export type Database = {
           nexo_causal_justificativa: string | null
           nexo_causal_tipo: string | null
           objetivo_pericia: string | null
+          observacoes_historico: string | null
           perito_crm: string | null
           perito_email: string | null
           perito_endereco: string | null
@@ -369,6 +370,7 @@ export type Database = {
           nexo_causal_justificativa?: string | null
           nexo_causal_tipo?: string | null
           objetivo_pericia?: string | null
+          observacoes_historico?: string | null
           perito_crm?: string | null
           perito_email?: string | null
           perito_endereco?: string | null
@@ -440,6 +442,7 @@ export type Database = {
           nexo_causal_justificativa?: string | null
           nexo_causal_tipo?: string | null
           objetivo_pericia?: string | null
+          observacoes_historico?: string | null
           perito_crm?: string | null
           perito_email?: string | null
           perito_endereco?: string | null
