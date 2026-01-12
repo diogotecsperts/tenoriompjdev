@@ -101,6 +101,19 @@ interface AIConfigDisplay {
   model: string;
 }
 
+interface AIUsageInfo {
+  pdfExtraction: {
+    provider: string;
+    model: string;
+    note?: string;
+  };
+  summaries: {
+    provider: string;
+    model: string;
+    count: number;
+  };
+}
+
 type ProcessingStep = "idle" | "uploading" | "analyzing" | "preview" | "creating";
 
 export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogProps) {
@@ -112,6 +125,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const [uploadProgress, setUploadProgress] = useState(0);
   const [extractedData, setExtractedData] = useState<ExtractedData | null>(null);
   const [usedModel, setUsedModel] = useState<string>("");
+  const [aiUsage, setAiUsage] = useState<AIUsageInfo | null>(null);
   const [analysisStep, setAnalysisStep] = useState<string>("");
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [isDeveloper, setIsDeveloper] = useState(false);
@@ -281,7 +295,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       if (data.status === 'completed' && data.result) {
         // Success!
         setExtractedData(data.result.data);
-        setUsedModel(data.result.model || 'gemini-2.5-flash');
+        setAiUsage(data.result.aiUsage || null);
+        setUsedModel(data.result.aiUsage?.pdfExtraction?.model || 'gemini-2.5-flash');
         setProcessingStep("preview");
         return true; // Stop polling
       }
@@ -521,6 +536,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setUploadProgress(0);
     setExtractedData(null);
     setUsedModel("");
+    setAiUsage(null);
     setAnalysisStep("");
     setAnalysisProgress(0);
     onOpenChange(false);
@@ -560,14 +576,63 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
     return (
       <div className="space-y-4 max-h-[400px] overflow-y-auto">
+        {/* AI Usage Breakdown */}
+        {aiUsage && (
+          <div className="p-3 rounded-lg bg-muted/30 border border-border">
+            <h4 className="font-medium text-sm mb-3 flex items-center gap-2">
+              <Cpu className="h-4 w-4 text-primary" />
+              Inteligências Artificiais Utilizadas
+            </h4>
+            <div className="grid grid-cols-2 gap-4">
+              {/* PDF Extraction */}
+              <div className="space-y-1">
+                <div className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                  <FileText className="h-3 w-3" />
+                  Extração do PDF
+                </div>
+                <div className="text-sm font-medium">
+                  {formatModelName(aiUsage.pdfExtraction.model)}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {formatProviderName(aiUsage.pdfExtraction.provider)}
+                </div>
+                <div className="text-xs text-blue-500 flex items-center gap-1 mt-1">
+                  <AlertCircle className="h-3 w-3" />
+                  Gemini Vision obrigatório para PDFs
+                </div>
+              </div>
+              
+              {/* Summaries Generation */}
+              <div className="space-y-1">
+                <div className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" />
+                  Geração dos Resumos
+                </div>
+                <div className="text-sm font-medium">
+                  {aiUsage.summaries.provider === 'none' 
+                    ? 'Não configurado' 
+                    : formatModelName(aiUsage.summaries.model)}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {aiUsage.summaries.provider === 'none' 
+                    ? 'Sem API key' 
+                    : formatProviderName(aiUsage.summaries.provider)}
+                </div>
+                {aiUsage.summaries.count > 0 && (
+                  <div className="text-xs text-green-500 flex items-center gap-1 mt-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    {aiUsage.summaries.count} textos gerados
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center justify-between text-sm">
           <div className="flex items-center gap-2 text-muted-foreground">
-            <Sparkles className="h-4 w-4 text-primary" />
-            Processado com {usedModel}
-          </div>
-          <div className="flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 text-primary" />
-            <span className="font-medium text-primary">{filled}/{total} campos ({percentage}%)</span>
+            <span className="font-medium text-primary">{filled}/{total} campos extraídos ({percentage}%)</span>
           </div>
         </div>
 
