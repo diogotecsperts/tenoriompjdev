@@ -425,9 +425,11 @@ async function processarPDFBackground(
   jobId: string,
   pdfBase64: string,
   fileName: string,
-  supabaseAdmin: any
+  supabaseAdmin: any,
+  isRetry: boolean = false
 ) {
   let modelUsed = 'unknown';
+  let attemptId: string | null = null;
   
   // Timing tracking
   const timings = {
@@ -437,12 +439,49 @@ async function processarPDFBackground(
   };
   
   try {
+    // Get current retry_count from job
+    const { data: jobData } = await supabaseAdmin
+      .from('import_jobs')
+      .select('retry_count')
+      .eq('id', jobId)
+      .single();
+    
+    const currentRetryCount = jobData?.retry_count || 0;
+    const attemptNumber = isRetry ? currentRetryCount + 1 : 1;
+
+    // Create attempt record
+    const { data: attemptData, error: attemptError } = await supabaseAdmin
+      .from('import_attempts')
+      .insert({
+        job_id: jobId,
+        attempt_number: attemptNumber,
+        status: 'processing'
+      })
+      .select('id')
+      .single();
+
+    if (!attemptError && attemptData) {
+      attemptId = attemptData.id;
+      console.log(`[processar-autos] Created attempt #${attemptNumber} (${attemptId}) for job ${jobId}`);
+    }
+
+    // If retry, increment retry_count on the job
+    if (isRetry) {
+      await supabaseAdmin
+        .from('import_jobs')
+        .update({ 
+          retry_count: attemptNumber,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', jobId);
+    }
+
     // Update progress: Starting
     await supabaseAdmin
       .from('import_jobs')
       .update({ 
         progress: 5, 
-        current_step: 'Enviando PDF para análise...',
+        current_step: isRetry ? 'Reprocessando PDF...' : 'Enviando PDF para análise...',
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
@@ -563,6 +602,23 @@ async function processarPDFBackground(
       truncated: visionResult.finishReason === "MAX_TOKENS"
     };
 
+    // Update attempt record with success
+    if (attemptId) {
+      await supabaseAdmin
+        .from('import_attempts')
+        .update({
+          status: 'completed',
+          result: {
+            summariesCount: resumosResult.aiInfo.summariesGenerated,
+            truncated: visionResult.finishReason === "MAX_TOKENS",
+            model: modelUsed,
+            totalDurationMs: totalDuration
+          },
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', attemptId);
+    }
+
     // Save result as completed
     await supabaseAdmin
       .from('import_jobs')
@@ -581,6 +637,18 @@ async function processarPDFBackground(
     console.error(`[processar-autos] Job ${jobId} failed:`, error);
     
     const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido no processamento';
+    
+    // Update attempt record with failure
+    if (attemptId) {
+      await supabaseAdmin
+        .from('import_attempts')
+        .update({
+          status: 'failed',
+          error: errorMessage,
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', attemptId);
+    }
     
     // Save error
     await supabaseAdmin
@@ -692,7 +760,7 @@ serve(async (req) => {
 
     // Start background processing using EdgeRuntime.waitUntil
     // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
-    EdgeRuntime.waitUntil(processarPDFBackground(jobId, finalPdfBase64, fileName, supabaseAdmin));
+    EdgeRuntime.waitUntil(processarPDFBackground(jobId, finalPdfBase64, fileName, supabaseAdmin, isRetry));
 
     // Return immediately with jobId
     return new Response(

@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import {
   Dialog,
   DialogContent,
@@ -22,9 +24,13 @@ import {
   Cpu,
   Clock,
   AlertTriangle,
-  RefreshCw
+  RefreshCw,
+  History,
+  ChevronDown,
+  XCircle
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -121,6 +127,22 @@ interface AIUsageInfo {
   totalDurationMs?: number;
 }
 
+interface ImportAttempt {
+  id: string;
+  job_id: string;
+  attempt_number: number;
+  status: string;
+  result: {
+    summariesCount?: number;
+    truncated?: boolean;
+    model?: string;
+    totalDurationMs?: number;
+  } | null;
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
 type ProcessingStep = "idle" | "uploading" | "analyzing" | "preview" | "creating";
 
 export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogProps) {
@@ -140,6 +162,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const [attempts, setAttempts] = useState<ImportAttempt[]>([]);
 
   // Check if user is developer and fetch AI config
   useEffect(() => {
@@ -186,6 +210,29 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       }
     };
   }, []);
+
+  // Fetch attempts when preview is shown
+  useEffect(() => {
+    const fetchAttempts = async () => {
+      if (processingStep === 'preview' && currentJobId) {
+        try {
+          const { data, error } = await supabase
+            .from('import_attempts')
+            .select('*')
+            .eq('job_id', currentJobId)
+            .order('attempt_number', { ascending: true });
+          
+          if (!error && data) {
+            setAttempts(data as ImportAttempt[]);
+          }
+        } catch (err) {
+          console.error('Error fetching attempts:', err);
+        }
+      }
+    };
+
+    fetchAttempts();
+  }, [processingStep, currentJobId]);
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + " B";
@@ -402,6 +449,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
       const { jobId } = await response.json();
       console.log('Job started:', jobId);
+      setCurrentJobId(jobId);
 
       // Start polling for status
       setAnalysisStep("Processando documento...");
@@ -581,6 +629,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setAnalysisProgress(0);
     setIsRetrying(false);
     setCurrentFilePath(null);
+    setCurrentJobId(null);
+    setAttempts([]);
     onOpenChange(false);
   };
 
@@ -627,6 +677,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
       const { jobId } = await response.json();
       console.log('Retry job started:', jobId);
+      setCurrentJobId(jobId); // Update to new jobId for fetching attempts
 
       // Start polling for status
       setAnalysisStep("Reprocessando documento...");
@@ -826,6 +877,65 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               </div>
             )}
           </div>
+        )}
+
+        {/* Attempts History */}
+        {attempts.length > 1 && (
+          <Collapsible className="border rounded-lg bg-muted/20">
+            <CollapsibleTrigger className="flex items-center justify-between w-full p-3 hover:bg-muted/30 transition-colors rounded-lg">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <History className="h-4 w-4 text-primary" />
+                Histórico de Tentativas ({attempts.length})
+              </div>
+              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200 [[data-state=open]>&]:rotate-180" />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="px-3 pb-3">
+              <div className="space-y-2 pt-2 border-t border-border">
+                {attempts.map((attempt, index) => (
+                  <div 
+                    key={attempt.id} 
+                    className={cn(
+                      "flex items-center justify-between p-2 rounded-md text-sm",
+                      index === attempts.length - 1 
+                        ? "bg-primary/10 border border-primary/30" 
+                        : "bg-muted/30"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Badge 
+                        variant={attempt.status === 'completed' ? 'default' : 'destructive'}
+                        className="text-xs"
+                      >
+                        #{attempt.attempt_number}
+                      </Badge>
+                      <span className="text-muted-foreground text-xs">
+                        {formatDistanceToNow(new Date(attempt.created_at), { addSuffix: true, locale: ptBR })}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {attempt.result && (
+                        <span className="text-xs text-muted-foreground">
+                          {attempt.result.summariesCount || 0}/5 resumos
+                        </span>
+                      )}
+                      {attempt.result?.totalDurationMs && (
+                        <span className="text-xs text-muted-foreground">
+                          {formatDuration(attempt.result.totalDurationMs)}
+                        </span>
+                      )}
+                      {attempt.status === 'completed' ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                      ) : attempt.status === 'failed' ? (
+                        <XCircle className="h-4 w-4 text-red-500" />
+                      ) : (
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         )}
 
         <div className="flex items-center justify-between text-sm">
