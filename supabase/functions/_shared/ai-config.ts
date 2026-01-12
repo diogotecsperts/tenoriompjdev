@@ -525,10 +525,25 @@ export async function callGeminiVision(
   let useDirectGemini = false;
   let modelToUse = 'gemini-2.5-flash';
 
+  // First, check if there's a specific PDF model configured
+  const { data: pdfModelConfig } = await supabase
+    .from('system_config')
+    .select('value')
+    .eq('id', 'gemini_pdf_model')
+    .single();
+
+  if (pdfModelConfig?.value) {
+    modelToUse = String(pdfModelConfig.value);
+    console.log(`[Gemini Vision] Using configured PDF model: ${modelToUse}`);
+  }
+
   if (config.provider === 'gemini' && config.apiKey) {
     apiKey = config.apiKey;
     useDirectGemini = true;
-    modelToUse = config.model.replace('google/', '');
+    // Only override model if no specific PDF model is configured
+    if (!pdfModelConfig?.value) {
+      modelToUse = config.model.replace('google/', '');
+    }
     console.log(`[Gemini Vision] Using direct Gemini API with model: ${modelToUse}`);
   } else {
     // Tentar buscar GEMINI_API_KEY do env (legado)
@@ -547,7 +562,8 @@ export async function callGeminiVision(
 
     if (apiKey) {
       useDirectGemini = true;
-      if (config.model && (config.model.includes('gemini') || config.provider === 'gemini')) {
+      // Only override model if no specific PDF model is configured
+      if (!pdfModelConfig?.value && config.model && (config.model.includes('gemini') || config.provider === 'gemini')) {
         modelToUse = config.model.replace('google/', '');
       }
       console.log(`[Gemini Vision] Using Gemini API key from config with model: ${modelToUse}`);

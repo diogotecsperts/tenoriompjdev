@@ -36,6 +36,7 @@ import {
   Copy,
   Trash2,
   Star,
+  FileText,
 } from "lucide-react";
 
 interface ProviderInfo {
@@ -56,6 +57,7 @@ interface SystemConfig {
   default_ai_model: string;
   fallback_ai_provider: string;
   fallback_ai_model: string;
+  gemini_pdf_model: string;
   maintenance_mode: boolean;
   max_pdf_size_mb: number;
   allowed_ai_providers: string[];
@@ -161,10 +163,18 @@ const DEFAULT_CONFIG: SystemConfig = {
   default_ai_model: "google/gemini-3-flash-preview",
   fallback_ai_provider: "lovable",
   fallback_ai_model: "google/gemini-2.5-flash",
+  gemini_pdf_model: "gemini-2.5-flash",
   maintenance_mode: false,
   max_pdf_size_mb: 50,
   allowed_ai_providers: ["lovable", "openai", "gemini", "claude", "groq", "deepseek", "openrouter"],
 };
+
+// Gemini Vision models available for PDF extraction
+const GEMINI_PDF_MODELS = [
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Rápido e eficiente (recomendado)' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Maior precisão, mais lento' },
+  { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Exp)', description: 'Versão experimental' },
+];
 
 export function DevSettings() {
   const [config, setConfig] = useState<SystemConfig>(DEFAULT_CONFIG);
@@ -327,6 +337,7 @@ export function DevSettings() {
           default_ai_model: configMap.default_ai_model || DEFAULT_CONFIG.default_ai_model,
           fallback_ai_provider: configMap.fallback_ai_provider || DEFAULT_CONFIG.fallback_ai_provider,
           fallback_ai_model: configMap.fallback_ai_model || DEFAULT_CONFIG.fallback_ai_model,
+          gemini_pdf_model: configMap.gemini_pdf_model || DEFAULT_CONFIG.gemini_pdf_model,
           maintenance_mode: configMap.maintenance_mode || DEFAULT_CONFIG.maintenance_mode,
           max_pdf_size_mb: configMap.max_pdf_size_mb || DEFAULT_CONFIG.max_pdf_size_mb,
           allowed_ai_providers: configMap.allowed_ai_providers || DEFAULT_CONFIG.allowed_ai_providers,
@@ -375,6 +386,7 @@ export function DevSettings() {
         { id: "default_ai_model", value: config.default_ai_model },
         { id: "fallback_ai_provider", value: config.fallback_ai_provider },
         { id: "fallback_ai_model", value: config.fallback_ai_model },
+        { id: "gemini_pdf_model", value: config.gemini_pdf_model },
         { id: "maintenance_mode", value: config.maintenance_mode },
         { id: "max_pdf_size_mb", value: config.max_pdf_size_mb },
         { id: "allowed_ai_providers", value: config.allowed_ai_providers },
@@ -1236,6 +1248,64 @@ export function DevSettings() {
                 <Zap className="h-4 w-4" />
                 <span>Lovable AI não requer API Key (recomendado)</span>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Separator />
+
+      {/* Section: PDF Extraction Model */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <FileText className="h-5 w-5 text-primary" />
+          <h2 className="text-xl font-semibold">Extração de PDF (Gemini Vision)</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          A extração de conteúdo de PDFs requer a API Gemini Vision. Escolha o modelo a ser utilizado.
+        </p>
+
+        <Card>
+          <CardContent className="pt-6 space-y-4">
+            <div className="space-y-2">
+              <Label>Modelo para PDFs</Label>
+              <Select
+                value={config.gemini_pdf_model}
+                onValueChange={(value) => setConfig({ ...config, gemini_pdf_model: value })}
+              >
+                <SelectTrigger className="w-full md:w-80">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {GEMINI_PDF_MODELS.map((model) => (
+                    <SelectItem key={model.id} value={model.id}>
+                      <div className="flex items-center gap-2">
+                        <span>{model.name}</span>
+                        <span className="text-xs text-muted-foreground">- {model.description}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {GEMINI_PDF_MODELS.map((model) => (
+                <Button
+                  key={model.id}
+                  variant={config.gemini_pdf_model === model.id ? "default" : "outline"}
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => setConfig({ ...config, gemini_pdf_model: model.id })}
+                >
+                  {model.name}
+                </Button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 text-sm text-muted-foreground pt-2 border-t">
+              <AlertTriangle className="h-4 w-4 text-yellow-500" />
+              <span>Requer API Key do Gemini configurada acima.</span>
             </div>
           </CardContent>
         </Card>

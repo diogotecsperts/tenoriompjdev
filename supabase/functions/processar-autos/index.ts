@@ -390,6 +390,13 @@ async function processarPDFBackground(
 ) {
   let modelUsed = 'unknown';
   
+  // Timing tracking
+  const timings = {
+    total: { start: Date.now(), end: 0 },
+    pdfExtraction: { start: 0, end: 0 },
+    summaries: { start: 0, end: 0 }
+  };
+  
   try {
     // Update progress: Starting
     await supabaseAdmin
@@ -416,9 +423,15 @@ async function processarPDFBackground(
     // Use the shared Gemini Vision function that respects DevPanel config
     console.log(`[processar-autos] Calling Gemini Vision for PDF extraction...`);
     
+    // Start PDF extraction timing
+    timings.pdfExtraction.start = Date.now();
+    
     const visionResult = await callGeminiVision(pdfBase64, systemPrompt, {
       promptType: 'pdf_extraction'
     });
+    
+    // End PDF extraction timing
+    timings.pdfExtraction.end = Date.now();
     modelUsed = visionResult.model;
     
     console.log(`[processar-autos] Gemini Vision response - Model: ${modelUsed}, FinishReason: ${visionResult.finishReason}`);
@@ -455,7 +468,15 @@ async function processarPDFBackground(
 
     // Generate AI summaries with progress updates
     console.log("[processar-autos] Starting AI summary generation...");
+    
+    // Start summaries timing
+    timings.summaries.start = Date.now();
+    
     const resumosResult = await gerarResumosIA(extractedData, supabaseAdmin, jobId);
+    
+    // End summaries timing
+    timings.summaries.end = Date.now();
+    
     console.log("[processar-autos] AI summaries generated successfully");
 
     // Add resumos to extracted data
@@ -471,6 +492,16 @@ async function processarPDFBackground(
       })
       .eq('id', jobId);
 
+    // End total timing
+    timings.total.end = Date.now();
+
+    // Calculate durations
+    const pdfExtractionDuration = timings.pdfExtraction.end - timings.pdfExtraction.start;
+    const summariesDuration = timings.summaries.end - timings.summaries.start;
+    const totalDuration = timings.total.end - timings.total.start;
+
+    console.log(`[processar-autos] Timing - PDF Extraction: ${pdfExtractionDuration}ms, Summaries: ${summariesDuration}ms, Total: ${totalDuration}ms`);
+
     // Build result with detailed AI usage info
     const result = {
       success: true,
@@ -479,13 +510,16 @@ async function processarPDFBackground(
         pdfExtraction: {
           provider: 'gemini',
           model: modelUsed,
-          note: 'Gemini Vision é obrigatório para processar PDFs nativamente'
+          note: 'Gemini Vision é obrigatório para processar PDFs nativamente',
+          durationMs: pdfExtractionDuration
         },
         summaries: {
           provider: resumosResult.aiInfo.provider,
           model: resumosResult.aiInfo.model,
-          count: resumosResult.aiInfo.summariesGenerated
-        }
+          count: resumosResult.aiInfo.summariesGenerated,
+          durationMs: summariesDuration
+        },
+        totalDurationMs: totalDuration
       },
       truncated: visionResult.finishReason === "MAX_TOKENS"
     };

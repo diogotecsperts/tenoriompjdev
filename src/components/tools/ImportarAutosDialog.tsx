@@ -19,7 +19,8 @@ import {
   Loader2,
   Sparkles,
   Eye,
-  Cpu
+  Cpu,
+  Clock
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
@@ -106,12 +107,15 @@ interface AIUsageInfo {
     provider: string;
     model: string;
     note?: string;
+    durationMs?: number;
   };
   summaries: {
     provider: string;
     model: string;
     count: number;
+    durationMs?: number;
   };
+  totalDurationMs?: number;
 }
 
 type ProcessingStep = "idle" | "uploading" | "analyzing" | "preview" | "creating";
@@ -200,6 +204,14 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const formatModelName = (model: string) => {
     // Remove prefixes like "google/" for cleaner display
     return model.replace('google/', '').replace('openai/', '');
+  };
+
+  const formatDuration = (ms: number) => {
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    return `${minutes}m ${seconds}s`;
   };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -596,6 +608,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                 <div className="text-xs text-muted-foreground">
                   {formatProviderName(aiUsage.pdfExtraction.provider)}
                 </div>
+                {aiUsage.pdfExtraction.durationMs && (
+                  <div className="text-xs text-primary flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {formatDuration(aiUsage.pdfExtraction.durationMs)}
+                  </div>
+                )}
                 <div className="text-xs text-blue-500 flex items-center gap-1 mt-1">
                   <AlertCircle className="h-3 w-3" />
                   Gemini Vision obrigatório para PDFs
@@ -618,6 +636,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                     ? 'Sem API key' 
                     : formatProviderName(aiUsage.summaries.provider)}
                 </div>
+                {aiUsage.summaries.durationMs && (
+                  <div className="text-xs text-primary flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {formatDuration(aiUsage.summaries.durationMs)}
+                  </div>
+                )}
                 {aiUsage.summaries.count > 0 && (
                   <div className="text-xs text-green-500 flex items-center gap-1 mt-1">
                     <CheckCircle2 className="h-3 w-3" />
@@ -626,6 +650,15 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                 )}
               </div>
             </div>
+            
+            {/* Total Duration */}
+            {aiUsage.totalDurationMs && (
+              <div className="mt-3 pt-3 border-t border-border flex items-center justify-center gap-2 text-sm">
+                <Clock className="h-4 w-4 text-primary" />
+                <span className="text-muted-foreground">Tempo total:</span>
+                <span className="font-medium">{formatDuration(aiUsage.totalDurationMs)}</span>
+              </div>
+            )}
           </div>
         )}
 
