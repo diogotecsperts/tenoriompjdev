@@ -179,6 +179,47 @@ export type Database = {
         }
         Relationships: []
       }
+      import_attempts: {
+        Row: {
+          attempt_number: number
+          completed_at: string | null
+          created_at: string
+          error: string | null
+          id: string
+          job_id: string
+          result: Json | null
+          status: string
+        }
+        Insert: {
+          attempt_number?: number
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          job_id: string
+          result?: Json | null
+          status?: string
+        }
+        Update: {
+          attempt_number?: number
+          completed_at?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          job_id?: string
+          result?: Json | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "import_attempts_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "import_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       import_jobs: {
         Row: {
           created_at: string
@@ -188,6 +229,7 @@ export type Database = {
           id: string
           progress: number
           result: Json | null
+          retry_count: number | null
           status: string
           updated_at: string
           user_id: string
@@ -200,6 +242,7 @@ export type Database = {
           id?: string
           progress?: number
           result?: Json | null
+          retry_count?: number | null
           status?: string
           updated_at?: string
           user_id: string
@@ -212,6 +255,7 @@ export type Database = {
           id?: string
           progress?: number
           result?: Json | null
+          retry_count?: number | null
           status?: string
           updated_at?: string
           user_id?: string
