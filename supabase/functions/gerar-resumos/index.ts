@@ -163,9 +163,11 @@ serve(async (req) => {
     console.log(`[gerar-resumos] Gerando resumo do tipo: ${tipo}`);
 
     try {
-      const result = await callAI(aiConfig, systemPrompt, prompt);
+      const result = await callAI(aiConfig, systemPrompt, prompt, {
+        promptType: tipo
+      });
       
-      console.log(`[gerar-resumos] Resumo gerado com sucesso - Provider: ${result.provider}, Model: ${result.model}`);
+      console.log(`[gerar-resumos] Resumo gerado com sucesso - Provider: ${result.provider}, Model: ${result.model}, UsedFallback: ${result.usedFallback}`);
 
       return new Response(
         JSON.stringify({ 
