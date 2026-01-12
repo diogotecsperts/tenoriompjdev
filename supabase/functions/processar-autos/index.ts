@@ -9,6 +9,12 @@ const corsHeaders = {
 
 const systemPrompt = `Você é um assistente especializado em análise de processos trabalhistas para médicos peritos. Analise os autos do processo e extraia TODAS as informações disponíveis para preencher um laudo pericial completo.
 
+PRIORIDADE DE EXTRAÇÃO (em caso de documento extenso/truncado):
+1. MÁXIMA PRIORIDADE: CIDs mencionados, nome da vítima, número do processo
+2. ALTA PRIORIDADE: Descrição do acidente/doença, história atual, dados ocupacionais
+3. MÉDIA PRIORIDADE: Quesitos, exames, tratamentos
+4. NORMAL: Textos brutos completos (petição e contestação)
+
 REGRAS GERAIS:
 - Extraia APENAS o que está EXPLÍCITO no documento
 - Campos não encontrados = "" (string vazia) ou [] (array vazio)
@@ -596,14 +602,7 @@ serve(async (req) => {
   }
 
   try {
-    const { pdfBase64, fileName } = await req.json();
-
-    if (!pdfBase64 || !fileName) {
-      return new Response(
-        JSON.stringify({ error: "pdfBase64 e fileName são obrigatórios" }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    const { pdfBase64, fileName, filePath, retryFilePath } = await req.json();
 
     // Create Supabase admin client
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -631,14 +630,51 @@ serve(async (req) => {
       );
     }
 
-    // Create job record
+    // Check if this is a retry request
+    const isRetry = !!retryFilePath && !pdfBase64;
+    let finalPdfBase64 = pdfBase64;
+    let finalFilePath = filePath || retryFilePath;
+
+    if (isRetry) {
+      console.log('[processar-autos] Retry mode - fetching PDF from storage:', retryFilePath);
+      
+      const { data: fileData, error: downloadError } = await supabaseAdmin.storage
+        .from('processos-pdf')
+        .download(retryFilePath);
+      
+      if (downloadError || !fileData) {
+        console.error('[processar-autos] Error downloading PDF for retry:', downloadError);
+        return new Response(
+          JSON.stringify({ error: "Falha ao recuperar PDF do armazenamento" }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      // Convert to base64
+      const arrayBuffer = await fileData.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (let i = 0; i < uint8Array.length; i++) {
+        binary += String.fromCharCode(uint8Array[i]);
+      }
+      finalPdfBase64 = btoa(binary);
+      console.log(`[processar-autos] Retry: PDF loaded from storage, size: ${finalPdfBase64.length} chars`);
+    } else if (!pdfBase64 || !fileName) {
+      return new Response(
+        JSON.stringify({ error: "pdfBase64 e fileName são obrigatórios" }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Create job record with file_path for retry capability
     const { data: job, error: jobError } = await supabaseAdmin
       .from('import_jobs')
       .insert({
         user_id: userId,
         status: 'processing',
         progress: 0,
-        current_step: 'Iniciando processamento...'
+        current_step: isRetry ? 'Reprocessando documento...' : 'Iniciando processamento...',
+        file_path: finalFilePath || null
       })
       .select('id')
       .single();
@@ -652,17 +688,19 @@ serve(async (req) => {
     }
 
     const jobId = job.id;
-    console.log(`[processar-autos] Created job ${jobId} for user ${userId}`);
+    console.log(`[processar-autos] Created job ${jobId} for user ${userId}${isRetry ? ' (RETRY)' : ''}`);
 
     // Start background processing using EdgeRuntime.waitUntil
     // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
-    EdgeRuntime.waitUntil(processarPDFBackground(jobId, pdfBase64, fileName, supabaseAdmin));
+    EdgeRuntime.waitUntil(processarPDFBackground(jobId, finalPdfBase64, fileName, supabaseAdmin));
 
     // Return immediately with jobId
     return new Response(
       JSON.stringify({ 
         jobId,
-        message: "Processamento iniciado. Use o endpoint check-import-status para acompanhar." 
+        message: isRetry 
+          ? "Reprocessamento iniciado. Use o endpoint check-import-status para acompanhar."
+          : "Processamento iniciado. Use o endpoint check-import-status para acompanhar." 
       }),
       { 
         status: 202, 

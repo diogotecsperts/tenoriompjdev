@@ -184,6 +184,7 @@ export type Database = {
           created_at: string
           current_step: string | null
           error: string | null
+          file_path: string | null
           id: string
           progress: number
           result: Json | null
@@ -195,6 +196,7 @@ export type Database = {
           created_at?: string
           current_step?: string | null
           error?: string | null
+          file_path?: string | null
           id?: string
           progress?: number
           result?: Json | null
@@ -206,6 +208,7 @@ export type Database = {
           created_at?: string
           current_step?: string | null
           error?: string | null
+          file_path?: string | null
           id?: string
           progress?: number
           result?: Json | null
