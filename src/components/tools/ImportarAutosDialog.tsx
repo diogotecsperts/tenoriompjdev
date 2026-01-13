@@ -400,11 +400,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       return;
     }
 
-    if (pdfFile.size > 20 * 1024 * 1024) {
+    if (pdfFile.size > 50 * 1024 * 1024) {
       toast({
         variant: "destructive",
         title: "Arquivo muito grande",
-        description: "O arquivo deve ter no máximo 20MB.",
+        description: "O arquivo deve ter no máximo 50MB.",
       });
       return;
     }
@@ -425,11 +425,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       return;
     }
 
-    if (file.size > 20 * 1024 * 1024) {
+    if (file.size > 50 * 1024 * 1024) {
       toast({
         variant: "destructive",
         title: "Arquivo muito grande",
-        description: "O arquivo deve ter no máximo 20MB.",
+        description: "O arquivo deve ter no máximo 50MB.",
       });
       return;
     }
