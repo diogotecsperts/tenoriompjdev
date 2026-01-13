@@ -661,7 +661,7 @@ export default function LaudoEditor() {
                   {currentLaudo?.aiMetadata && (
                     <button
                       onClick={handleSecretAIClick}
-                      className="ml-1 p-0.5 opacity-[0.08] hover:opacity-[0.15] transition-opacity cursor-default"
+                      className="ml-1 p-0.5 opacity-[0.15] hover:opacity-[0.25] transition-opacity cursor-default"
                       aria-hidden="true"
                       tabIndex={-1}
                     >
