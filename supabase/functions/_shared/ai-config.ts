@@ -505,7 +505,299 @@ async function callClaude(config: AIConfig, systemPrompt: string, userPrompt: st
   };
 }
 
-// ============= GEMINI VISION (PDF) =============
+// ============= PDF PROVIDER CONFIGURATION =============
+export interface PDFConfig {
+  provider: string;  // 'openrouter', 'gemini', 'lovable'
+  model: string;     // e.g. 'google/gemini-2.5-flash'
+}
+
+// Models with high context for PDF processing via OpenRouter
+export const OPENROUTER_PDF_MODELS = [
+  { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash', context: '1M tokens', cost: '$0.10/M' },
+  { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro', context: '1M tokens', cost: '$2.50/M' },
+  { id: 'google/gemini-3-pro-preview', name: 'Gemini 3 Pro Preview', context: '1M tokens', cost: '$2/M' },
+  { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', context: '200K tokens', cost: '$3/M' },
+  { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B', context: '128K tokens', cost: '$0.40/M' },
+  { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat', context: '64K tokens', cost: '$0.14/M' },
+];
+
+async function getPDFConfig(): Promise<PDFConfig> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  const { data, error } = await supabase
+    .from('system_config')
+    .select('id, value')
+    .in('id', ['pdf_ai_provider', 'pdf_ai_model']);
+
+  if (error) {
+    console.error('[getPDFConfig] Error:', error);
+    return { provider: 'openrouter', model: 'google/gemini-2.5-flash' };
+  }
+
+  const configMap: Record<string, any> = {};
+  data?.forEach(item => {
+    configMap[item.id] = typeof item.value === 'string' ? item.value : String(item.value);
+  });
+
+  return {
+    provider: configMap.pdf_ai_provider || 'openrouter',
+    model: configMap.pdf_ai_model || 'google/gemini-2.5-flash'
+  };
+}
+
+// ============= PDF PROVIDER ROUTER =============
+export async function callPDFProvider(
+  pdfBase64: string,
+  systemPrompt: string,
+  options?: { userId?: string; promptType?: string }
+): Promise<{ text: string; model: string; provider: string; finishReason: string; usedFallback: boolean }> {
+  const pdfConfig = await getPDFConfig();
+  console.log(`[callPDFProvider] Using provider: ${pdfConfig.provider}, model: ${pdfConfig.model}`);
+
+  switch (pdfConfig.provider) {
+    case 'openrouter':
+      return await callOpenRouterPDF(pdfBase64, pdfConfig.model, systemPrompt, options);
+    case 'gemini':
+      const geminiResult = await callGeminiVision(pdfBase64, systemPrompt, options);
+      return { ...geminiResult, provider: 'gemini' };
+    case 'lovable':
+      return await callLovableAIPDF(pdfBase64, pdfConfig.model, systemPrompt, options);
+    default:
+      console.warn(`[callPDFProvider] Unknown provider ${pdfConfig.provider}, falling back to OpenRouter`);
+      return await callOpenRouterPDF(pdfBase64, pdfConfig.model, systemPrompt, options);
+  }
+}
+
+// ============= OPENROUTER PDF =============
+async function callOpenRouterPDF(
+  pdfBase64: string,
+  model: string,
+  systemPrompt: string,
+  options?: { userId?: string; promptType?: string }
+): Promise<{ text: string; model: string; provider: string; finishReason: string; usedFallback: boolean }> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  const startTime = Date.now();
+
+  // Get OpenRouter API key
+  const { data: keyData } = await supabase
+    .from('global_api_keys')
+    .select('api_key')
+    .eq('id', 'openrouter')
+    .single();
+
+  if (!keyData?.api_key) {
+    throw new Error('OpenRouter API key not configured. Configure it in DevPanel.');
+  }
+
+  console.log(`[OpenRouter PDF] Calling model: ${model}`);
+
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${keyData.api_key}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://lovable.dev',
+        'X-Title': 'Perito AI - PDF Processing'
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: systemPrompt },
+            {
+              type: 'file',
+              file: {
+                filename: 'document.pdf',
+                file_data: `data:application/pdf;base64,${pdfBase64}`
+              }
+            }
+          ]
+        }],
+        max_tokens: 32768,
+        response_format: { type: 'json_object' }
+      })
+    });
+
+    const latencyMs = Date.now() - startTime;
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("[OpenRouter PDF] API error:", response.status, errorText);
+      
+      if (options?.promptType) {
+        await logAIUsage({
+          userId: options.userId,
+          provider: 'openrouter',
+          model: model,
+          promptType: options.promptType,
+          latencyMs,
+          success: false,
+          errorMessage: `API error: ${response.status} - ${errorText}`
+        });
+      }
+      
+      throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const finishReason = data.choices?.[0]?.finish_reason || 'stop';
+    const text = data.choices?.[0]?.message?.content || '';
+
+    // Log success
+    if (options?.promptType) {
+      await logAIUsage({
+        userId: options.userId,
+        provider: 'openrouter',
+        model: model,
+        promptType: options.promptType,
+        latencyMs,
+        success: true,
+        tokensInput: data.usage?.prompt_tokens,
+        tokensOutput: data.usage?.completion_tokens
+      });
+    }
+
+    console.log(`[OpenRouter PDF] Success - Model: ${model}, Finish: ${finishReason}, Latency: ${latencyMs}ms`);
+
+    return {
+      text,
+      model,
+      provider: 'openrouter',
+      finishReason,
+      usedFallback: false
+    };
+  } catch (error) {
+    const latencyMs = Date.now() - startTime;
+    
+    if (options?.promptType) {
+      await logAIUsage({
+        userId: options.userId,
+        provider: 'openrouter',
+        model: model,
+        promptType: options.promptType,
+        latencyMs,
+        success: false,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+    
+    throw error;
+  }
+}
+
+// ============= LOVABLE AI PDF =============
+async function callLovableAIPDF(
+  pdfBase64: string,
+  model: string,
+  systemPrompt: string,
+  options?: { userId?: string; promptType?: string }
+): Promise<{ text: string; model: string; provider: string; finishReason: string; usedFallback: boolean }> {
+  const startTime = Date.now();
+  const lovableKey = Deno.env.get('LOVABLE_API_KEY');
+
+  if (!lovableKey) {
+    throw new Error('LOVABLE_API_KEY not configured');
+  }
+
+  console.log(`[Lovable AI PDF] Calling model: ${model}`);
+
+  try {
+    // Lovable AI uses base64 inline for files
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${lovableKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: systemPrompt },
+            {
+              type: 'image_url',
+              image_url: {
+                url: `data:application/pdf;base64,${pdfBase64}`
+              }
+            }
+          ]
+        }],
+        max_tokens: 32768,
+        response_format: { type: 'json_object' }
+      })
+    });
+
+    const latencyMs = Date.now() - startTime;
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("[Lovable AI PDF] API error:", response.status, errorText);
+      
+      if (options?.promptType) {
+        await logAIUsage({
+          userId: options.userId,
+          provider: 'lovable',
+          model: model,
+          promptType: options.promptType,
+          latencyMs,
+          success: false,
+          errorMessage: `API error: ${response.status}`
+        });
+      }
+      
+      throw new Error(`Lovable AI error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const finishReason = data.choices?.[0]?.finish_reason || 'stop';
+    const text = data.choices?.[0]?.message?.content || '';
+
+    if (options?.promptType) {
+      await logAIUsage({
+        userId: options.userId,
+        provider: 'lovable',
+        model: model,
+        promptType: options.promptType,
+        latencyMs,
+        success: true
+      });
+    }
+
+    return {
+      text,
+      model,
+      provider: 'lovable',
+      finishReason,
+      usedFallback: false
+    };
+  } catch (error) {
+    const latencyMs = Date.now() - startTime;
+    
+    if (options?.promptType) {
+      await logAIUsage({
+        userId: options.userId,
+        provider: 'lovable',
+        model: model,
+        promptType: options.promptType,
+        latencyMs,
+        success: false,
+        errorMessage: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+    
+    throw error;
+  }
+}
+
+// ============= GEMINI VISION (PDF) - Direct API =============
 export async function callGeminiVision(
   pdfBase64: string, 
   systemPrompt: string,
@@ -522,7 +814,6 @@ export async function callGeminiVision(
   
   // Para PDF, precisamos de Gemini Vision
   let apiKey: string | null = null;
-  let useDirectGemini = false;
   let modelToUse = 'gemini-2.5-flash';
 
   // First, check if there's a specific PDF model configured
@@ -539,18 +830,14 @@ export async function callGeminiVision(
 
   if (config.provider === 'gemini' && config.apiKey) {
     apiKey = config.apiKey;
-    useDirectGemini = true;
-    // Only override model if no specific PDF model is configured
     if (!pdfModelConfig?.value) {
       modelToUse = config.model.replace('google/', '');
     }
     console.log(`[Gemini Vision] Using direct Gemini API with model: ${modelToUse}`);
   } else {
-    // Tentar buscar GEMINI_API_KEY do env (legado)
     apiKey = Deno.env.get('GEMINI_API_KEY') || null;
     
     if (!apiKey) {
-      // Buscar do banco
       const { data: keyData } = await supabase
         .from('global_api_keys')
         .select('api_key')
@@ -561,8 +848,6 @@ export async function callGeminiVision(
     }
 
     if (apiKey) {
-      useDirectGemini = true;
-      // Only override model if no specific PDF model is configured
       if (!pdfModelConfig?.value && config.model && (config.model.includes('gemini') || config.provider === 'gemini')) {
         modelToUse = config.model.replace('google/', '');
       }
@@ -607,7 +892,6 @@ export async function callGeminiVision(
       const errorText = await response.text();
       console.error("[Gemini Vision] API error:", response.status, errorText);
       
-      // Log failure
       if (options?.promptType) {
         await logAIUsage({
           userId: options.userId,
@@ -627,7 +911,6 @@ export async function callGeminiVision(
     const finishReason = data.candidates?.[0]?.finishReason || 'STOP';
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    // Log success
     if (options?.promptType) {
       await logAIUsage({
         userId: options.userId,
@@ -648,7 +931,6 @@ export async function callGeminiVision(
   } catch (error) {
     const latencyMs = Date.now() - startTime;
     
-    // Log failure if not already logged
     if (options?.promptType) {
       await logAIUsage({
         userId: options.userId,

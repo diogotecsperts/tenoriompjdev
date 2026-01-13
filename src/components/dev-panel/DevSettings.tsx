@@ -58,6 +58,8 @@ interface SystemConfig {
   fallback_ai_provider: string;
   fallback_ai_model: string;
   gemini_pdf_model: string;
+  pdf_ai_provider: string;
+  pdf_ai_model: string;
   maintenance_mode: boolean;
   max_pdf_size_mb: number;
   allowed_ai_providers: string[];
@@ -164,16 +166,35 @@ const DEFAULT_CONFIG: SystemConfig = {
   fallback_ai_provider: "lovable",
   fallback_ai_model: "google/gemini-2.5-flash",
   gemini_pdf_model: "gemini-2.5-flash",
+  pdf_ai_provider: "openrouter",
+  pdf_ai_model: "google/gemini-2.5-flash",
   maintenance_mode: false,
   max_pdf_size_mb: 50,
   allowed_ai_providers: ["lovable", "openai", "gemini", "claude", "groq", "deepseek", "openrouter"],
 };
 
-// Gemini Vision models available for PDF extraction
+// Gemini Vision models available for PDF extraction (legacy - direct Gemini)
 const GEMINI_PDF_MODELS = [
   { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', description: 'Rápido e eficiente (recomendado)' },
   { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', description: 'Maior precisão, mais lento' },
   { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Exp)', description: 'Versão experimental' },
+];
+
+// PDF AI Providers
+const PDF_AI_PROVIDERS = [
+  { id: 'openrouter', name: 'OpenRouter', description: 'Gateway unificado - centraliza custos' },
+  { id: 'gemini', name: 'Gemini Direto', description: 'API Google AI Studio (requer chave)' },
+  { id: 'lovable', name: 'Lovable AI', description: 'Gateway integrado (requer modelo com suporte a PDF)' },
+];
+
+// OpenRouter models with high context for PDF processing
+const OPENROUTER_PDF_MODELS = [
+  { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash', context: '1M tokens', cost: '$0.10/M' },
+  { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro', context: '1M tokens', cost: '$2.50/M' },
+  { id: 'google/gemini-3-pro-preview', name: 'Gemini 3 Pro Preview', context: '1M tokens', cost: '$2/M' },
+  { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet', context: '200K tokens', cost: '$3/M' },
+  { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B', context: '128K tokens', cost: '$0.40/M' },
+  { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat', context: '64K tokens', cost: '$0.14/M' },
 ];
 
 export function DevSettings() {
@@ -338,6 +359,8 @@ export function DevSettings() {
           fallback_ai_provider: configMap.fallback_ai_provider || DEFAULT_CONFIG.fallback_ai_provider,
           fallback_ai_model: configMap.fallback_ai_model || DEFAULT_CONFIG.fallback_ai_model,
           gemini_pdf_model: configMap.gemini_pdf_model || DEFAULT_CONFIG.gemini_pdf_model,
+          pdf_ai_provider: configMap.pdf_ai_provider || DEFAULT_CONFIG.pdf_ai_provider,
+          pdf_ai_model: configMap.pdf_ai_model || DEFAULT_CONFIG.pdf_ai_model,
           maintenance_mode: configMap.maintenance_mode || DEFAULT_CONFIG.maintenance_mode,
           max_pdf_size_mb: configMap.max_pdf_size_mb || DEFAULT_CONFIG.max_pdf_size_mb,
           allowed_ai_providers: configMap.allowed_ai_providers || DEFAULT_CONFIG.allowed_ai_providers,
@@ -387,6 +410,8 @@ export function DevSettings() {
         { id: "fallback_ai_provider", value: config.fallback_ai_provider },
         { id: "fallback_ai_model", value: config.fallback_ai_model },
         { id: "gemini_pdf_model", value: config.gemini_pdf_model },
+        { id: "pdf_ai_provider", value: config.pdf_ai_provider },
+        { id: "pdf_ai_model", value: config.pdf_ai_model },
         { id: "maintenance_mode", value: config.maintenance_mode },
         { id: "max_pdf_size_mb", value: config.max_pdf_size_mb },
         { id: "allowed_ai_providers", value: config.allowed_ai_providers },
@@ -1255,58 +1280,172 @@ export function DevSettings() {
 
       <Separator />
 
-      {/* Section: PDF Extraction Model */}
+      {/* Section: PDF Extraction - Flexible Provider */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <FileText className="h-5 w-5 text-primary" />
-          <h2 className="text-xl font-semibold">Extração de PDF (Gemini Vision)</h2>
+          <h2 className="text-xl font-semibold">Extração de PDF (Importação de Autos)</h2>
         </div>
         <p className="text-sm text-muted-foreground">
-          A extração de conteúdo de PDFs requer a API Gemini Vision. Escolha o modelo a ser utilizado.
+          Configure o provider e modelo de IA para processamento de PDFs. OpenRouter centraliza os custos.
         </p>
 
         <Card>
-          <CardContent className="pt-6 space-y-4">
-            <div className="space-y-2">
-              <Label>Modelo para PDFs</Label>
-              <Select
-                value={config.gemini_pdf_model}
-                onValueChange={(value) => setConfig({ ...config, gemini_pdf_model: value })}
-              >
-                <SelectTrigger className="w-full md:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {GEMINI_PDF_MODELS.map((model) => (
-                    <SelectItem key={model.id} value={model.id}>
-                      <div className="flex items-center gap-2">
-                        <span>{model.name}</span>
-                        <span className="text-xs text-muted-foreground">- {model.description}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {GEMINI_PDF_MODELS.map((model) => (
-                <Button
-                  key={model.id}
-                  variant={config.gemini_pdf_model === model.id ? "default" : "outline"}
-                  size="sm"
-                  className="text-xs"
-                  onClick={() => setConfig({ ...config, gemini_pdf_model: model.id })}
+          <CardContent className="pt-6 space-y-6">
+            {/* PDF Provider Selection */}
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Provider para PDFs</Label>
+                <Select
+                  value={config.pdf_ai_provider}
+                  onValueChange={(value) => {
+                    // Check if provider requires API key
+                    if (value === 'openrouter' && !savedApiKeys['openrouter']) {
+                      toast({
+                        variant: "destructive",
+                        title: "API Key necessária",
+                        description: "Configure a API Key do OpenRouter antes de usar como provider de PDF",
+                      });
+                      return;
+                    }
+                    if (value === 'gemini' && !savedApiKeys['gemini']) {
+                      toast({
+                        variant: "destructive",
+                        title: "API Key necessária",
+                        description: "Configure a API Key do Gemini antes de usar como provider de PDF",
+                      });
+                      return;
+                    }
+                    
+                    // Set default model for the provider
+                    let defaultModel = 'google/gemini-2.5-flash';
+                    if (value === 'gemini') {
+                      defaultModel = 'gemini-2.5-flash';
+                    }
+                    
+                    setConfig({ 
+                      ...config, 
+                      pdf_ai_provider: value,
+                      pdf_ai_model: defaultModel
+                    });
+                  }}
                 >
-                  {model.name}
-                </Button>
-              ))}
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PDF_AI_PROVIDERS.map((provider) => (
+                      <SelectItem key={provider.id} value={provider.id}>
+                        <div className="flex items-center gap-2">
+                          <span>{provider.name}</span>
+                          <span className="text-xs text-muted-foreground">- {provider.description}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Modelo para PDFs</Label>
+                {config.pdf_ai_provider === 'openrouter' ? (
+                  <Select
+                    value={config.pdf_ai_model}
+                    onValueChange={(value) => setConfig({ ...config, pdf_ai_model: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {OPENROUTER_PDF_MODELS.map((model) => (
+                        <SelectItem key={model.id} value={model.id}>
+                          <div className="flex items-center gap-2">
+                            <span>{model.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {model.context} • {model.cost}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : config.pdf_ai_provider === 'gemini' ? (
+                  <Select
+                    value={config.pdf_ai_model}
+                    onValueChange={(value) => setConfig({ ...config, pdf_ai_model: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GEMINI_PDF_MODELS.map((model) => (
+                        <SelectItem key={model.id} value={model.id}>
+                          <div className="flex items-center gap-2">
+                            <span>{model.name}</span>
+                            <span className="text-xs text-muted-foreground">- {model.description}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    value={config.pdf_ai_model}
+                    onChange={(e) => setConfig({ ...config, pdf_ai_model: e.target.value })}
+                    placeholder="google/gemini-2.5-flash"
+                  />
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 text-sm text-muted-foreground pt-2 border-t">
-              <AlertTriangle className="h-4 w-4 text-yellow-500" />
-              <span>Requer API Key do Gemini configurada acima.</span>
+            {/* Quick Model Selection for OpenRouter */}
+            {config.pdf_ai_provider === 'openrouter' && (
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Seleção rápida:</Label>
+                <div className="flex flex-wrap gap-2">
+                  {OPENROUTER_PDF_MODELS.map((model) => (
+                    <Button
+                      key={model.id}
+                      variant={config.pdf_ai_model === model.id ? "default" : "outline"}
+                      size="sm"
+                      className="text-xs"
+                      onClick={() => setConfig({ ...config, pdf_ai_model: model.id })}
+                    >
+                      {model.name}
+                      <Badge variant="secondary" className="ml-1 text-[10px]">
+                        {model.cost}
+                      </Badge>
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Info Box */}
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border">
+              <Zap className="h-5 w-5 text-primary mt-0.5" />
+              <div className="space-y-1 text-sm">
+                <p className="font-medium">Recomendação: OpenRouter + Gemini 2.5 Flash</p>
+                <p className="text-muted-foreground">
+                  Centraliza custos em uma única plataforma. O Gemini 2.5 Flash oferece excelente custo-benefício 
+                  com contexto de 1M tokens para PDFs grandes.
+                </p>
+              </div>
             </div>
+
+            {/* Provider-specific warnings */}
+            {config.pdf_ai_provider === 'openrouter' && !savedApiKeys['openrouter'] && (
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <span>Configure a API Key do OpenRouter nos cards acima.</span>
+              </div>
+            )}
+            {config.pdf_ai_provider === 'gemini' && !savedApiKeys['gemini'] && (
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <span>Configure a API Key do Gemini nos cards acima.</span>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
