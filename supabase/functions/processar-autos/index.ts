@@ -1,11 +1,15 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAIConfig, callAI, callPDFProvider } from "../_shared/ai-config.ts";
+import { logToBackend, logError, logWarn, logInfo } from "../_shared/backend-logger.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// Timeout for individual summary generation (2 minutes)
+const SUMMARY_TIMEOUT_MS = 120000;
 
 const systemPrompt = `Você é um assistente especializado em análise de processos trabalhistas para médicos peritos. Analise os autos do processo e extraia TODAS as informações disponíveis para preencher um laudo pericial completo.
 
@@ -376,6 +380,7 @@ async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: str
   }
 
   let summariesGenerated = 0;
+  const summaryErrors: string[] = [];
 
   // Generate summaries sequentially with progress updates
   for (const { tipo, shouldGenerate, step, progress } of summariesToGenerate) {
@@ -395,9 +400,19 @@ async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: str
       console.log(`[gerarResumosIA] Generating: ${tipo} with ${aiConfig.provider}/${aiConfig.model}`);
       
       const prompt = getPromptForType(tipo, contexto);
-      const result = await callAI(aiConfig, summarySystemPrompt, prompt, {
-        promptType: tipo
+      
+      // Create a timeout promise
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`Timeout após ${SUMMARY_TIMEOUT_MS/1000}s aguardando resposta da IA`)), SUMMARY_TIMEOUT_MS);
       });
+      
+      // Race between AI call and timeout
+      const result = await Promise.race([
+        callAI(aiConfig, summarySystemPrompt, prompt, {
+          promptType: tipo
+        }),
+        timeoutPromise
+      ]);
       
       console.log(`[gerarResumosIA] Successfully generated ${tipo}`);
       
@@ -406,8 +421,26 @@ async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: str
         summariesGenerated++;
       }
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
       console.error(`[gerarResumosIA] Error generating ${tipo}:`, error);
+      summaryErrors.push(`${tipo}: ${errorMsg}`);
+      
+      // Log error to backend_logs for visibility in DevPanel
+      await logError('processar-autos', `Falha ao gerar ${tipo}: ${errorMsg}`, jobId, { 
+        tipo, 
+        provider: aiConfig.provider, 
+        model: aiConfig.model 
+      });
     }
+  }
+
+  // Log warning if not all summaries were generated
+  if (summariesGenerated < 3 && summaryErrors.length > 0) {
+    await logWarn('processar-autos', `Processamento parcial: ${summariesGenerated}/5 resumos gerados`, jobId, {
+      summariesGenerated,
+      totalAttempted: 5,
+      errors: summaryErrors
+    });
   }
 
   return {
@@ -439,6 +472,12 @@ async function processarPDFBackground(
   };
   
   try {
+    // Log job start
+    await logInfo('processar-autos', `Iniciando processamento de PDF: ${fileName}`, jobId, {
+      isRetry,
+      pdfSizeChars: pdfBase64.length
+    });
+
     // Get current retry_count from job
     const { data: jobData } = await supabaseAdmin
       .from('import_jobs')
@@ -633,10 +672,27 @@ async function processarPDFBackground(
 
     console.log(`[processar-autos] Job ${jobId} completed successfully with model: ${modelUsed}`);
 
+    // Log success to backend_logs
+    await logInfo('processar-autos', `Job concluído com sucesso`, jobId, {
+      model: modelUsed,
+      totalDurationMs: totalDuration,
+      pdfExtractionDurationMs: pdfExtractionDuration,
+      summariesDurationMs: summariesDuration,
+      summariesGenerated: resumosResult.aiInfo.summariesGenerated
+    });
+
   } catch (error) {
     console.error(`[processar-autos] Job ${jobId} failed:`, error);
     
     const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido no processamento';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
+    // Log error to backend_logs for visibility in DevPanel
+    await logError('processar-autos', `Job falhou: ${errorMessage}`, jobId, {
+      errorMessage,
+      errorStack,
+      modelUsed
+    });
     
     // Update attempt record with failure
     if (attemptId) {

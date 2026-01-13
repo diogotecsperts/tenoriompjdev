@@ -12,7 +12,8 @@ import {
   AlertTriangle,
   Cpu,
   DollarSign,
-  RefreshCw
+  RefreshCw,
+  Server
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,12 +24,13 @@ import { DevUsersList } from "@/components/dev-panel/DevUsersList";
 import { DevLogs } from "@/components/dev-panel/DevLogs";
 import { DevSettings } from "@/components/dev-panel/DevSettings";
 import DevErrorLogs from "@/components/dev-panel/DevErrorLogs";
+import DevBackendLogs from "@/components/dev-panel/DevBackendLogs";
 import { DevAIStatus } from "@/components/dev-panel/DevAIStatus";
 import { DevAIUsageLogs } from "@/components/dev-panel/DevAIUsageLogs";
 import { DevPDFCosts } from "@/components/dev-panel/DevPDFCosts";
 import { DevRetryStats } from "@/components/dev-panel/DevRetryStats";
 
-type DevTab = "dashboard" | "users" | "logs" | "errors" | "ai" | "retries" | "pdf-costs" | "settings";
+type DevTab = "dashboard" | "users" | "logs" | "backend-logs" | "errors" | "ai" | "retries" | "pdf-costs" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -40,6 +42,7 @@ const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "users", label: "Usuários", icon: Users },
   { id: "logs", label: "Logs & Métricas", icon: FileText },
+  { id: "backend-logs", label: "Logs Backend", icon: Server },
   { id: "errors", label: "Erros", icon: AlertTriangle },
   { id: "ai", label: "Inteligência Artificial", icon: Cpu },
   { id: "retries", label: "Retries & Rate Limits", icon: RefreshCw },
@@ -66,6 +69,8 @@ export default function DevPanel() {
         return <DevUsersList />;
       case "logs":
         return <DevLogs />;
+      case "backend-logs":
+        return <DevBackendLogs />;
       case "errors":
         return <DevErrorLogs />;
       case "ai":

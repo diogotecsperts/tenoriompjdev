@@ -145,6 +145,9 @@ interface ImportAttempt {
 
 type ProcessingStep = "idle" | "uploading" | "analyzing" | "preview" | "creating";
 
+// Maximum processing time before showing timeout warning (10 minutes)
+const MAX_PROCESSING_TIME_MS = 10 * 60 * 1000;
+
 export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogProps) {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
@@ -165,6 +168,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [attempts, setAttempts] = useState<ImportAttempt[]>([]);
   const [retryInfo, setRetryInfo] = useState<{ isRetrying: boolean; retryCount: number; lastError: string | null } | null>(null);
+  
+  // Timing state
+  const processingStartTime = useRef<number>(0);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [backendLogs, setBackendLogs] = useState<Array<{ level: string; message: string; created_at: string }>>([]);
 
   // Check if user is developer and fetch AI config
   useEffect(() => {
@@ -211,6 +219,41 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       }
     };
   }, []);
+
+  // Elapsed time timer during analysis
+  useEffect(() => {
+    let timer: NodeJS.Timeout | null = null;
+    
+    if (processingStep === 'analyzing' && processingStartTime.current > 0) {
+      timer = setInterval(() => {
+        const elapsed = Date.now() - processingStartTime.current;
+        setElapsedTime(elapsed);
+        
+        // Check for global timeout
+        if (elapsed > MAX_PROCESSING_TIME_MS) {
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
+          
+          toast({
+            variant: "destructive",
+            title: "Tempo limite excedido",
+            description: "O processamento demorou mais de 10 minutos. Verifique os logs no DevPanel para mais detalhes.",
+          });
+          
+          setProcessingStep("idle");
+          setAnalysisStep("");
+        }
+      }, 1000);
+    } else {
+      setElapsedTime(0);
+    }
+    
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [processingStep]);
 
   // Fetch attempts when preview is shown
   useEffect(() => {
@@ -386,6 +429,10 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     if (!selectedFile || !user) return;
 
     try {
+      // Start timing
+      processingStartTime.current = Date.now();
+      setBackendLogs([]);
+      
       // Step 1: Upload to storage
       setProcessingStep("uploading");
       setUploadProgress(0);

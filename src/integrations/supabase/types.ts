@@ -62,6 +62,44 @@ export type Database = {
         }
         Relationships: []
       }
+      backend_logs: {
+        Row: {
+          created_at: string | null
+          function_name: string
+          id: string
+          job_id: string | null
+          level: string
+          message: string
+          metadata: Json | null
+        }
+        Insert: {
+          created_at?: string | null
+          function_name: string
+          id?: string
+          job_id?: string | null
+          level: string
+          message: string
+          metadata?: Json | null
+        }
+        Update: {
+          created_at?: string | null
+          function_name?: string
+          id?: string
+          job_id?: string | null
+          level?: string
+          message?: string
+          metadata?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "backend_logs_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "import_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       error_logs: {
         Row: {
           component_stack: string | null
