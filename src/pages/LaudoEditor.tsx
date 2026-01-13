@@ -18,7 +18,8 @@ import {
   HelpCircle,
   LayoutGrid,
   Scroll,
-  CheckCircle2
+  CheckCircle2,
+  Sparkles
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
@@ -428,15 +429,15 @@ export default function LaudoEditor() {
     }
   };
 
-  // Handle view mode toggle with secret click counting
+  // Handle view mode toggle - simple toggle only
   const handleViewModeClick = () => {
-    // Normal toggle functionality
     setViewMode(prev => prev === "paginated" ? "infinite" : "paginated");
-    
-    // Secret click counting
+  };
+
+  // Handle secret AI icon click
+  const handleSecretAIClick = () => {
     setSecretClickCount(prev => prev + 1);
     
-    // Reset after 2 seconds of no clicks
     if (secretClickTimeout.current) {
       clearTimeout(secretClickTimeout.current);
     }
@@ -654,8 +655,19 @@ export default function LaudoEditor() {
                   <Badge variant="secondary" className="text-xs px-2 py-0">
                     Em andamento
                   </Badge>
-                  <span>•</span>
+                <span>•</span>
                   <span>Salvo automaticamente</span>
+                  {/* Secret AI trigger - highly discrete */}
+                  {currentLaudo?.aiMetadata && (
+                    <button
+                      onClick={handleSecretAIClick}
+                      className="ml-1 p-0.5 opacity-[0.08] hover:opacity-[0.15] transition-opacity cursor-default"
+                      aria-hidden="true"
+                      tabIndex={-1}
+                    >
+                      <Sparkles className="h-3 w-3 text-muted-foreground" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -671,14 +683,10 @@ export default function LaudoEditor() {
                       onClick={handleViewModeClick}
                       className="h-9 w-9 relative"
                     >
-                      {viewMode === "paginated" ? (
+                    {viewMode === "paginated" ? (
                         <Scroll className="h-4 w-4" />
                       ) : (
                         <LayoutGrid className="h-4 w-4" />
-                      )}
-                      {/* Subtle indicator when AI metadata exists */}
-                      {currentLaudo?.aiMetadata && (
-                        <span className="absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full bg-primary/40" />
                       )}
                     </Button>
                   </TooltipTrigger>
