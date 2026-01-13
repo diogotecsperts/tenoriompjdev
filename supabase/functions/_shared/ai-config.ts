@@ -51,14 +51,69 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
   retryableStatuses: [429, 502, 503, 504]
 };
 
+// Cache for retry configuration
+let retryConfigCache: { config: RetryConfig; timestamp: number } | null = null;
+const RETRY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Get retry configuration from database with caching
+ */
+export async function getRetryConfig(): Promise<RetryConfig> {
+  // Check cache first
+  if (retryConfigCache && Date.now() - retryConfigCache.timestamp < RETRY_CACHE_TTL_MS) {
+    return retryConfigCache.config;
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    const { data, error } = await supabase
+      .from('system_config')
+      .select('id, value')
+      .in('id', ['retry_max_attempts', 'retry_base_delay_ms', 'retry_enabled']);
+
+    if (error) throw error;
+
+    const configMap: Record<string, any> = {};
+    data?.forEach(item => { configMap[item.id] = item.value; });
+
+    const config: RetryConfig = {
+      maxRetries: configMap.retry_enabled === false ? 0 : (configMap.retry_max_attempts ?? 3),
+      baseDelayMs: configMap.retry_base_delay_ms ?? 1000,
+      retryableStatuses: [429, 502, 503, 504]
+    };
+
+    retryConfigCache = { config, timestamp: Date.now() };
+    console.log(`[Retry Config] Loaded: enabled=${configMap.retry_enabled !== false}, maxRetries=${config.maxRetries}, baseDelay=${config.baseDelayMs}ms`);
+
+    return config;
+  } catch (err) {
+    console.error('[Retry Config] Error loading, using defaults:', err);
+    return DEFAULT_RETRY_CONFIG;
+  }
+}
+
+/**
+ * Invalidate retry config cache (call after saving new config)
+ */
+export function invalidateRetryConfigCache(): void {
+  retryConfigCache = null;
+  console.log('[Retry Config] Cache invalidated');
+}
+
 /**
  * Fetch with automatic retry and exponential backoff for rate limits
  */
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
-  config: RetryConfig = DEFAULT_RETRY_CONFIG
+  configOverride?: Partial<RetryConfig>
 ): Promise<Response> {
+  // Load config from database (cached)
+  const baseConfig = await getRetryConfig();
+  const config = { ...baseConfig, ...configOverride };
   let lastResponse: Response | null = null;
   let lastError: Error | null = null;
 
