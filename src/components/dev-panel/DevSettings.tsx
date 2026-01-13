@@ -63,6 +63,9 @@ interface SystemConfig {
   maintenance_mode: boolean;
   max_pdf_size_mb: number;
   allowed_ai_providers: string[];
+  retry_enabled: boolean;
+  retry_max_attempts: number;
+  retry_base_delay_ms: number;
 }
 
 interface ApiKeys {
@@ -171,6 +174,9 @@ const DEFAULT_CONFIG: SystemConfig = {
   maintenance_mode: false,
   max_pdf_size_mb: 50,
   allowed_ai_providers: ["lovable", "openai", "gemini", "claude", "groq", "deepseek", "openrouter"],
+  retry_enabled: true,
+  retry_max_attempts: 3,
+  retry_base_delay_ms: 1000,
 };
 
 // Gemini Vision models available for PDF extraction (legacy - direct Gemini)
@@ -364,6 +370,9 @@ export function DevSettings() {
           maintenance_mode: configMap.maintenance_mode || DEFAULT_CONFIG.maintenance_mode,
           max_pdf_size_mb: configMap.max_pdf_size_mb || DEFAULT_CONFIG.max_pdf_size_mb,
           allowed_ai_providers: configMap.allowed_ai_providers || DEFAULT_CONFIG.allowed_ai_providers,
+          retry_enabled: configMap.retry_enabled ?? DEFAULT_CONFIG.retry_enabled,
+          retry_max_attempts: configMap.retry_max_attempts ?? DEFAULT_CONFIG.retry_max_attempts,
+          retry_base_delay_ms: configMap.retry_base_delay_ms ?? DEFAULT_CONFIG.retry_base_delay_ms,
         });
       }
     } catch (error) {
@@ -415,6 +424,9 @@ export function DevSettings() {
         { id: "maintenance_mode", value: config.maintenance_mode },
         { id: "max_pdf_size_mb", value: config.max_pdf_size_mb },
         { id: "allowed_ai_providers", value: config.allowed_ai_providers },
+        { id: "retry_enabled", value: config.retry_enabled },
+        { id: "retry_max_attempts", value: config.retry_max_attempts },
+        { id: "retry_base_delay_ms", value: config.retry_base_delay_ms },
       ];
 
       for (const update of updates) {
@@ -1471,6 +1483,112 @@ export function DevSettings() {
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Separator />
+
+      {/* Section: Retry & Rate Limit Settings */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2">
+          <RefreshCw className="h-5 w-5 text-primary" />
+          <h2 className="text-xl font-semibold">Resiliência & Rate Limits</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Configure o comportamento de retry automático quando a IA retorna erros temporários (429, 502, 503).
+        </p>
+
+        <Card>
+          <CardContent className="pt-6 space-y-6">
+            {/* Toggle para habilitar/desabilitar */}
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>Retry Automático</Label>
+                <p className="text-sm text-muted-foreground">
+                  Tentar novamente automaticamente em caso de rate limits
+                </p>
+              </div>
+              <Switch
+                checked={config.retry_enabled}
+                onCheckedChange={(checked) =>
+                  setConfig({ ...config, retry_enabled: checked })
+                }
+              />
+            </div>
+
+            {/* Configurações detalhadas (visíveis apenas se habilitado) */}
+            {config.retry_enabled && (
+              <div className="grid gap-4 md:grid-cols-2 pt-4 border-t">
+                {/* Máximo de Tentativas */}
+                <div className="space-y-2">
+                  <Label>Máximo de Tentativas</Label>
+                  <Select
+                    value={String(config.retry_max_attempts)}
+                    onValueChange={(value) =>
+                      setConfig({ ...config, retry_max_attempts: Number(value) })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">1 tentativa</SelectItem>
+                      <SelectItem value="2">2 tentativas</SelectItem>
+                      <SelectItem value="3">3 tentativas (padrão)</SelectItem>
+                      <SelectItem value="4">4 tentativas</SelectItem>
+                      <SelectItem value="5">5 tentativas</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Número de retries antes de desistir
+                  </p>
+                </div>
+
+                {/* Delay Base */}
+                <div className="space-y-2">
+                  <Label>Delay Base (ms)</Label>
+                  <Select
+                    value={String(config.retry_base_delay_ms)}
+                    onValueChange={(value) =>
+                      setConfig({ ...config, retry_base_delay_ms: Number(value) })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="500">500ms (rápido)</SelectItem>
+                      <SelectItem value="1000">1000ms (padrão)</SelectItem>
+                      <SelectItem value="2000">2000ms (conservador)</SelectItem>
+                      <SelectItem value="3000">3000ms (lento)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Tempo inicial de espera (dobra a cada retry)
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Visualização do comportamento */}
+            {config.retry_enabled && (
+              <div className="bg-muted/50 rounded-lg p-4 mt-4">
+                <Label className="text-sm">Comportamento esperado:</Label>
+                <div className="flex flex-wrap items-center gap-2 mt-2 text-sm text-muted-foreground">
+                  <span>Tentativa 1</span>
+                  {Array.from({ length: config.retry_max_attempts }).map((_, i) => (
+                    <span key={i} className="flex items-center gap-1">
+                      <span>→</span>
+                      <span className="text-amber-500 font-mono">
+                        {config.retry_base_delay_ms * Math.pow(2, i)}ms
+                      </span>
+                      <span>→ Tentativa {i + 2}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
