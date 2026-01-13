@@ -826,6 +826,21 @@ export function DevSettings() {
     return AI_PROVIDERS.find((p) => p.id === config.fallback_ai_provider);
   };
 
+  // PDF provider helper functions (mirrors fallback logic)
+  const getPdfProviderModels = () => {
+    const provider = AI_PROVIDERS.find((p) => p.id === config.pdf_ai_provider);
+    return provider?.models || [];
+  };
+
+  const pdfProviderHasCustomInput = () => {
+    const provider = AI_PROVIDERS.find((p) => p.id === config.pdf_ai_provider);
+    return provider?.customModelInput || false;
+  };
+
+  const getPdfProvider = () => {
+    return AI_PROVIDERS.find((p) => p.id === config.pdf_ai_provider);
+  };
+
   // Render individual provider card with enhanced styling
   const renderProviderCard = (provider: ProviderInfo, isActive: boolean, isPinned: boolean) => {
     const hasKey = savedApiKeys[provider.id];
@@ -1526,53 +1541,38 @@ export function DevSettings() {
 
       <Separator />
 
-      {/* Section: PDF Extraction - Flexible Provider */}
+      {/* Section: PDF Extraction - Dynamic Provider (same as Fallback) */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <FileText className="h-5 w-5 text-primary" />
           <h2 className="text-xl font-semibold">Extração de PDF (Importação de Autos)</h2>
         </div>
         <p className="text-sm text-muted-foreground">
-          Configure o provider e modelo de IA para processamento de PDFs. OpenRouter centraliza os custos.
+          Configure o provider e modelo de IA para processamento de PDFs. Modelos favoritos são compartilhados com a IA principal.
         </p>
 
         <Card>
-          <CardContent className="pt-6 space-y-6">
-            {/* PDF Provider Selection */}
+          <CardContent className="pt-6 space-y-4">
             <div className="grid gap-4 md:grid-cols-2">
+              {/* PDF Provider Selection - Uses AI_PROVIDERS like Fallback */}
               <div className="space-y-2">
                 <Label>Provider para PDFs</Label>
                 <Select
                   value={config.pdf_ai_provider}
                   onValueChange={(value) => {
-                    // Check if provider requires API key
-                    if (value === 'openrouter' && !savedApiKeys['openrouter']) {
+                    const provider = AI_PROVIDERS.find(p => p.id === value);
+                    if (provider?.requiresKey && !savedApiKeys[value]) {
                       toast({
                         variant: "destructive",
                         title: "API Key necessária",
-                        description: "Configure a API Key do OpenRouter antes de usar como provider de PDF",
+                        description: `Configure uma API Key para usar ${provider.name} para PDFs`,
                       });
                       return;
                     }
-                    if (value === 'gemini' && !savedApiKeys['gemini']) {
-                      toast({
-                        variant: "destructive",
-                        title: "API Key necessária",
-                        description: "Configure a API Key do Gemini antes de usar como provider de PDF",
-                      });
-                      return;
-                    }
-                    
-                    // Set default model for the provider
-                    let defaultModel = 'google/gemini-2.5-flash';
-                    if (value === 'gemini') {
-                      defaultModel = 'gemini-2.5-flash';
-                    }
-                    
                     setConfig({ 
                       ...config, 
                       pdf_ai_provider: value,
-                      pdf_ai_model: defaultModel
+                      pdf_ai_model: AI_PROVIDERS.find(p => p.id === value)?.models[0] || ""
                     });
                   }}
                 >
@@ -1580,116 +1580,165 @@ export function DevSettings() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {PDF_AI_PROVIDERS.map((provider) => (
+                    {AI_PROVIDERS.filter(p => !p.requiresKey || savedApiKeys[p.id]).map((provider) => (
                       <SelectItem key={provider.id} value={provider.id}>
-                        <div className="flex items-center gap-2">
-                          <span>{provider.name}</span>
-                          <span className="text-xs text-muted-foreground">- {provider.description}</span>
-                        </div>
+                        {provider.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
+              {/* PDF Model Selection - Dynamic like Fallback */}
               <div className="space-y-2">
                 <Label>Modelo para PDFs</Label>
-                {config.pdf_ai_provider === 'openrouter' ? (
-                  <Select
-                    value={config.pdf_ai_model}
-                    onValueChange={(value) => setConfig({ ...config, pdf_ai_model: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {OPENROUTER_PDF_MODELS.map((model) => (
-                        <SelectItem key={model.id} value={model.id}>
-                          <div className="flex items-center gap-2">
-                            <span>{model.name}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {model.context} • {model.cost}
-                            </span>
-                          </div>
-                        </SelectItem>
+                {pdfProviderHasCustomInput() ? (
+                  <div className="space-y-3">
+                    <div className="flex gap-2 items-center">
+                      <Input
+                        value={config.pdf_ai_model}
+                        onChange={(e) => setConfig({ ...config, pdf_ai_model: e.target.value })}
+                        placeholder={getPdfProvider()?.modelPlaceholder}
+                      />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => addFavoriteModel(config.pdf_ai_provider, config.pdf_ai_model)}
+                        disabled={!config.pdf_ai_model.trim()}
+                        title="Adicionar aos favoritos"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                      {config.pdf_ai_model && (
+                        <Badge variant="secondary" className="flex items-center gap-1 shrink-0 text-xs">
+                          <Check className="h-3 w-3" />
+                          Definido
+                        </Badge>
+                      )}
+                    </div>
+                    
+                    {/* Favorite Models for PDF - Shared with main AI */}
+                    {favoriteModels[config.pdf_ai_provider]?.length > 0 && (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Star className="h-3 w-3 text-yellow-500" />
+                          Favoritos:
+                        </Label>
+                        <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
+                          {favoriteModels[config.pdf_ai_provider].map((model) => (
+                            <div
+                              key={model}
+                              className={cn(
+                                "flex items-center justify-between p-1.5 rounded-md border text-xs group cursor-pointer hover:bg-muted/50 transition-colors",
+                                config.pdf_ai_model === model && "border-primary bg-primary/5"
+                              )}
+                              onClick={() => setConfig({ ...config, pdf_ai_model: model })}
+                            >
+                              <div className="flex items-center gap-1 min-w-0">
+                                <Star className="h-2.5 w-2.5 text-yellow-500 shrink-0" />
+                                <span className="font-mono truncate">{model}</span>
+                              </div>
+                              <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    copyModelId(model);
+                                  }}
+                                >
+                                  {copiedModel === model ? (
+                                    <Check className="h-2.5 w-2.5 text-green-500" />
+                                  ) : (
+                                    <Copy className="h-2.5 w-2.5" />
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-5 w-5 text-destructive hover:text-destructive"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeFavoriteModel(config.pdf_ai_provider, model);
+                                  }}
+                                >
+                                  <Trash2 className="h-2.5 w-2.5" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Quick suggestions from provider defaults */}
+                    <div className="flex flex-wrap gap-1">
+                      {getPdfProviderModels().slice(0, 4).map((model) => (
+                        <Button
+                          key={model}
+                          variant={config.pdf_ai_model === model ? "default" : "outline"}
+                          size="sm"
+                          className="text-xs h-6"
+                          onClick={() => setConfig({ ...config, pdf_ai_model: model })}
+                        >
+                          {model.length > 25 ? model.slice(0, 25) + "..." : model}
+                        </Button>
                       ))}
-                    </SelectContent>
-                  </Select>
-                ) : config.pdf_ai_provider === 'gemini' ? (
-                  <Select
-                    value={config.pdf_ai_model}
-                    onValueChange={(value) => setConfig({ ...config, pdf_ai_model: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {GEMINI_PDF_MODELS.map((model) => (
-                        <SelectItem key={model.id} value={model.id}>
-                          <div className="flex items-center gap-2">
-                            <span>{model.name}</span>
-                            <span className="text-xs text-muted-foreground">- {model.description}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    </div>
+                  </div>
                 ) : (
-                  <Input
+                  <Select
                     value={config.pdf_ai_model}
-                    onChange={(e) => setConfig({ ...config, pdf_ai_model: e.target.value })}
-                    placeholder="google/gemini-2.5-flash"
-                  />
+                    onValueChange={(value) => setConfig({ ...config, pdf_ai_model: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getPdfProviderModels().map((model) => (
+                        <SelectItem key={model} value={model}>
+                          {model}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 )}
               </div>
             </div>
 
-            {/* Quick Model Selection for OpenRouter */}
-            {config.pdf_ai_provider === 'openrouter' && (
-              <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground">Seleção rápida:</Label>
-                <div className="flex flex-wrap gap-2">
-                  {OPENROUTER_PDF_MODELS.map((model) => (
-                    <Button
-                      key={model.id}
-                      variant={config.pdf_ai_model === model.id ? "default" : "outline"}
-                      size="sm"
-                      className="text-xs"
-                      onClick={() => setConfig({ ...config, pdf_ai_model: model.id })}
-                    >
-                      {model.name}
-                      <Badge variant="secondary" className="ml-1 text-[10px]">
-                        {model.cost}
-                      </Badge>
-                    </Button>
-                  ))}
-                </div>
-              </div>
+            {/* Link to docs for custom input providers */}
+            {getPdfProvider()?.modelDocsUrl && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1">
+                <Globe className="h-3 w-3" />
+                Ver todos os modelos em{" "}
+                <a
+                  href={getPdfProvider()?.modelDocsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  {getPdfProvider()?.modelDocsUrl?.replace("https://", "")}
+                </a>
+              </p>
             )}
 
             {/* Info Box */}
             <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border">
               <Zap className="h-5 w-5 text-primary mt-0.5" />
               <div className="space-y-1 text-sm">
-                <p className="font-medium">Recomendação: OpenRouter + Gemini 2.5 Flash</p>
+                <p className="font-medium">Dica: Favoritos são compartilhados</p>
                 <p className="text-muted-foreground">
-                  Centraliza custos em uma única plataforma. O Gemini 2.5 Flash oferece excelente custo-benefício 
-                  com contexto de 1M tokens para PDFs grandes.
+                  Modelos adicionados como favoritos na IA principal ou fallback também aparecem aqui automaticamente.
                 </p>
               </div>
             </div>
 
             {/* Provider-specific warnings */}
-            {config.pdf_ai_provider === 'openrouter' && !savedApiKeys['openrouter'] && (
+            {getPdfProvider()?.requiresKey && !savedApiKeys[config.pdf_ai_provider] && (
               <div className="flex items-center gap-2 text-sm text-destructive">
                 <AlertTriangle className="h-4 w-4" />
-                <span>Configure a API Key do OpenRouter nos cards acima.</span>
-              </div>
-            )}
-            {config.pdf_ai_provider === 'gemini' && !savedApiKeys['gemini'] && (
-              <div className="flex items-center gap-2 text-sm text-destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <span>Configure a API Key do Gemini nos cards acima.</span>
+                <span>Configure a API Key do {getPdfProvider()?.name} nos cards acima.</span>
               </div>
             )}
           </CardContent>
