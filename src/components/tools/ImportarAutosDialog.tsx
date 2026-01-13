@@ -1238,8 +1238,10 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             <>
               <div
                 className={cn(
-                  "border-2 border-dashed rounded-lg p-8 text-center transition-colors",
-                  isDragging ? "border-primary bg-primary/5" : "border-muted-foreground/25",
+                  "border-2 border-dashed rounded-lg p-8 text-center transition-all duration-300 ease-out",
+                  isDragging 
+                    ? "border-primary border-[3px] bg-primary/10 scale-[1.02] shadow-lg shadow-primary/20 ring-4 ring-primary/20" 
+                    : "border-muted-foreground/25 hover:border-muted-foreground/40",
                   selectedFile ? "border-primary bg-primary/5" : ""
                 )}
                 onDragOver={handleDragOver}
@@ -1263,9 +1265,19 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   </div>
                 ) : (
                   <>
-                    <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-4" />
-                    <p className="text-muted-foreground mb-2">
-                      Arraste um arquivo PDF aqui ou
+                    <Upload 
+                      className={cn(
+                        "h-10 w-10 mx-auto mb-4 transition-all duration-300",
+                        isDragging 
+                          ? "text-primary scale-110 animate-bounce" 
+                          : "text-muted-foreground"
+                      )} 
+                    />
+                    <p className={cn(
+                      "mb-2 transition-colors duration-300",
+                      isDragging ? "text-primary font-medium" : "text-muted-foreground"
+                    )}>
+                      {isDragging ? "Solte o arquivo aqui!" : "Arraste um arquivo PDF aqui ou"}
                     </p>
                     <label>
                       <input
