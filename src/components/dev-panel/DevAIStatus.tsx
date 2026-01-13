@@ -33,6 +33,14 @@ interface AIOperation {
   status: 'ok' | 'warning' | 'error';
 }
 
+interface FallbackStats {
+  totalJobs: number;
+  fallbackCount: number;
+  lastFallbackReason: string | null;
+  lastFallbackDate: Date | null;
+  lastOriginalProvider: string | null;
+}
+
 const PROVIDER_NAMES: Record<string, string> = {
   lovable: 'Lovable AI',
   gemini: 'Google Gemini',
@@ -60,6 +68,7 @@ export function DevAIStatus() {
   const [fallbackConfig, setFallbackConfig] = useState<ProviderConfig | null>(null);
   const [operations, setOperations] = useState<AIOperation[]>(AI_OPERATIONS);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [fallbackStats, setFallbackStats] = useState<FallbackStats | null>(null);
 
   useEffect(() => {
     fetchConfig();
@@ -177,6 +186,45 @@ export function DevAIStatus() {
           status: primaryHasKey ? 'ok' : 'error'
         };
       }));
+
+      // Fetch fallback statistics from recent jobs (last 30 days)
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: jobsData } = await supabase
+        .from('import_jobs')
+        .select('result, created_at')
+        .eq('status', 'completed')
+        .gte('created_at', thirtyDaysAgo)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      // Calculate fallback stats
+      let fallbackCount = 0;
+      let lastFallbackReason: string | null = null;
+      let lastFallbackDate: Date | null = null;
+      let lastOriginalProvider: string | null = null;
+
+      jobsData?.forEach(job => {
+        const result = job.result as Record<string, unknown> | null;
+        const aiUsage = result?.aiUsage as Record<string, unknown> | undefined;
+        const pdfExtraction = aiUsage?.pdfExtraction as Record<string, unknown> | undefined;
+        
+        if (pdfExtraction?.usedFallback) {
+          fallbackCount++;
+          if (!lastFallbackReason && pdfExtraction.fallbackReason) {
+            lastFallbackReason = pdfExtraction.fallbackReason as string;
+            lastFallbackDate = new Date(job.created_at);
+            lastOriginalProvider = pdfExtraction.originalProvider as string || null;
+          }
+        }
+      });
+
+      setFallbackStats({
+        totalJobs: jobsData?.length || 0,
+        fallbackCount,
+        lastFallbackReason,
+        lastFallbackDate,
+        lastOriginalProvider
+      });
 
       setLastUpdate(new Date());
     } catch (error) {
@@ -402,6 +450,79 @@ export function DevAIStatus() {
             </table>
           </div>
         </div>
+
+        {/* Fallback Statistics */}
+        {fallbackStats && (
+          <Card className="bg-muted/30 border-dashed">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <RefreshCw className="h-4 w-4 text-orange-500" />
+                Estatísticas de Fallback (últimos 30 dias)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold">{fallbackStats.totalJobs}</div>
+                  <div className="text-xs text-muted-foreground">Jobs Processados</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-orange-500">{fallbackStats.fallbackCount}</div>
+                  <div className="text-xs text-muted-foreground">Usaram Fallback</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold">
+                    {fallbackStats.totalJobs > 0 
+                      ? ((fallbackStats.fallbackCount / fallbackStats.totalJobs) * 100).toFixed(1) 
+                      : 0}%
+                  </div>
+                  <div className="text-xs text-muted-foreground">Taxa de Fallback</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-green-500">
+                    {fallbackStats.totalJobs - fallbackStats.fallbackCount}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Sucesso Direto</div>
+                </div>
+              </div>
+              
+              {fallbackStats.lastFallbackReason && (
+                <div className="mt-3 p-3 bg-orange-500/10 rounded-lg border border-orange-500/20">
+                  <div className="text-sm font-medium text-orange-700 dark:text-orange-400">
+                    Último Fallback:
+                  </div>
+                  <div className="text-sm mt-1">
+                    <span className="text-muted-foreground">Motivo:</span>{' '}
+                    <span className="font-medium">{fallbackStats.lastFallbackReason}</span>
+                  </div>
+                  {fallbackStats.lastOriginalProvider && (
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Provider Original:</span>{' '}
+                      <span className="font-medium">{PROVIDER_NAMES[fallbackStats.lastOriginalProvider] || fallbackStats.lastOriginalProvider}</span>
+                    </div>
+                  )}
+                  {fallbackStats.lastFallbackDate && (
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {fallbackStats.lastFallbackDate.toLocaleString('pt-BR')}
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {!fallbackStats.lastFallbackReason && fallbackStats.totalJobs > 0 && (
+                <div className="text-sm text-center text-muted-foreground py-2">
+                  Nenhum fallback acionado nos últimos 30 dias
+                </div>
+              )}
+              
+              {fallbackStats.totalJobs === 0 && (
+                <div className="text-sm text-center text-muted-foreground py-2">
+                  Nenhum job processado nos últimos 30 dias
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Cache Info */}
         <div className="flex items-center justify-between text-xs text-muted-foreground bg-muted/30 rounded-lg p-3">
