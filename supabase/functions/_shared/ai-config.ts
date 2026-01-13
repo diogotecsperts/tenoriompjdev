@@ -716,15 +716,30 @@ export async function callPDFProvider(
         return await callOpenRouterPDF(pdfBase64, pdfConfig.model, systemPrompt, options);
     }
   } catch (primaryError) {
-    console.error(`[callPDFProvider] ❌ Primary provider ${pdfConfig.provider} failed:`, primaryError);
+    console.error(`[callPDFProvider] ❌ Primary provider ${pdfConfig.provider}/${pdfConfig.model} failed:`, primaryError);
     
     const errorMessage = primaryError instanceof Error ? primaryError.message : String(primaryError);
-    const fallbackReason = errorMessage.includes('100 PDF pages') 
-      ? 'Limite de páginas excedido' 
+    
+    // Detectar erro específico de limite de páginas do Anthropic/Claude
+    const isPageLimitError = errorMessage.includes('100 PDF pages') || 
+                             errorMessage.includes('maximum of 100');
+    
+    const fallbackReason = isPageLimitError 
+      ? 'Limite de 100 páginas excedido (Anthropic)' 
       : 'Erro no provider principal';
     
-    // Try configured fallback
-    if (pdfConfig.provider !== pdfConfig.fallbackProvider) {
+    if (isPageLimitError) {
+      console.warn('[callPDFProvider] ⚠️ Anthropic page limit detected - switching to Gemini model');
+    }
+    
+    // CORREÇÃO: Comparar providers E modelos para decidir fallback
+    const differentProvider = pdfConfig.provider !== pdfConfig.fallbackProvider;
+    const differentModel = pdfConfig.model !== pdfConfig.fallbackModel;
+    const shouldTryFallback = differentProvider || differentModel;
+    
+    console.log(`[callPDFProvider] Fallback check: differentProvider=${differentProvider}, differentModel=${differentModel}, willTryFallback=${shouldTryFallback}`);
+    
+    if (shouldTryFallback) {
       console.log(`[callPDFProvider] 🔄 Trying configured fallback: ${pdfConfig.fallbackProvider}/${pdfConfig.fallbackModel}`);
       try {
         let fallbackResult;
@@ -741,17 +756,17 @@ export async function callPDFProvider(
             fallbackResult = await callLovableAIPDF(pdfBase64, pdfConfig.fallbackModel, systemPrompt, options);
             break;
         }
-        console.log(`[callPDFProvider] ✅ Fallback ${pdfConfig.fallbackProvider} succeeded`);
-        return { ...fallbackResult, usedFallback: true, originalProvider: pdfConfig.provider, fallbackReason };
+        console.log(`[callPDFProvider] ✅ Fallback ${pdfConfig.fallbackProvider}/${pdfConfig.fallbackModel} succeeded`);
+        return { ...fallbackResult, usedFallback: true, originalProvider: `${pdfConfig.provider}/${pdfConfig.model}`, fallbackReason };
       } catch (fallbackError) {
-        console.error(`[callPDFProvider] ❌ Fallback ${pdfConfig.fallbackProvider} also failed:`, fallbackError);
+        console.error(`[callPDFProvider] ❌ Fallback ${pdfConfig.fallbackProvider}/${pdfConfig.fallbackModel} also failed:`, fallbackError);
         
         // Last resort: Lovable AI (if not already tried)
         if (pdfConfig.fallbackProvider !== 'lovable') {
-          console.log('[callPDFProvider] 🔄 Last resort: Lovable AI');
+          console.log('[callPDFProvider] 🔄 Last resort: Lovable AI with google/gemini-2.5-flash');
           try {
             const lastResortResult = await callLovableAIPDF(pdfBase64, 'google/gemini-2.5-flash', systemPrompt, options);
-            return { ...lastResortResult, usedFallback: true, originalProvider: pdfConfig.provider, fallbackReason: 'Todos os providers configurados falharam' };
+            return { ...lastResortResult, usedFallback: true, originalProvider: `${pdfConfig.provider}/${pdfConfig.model}`, fallbackReason: 'Todos os providers configurados falharam' };
           } catch (lastError) {
             console.error('[callPDFProvider] ❌ All providers failed');
           }
