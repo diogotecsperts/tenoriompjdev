@@ -69,7 +69,15 @@ serve(async (req) => {
     const response: any = {
       status: job.status,
       progress: job.progress,
-      currentStep: job.current_step
+      currentStep: job.current_step,
+      // Add retry info for UI indicator
+      retryInfo: {
+        isRetrying: (job.current_step?.toLowerCase().includes('retry') || 
+                     job.current_step?.toLowerCase().includes('tentativa') ||
+                     job.current_step?.toLowerCase().includes('reconectando')) || false,
+        retryCount: job.retry_count || 0,
+        lastError: job.error || null
+      }
     };
 
     if (job.status === 'completed' && job.result) {
