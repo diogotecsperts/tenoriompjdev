@@ -148,6 +148,27 @@ type ProcessingStep = "idle" | "uploading" | "analyzing" | "preview" | "creating
 // Maximum processing time before showing timeout warning (10 minutes)
 const MAX_PROCESSING_TIME_MS = 10 * 60 * 1000;
 
+// Processing steps definition for visual tracking
+interface StepStatus {
+  id: string;
+  label: string;
+  status: 'pending' | 'processing' | 'completed' | 'skipped' | 'error';
+  startTime?: number;
+  duration?: number;
+}
+
+const PROCESSING_STEPS: Array<{ id: string; label: string }> = [
+  { id: 'upload', label: 'Upload do PDF' },
+  { id: 'extraction', label: 'Extração de dados (Vision)' },
+  { id: 'processing', label: 'Processando dados extraídos' },
+  { id: 'resumo_peticao', label: 'Resumo da Petição Inicial' },
+  { id: 'resumo_contestacao', label: 'Resumo da Contestação' },
+  { id: 'descricao_doencas', label: 'Descrição Técnica das Doenças' },
+  { id: 'nexo_causal', label: 'Análise de Nexo Causal' },
+  { id: 'incapacidade', label: 'Análise de Incapacidade' },
+  { id: 'finalizing', label: 'Finalizando processamento' },
+];
+
 export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogProps) {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
@@ -173,6 +194,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const processingStartTime = useRef<number>(0);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [backendLogs, setBackendLogs] = useState<Array<{ level: string; message: string; created_at: string }>>([]);
+  
+  // Step-by-step tracking
+  const [stepsStatus, setStepsStatus] = useState<StepStatus[]>(
+    PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' }))
+  );
+  const lastStepIdRef = useRef<string | null>(null);
 
   // Check if user is developer and fetch AI config
   useEffect(() => {
@@ -373,6 +400,58 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setSelectedFile(file);
   };
 
+  // Update step status based on stepId from backend
+  const updateStepProgress = (stepId: string | null) => {
+    if (!stepId || stepId === lastStepIdRef.current) return;
+    
+    lastStepIdRef.current = stepId;
+    
+    setStepsStatus(prev => {
+      const currentIndex = PROCESSING_STEPS.findIndex(s => s.id === stepId);
+      
+      return prev.map((step, index) => {
+        if (step.id === stepId) {
+          // Current step is processing
+          return { 
+            ...step, 
+            status: 'processing' as const,
+            startTime: step.startTime || Date.now()
+          };
+        } else if (index < currentIndex) {
+          // Previous steps should be completed
+          if (step.status === 'processing' || step.status === 'pending') {
+            return { 
+              ...step, 
+              status: 'completed' as const,
+              duration: step.startTime ? Date.now() - step.startTime : undefined
+            };
+          }
+          return step;
+        }
+        return step;
+      });
+    });
+  };
+
+  // Mark all remaining steps as completed when processing finishes
+  const markAllStepsCompleted = () => {
+    setStepsStatus(prev => prev.map(step => {
+      if (step.status === 'processing' || step.status === 'pending') {
+        // Check if this was a summary step that might have been skipped
+        const summarySteps = ['resumo_peticao', 'resumo_contestacao', 'descricao_doencas', 'nexo_causal', 'incapacidade'];
+        if (summarySteps.includes(step.id) && step.status === 'pending') {
+          return { ...step, status: 'skipped' as const };
+        }
+        return { 
+          ...step, 
+          status: 'completed' as const,
+          duration: step.startTime ? Date.now() - step.startTime : undefined
+        };
+      }
+      return step;
+    }));
+  };
+
   const checkJobStatus = async (jobId: string): Promise<boolean> => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -400,12 +479,18 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       setAnalysisStep(data.currentStep || 'Processando...');
       setAnalysisProgress(data.progress || 0);
       
+      // Update step progress based on stepId
+      updateStepProgress(data.stepId);
+      
       // Update retry info for visual indicator
       if (data.retryInfo) {
         setRetryInfo(data.retryInfo);
       }
 
       if (data.status === 'completed' && data.result) {
+        // Mark all steps as completed
+        markAllStepsCompleted();
+        
         // Success!
         setExtractedData(data.result.data);
         setAiUsage(data.result.aiUsage || null);
@@ -457,11 +542,23 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
       // Store file path for potential retry
       setCurrentFilePath(filePathToUpload);
+      
+      // Mark upload step as completed
+      setStepsStatus(prev => prev.map(step => 
+        step.id === 'upload' ? { ...step, status: 'completed' as const } : step
+      ));
 
       // Step 2: Convert to base64 and start async processing
       setProcessingStep("analyzing");
       setAnalysisStep("Convertendo documento...");
       setAnalysisProgress(0);
+      
+      // Reset steps for new processing (keep upload as completed)
+      setStepsStatus(PROCESSING_STEPS.map(step => ({ 
+        ...step, 
+        status: step.id === 'upload' ? 'completed' as const : 'pending' as const 
+      })));
+      lastStepIdRef.current = null;
 
       const arrayBuffer = await selectedFile.arrayBuffer();
       const base64 = btoa(
@@ -684,6 +781,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setCurrentFilePath(null);
     setCurrentJobId(null);
     setAttempts([]);
+    // Reset steps status
+    setStepsStatus(PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' })));
+    lastStepIdRef.current = null;
     onOpenChange(false);
   };
 
@@ -702,6 +802,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setProcessingStep("analyzing");
     setAnalysisStep("Reprocessando documento...");
     setAnalysisProgress(0);
+    
+    // Reset steps for retry (keep upload as completed)
+    setStepsStatus(PROCESSING_STEPS.map(step => ({ 
+      ...step, 
+      status: step.id === 'upload' ? 'completed' as const : 'pending' as const 
+    })));
+    lastStepIdRef.current = null;
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -1181,22 +1288,76 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           )}
 
           {processingStep === "analyzing" && (
-            <div className="space-y-4 py-8">
-              <div className="flex items-center justify-center">
-                <div className="relative">
-                  <Loader2 className="h-12 w-12 animate-spin text-primary" />
-                  <Sparkles className="h-5 w-5 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-primary" />
-                </div>
-              </div>
-              <div className="text-center">
-                <p className="font-medium">Analisando documento com IA</p>
-                <p className="text-sm text-muted-foreground mt-1">{analysisStep}</p>
+            <div className="space-y-4 py-4">
+              {/* Header com tempo decorrido */}
+              <div className="text-center mb-2">
+                <p className="font-medium text-lg flex items-center justify-center gap-2">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  Analisando documento com IA
+                </p>
+                <p className="text-sm text-muted-foreground mt-1 flex items-center justify-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  Tempo decorrido: {formatDuration(elapsedTime)}
+                </p>
                 {isDeveloper && aiConfig && (
                   <Badge variant="outline" className="mt-2 text-xs">
                     <Cpu className="h-3 w-3 mr-1" />
                     {formatProviderName(aiConfig.provider)} • {formatModelName(aiConfig.model)}
                   </Badge>
                 )}
+              </div>
+              
+              {/* Lista de etapas */}
+              <div className="space-y-1.5 max-w-md mx-auto">
+                {stepsStatus.map((step) => (
+                  <div 
+                    key={step.id}
+                    className={cn(
+                      "flex items-center gap-3 p-2 rounded-lg transition-all duration-300",
+                      step.status === 'processing' && "bg-primary/10",
+                      step.status === 'completed' && "text-muted-foreground",
+                      step.status === 'error' && "bg-destructive/10"
+                    )}
+                  >
+                    {/* Ícone de status */}
+                    <div className="w-5 h-5 flex items-center justify-center flex-shrink-0">
+                      {step.status === 'pending' && (
+                        <div className="w-3.5 h-3.5 rounded-full border-2 border-muted-foreground/30" />
+                      )}
+                      {step.status === 'processing' && (
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                      )}
+                      {step.status === 'completed' && (
+                        <CheckCircle2 className="w-4 h-4 text-green-500" />
+                      )}
+                      {step.status === 'skipped' && (
+                        <div className="w-3.5 h-3.5 rounded-full bg-muted-foreground/20 flex items-center justify-center">
+                          <span className="text-[8px] text-muted-foreground">–</span>
+                        </div>
+                      )}
+                      {step.status === 'error' && (
+                        <XCircle className="w-4 h-4 text-destructive" />
+                      )}
+                    </div>
+                    
+                    {/* Label da etapa */}
+                    <span className={cn(
+                      "text-sm flex-1",
+                      step.status === 'processing' && "font-medium text-primary",
+                      step.status === 'completed' && "line-through opacity-70",
+                      step.status === 'skipped' && "opacity-50"
+                    )}>
+                      {step.label}
+                    </span>
+                    
+                    {/* Duração (se concluída) */}
+                    {step.status === 'completed' && step.duration && (
+                      <span className="text-xs text-muted-foreground">
+                        {formatDuration(step.duration)}
+                      </span>
+                    )}
+                  </div>
+                ))}
               </div>
               
               {/* Retry Indicator */}
@@ -1212,10 +1373,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                 </Alert>
               )}
               
-              <Progress value={analysisProgress} className="h-2" />
-              <p className="text-xs text-center text-muted-foreground">
-                Este processo pode levar alguns minutos para PDFs grandes
-              </p>
+              {/* Barra de progresso geral */}
+              <div className="pt-2">
+                <Progress value={analysisProgress} className="h-2" />
+                <p className="text-xs text-center text-muted-foreground mt-2">
+                  {analysisProgress}% concluído
+                </p>
+              </div>
             </div>
           )}
 

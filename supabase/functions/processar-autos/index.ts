@@ -387,12 +387,13 @@ async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: str
     if (!shouldGenerate) continue;
 
     try {
-      // Update progress
+      // Update progress with step_id for frontend tracking
       await supabaseAdmin
         .from('import_jobs')
         .update({ 
           progress, 
           current_step: step,
+          step_id: tipo,
           updated_at: new Date().toISOString()
         })
         .eq('id', jobId);
@@ -521,6 +522,7 @@ async function processarPDFBackground(
       .update({ 
         progress: 5, 
         current_step: isRetry ? 'Reprocessando PDF...' : 'Enviando PDF para análise...',
+        step_id: 'upload',
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
@@ -533,6 +535,7 @@ async function processarPDFBackground(
       .update({ 
         progress: 10, 
         current_step: 'Extraindo dados do PDF com IA...',
+        step_id: 'extraction',
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
@@ -569,6 +572,7 @@ async function processarPDFBackground(
       .update({ 
         progress: 40, 
         current_step: 'Processando dados extraídos...',
+        step_id: 'processing',
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
@@ -605,6 +609,7 @@ async function processarPDFBackground(
       .update({ 
         progress: 95, 
         current_step: 'Finalizando processamento...',
+        step_id: 'finalizing',
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
@@ -665,6 +670,7 @@ async function processarPDFBackground(
         status: 'completed',
         progress: 100, 
         current_step: 'Processamento concluído!',
+        step_id: 'completed',
         result: result,
         updated_at: new Date().toISOString()
       })

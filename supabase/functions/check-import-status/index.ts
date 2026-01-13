@@ -70,6 +70,7 @@ serve(async (req) => {
       status: job.status,
       progress: job.progress,
       currentStep: job.current_step,
+      stepId: job.step_id || null,
       // Add retry info for UI indicator
       retryInfo: {
         isRetrying: (job.current_step?.toLowerCase().includes('retry') || 
