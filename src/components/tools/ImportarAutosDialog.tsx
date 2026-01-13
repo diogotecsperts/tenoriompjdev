@@ -1275,7 +1275,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                         onChange={handleFileSelect}
                       />
                       <Button variant="secondary" asChild>
-                        <span>Selecionar arquivo</span>
+                        <span className="relative overflow-hidden transition-all duration-200 ease-out hover:scale-[1.02] hover:shadow-md active:scale-[0.98] active:shadow-sm cursor-pointer group">
+                          <span className="absolute inset-0 bg-primary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-md" />
+                          <span className="relative z-10 flex items-center gap-2">
+                            <Upload className="h-4 w-4" />
+                            Selecionar arquivo
+                          </span>
+                        </span>
                       </Button>
                     </label>
                     <p className="text-xs text-muted-foreground mt-2">
