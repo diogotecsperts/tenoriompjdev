@@ -232,6 +232,10 @@ export function DevSettings() {
   
   // Pinned providers for visual organization
   const [pinnedProviders, setPinnedProviders] = useState<string[]>([]);
+  
+  // Animation states for visual feedback
+  const [animatingProvider, setAnimatingProvider] = useState<string | null>(null);
+  const [animationType, setAnimationType] = useState<'pin' | 'activate' | null>(null);
 
   useEffect(() => {
     fetchConfig();
@@ -265,6 +269,16 @@ export function DevSettings() {
       ? pinnedProviders.filter((p) => p !== providerId)
       : [...pinnedProviders, providerId];
 
+    // Trigger animation only when pinning (not unpinning)
+    if (!isPinned) {
+      setAnimatingProvider(providerId);
+      setAnimationType('pin');
+      setTimeout(() => {
+        setAnimatingProvider(null);
+        setAnimationType(null);
+      }, 600);
+    }
+
     try {
       const { error } = await supabase.from("system_config").upsert({
         id: "pinned_ai_providers",
@@ -275,9 +289,16 @@ export function DevSettings() {
       if (error) throw error;
 
       setPinnedProviders(updated);
+      
+      const providerName = AI_PROVIDERS.find(p => p.id === providerId)?.name;
       toast({
         title: isPinned ? "Desafixado" : "Fixado",
-        description: `Provider ${isPinned ? "removido dos" : "adicionado aos"} favoritos`,
+        description: (
+          <div className="flex items-center gap-2">
+            <Pin className={cn("h-4 w-4", isPinned ? "text-muted-foreground" : "text-amber-500")} />
+            <span>{providerName} {isPinned ? "removido dos favoritos" : "fixado no topo"}</span>
+          </div>
+        ),
       });
     } catch (error) {
       console.error("Error toggling pinned provider:", error);
@@ -717,11 +738,29 @@ export function DevSettings() {
       return;
     }
 
+    // Trigger activation animation
+    setAnimatingProvider(providerId);
+    setAnimationType('activate');
+    setTimeout(() => {
+      setAnimatingProvider(null);
+      setAnimationType(null);
+    }, 1000);
+
     setConfig((prev) => ({
       ...prev,
       default_ai_provider: providerId,
       default_ai_model: provider.models[0],
     }));
+
+    toast({
+      title: "Provider Atualizado",
+      description: (
+        <div className="flex items-center gap-2">
+          <Crown className="h-4 w-4 text-primary" />
+          <span>{provider.name} agora é o provider padrão</span>
+        </div>
+      ),
+    });
   };
 
   const toggleProvider = (providerId: string) => {
@@ -793,59 +832,84 @@ export function DevSettings() {
     const isAllowed = config.allowed_ai_providers.includes(provider.id);
     const testResult = testResults[provider.id];
     const isTesting = testingProvider === provider.id;
+    
+    // Animation states
+    const isAnimating = animatingProvider === provider.id;
+    const isActivating = isAnimating && animationType === 'activate';
+    const isPinning = isAnimating && animationType === 'pin';
 
     return (
-      <Card
+      <div
         key={provider.id}
-        className={cn(
-          "group relative overflow-hidden transition-all duration-200 cursor-pointer hover:shadow-lg",
-          isActive && "ring-2 ring-primary shadow-xl scale-[1.02]",
-          isPinned && !isActive && "ring-1 ring-amber-400/50",
-          !isAllowed && "opacity-50"
-        )}
-        onClick={() => selectProvider(provider.id)}
+        className="transition-all duration-500 ease-out"
+        style={{ willChange: isAnimating ? 'transform' : 'auto' }}
       >
-        {/* Colored top bar - thicker for active */}
-        <div
+        <Card
           className={cn(
-            "absolute top-0 left-0 w-full transition-all",
-            isActive ? "h-2" : "h-1"
+            "group relative overflow-hidden cursor-pointer hover:shadow-lg",
+            "transition-all duration-300 ease-out",
+            // Visual states
+            isActive && "ring-2 ring-primary shadow-xl scale-[1.02]",
+            isPinned && !isActive && "ring-1 ring-amber-400/50",
+            !isAllowed && "opacity-50",
+            // Temporary animations
+            isActivating && "animate-glow-primary",
+            isPinning && "animate-highlight-pulse"
           )}
-          style={{ backgroundColor: provider.color }}
-        />
-
-        {/* Pin button - visible on hover or when pinned */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(
-            "absolute top-3 left-3 h-6 w-6 z-10 opacity-0 group-hover:opacity-100 transition-opacity",
-            isPinned && "opacity-100 text-amber-500",
-            isActive && "opacity-0 group-hover:opacity-0" // Hide pin for active
-          )}
-          onClick={(e) => {
-            e.stopPropagation();
-            togglePinProvider(provider.id);
-          }}
-          title={isPinned ? "Desafixar" : "Fixar no topo"}
+          onClick={() => selectProvider(provider.id)}
         >
-          {isPinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
-        </Button>
+          {/* Colored top bar - thicker for active */}
+          <div
+            className={cn(
+              "absolute top-0 left-0 w-full transition-all duration-300",
+              isActive ? "h-2" : "h-1"
+            )}
+            style={{ backgroundColor: provider.color }}
+          />
 
-        {/* Status badges */}
-        {isActive ? (
-          <Badge className="absolute top-3 right-3 bg-primary text-primary-foreground shadow-lg">
-            <Check className="h-3 w-3 mr-1" />
-            ATIVO
-          </Badge>
-        ) : isPinned ? (
-          <Badge
-            variant="outline"
-            className="absolute top-3 right-3 border-amber-400 text-amber-500"
+          {/* Pin button - visible on hover or when pinned */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "absolute top-3 left-3 h-6 w-6 z-10 transition-all duration-200",
+              "opacity-0 group-hover:opacity-100",
+              isPinned && "opacity-100 text-amber-500",
+              isActive && "opacity-0 group-hover:opacity-0", // Hide pin for active
+              isPinning && "animate-pin-bounce"
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              togglePinProvider(provider.id);
+            }}
+            title={isPinned ? "Desafixar" : "Fixar no topo"}
           >
-            <Pin className="h-3 w-3" />
-          </Badge>
-        ) : null}
+            {isPinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+          </Button>
+
+          {/* Status badges */}
+          {isActive ? (
+            <Badge 
+              className={cn(
+                "absolute top-3 right-3 bg-primary text-primary-foreground shadow-lg",
+                "transition-all duration-300",
+                isActivating && "animate-scale-in"
+              )}
+            >
+              <Check className="h-3 w-3 mr-1" />
+              ATIVO
+            </Badge>
+          ) : isPinned ? (
+            <Badge
+              variant="outline"
+              className={cn(
+                "absolute top-3 right-3 border-amber-400 text-amber-500",
+                isPinning && "animate-scale-in"
+              )}
+            >
+              <Pin className="h-3 w-3" />
+            </Badge>
+          ) : null}
 
         <CardHeader className="pb-2 pt-6">
           <div className="flex items-center gap-2">
@@ -988,7 +1052,8 @@ export function DevSettings() {
             </div>
           </div>
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     );
   };
 
