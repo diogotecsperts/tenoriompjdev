@@ -13,7 +13,8 @@ import {
   Cpu,
   DollarSign,
   RefreshCw,
-  Server
+  Server,
+  Gauge
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -29,8 +30,9 @@ import { DevAIStatus } from "@/components/dev-panel/DevAIStatus";
 import { DevAIUsageLogs } from "@/components/dev-panel/DevAIUsageLogs";
 import { DevPDFCosts } from "@/components/dev-panel/DevPDFCosts";
 import { DevRetryStats } from "@/components/dev-panel/DevRetryStats";
+import { DevAIEfficiency } from "@/components/dev-panel/DevAIEfficiency";
 
-type DevTab = "dashboard" | "users" | "logs" | "backend-logs" | "errors" | "ai" | "retries" | "pdf-costs" | "settings";
+type DevTab = "dashboard" | "users" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -45,6 +47,7 @@ const navItems: NavItem[] = [
   { id: "backend-logs", label: "Logs Backend", icon: Server },
   { id: "errors", label: "Erros", icon: AlertTriangle },
   { id: "ai", label: "Inteligência Artificial", icon: Cpu },
+  { id: "ai-efficiency", label: "Eficiência de IAs", icon: Gauge },
   { id: "retries", label: "Retries & Rate Limits", icon: RefreshCw },
   { id: "pdf-costs", label: "Custos PDF", icon: DollarSign },
   { id: "settings", label: "Configurações", icon: Settings },
@@ -80,6 +83,8 @@ export default function DevPanel() {
             <DevAIUsageLogs />
           </div>
         );
+      case "ai-efficiency":
+        return <DevAIEfficiency />;
       case "retries":
         return <DevRetryStats />;
       case "pdf-costs":
