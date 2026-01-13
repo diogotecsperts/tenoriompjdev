@@ -638,10 +638,12 @@ async function processarPDFBackground(
       data: extractedData,
       aiUsage: {
         pdfExtraction: {
-          provider: 'gemini',
+          provider: visionResult.provider,
           model: modelUsed,
-          note: 'Gemini Vision é obrigatório para processar PDFs nativamente',
-          durationMs: pdfExtractionDuration
+          durationMs: pdfExtractionDuration,
+          usedFallback: visionResult.usedFallback || false,
+          originalProvider: visionResult.originalProvider,
+          fallbackReason: visionResult.fallbackReason
         },
         summaries: {
           provider: resumosResult.aiInfo.provider,

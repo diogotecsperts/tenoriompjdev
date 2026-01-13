@@ -27,7 +27,8 @@ import {
   RefreshCw,
   History,
   ChevronDown,
-  XCircle
+  XCircle,
+  Turtle
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -117,6 +118,9 @@ interface AIUsageInfo {
     model: string;
     note?: string;
     durationMs?: number;
+    usedFallback?: boolean;
+    originalProvider?: string;
+    fallbackReason?: string;
   };
   summaries: {
     provider: string;
@@ -145,8 +149,24 @@ interface ImportAttempt {
 
 type ProcessingStep = "idle" | "uploading" | "analyzing" | "preview" | "creating";
 
-// Maximum processing time before showing timeout warning (10 minutes)
-const MAX_PROCESSING_TIME_MS = 10 * 60 * 1000;
+// Maximum processing time before showing timeout warning (25 minutes)
+const MAX_PROCESSING_TIME_MS = 25 * 60 * 1000;
+
+// Average step times (in ms) - based on historical data
+const AVERAGE_STEP_TIMES: Record<string, number> = {
+  upload: 3000,           // 3s
+  extraction: 80000,      // 80s (Vision is naturally slow)
+  processing: 5000,       // 5s
+  resumo_peticao: 15000,  // 15s
+  resumo_contestacao: 15000, // 15s
+  descricao_doencas: 45000,  // 45s
+  nexo_causal: 35000,     // 35s
+  incapacidade: 25000,    // 25s
+  finalizing: 3000        // 3s
+};
+
+// Multiplier to consider "slow" (1.5x = 50% slower than average)
+const SLOW_THRESHOLD_MULTIPLIER = 1.5;
 
 // Processing steps definition for visual tracking
 interface StepStatus {
@@ -200,6 +220,10 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' }))
   );
   const lastStepIdRef = useRef<string | null>(null);
+  
+  // Slow AI detection state
+  const [isSlowAI, setIsSlowAI] = useState(false);
+  const [slowSteps, setSlowSteps] = useState<string[]>([]);
 
   // Check if user is developer and fetch AI config
   useEffect(() => {
@@ -266,11 +290,24 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           toast({
             variant: "destructive",
             title: "Tempo limite excedido",
-            description: "O processamento demorou mais de 10 minutos. Verifique os logs no DevPanel para mais detalhes.",
+            description: "O processamento demorou mais de 25 minutos. Verifique os logs no DevPanel para mais detalhes.",
           });
           
           setProcessingStep("idle");
           setAnalysisStep("");
+        }
+        
+        // Check for slow steps
+        const currentProcessingStep = stepsStatus.find(s => s.status === 'processing');
+        if (currentProcessingStep?.startTime) {
+          const elapsedForStep = Date.now() - currentProcessingStep.startTime;
+          const expectedTime = AVERAGE_STEP_TIMES[currentProcessingStep.id] || 30000;
+          const slowThreshold = expectedTime * SLOW_THRESHOLD_MULTIPLIER;
+          
+          if (elapsedForStep > slowThreshold && !slowSteps.includes(currentProcessingStep.id)) {
+            setIsSlowAI(true);
+            setSlowSteps(prev => [...prev, currentProcessingStep.id]);
+          }
         }
       }, 1000);
     } else {
@@ -784,6 +821,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     // Reset steps status
     setStepsStatus(PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' })));
     lastStepIdRef.current = null;
+    // Reset slow AI detection
+    setIsSlowAI(false);
+    setSlowSteps([]);
     onOpenChange(false);
   };
 
@@ -979,10 +1019,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                     {formatDuration(aiUsage.pdfExtraction.durationMs)}
                   </div>
                 )}
-                <div className="text-xs text-blue-500 flex items-center gap-1 mt-1">
-                  <AlertCircle className="h-3 w-3" />
-                  Gemini Vision obrigatório para PDFs
-                </div>
+                {/* Fallback indicator */}
+                {aiUsage.pdfExtraction.usedFallback && aiUsage.pdfExtraction.originalProvider && (
+                  <div className="text-xs text-amber-500 flex items-center gap-1 mt-1">
+                    <RefreshCw className="h-3 w-3" />
+                    Fallback de {aiUsage.pdfExtraction.originalProvider}
+                  </div>
+                )}
               </div>
               
               {/* Summaries Generation */}
@@ -1350,6 +1393,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                       {step.label}
                     </span>
                     
+                    {/* Slow indicator per step */}
+                    {step.status === 'processing' && slowSteps.includes(step.id) && (
+                      <Turtle className="h-3.5 w-3.5 text-blue-500 animate-pulse" />
+                    )}
+                    
                     {/* Duração (se concluída) */}
                     {step.status === 'completed' && step.duration && (
                       <span className="text-xs text-muted-foreground">
@@ -1359,6 +1407,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   </div>
                 ))}
               </div>
+              
+              {/* Slow AI Indicator */}
+              {isSlowAI && (
+                <Alert className="bg-blue-500/10 border-blue-500/30">
+                  <Turtle className="h-4 w-4 text-blue-500" />
+                  <AlertTitle className="text-blue-600 dark:text-blue-400">
+                    IA processando com calma
+                  </AlertTitle>
+                  <AlertDescription className="text-blue-600/80 dark:text-blue-400/80">
+                    O modelo de IA selecionado é mais lento, mas geralmente oferece 
+                    resultados de maior qualidade. Aguarde...
+                  </AlertDescription>
+                </Alert>
+              )}
               
               {/* Retry Indicator */}
               {retryInfo && retryInfo.retryCount > 0 && (

@@ -64,6 +64,8 @@ interface SystemConfig {
   gemini_pdf_model: string;
   pdf_ai_provider: string;
   pdf_ai_model: string;
+  pdf_fallback_provider: string;
+  pdf_fallback_model: string;
   maintenance_mode: boolean;
   max_pdf_size_mb: number;
   allowed_ai_providers: string[];
@@ -175,6 +177,8 @@ const DEFAULT_CONFIG: SystemConfig = {
   gemini_pdf_model: "gemini-2.5-flash",
   pdf_ai_provider: "openrouter",
   pdf_ai_model: "google/gemini-2.5-flash",
+  pdf_fallback_provider: "lovable",
+  pdf_fallback_model: "google/gemini-2.5-flash",
   maintenance_mode: false,
   max_pdf_size_mb: 50,
   allowed_ai_providers: ["lovable", "openai", "gemini", "claude", "groq", "deepseek", "openrouter"],
@@ -470,6 +474,8 @@ export function DevSettings() {
           gemini_pdf_model: configMap.gemini_pdf_model || DEFAULT_CONFIG.gemini_pdf_model,
           pdf_ai_provider: configMap.pdf_ai_provider || DEFAULT_CONFIG.pdf_ai_provider,
           pdf_ai_model: configMap.pdf_ai_model || DEFAULT_CONFIG.pdf_ai_model,
+          pdf_fallback_provider: configMap.pdf_fallback_provider || DEFAULT_CONFIG.pdf_fallback_provider,
+          pdf_fallback_model: configMap.pdf_fallback_model || DEFAULT_CONFIG.pdf_fallback_model,
           maintenance_mode: configMap.maintenance_mode || DEFAULT_CONFIG.maintenance_mode,
           max_pdf_size_mb: configMap.max_pdf_size_mb || DEFAULT_CONFIG.max_pdf_size_mb,
           allowed_ai_providers: configMap.allowed_ai_providers || DEFAULT_CONFIG.allowed_ai_providers,
@@ -524,6 +530,8 @@ export function DevSettings() {
         { id: "gemini_pdf_model", value: config.gemini_pdf_model },
         { id: "pdf_ai_provider", value: config.pdf_ai_provider },
         { id: "pdf_ai_model", value: config.pdf_ai_model },
+        { id: "pdf_fallback_provider", value: config.pdf_fallback_provider },
+        { id: "pdf_fallback_model", value: config.pdf_fallback_model },
         { id: "maintenance_mode", value: config.maintenance_mode },
         { id: "max_pdf_size_mb", value: config.max_pdf_size_mb },
         { id: "allowed_ai_providers", value: config.allowed_ai_providers },
@@ -839,6 +847,21 @@ export function DevSettings() {
 
   const getPdfProvider = () => {
     return AI_PROVIDERS.find((p) => p.id === config.pdf_ai_provider);
+  };
+  
+  // PDF Fallback helper functions
+  const getPdfFallbackProviderModels = () => {
+    const provider = AI_PROVIDERS.find((p) => p.id === config.pdf_fallback_provider);
+    return provider?.models || [];
+  };
+
+  const pdfFallbackProviderHasCustomInput = () => {
+    const provider = AI_PROVIDERS.find((p) => p.id === config.pdf_fallback_provider);
+    return provider?.customModelInput || false;
+  };
+
+  const getPdfFallbackProvider = () => {
+    return AI_PROVIDERS.find((p) => p.id === config.pdf_fallback_provider);
   };
 
   // Render individual provider card with enhanced styling
@@ -1739,6 +1762,157 @@ export function DevSettings() {
               <div className="flex items-center gap-2 text-sm text-destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <span>Configure a API Key do {getPdfProvider()?.name} nos cards acima.</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        
+        {/* PDF Fallback Configuration Card */}
+        <Card className="border-dashed border-amber-500/30">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <RefreshCw className="h-4 w-4 text-amber-500" />
+              <CardTitle className="text-base">Fallback para Extração de PDF</CardTitle>
+            </div>
+            <CardDescription>
+              Usado automaticamente quando o provider principal falha (ex: limite de páginas excedido)
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* PDF Fallback Provider Selection */}
+              <div className="space-y-2">
+                <Label>Provider de Fallback</Label>
+                <Select
+                  value={config.pdf_fallback_provider}
+                  onValueChange={(value) => {
+                    const provider = AI_PROVIDERS.find(p => p.id === value);
+                    if (provider?.requiresKey && !savedApiKeys[value]) {
+                      toast({
+                        variant: "destructive",
+                        title: "API Key necessária",
+                        description: `Configure uma API Key para usar ${provider.name} como fallback`,
+                      });
+                      return;
+                    }
+                    setConfig({ 
+                      ...config, 
+                      pdf_fallback_provider: value,
+                      pdf_fallback_model: AI_PROVIDERS.find(p => p.id === value)?.models[0] || ""
+                    });
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AI_PROVIDERS.filter(p => !p.requiresKey || savedApiKeys[p.id]).map((provider) => (
+                      <SelectItem key={provider.id} value={provider.id}>
+                        {provider.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* PDF Fallback Model Selection */}
+              <div className="space-y-2">
+                <Label>Modelo de Fallback</Label>
+                {pdfFallbackProviderHasCustomInput() ? (
+                  <div className="space-y-3">
+                    <div className="flex gap-2 items-center">
+                      <Input
+                        value={config.pdf_fallback_model}
+                        onChange={(e) => setConfig({ ...config, pdf_fallback_model: e.target.value })}
+                        placeholder={getPdfFallbackProvider()?.modelPlaceholder}
+                      />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => addFavoriteModel(config.pdf_fallback_provider, config.pdf_fallback_model)}
+                        disabled={!config.pdf_fallback_model.trim()}
+                        title="Adicionar aos favoritos"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    {/* Favorite Models for PDF Fallback - Shared */}
+                    {favoriteModels[config.pdf_fallback_provider]?.length > 0 && (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Star className="h-3 w-3 text-yellow-500" />
+                          Favoritos:
+                        </Label>
+                        <div className="flex flex-col gap-1 max-h-24 overflow-y-auto">
+                          {favoriteModels[config.pdf_fallback_provider].map((model) => (
+                            <div
+                              key={model}
+                              className={cn(
+                                "flex items-center justify-between p-1.5 rounded-md border text-xs group cursor-pointer hover:bg-muted/50 transition-colors",
+                                config.pdf_fallback_model === model && "border-primary bg-primary/5"
+                              )}
+                              onClick={() => setConfig({ ...config, pdf_fallback_model: model })}
+                            >
+                              <div className="flex items-center gap-1 min-w-0">
+                                <Star className="h-2.5 w-2.5 text-yellow-500 shrink-0" />
+                                <span className="font-mono truncate">{model}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Quick suggestions */}
+                    <div className="flex flex-wrap gap-1">
+                      {getPdfFallbackProviderModels().slice(0, 3).map((model) => (
+                        <Button
+                          key={model}
+                          variant={config.pdf_fallback_model === model ? "default" : "outline"}
+                          size="sm"
+                          className="text-xs h-6"
+                          onClick={() => setConfig({ ...config, pdf_fallback_model: model })}
+                        >
+                          {model.length > 20 ? model.slice(0, 20) + "..." : model}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <Select
+                    value={config.pdf_fallback_model}
+                    onValueChange={(value) => setConfig({ ...config, pdf_fallback_model: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {getPdfFallbackProviderModels().map((model) => (
+                        <SelectItem key={model} value={model}>
+                          {model}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            </div>
+
+            {/* Info Box */}
+            <div className="flex items-start gap-2 p-2 rounded bg-amber-500/10 text-sm">
+              <Shield className="h-4 w-4 text-amber-500 mt-0.5" />
+              <span className="text-muted-foreground">
+                <strong>Lovable AI</strong> é recomendado como fallback por não requerer API Key e 
+                ter suporte nativo a PDFs grandes.
+              </span>
+            </div>
+            
+            {/* Warning if fallback requires key */}
+            {getPdfFallbackProvider()?.requiresKey && !savedApiKeys[config.pdf_fallback_provider] && (
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <AlertTriangle className="h-4 w-4" />
+                <span>Configure a API Key do {getPdfFallbackProvider()?.name} nos cards acima.</span>
               </div>
             )}
           </CardContent>

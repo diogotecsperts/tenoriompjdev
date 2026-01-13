@@ -645,6 +645,8 @@ async function callClaude(config: AIConfig, systemPrompt: string, userPrompt: st
 export interface PDFConfig {
   provider: string;  // 'openrouter', 'gemini', 'lovable'
   model: string;     // e.g. 'google/gemini-2.5-flash'
+  fallbackProvider: string;
+  fallbackModel: string;
 }
 
 // Models with high context for PDF processing via OpenRouter
@@ -665,11 +667,16 @@ async function getPDFConfig(): Promise<PDFConfig> {
   const { data, error } = await supabase
     .from('system_config')
     .select('id, value')
-    .in('id', ['pdf_ai_provider', 'pdf_ai_model']);
+    .in('id', ['pdf_ai_provider', 'pdf_ai_model', 'pdf_fallback_provider', 'pdf_fallback_model']);
 
   if (error) {
     console.error('[getPDFConfig] Error:', error);
-    return { provider: 'openrouter', model: 'google/gemini-2.5-flash' };
+    return { 
+      provider: 'openrouter', 
+      model: 'google/gemini-2.5-flash',
+      fallbackProvider: 'lovable',
+      fallbackModel: 'google/gemini-2.5-flash'
+    };
   }
 
   const configMap: Record<string, any> = {};
@@ -679,18 +686,20 @@ async function getPDFConfig(): Promise<PDFConfig> {
 
   return {
     provider: configMap.pdf_ai_provider || 'openrouter',
-    model: configMap.pdf_ai_model || 'google/gemini-2.5-flash'
+    model: configMap.pdf_ai_model || 'google/gemini-2.5-flash',
+    fallbackProvider: configMap.pdf_fallback_provider || 'lovable',
+    fallbackModel: configMap.pdf_fallback_model || 'google/gemini-2.5-flash'
   };
 }
 
-// ============= PDF PROVIDER ROUTER WITH FALLBACK =============
+// ============= PDF PROVIDER ROUTER WITH DYNAMIC FALLBACK =============
 export async function callPDFProvider(
   pdfBase64: string,
   systemPrompt: string,
   options?: { userId?: string; promptType?: string }
-): Promise<{ text: string; model: string; provider: string; finishReason: string; usedFallback: boolean }> {
+): Promise<{ text: string; model: string; provider: string; finishReason: string; usedFallback: boolean; originalProvider?: string; fallbackReason?: string }> {
   const pdfConfig = await getPDFConfig();
-  console.log(`[callPDFProvider] Using provider: ${pdfConfig.provider}, model: ${pdfConfig.model}`);
+  console.log(`[callPDFProvider] Primary: ${pdfConfig.provider}/${pdfConfig.model}, Fallback: ${pdfConfig.fallbackProvider}/${pdfConfig.fallbackModel}`);
 
   try {
     // Try primary provider
@@ -709,34 +718,42 @@ export async function callPDFProvider(
   } catch (primaryError) {
     console.error(`[callPDFProvider] ❌ Primary provider ${pdfConfig.provider} failed:`, primaryError);
     
-    // Fallback logic: try Lovable AI as universal backup
-    if (pdfConfig.provider !== 'lovable') {
-      console.log('[callPDFProvider] 🔄 Trying Lovable AI as fallback...');
+    const errorMessage = primaryError instanceof Error ? primaryError.message : String(primaryError);
+    const fallbackReason = errorMessage.includes('100 PDF pages') 
+      ? 'Limite de páginas excedido' 
+      : 'Erro no provider principal';
+    
+    // Try configured fallback
+    if (pdfConfig.provider !== pdfConfig.fallbackProvider) {
+      console.log(`[callPDFProvider] 🔄 Trying configured fallback: ${pdfConfig.fallbackProvider}/${pdfConfig.fallbackModel}`);
       try {
-        const fallbackResult = await callLovableAIPDF(
-          pdfBase64, 
-          'google/gemini-2.5-flash', 
-          systemPrompt, 
-          options
-        );
-        console.log('[callPDFProvider] ✅ Fallback to Lovable AI succeeded');
-        return { ...fallbackResult, usedFallback: true };
+        let fallbackResult;
+        switch (pdfConfig.fallbackProvider) {
+          case 'openrouter':
+            fallbackResult = await callOpenRouterPDF(pdfBase64, pdfConfig.fallbackModel, systemPrompt, options);
+            break;
+          case 'gemini':
+            const gemResult = await callGeminiVision(pdfBase64, systemPrompt, options);
+            fallbackResult = { ...gemResult, provider: 'gemini' };
+            break;
+          case 'lovable':
+          default:
+            fallbackResult = await callLovableAIPDF(pdfBase64, pdfConfig.fallbackModel, systemPrompt, options);
+            break;
+        }
+        console.log(`[callPDFProvider] ✅ Fallback ${pdfConfig.fallbackProvider} succeeded`);
+        return { ...fallbackResult, usedFallback: true, originalProvider: pdfConfig.provider, fallbackReason };
       } catch (fallbackError) {
-        console.error('[callPDFProvider] ❌ Lovable AI fallback also failed:', fallbackError);
-        // If Lovable failed too, try OpenRouter as last resort
-        if (pdfConfig.provider !== 'openrouter') {
+        console.error(`[callPDFProvider] ❌ Fallback ${pdfConfig.fallbackProvider} also failed:`, fallbackError);
+        
+        // Last resort: Lovable AI (if not already tried)
+        if (pdfConfig.fallbackProvider !== 'lovable') {
+          console.log('[callPDFProvider] 🔄 Last resort: Lovable AI');
           try {
-            console.log('[callPDFProvider] 🔄 Trying OpenRouter as last resort...');
-            const lastResortResult = await callOpenRouterPDF(
-              pdfBase64, 
-              'google/gemini-2.5-flash', 
-              systemPrompt, 
-              options
-            );
-            console.log('[callPDFProvider] ✅ OpenRouter fallback succeeded');
-            return { ...lastResortResult, usedFallback: true };
-          } catch (lastResortError) {
-            console.error('[callPDFProvider] ❌ All fallbacks failed');
+            const lastResortResult = await callLovableAIPDF(pdfBase64, 'google/gemini-2.5-flash', systemPrompt, options);
+            return { ...lastResortResult, usedFallback: true, originalProvider: pdfConfig.provider, fallbackReason: 'Todos os providers configurados falharam' };
+          } catch (lastError) {
+            console.error('[callPDFProvider] ❌ All providers failed');
           }
         }
       }
