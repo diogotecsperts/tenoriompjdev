@@ -760,6 +760,10 @@ async function callLovableAIPDF(
     const finishReason = data.choices?.[0]?.finish_reason || 'stop';
     const text = data.choices?.[0]?.message?.content || '';
 
+    // Capturar tokens para cálculo de custo
+    const tokensInput = data.usage?.prompt_tokens || 0;
+    const tokensOutput = data.usage?.completion_tokens || 0;
+
     if (options?.promptType) {
       await logAIUsage({
         userId: options.userId,
@@ -767,9 +771,13 @@ async function callLovableAIPDF(
         model: model,
         promptType: options.promptType,
         latencyMs,
-        success: true
+        success: true,
+        tokensInput,
+        tokensOutput
       });
     }
+
+    console.log(`[Lovable AI PDF] Success - Tokens: ${tokensInput}/${tokensOutput}, Latency: ${latencyMs}ms`);
 
     return {
       text,
@@ -911,6 +919,10 @@ export async function callGeminiVision(
     const finishReason = data.candidates?.[0]?.finishReason || 'STOP';
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
+    // Capturar tokens do Gemini para cálculo de custo
+    const tokensInput = data.usageMetadata?.promptTokenCount || 0;
+    const tokensOutput = data.usageMetadata?.candidatesTokenCount || 0;
+
     if (options?.promptType) {
       await logAIUsage({
         userId: options.userId,
@@ -918,9 +930,13 @@ export async function callGeminiVision(
         model: modelToUse,
         promptType: options.promptType,
         latencyMs,
-        success: true
+        success: true,
+        tokensInput,
+        tokensOutput
       });
     }
+
+    console.log(`[Gemini Vision] Success - Tokens: ${tokensInput}/${tokensOutput}, Latency: ${latencyMs}ms`);
 
     return {
       text,

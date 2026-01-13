@@ -522,6 +522,33 @@ export type Database = {
         }
         Relationships: []
       }
+      model_pricing: {
+        Row: {
+          display_name: string | null
+          id: string
+          input_price_per_million: number
+          output_price_per_million: number
+          provider: string
+          updated_at: string | null
+        }
+        Insert: {
+          display_name?: string | null
+          id: string
+          input_price_per_million: number
+          output_price_per_million: number
+          provider: string
+          updated_at?: string | null
+        }
+        Update: {
+          display_name?: string | null
+          id?: string
+          input_price_per_million?: number
+          output_price_per_million?: number
+          provider?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       modelos_laudo: {
         Row: {
           category: string

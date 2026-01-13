@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { 
@@ -7,7 +7,8 @@ import {
   Cpu, 
   TrendingUp,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  DollarSign
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -29,6 +30,8 @@ interface DashboardStats {
   totalAIRequests: number;
   laudosThisMonth: number;
   aiRequestsToday: number;
+  monthlyAICost: number;
+  pdfImportsMonth: number;
 }
 
 interface AIProviderUsage {
@@ -152,12 +155,41 @@ export function DevDashboard() {
         );
       }
 
+      // Fetch AI cost for the month (PDF imports)
+      let monthlyAICost = 0;
+      let pdfImportsMonth = 0;
+      
+      const { data: aiLogsMonth } = await supabase
+        .from("ai_usage_logs")
+        .select("tokens_input, tokens_output, model")
+        .eq("prompt_type", "pdf_extraction")
+        .gte("created_at", startOfMonth.toISOString());
+
+      const { data: pricingData } = await supabase
+        .from("model_pricing")
+        .select("id, input_price_per_million, output_price_per_million");
+
+      if (aiLogsMonth && pricingData) {
+        const pricingMap = new Map(pricingData.map(p => [p.id, p]));
+        pdfImportsMonth = aiLogsMonth.length;
+        
+        aiLogsMonth.forEach(log => {
+          const price = pricingMap.get(log.model);
+          if (price && log.tokens_input && log.tokens_output) {
+            monthlyAICost += (log.tokens_input * price.input_price_per_million / 1000000);
+            monthlyAICost += (log.tokens_output * price.output_price_per_million / 1000000);
+          }
+        });
+      }
+
       setStats({
         totalUsers: usersCount || 0,
         totalLaudos: laudosCount || 0,
         totalAIRequests: aiCount || 0,
         laudosThisMonth: laudosMonthCount || 0,
         aiRequestsToday: aiTodayCount || 0,
+        monthlyAICost,
+        pdfImportsMonth,
       });
 
       setErrors(errorList);
@@ -204,7 +236,7 @@ export function DevDashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
@@ -262,6 +294,23 @@ export function DevDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats?.aiRequestsToday || 0}</div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-primary/20 bg-primary/5">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Custo IA (Mês)
+            </CardTitle>
+            <DollarSign className="h-4 w-4 text-primary" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-primary">
+              ${(stats?.monthlyAICost || 0).toFixed(4)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {stats?.pdfImportsMonth || 0} imports PDF
+            </p>
           </CardContent>
         </Card>
       </div>

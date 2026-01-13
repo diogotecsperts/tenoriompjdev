@@ -10,7 +10,8 @@ import {
   Terminal,
   Stethoscope,
   AlertTriangle,
-  Cpu
+  Cpu,
+  DollarSign
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,8 +24,9 @@ import { DevSettings } from "@/components/dev-panel/DevSettings";
 import DevErrorLogs from "@/components/dev-panel/DevErrorLogs";
 import { DevAIStatus } from "@/components/dev-panel/DevAIStatus";
 import { DevAIUsageLogs } from "@/components/dev-panel/DevAIUsageLogs";
+import { DevPDFCosts } from "@/components/dev-panel/DevPDFCosts";
 
-type DevTab = "dashboard" | "users" | "logs" | "errors" | "ai" | "settings";
+type DevTab = "dashboard" | "users" | "logs" | "errors" | "ai" | "pdf-costs" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -38,6 +40,7 @@ const navItems: NavItem[] = [
   { id: "logs", label: "Logs & Métricas", icon: FileText },
   { id: "errors", label: "Erros", icon: AlertTriangle },
   { id: "ai", label: "Inteligência Artificial", icon: Cpu },
+  { id: "pdf-costs", label: "Custos PDF", icon: DollarSign },
   { id: "settings", label: "Configurações", icon: Settings },
 ];
 
@@ -69,6 +72,8 @@ export default function DevPanel() {
             <DevAIUsageLogs />
           </div>
         );
+      case "pdf-costs":
+        return <DevPDFCosts />;
       case "settings":
         return <DevSettings />;
       default:
