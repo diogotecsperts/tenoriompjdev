@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getAIConfig, callAI, callGeminiVision } from "../_shared/ai-config.ts";
+import { getAIConfig, callAI, callPDFProvider } from "../_shared/ai-config.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -498,21 +498,21 @@ async function processarPDFBackground(
       })
       .eq('id', jobId);
 
-    // Use the shared Gemini Vision function that respects DevPanel config
-    console.log(`[processar-autos] Calling Gemini Vision for PDF extraction...`);
+    // Use the flexible PDF provider that supports OpenRouter, Gemini, or Lovable AI
+    console.log(`[processar-autos] Calling PDF provider for extraction...`);
     
     // Start PDF extraction timing
     timings.pdfExtraction.start = Date.now();
     
-    const visionResult = await callGeminiVision(pdfBase64, systemPrompt, {
+    const visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
       promptType: 'pdf_extraction'
     });
     
     // End PDF extraction timing
     timings.pdfExtraction.end = Date.now();
-    modelUsed = visionResult.model;
+    modelUsed = `${visionResult.provider}/${visionResult.model}`;
     
-    console.log(`[processar-autos] Gemini Vision response - Model: ${modelUsed}, FinishReason: ${visionResult.finishReason}`);
+    console.log(`[processar-autos] PDF provider response - Provider: ${visionResult.provider}, Model: ${visionResult.model}, FinishReason: ${visionResult.finishReason}`);
 
     if (visionResult.finishReason === "MAX_TOKENS") {
       console.warn("[processar-autos] Response was truncated due to max tokens limit");
