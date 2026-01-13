@@ -38,6 +38,74 @@ const DEFAULT_MODELS: Record<string, string> = {
   openrouter: 'openai/gpt-4o'
 };
 
+// ============= RETRY CONFIGURATION =============
+interface RetryConfig {
+  maxRetries: number;
+  baseDelayMs: number;
+  retryableStatuses: number[];
+}
+
+const DEFAULT_RETRY_CONFIG: RetryConfig = {
+  maxRetries: 3,
+  baseDelayMs: 1000,
+  retryableStatuses: [429, 502, 503, 504]
+};
+
+/**
+ * Fetch with automatic retry and exponential backoff for rate limits
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  config: RetryConfig = DEFAULT_RETRY_CONFIG
+): Promise<Response> {
+  let lastResponse: Response | null = null;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+
+      // Success - return immediately
+      if (response.ok) {
+        if (attempt > 0) {
+          console.log(`[Retry] ✅ Success after ${attempt} retries`);
+        }
+        return response;
+      }
+
+      lastResponse = response;
+
+      // Check if error is retryable and we have attempts left
+      if (config.retryableStatuses.includes(response.status) && attempt < config.maxRetries) {
+        const delay = config.baseDelayMs * Math.pow(2, attempt); // Exponential: 1s, 2s, 4s
+        console.log(`[Retry] ⏳ Status ${response.status} (rate limit), waiting ${delay}ms (attempt ${attempt + 1}/${config.maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+
+      // Not retryable or exhausted retries - return the response for error handling
+      return response;
+    } catch (networkError) {
+      lastError = networkError instanceof Error ? networkError : new Error(String(networkError));
+      
+      // Network errors can also be retried
+      if (attempt < config.maxRetries) {
+        const delay = config.baseDelayMs * Math.pow(2, attempt);
+        console.log(`[Retry] 🔌 Network error, waiting ${delay}ms (attempt ${attempt + 1}/${config.maxRetries}): ${lastError.message}`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      
+      throw lastError;
+    }
+  }
+
+  // Should not reach here, but just in case
+  if (lastResponse) return lastResponse;
+  throw lastError || new Error('Unknown error in fetchWithRetry');
+}
+
 // ============= CACHE SYSTEM =============
 interface CacheEntry {
   config: AIConfig;
@@ -69,11 +137,20 @@ export async function logAIUsage(params: {
   success: boolean;
   errorMessage?: string;
   usedFallback?: boolean;
+  retryCount?: number;
 }): Promise<void> {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    // Include retry count in error message if present
+    let errorMessage = params.errorMessage || null;
+    if (params.retryCount && params.retryCount > 0) {
+      errorMessage = errorMessage 
+        ? `${errorMessage} (after ${params.retryCount} retries)`
+        : `Failed after ${params.retryCount} retries`;
+    }
     
     await supabase.from('ai_usage_logs').insert({
       user_id: params.userId || '00000000-0000-0000-0000-000000000000',
@@ -84,10 +161,11 @@ export async function logAIUsage(params: {
       tokens_output: params.tokensOutput || 0,
       latency_ms: params.latencyMs,
       success: params.success,
-      error_message: params.errorMessage || null
+      error_message: errorMessage
     });
 
-    console.log(`[AI Usage Log] ${params.promptType} - ${params.provider}/${params.model} - ${params.success ? 'SUCCESS' : 'FAILED'} - ${params.latencyMs}ms${params.usedFallback ? ' (FALLBACK)' : ''}`);
+    const retryInfo = params.retryCount && params.retryCount > 0 ? ` (${params.retryCount} retries)` : '';
+    console.log(`[AI Usage Log] ${params.promptType} - ${params.provider}/${params.model} - ${params.success ? 'SUCCESS' : 'FAILED'} - ${params.latencyMs}ms${params.usedFallback ? ' (FALLBACK)' : ''}${retryInfo}`);
   } catch (error) {
     console.error('[logAIUsage] Failed to log:', error);
   }
@@ -386,7 +464,7 @@ async function callProvider(
 }
 
 async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string) {
-  const response = await fetch(config.endpoint, {
+  const response = await fetchWithRetry(config.endpoint, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${config.apiKey}`,
@@ -417,7 +495,7 @@ async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt:
 async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string) {
   const url = `${config.endpoint}/${config.model}:generateContent?key=${config.apiKey}`;
   
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -446,7 +524,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
 }
 
 async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string) {
-  const response = await fetch(config.endpoint, {
+  const response = await fetchWithRetry(config.endpoint, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${config.apiKey}`,
@@ -475,7 +553,7 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
 }
 
 async function callClaude(config: AIConfig, systemPrompt: string, userPrompt: string) {
-  const response = await fetch(config.endpoint, {
+  const response = await fetchWithRetry(config.endpoint, {
     method: 'POST',
     headers: {
       'x-api-key': config.apiKey!,
@@ -547,7 +625,7 @@ async function getPDFConfig(): Promise<PDFConfig> {
   };
 }
 
-// ============= PDF PROVIDER ROUTER =============
+// ============= PDF PROVIDER ROUTER WITH FALLBACK =============
 export async function callPDFProvider(
   pdfBase64: string,
   systemPrompt: string,
@@ -556,21 +634,61 @@ export async function callPDFProvider(
   const pdfConfig = await getPDFConfig();
   console.log(`[callPDFProvider] Using provider: ${pdfConfig.provider}, model: ${pdfConfig.model}`);
 
-  switch (pdfConfig.provider) {
-    case 'openrouter':
-      return await callOpenRouterPDF(pdfBase64, pdfConfig.model, systemPrompt, options);
-    case 'gemini':
-      const geminiResult = await callGeminiVision(pdfBase64, systemPrompt, options);
-      return { ...geminiResult, provider: 'gemini' };
-    case 'lovable':
-      return await callLovableAIPDF(pdfBase64, pdfConfig.model, systemPrompt, options);
-    default:
-      console.warn(`[callPDFProvider] Unknown provider ${pdfConfig.provider}, falling back to OpenRouter`);
-      return await callOpenRouterPDF(pdfBase64, pdfConfig.model, systemPrompt, options);
+  try {
+    // Try primary provider
+    switch (pdfConfig.provider) {
+      case 'openrouter':
+        return await callOpenRouterPDF(pdfBase64, pdfConfig.model, systemPrompt, options);
+      case 'gemini':
+        const geminiResult = await callGeminiVision(pdfBase64, systemPrompt, options);
+        return { ...geminiResult, provider: 'gemini' };
+      case 'lovable':
+        return await callLovableAIPDF(pdfBase64, pdfConfig.model, systemPrompt, options);
+      default:
+        console.warn(`[callPDFProvider] Unknown provider ${pdfConfig.provider}, falling back to OpenRouter`);
+        return await callOpenRouterPDF(pdfBase64, pdfConfig.model, systemPrompt, options);
+    }
+  } catch (primaryError) {
+    console.error(`[callPDFProvider] ❌ Primary provider ${pdfConfig.provider} failed:`, primaryError);
+    
+    // Fallback logic: try Lovable AI as universal backup
+    if (pdfConfig.provider !== 'lovable') {
+      console.log('[callPDFProvider] 🔄 Trying Lovable AI as fallback...');
+      try {
+        const fallbackResult = await callLovableAIPDF(
+          pdfBase64, 
+          'google/gemini-2.5-flash', 
+          systemPrompt, 
+          options
+        );
+        console.log('[callPDFProvider] ✅ Fallback to Lovable AI succeeded');
+        return { ...fallbackResult, usedFallback: true };
+      } catch (fallbackError) {
+        console.error('[callPDFProvider] ❌ Lovable AI fallback also failed:', fallbackError);
+        // If Lovable failed too, try OpenRouter as last resort
+        if (pdfConfig.provider !== 'openrouter') {
+          try {
+            console.log('[callPDFProvider] 🔄 Trying OpenRouter as last resort...');
+            const lastResortResult = await callOpenRouterPDF(
+              pdfBase64, 
+              'google/gemini-2.5-flash', 
+              systemPrompt, 
+              options
+            );
+            console.log('[callPDFProvider] ✅ OpenRouter fallback succeeded');
+            return { ...lastResortResult, usedFallback: true };
+          } catch (lastResortError) {
+            console.error('[callPDFProvider] ❌ All fallbacks failed');
+          }
+        }
+      }
+    }
+    
+    throw primaryError;
   }
 }
 
-// ============= OPENROUTER PDF =============
+// ============= OPENROUTER PDF WITH RETRY =============
 async function callOpenRouterPDF(
   pdfBase64: string,
   model: string,
@@ -597,7 +715,7 @@ async function callOpenRouterPDF(
   console.log(`[OpenRouter PDF] Calling model: ${model}`);
 
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const response = await fetchWithRetry('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${keyData.api_key}`,
@@ -692,7 +810,7 @@ async function callOpenRouterPDF(
   }
 }
 
-// ============= LOVABLE AI PDF =============
+// ============= LOVABLE AI PDF WITH RETRY =============
 async function callLovableAIPDF(
   pdfBase64: string,
   model: string,
@@ -710,7 +828,7 @@ async function callLovableAIPDF(
 
   try {
     // Lovable AI uses base64 inline for files
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    const response = await fetchWithRetry('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${lovableKey}`,
@@ -805,7 +923,7 @@ async function callLovableAIPDF(
   }
 }
 
-// ============= GEMINI VISION (PDF) - Direct API =============
+// ============= GEMINI VISION (PDF) WITH RETRY =============
 export async function callGeminiVision(
   pdfBase64: string, 
   systemPrompt: string,
@@ -870,7 +988,7 @@ export async function callGeminiVision(
   console.log(`[Gemini Vision] Calling model: ${modelToUse}`);
 
   try {
-    const response = await fetch(geminiUrl, {
+    const response = await fetchWithRetry(geminiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
