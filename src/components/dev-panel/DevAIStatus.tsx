@@ -45,6 +45,7 @@ const PROVIDER_NAMES: Record<string, string> = {
 
 const AI_OPERATIONS: AIOperation[] = [
   { id: 'pdf_extraction', name: 'Extração PDF (Vision)', provider: '', model: '', status: 'ok' },
+  { id: 'pdf_fallback', name: 'Fallback PDF (Vision)', provider: '', model: '', status: 'ok' },
   { id: 'resumo_peticao', name: 'Resumo Petição', provider: '', model: '', status: 'ok' },
   { id: 'resumo_contestacao', name: 'Resumo Contestação', provider: '', model: '', status: 'ok' },
   { id: 'descricao_doencas', name: 'Descrição Doenças', provider: '', model: '', status: 'ok' },
@@ -95,7 +96,12 @@ export function DevAIStatus() {
       const { data: configData, error: configError } = await supabase
         .from('system_config')
         .select('id, value')
-        .in('id', ['default_ai_provider', 'default_ai_model', 'fallback_ai_provider', 'fallback_ai_model']);
+        .in('id', [
+          'default_ai_provider', 'default_ai_model', 
+          'fallback_ai_provider', 'fallback_ai_model',
+          'pdf_ai_provider', 'pdf_ai_model',
+          'pdf_fallback_provider', 'pdf_fallback_model'
+        ]);
 
       if (configError) throw configError;
 
@@ -137,15 +143,40 @@ export function DevAIStatus() {
         status: fallbackHasKey ? 'ready' : 'error'
       });
 
+      // Parse PDF-specific config
+      const pdfProvider = configMap.pdf_ai_provider?.replace(/"/g, '') || 'openrouter';
+      const pdfModel = configMap.pdf_ai_model?.replace(/"/g, '') || 'google/gemini-2.5-flash';
+      const pdfFallbackProvider = configMap.pdf_fallback_provider?.replace(/"/g, '') || 'lovable';
+      const pdfFallbackModel = configMap.pdf_fallback_model?.replace(/"/g, '') || 'google/gemini-2.5-flash';
+      
+      const pdfHasKey = pdfProvider === 'lovable' || savedKeys.has(pdfProvider);
+      const pdfFallbackHasKey = pdfFallbackProvider === 'lovable' || savedKeys.has(pdfFallbackProvider);
+
       // Update operations with current config
-      setOperations(AI_OPERATIONS.map(op => ({
-        ...op,
-        provider: op.id === 'pdf_extraction' ? 'gemini' : primaryProvider,
-        model: op.id === 'pdf_extraction' ? 
-          (primaryProvider === 'gemini' ? primaryModel : 'gemini-2.5-flash') : 
-          primaryModel,
-        status: primaryHasKey ? 'ok' : 'error'
-      })));
+      setOperations(AI_OPERATIONS.map(op => {
+        if (op.id === 'pdf_extraction') {
+          return {
+            ...op,
+            provider: pdfProvider,
+            model: pdfModel,
+            status: pdfHasKey ? 'ok' : 'error'
+          };
+        }
+        if (op.id === 'pdf_fallback') {
+          return {
+            ...op,
+            provider: pdfFallbackProvider,
+            model: pdfFallbackModel,
+            status: pdfFallbackHasKey ? 'ok' : 'error'
+          };
+        }
+        return {
+          ...op,
+          provider: primaryProvider,
+          model: primaryModel,
+          status: primaryHasKey ? 'ok' : 'error'
+        };
+      }));
 
       setLastUpdate(new Date());
     } catch (error) {

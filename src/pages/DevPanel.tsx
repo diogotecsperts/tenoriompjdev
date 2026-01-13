@@ -45,7 +45,7 @@ const navItems: NavItem[] = [
   { id: "users", label: "Usuários", icon: Users },
   { id: "logs", label: "Logs & Métricas", icon: FileText },
   { id: "backend-logs", label: "Logs Backend", icon: Server },
-  { id: "errors", label: "Erros", icon: AlertTriangle },
+  { id: "errors", label: "Erros Frontend", icon: AlertTriangle },
   { id: "ai", label: "Inteligência Artificial", icon: Cpu },
   { id: "ai-efficiency", label: "Eficiência de IAs", icon: Gauge },
   { id: "retries", label: "Retries & Rate Limits", icon: RefreshCw },
