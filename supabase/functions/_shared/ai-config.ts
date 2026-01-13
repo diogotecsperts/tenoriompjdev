@@ -144,9 +144,9 @@ export async function logAIUsage(params: {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
     
-    // Include retry count in error message if present
+    // Include retry count in error message if present (for backward compatibility)
     let errorMessage = params.errorMessage || null;
-    if (params.retryCount && params.retryCount > 0) {
+    if (params.retryCount && params.retryCount > 0 && !params.success) {
       errorMessage = errorMessage 
         ? `${errorMessage} (after ${params.retryCount} retries)`
         : `Failed after ${params.retryCount} retries`;
@@ -161,11 +161,14 @@ export async function logAIUsage(params: {
       tokens_output: params.tokensOutput || 0,
       latency_ms: params.latencyMs,
       success: params.success,
-      error_message: errorMessage
+      error_message: errorMessage,
+      retry_count: params.retryCount || 0,
+      used_fallback: params.usedFallback || false
     });
 
     const retryInfo = params.retryCount && params.retryCount > 0 ? ` (${params.retryCount} retries)` : '';
-    console.log(`[AI Usage Log] ${params.promptType} - ${params.provider}/${params.model} - ${params.success ? 'SUCCESS' : 'FAILED'} - ${params.latencyMs}ms${params.usedFallback ? ' (FALLBACK)' : ''}${retryInfo}`);
+    const fallbackInfo = params.usedFallback ? ' (FALLBACK)' : '';
+    console.log(`[AI Usage Log] ${params.promptType} - ${params.provider}/${params.model} - ${params.success ? 'SUCCESS' : 'FAILED'} - ${params.latencyMs}ms${fallbackInfo}${retryInfo}`);
   } catch (error) {
     console.error('[logAIUsage] Failed to log:', error);
   }

@@ -164,6 +164,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [attempts, setAttempts] = useState<ImportAttempt[]>([]);
+  const [retryInfo, setRetryInfo] = useState<{ isRetrying: boolean; retryCount: number; lastError: string | null } | null>(null);
 
   // Check if user is developer and fetch AI config
   useEffect(() => {
@@ -355,6 +356,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       // Update UI with current progress
       setAnalysisStep(data.currentStep || 'Processando...');
       setAnalysisProgress(data.progress || 0);
+      
+      // Update retry info for visual indicator
+      if (data.retryInfo) {
+        setRetryInfo(data.retryInfo);
+      }
 
       if (data.status === 'completed' && data.result) {
         // Success!
@@ -1145,6 +1151,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   </Badge>
                 )}
               </div>
+              
+              {/* Retry Indicator */}
+              {retryInfo && retryInfo.retryCount > 0 && (
+                <Alert className="bg-amber-500/10 border-amber-500/30">
+                  <RefreshCw className="h-4 w-4 text-amber-500 animate-spin" />
+                  <AlertTitle className="text-amber-600 dark:text-amber-400">
+                    Reconectando ao servidor de IA
+                  </AlertTitle>
+                  <AlertDescription className="text-amber-600/80 dark:text-amber-400/80">
+                    Limite temporário atingido. Tentativa {retryInfo.retryCount}/3 em andamento...
+                  </AlertDescription>
+                </Alert>
+              )}
+              
               <Progress value={analysisProgress} className="h-2" />
               <p className="text-xs text-center text-muted-foreground">
                 Este processo pode levar alguns minutos para PDFs grandes

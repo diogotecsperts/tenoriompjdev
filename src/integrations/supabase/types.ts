@@ -23,9 +23,11 @@ export type Database = {
           model: string
           prompt_type: string | null
           provider: string
+          retry_count: number | null
           success: boolean | null
           tokens_input: number | null
           tokens_output: number | null
+          used_fallback: boolean | null
           user_id: string
         }
         Insert: {
@@ -36,9 +38,11 @@ export type Database = {
           model: string
           prompt_type?: string | null
           provider: string
+          retry_count?: number | null
           success?: boolean | null
           tokens_input?: number | null
           tokens_output?: number | null
+          used_fallback?: boolean | null
           user_id: string
         }
         Update: {
@@ -49,9 +53,11 @@ export type Database = {
           model?: string
           prompt_type?: string | null
           provider?: string
+          retry_count?: number | null
           success?: boolean | null
           tokens_input?: number | null
           tokens_output?: number | null
+          used_fallback?: boolean | null
           user_id?: string
         }
         Relationships: []

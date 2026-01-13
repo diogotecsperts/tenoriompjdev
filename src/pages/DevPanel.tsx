@@ -11,7 +11,8 @@ import {
   Stethoscope,
   AlertTriangle,
   Cpu,
-  DollarSign
+  DollarSign,
+  RefreshCw
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -25,8 +26,9 @@ import DevErrorLogs from "@/components/dev-panel/DevErrorLogs";
 import { DevAIStatus } from "@/components/dev-panel/DevAIStatus";
 import { DevAIUsageLogs } from "@/components/dev-panel/DevAIUsageLogs";
 import { DevPDFCosts } from "@/components/dev-panel/DevPDFCosts";
+import { DevRetryStats } from "@/components/dev-panel/DevRetryStats";
 
-type DevTab = "dashboard" | "users" | "logs" | "errors" | "ai" | "pdf-costs" | "settings";
+type DevTab = "dashboard" | "users" | "logs" | "errors" | "ai" | "retries" | "pdf-costs" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -40,6 +42,7 @@ const navItems: NavItem[] = [
   { id: "logs", label: "Logs & Métricas", icon: FileText },
   { id: "errors", label: "Erros", icon: AlertTriangle },
   { id: "ai", label: "Inteligência Artificial", icon: Cpu },
+  { id: "retries", label: "Retries & Rate Limits", icon: RefreshCw },
   { id: "pdf-costs", label: "Custos PDF", icon: DollarSign },
   { id: "settings", label: "Configurações", icon: Settings },
 ];
@@ -72,6 +75,8 @@ export default function DevPanel() {
             <DevAIUsageLogs />
           </div>
         );
+      case "retries":
+        return <DevRetryStats />;
       case "pdf-costs":
         return <DevPDFCosts />;
       case "settings":
