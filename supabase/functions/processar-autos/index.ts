@@ -289,7 +289,12 @@ Fundamente tecnicamente sua análise com base nos achados clínicos e exames.
 const summarySystemPrompt = 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.';
 
 // Generate AI summaries using configured AI provider
-async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: string): Promise<{
+async function gerarResumosIA(
+  extractedData: any, 
+  supabaseAdmin: any, 
+  jobId: string,
+  userId: string
+): Promise<{
   resumos: {
     resumo_peticao: string;
     resumo_contestacao: string;
@@ -410,7 +415,8 @@ async function gerarResumosIA(extractedData: any, supabaseAdmin: any, jobId: str
       // Race between AI call and timeout
       const result = await Promise.race([
         callAI(aiConfig, summarySystemPrompt, prompt, {
-          promptType: tipo
+          promptType: tipo,
+          userId: userId
         }),
         timeoutPromise
       ]);
@@ -460,7 +466,8 @@ async function processarPDFBackground(
   pdfBase64: string,
   fileName: string,
   supabaseAdmin: any,
-  isRetry: boolean = false
+  isRetry: boolean = false,
+  userId: string
 ) {
   let modelUsed = 'unknown';
   let attemptId: string | null = null;
@@ -547,7 +554,8 @@ async function processarPDFBackground(
     timings.pdfExtraction.start = Date.now();
     
     const visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
-      promptType: 'pdf_extraction'
+      promptType: 'pdf_extraction',
+      userId: userId
     });
     
     // End PDF extraction timing
@@ -593,7 +601,7 @@ async function processarPDFBackground(
     // Start summaries timing
     timings.summaries.start = Date.now();
     
-    const resumosResult = await gerarResumosIA(extractedData, supabaseAdmin, jobId);
+    const resumosResult = await gerarResumosIA(extractedData, supabaseAdmin, jobId, userId);
     
     // End summaries timing
     timings.summaries.end = Date.now();
@@ -822,7 +830,7 @@ serve(async (req) => {
 
     // Start background processing using EdgeRuntime.waitUntil
     // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
-    EdgeRuntime.waitUntil(processarPDFBackground(jobId, finalPdfBase64, fileName, supabaseAdmin, isRetry));
+    EdgeRuntime.waitUntil(processarPDFBackground(jobId, finalPdfBase64, fileName, supabaseAdmin, isRetry, userId));
 
     // Return immediately with jobId
     return new Response(
