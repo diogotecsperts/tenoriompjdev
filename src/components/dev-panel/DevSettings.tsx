@@ -37,6 +37,10 @@ import {
   Trash2,
   Star,
   FileText,
+  Pin,
+  PinOff,
+  Crown,
+  ArrowDownAZ,
 } from "lucide-react";
 
 interface ProviderInfo {
@@ -225,12 +229,90 @@ export function DevSettings() {
     groq: []
   });
   const [copiedModel, setCopiedModel] = useState<string | null>(null);
+  
+  // Pinned providers for visual organization
+  const [pinnedProviders, setPinnedProviders] = useState<string[]>([]);
 
   useEffect(() => {
     fetchConfig();
     fetchApiKeys();
     fetchFavoriteModels();
+    fetchPinnedProviders();
   }, []);
+
+  const fetchPinnedProviders = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("system_config")
+        .select("value")
+        .eq("id", "pinned_ai_providers")
+        .single();
+
+      if (error && error.code !== "PGRST116") throw error;
+
+      if (data?.value) {
+        const parsed = Array.isArray(data.value) ? data.value : [];
+        setPinnedProviders(parsed.filter((v): v is string => typeof v === "string"));
+      }
+    } catch (error) {
+      console.error("Error fetching pinned providers:", error);
+    }
+  };
+
+  const togglePinProvider = async (providerId: string) => {
+    const isPinned = pinnedProviders.includes(providerId);
+    const updated = isPinned
+      ? pinnedProviders.filter((p) => p !== providerId)
+      : [...pinnedProviders, providerId];
+
+    try {
+      const { error } = await supabase.from("system_config").upsert({
+        id: "pinned_ai_providers",
+        value: updated,
+        updated_at: new Date().toISOString(),
+      });
+
+      if (error) throw error;
+
+      setPinnedProviders(updated);
+      toast({
+        title: isPinned ? "Desafixado" : "Fixado",
+        description: `Provider ${isPinned ? "removido dos" : "adicionado aos"} favoritos`,
+      });
+    } catch (error) {
+      console.error("Error toggling pinned provider:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Falha ao atualizar providers fixados",
+      });
+    }
+  };
+
+  // Dynamic sorting: Active > Pinned (in pin order) > Alphabetical
+  const getSortedProviders = () => {
+    const providers = [...AI_PROVIDERS];
+
+    return providers.sort((a, b) => {
+      // Priority 1: Active provider always first
+      const aIsActive = a.id === config.default_ai_provider;
+      const bIsActive = b.id === config.default_ai_provider;
+      if (aIsActive && !bIsActive) return -1;
+      if (!aIsActive && bIsActive) return 1;
+
+      // Priority 2: Pinned providers (in pin order)
+      const aIsPinned = pinnedProviders.includes(a.id);
+      const bIsPinned = pinnedProviders.includes(b.id);
+      if (aIsPinned && !bIsPinned) return -1;
+      if (!aIsPinned && bIsPinned) return 1;
+      if (aIsPinned && bIsPinned) {
+        return pinnedProviders.indexOf(a.id) - pinnedProviders.indexOf(b.id);
+      }
+
+      // Priority 3: Alphabetical for the rest
+      return a.name.localeCompare(b.name);
+    });
+  };
 
   const fetchFavoriteModels = async () => {
     try {
@@ -705,6 +787,211 @@ export function DevSettings() {
     return AI_PROVIDERS.find((p) => p.id === config.fallback_ai_provider);
   };
 
+  // Render individual provider card with enhanced styling
+  const renderProviderCard = (provider: ProviderInfo, isActive: boolean, isPinned: boolean) => {
+    const hasKey = savedApiKeys[provider.id];
+    const isAllowed = config.allowed_ai_providers.includes(provider.id);
+    const testResult = testResults[provider.id];
+    const isTesting = testingProvider === provider.id;
+
+    return (
+      <Card
+        key={provider.id}
+        className={cn(
+          "group relative overflow-hidden transition-all duration-200 cursor-pointer hover:shadow-lg",
+          isActive && "ring-2 ring-primary shadow-xl scale-[1.02]",
+          isPinned && !isActive && "ring-1 ring-amber-400/50",
+          !isAllowed && "opacity-50"
+        )}
+        onClick={() => selectProvider(provider.id)}
+      >
+        {/* Colored top bar - thicker for active */}
+        <div
+          className={cn(
+            "absolute top-0 left-0 w-full transition-all",
+            isActive ? "h-2" : "h-1"
+          )}
+          style={{ backgroundColor: provider.color }}
+        />
+
+        {/* Pin button - visible on hover or when pinned */}
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn(
+            "absolute top-3 left-3 h-6 w-6 z-10 opacity-0 group-hover:opacity-100 transition-opacity",
+            isPinned && "opacity-100 text-amber-500",
+            isActive && "opacity-0 group-hover:opacity-0" // Hide pin for active
+          )}
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePinProvider(provider.id);
+          }}
+          title={isPinned ? "Desafixar" : "Fixar no topo"}
+        >
+          {isPinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+        </Button>
+
+        {/* Status badges */}
+        {isActive ? (
+          <Badge className="absolute top-3 right-3 bg-primary text-primary-foreground shadow-lg">
+            <Check className="h-3 w-3 mr-1" />
+            ATIVO
+          </Badge>
+        ) : isPinned ? (
+          <Badge
+            variant="outline"
+            className="absolute top-3 right-3 border-amber-400 text-amber-500"
+          >
+            <Pin className="h-3 w-3" />
+          </Badge>
+        ) : null}
+
+        <CardHeader className="pb-2 pt-6">
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-base">{provider.name}</CardTitle>
+            {provider.requiresKey ? (
+              hasKey ? (
+                <Check className="h-4 w-4 text-green-500" />
+              ) : (
+                <Lock className="h-4 w-4 text-muted-foreground" />
+              )
+            ) : (
+              <Zap className="h-4 w-4 text-primary" />
+            )}
+          </div>
+          <CardDescription className="text-xs">{provider.description}</CardDescription>
+        </CardHeader>
+
+        <CardContent className="space-y-3">
+          {/* Models */}
+          <div className="flex flex-wrap gap-1">
+            {provider.models.slice(0, 3).map((model) => (
+              <Badge key={model} variant="secondary" className="text-xs">
+                {model.length > 20 ? model.slice(0, 20) + "..." : model}
+              </Badge>
+            ))}
+            {provider.models.length > 3 && (
+              <Badge variant="outline" className="text-xs">
+                +{provider.models.length - 3}
+              </Badge>
+            )}
+          </div>
+
+          {/* API Key input for providers that require it */}
+          {provider.requiresKey && (
+            <div
+              className="space-y-2 pt-2 border-t"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Label className="text-xs">API Key</Label>
+              <div className="flex gap-1">
+                <Input
+                  type={showKeys[provider.id] ? "text" : "password"}
+                  value={apiKeys[provider.id] || ""}
+                  onChange={(e) =>
+                    setApiKeys((prev) => ({ ...prev, [provider.id]: e.target.value }))
+                  }
+                  placeholder={provider.keyPlaceholder}
+                  className="h-8 text-xs"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() =>
+                    setShowKeys((prev) => ({ ...prev, [provider.id]: !prev[provider.id] }))
+                  }
+                >
+                  {showKeys[provider.id] ? (
+                    <EyeOff className="h-3 w-3" />
+                  ) : (
+                    <Eye className="h-3 w-3" />
+                  )}
+                </Button>
+                <Button
+                  size="icon"
+                  className="h-8 w-8 shrink-0"
+                  onClick={() => saveApiKey(provider.id)}
+                  disabled={savingKey === provider.id}
+                >
+                  {savingKey === provider.id ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Save className="h-3 w-3" />
+                  )}
+                </Button>
+              </div>
+              {hasKey && (
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-green-600 flex items-center gap-1">
+                    <Check className="h-3 w-3" /> Configurada
+                  </p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-xs text-destructive hover:text-destructive"
+                    onClick={() => deleteApiKey(provider.id)}
+                  >
+                    Remover
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Integrated badge for Lovable */}
+          {!provider.requiresKey && (
+            <Badge variant="default" className="w-fit">
+              Integrado
+            </Badge>
+          )}
+
+          {/* Test Connection Button */}
+          <div
+            className="pt-2 border-t"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => testConnection(provider.id)}
+                disabled={isTesting || (provider.requiresKey && !hasKey)}
+              >
+                {isTesting ? (
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                ) : (
+                  <Play className="h-3 w-3 mr-1" />
+                )}
+                Testar
+              </Button>
+
+              {testResult && (
+                <div className="flex items-center gap-1 text-xs">
+                  {testResult.success ? (
+                    <>
+                      <CheckCircle2 className="h-3 w-3 text-green-500" />
+                      <span className="text-green-600">{testResult.latencyMs}ms</span>
+                    </>
+                  ) : (
+                    <>
+                      <XCircle className="h-3 w-3 text-destructive" />
+                      <span className="text-destructive truncate max-w-20" title={testResult.error}>
+                        Erro
+                      </span>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -753,182 +1040,64 @@ export function DevSettings() {
           <h2 className="text-xl font-semibold">Provider de IA Padrão</h2>
         </div>
         <p className="text-sm text-muted-foreground">
-          Clique em um card para selecionar como provider padrão. Providers com 🔒 requerem API Key.
+          Clique em um card para selecionar como provider padrão. Use 📌 para fixar providers favoritos no topo.
         </p>
 
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {AI_PROVIDERS.map((provider) => {
-            const isActive = config.default_ai_provider === provider.id;
-            const hasKey = savedApiKeys[provider.id];
-            const isAllowed = config.allowed_ai_providers.includes(provider.id);
-            const testResult = testResults[provider.id];
-            const isTesting = testingProvider === provider.id;
+        {/* Provider Cards with Dynamic Sorting */}
+        <div className="space-y-6">
+          {(() => {
+            const sortedProviders = getSortedProviders();
+            const activeProvider = sortedProviders.find(p => p.id === config.default_ai_provider);
+            const pinnedNonActive = sortedProviders.filter(
+              p => pinnedProviders.includes(p.id) && p.id !== config.default_ai_provider
+            );
+            const others = sortedProviders.filter(
+              p => !pinnedProviders.includes(p.id) && p.id !== config.default_ai_provider
+            );
 
             return (
-              <Card
-                key={provider.id}
-                className={cn(
-                  "relative overflow-hidden transition-all cursor-pointer hover:shadow-md",
-                  isActive && "ring-2 ring-primary shadow-lg",
-                  !isAllowed && "opacity-50"
-                )}
-                onClick={() => selectProvider(provider.id)}
-              >
-                <div
-                  className="absolute top-0 left-0 w-full h-1"
-                  style={{ backgroundColor: provider.color }}
-                />
-
-                {isActive && (
-                  <Badge className="absolute top-3 right-3 bg-primary text-primary-foreground">
-                    ATIVO
-                  </Badge>
-                )}
-
-                <CardHeader className="pb-2">
-                  <div className="flex items-center gap-2">
-                    <CardTitle className="text-base">{provider.name}</CardTitle>
-                    {provider.requiresKey ? (
-                      hasKey ? (
-                        <Check className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <Lock className="h-4 w-4 text-muted-foreground" />
-                      )
-                    ) : (
-                      <Zap className="h-4 w-4 text-primary" />
-                    )}
-                  </div>
-                  <CardDescription className="text-xs">{provider.description}</CardDescription>
-                </CardHeader>
-
-                <CardContent className="space-y-3">
-                  {/* Models */}
-                  <div className="flex flex-wrap gap-1">
-                    {provider.models.slice(0, 3).map((model) => (
-                      <Badge key={model} variant="secondary" className="text-xs">
-                        {model.length > 20 ? model.slice(0, 20) + "..." : model}
-                      </Badge>
-                    ))}
-                    {provider.models.length > 3 && (
-                      <Badge variant="outline" className="text-xs">
-                        +{provider.models.length - 3}
-                      </Badge>
-                    )}
-                  </div>
-
-                  {/* API Key input for providers that require it */}
-                  {provider.requiresKey && (
-                    <div
-                      className="space-y-2 pt-2 border-t"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Label className="text-xs">API Key</Label>
-                      <div className="flex gap-1">
-                        <Input
-                          type={showKeys[provider.id] ? "text" : "password"}
-                          value={apiKeys[provider.id] || ""}
-                          onChange={(e) =>
-                            setApiKeys((prev) => ({ ...prev, [provider.id]: e.target.value }))
-                          }
-                          placeholder={provider.keyPlaceholder}
-                          className="h-8 text-xs"
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0"
-                          onClick={() =>
-                            setShowKeys((prev) => ({ ...prev, [provider.id]: !prev[provider.id] }))
-                          }
-                        >
-                          {showKeys[provider.id] ? (
-                            <EyeOff className="h-3 w-3" />
-                          ) : (
-                            <Eye className="h-3 w-3" />
-                          )}
-                        </Button>
-                        <Button
-                          size="icon"
-                          className="h-8 w-8 shrink-0"
-                          onClick={() => saveApiKey(provider.id)}
-                          disabled={savingKey === provider.id}
-                        >
-                          {savingKey === provider.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Save className="h-3 w-3" />
-                          )}
-                        </Button>
-                      </div>
-                      {hasKey && (
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs text-green-600 flex items-center gap-1">
-                            <Check className="h-3 w-3" /> Configurada
-                          </p>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 text-xs text-destructive hover:text-destructive"
-                            onClick={() => deleteApiKey(provider.id)}
-                          >
-                            Remover
-                          </Button>
-                        </div>
-                      )}
+              <>
+                {/* Section: Default Provider */}
+                {activeProvider && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                      <Crown className="h-4 w-4" />
+                      <span>IA Padrão</span>
                     </div>
-                  )}
-
-                  {/* Integrated badge for Lovable */}
-                  {!provider.requiresKey && (
-                    <Badge variant="default" className="w-fit">
-                      Integrado
-                    </Badge>
-                  )}
-
-                  {/* Test Connection Button */}
-                  <div
-                    className="pt-2 border-t"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="flex items-center justify-between">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => testConnection(provider.id)}
-                        disabled={isTesting || (provider.requiresKey && !hasKey)}
-                      >
-                        {isTesting ? (
-                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                        ) : (
-                          <Play className="h-3 w-3 mr-1" />
-                        )}
-                        Testar
-                      </Button>
-                      
-                      {testResult && (
-                        <div className="flex items-center gap-1 text-xs">
-                          {testResult.success ? (
-                            <>
-                              <CheckCircle2 className="h-3 w-3 text-green-500" />
-                              <span className="text-green-600">{testResult.latencyMs}ms</span>
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="h-3 w-3 text-destructive" />
-                              <span className="text-destructive truncate max-w-20" title={testResult.error}>
-                                Erro
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      )}
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {renderProviderCard(activeProvider, true, false)}
                     </div>
                   </div>
-                </CardContent>
-              </Card>
+                )}
+
+                {/* Section: Pinned Providers */}
+                {pinnedNonActive.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-medium text-amber-500">
+                      <Pin className="h-4 w-4" />
+                      <span>Fixados ({pinnedNonActive.length})</span>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {pinnedNonActive.map(provider => renderProviderCard(provider, false, true))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Section: Other Providers (Alphabetical) */}
+                {others.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                      <ArrowDownAZ className="h-4 w-4" />
+                      <span>Outros Providers (A-Z)</span>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {others.map(provider => renderProviderCard(provider, false, false))}
+                    </div>
+                  </div>
+                )}
+              </>
             );
-          })}
+          })()}
         </div>
 
         {/* Default Model Selector */}
