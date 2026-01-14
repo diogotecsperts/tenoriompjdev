@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { useEffect, useState, useRef, useLayoutEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -217,6 +217,10 @@ export function DevSettings() {
   // Pinned providers for visual organization
   const [pinnedProviders, setPinnedProviders] = useState<string[]>([]);
 
+  // Dynamic card height measurement
+  const [cardHeight, setCardHeight] = useState<number | null>(null);
+  const cardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+
   // Animation states for visual feedback
   const [animatingProvider, setAnimatingProvider] = useState<string | null>(null);
   const [animationType, setAnimationType] = useState<'pin' | 'activate' | null>(null);
@@ -226,6 +230,27 @@ export function DevSettings() {
     fetchFavoriteModels();
     fetchPinnedProviders();
   }, []);
+
+  // Measure card heights after render to set uniform height
+  useLayoutEffect(() => {
+    // Small delay to ensure content is rendered
+    const timer = setTimeout(() => {
+      let maxHeight = 0;
+      cardRefs.current.forEach((el) => {
+        if (el) {
+          const height = el.getBoundingClientRect().height;
+          if (height > maxHeight) {
+            maxHeight = height;
+          }
+        }
+      });
+      // Only set if we found valid heights and it's different
+      if (maxHeight > 0 && maxHeight !== cardHeight) {
+        setCardHeight(maxHeight);
+      }
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [loading, savedApiKeys, testResults]);
   const fetchPinnedProviders = async () => {
     try {
       const {
@@ -837,16 +862,18 @@ export function DevSettings() {
     const isActivating = isAnimating && animationType === 'activate';
     const isPinning = isAnimating && animationType === 'pin';
     return <div 
-      key={provider.id} 
+      key={provider.id}
+      ref={(el) => cardRefs.current.set(provider.id, el)}
       className={cn(
         "transition-all duration-500 ease-out",
         isAnimating && "animate-card-move"
       )} 
       style={{
-        willChange: isAnimating ? 'transform, opacity' : 'auto'
+        willChange: isAnimating ? 'transform, opacity' : 'auto',
+        ...(cardHeight ? { height: cardHeight } : {})
       }}
     >
-        <Card className={cn("group relative overflow-hidden cursor-pointer hover:shadow-lg min-h-[360px] flex flex-col", "transition-all duration-300 ease-out",
+        <Card className={cn("group relative cursor-pointer hover:shadow-lg h-full flex flex-col", "transition-all duration-300 ease-out",
       // Visual states
       isActive && "ring-2 ring-primary shadow-xl scale-[1.02]", isPinned && !isActive && "ring-1 ring-amber-400/50", !isAllowed && "opacity-50",
       // Temporary animations
@@ -882,7 +909,7 @@ export function DevSettings() {
           <CardDescription className="text-xs">{provider.description}</CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-3 flex-1 flex flex-col overflow-y-auto">
+        <CardContent className="space-y-3 flex-1 flex flex-col">
           {/* Models */}
           <div className="flex flex-wrap gap-1">
             {provider.models.slice(0, 3).map(model => <Badge key={model} variant="secondary" className="text-xs">
@@ -925,29 +952,29 @@ export function DevSettings() {
           {!provider.requiresKey && <Badge variant="default" className="w-fit">
               Integrado
             </Badge>}
-
-          {/* Test Connection Button */}
-          <div className="pt-2 border-t mt-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => testConnection(provider.id)} disabled={isTesting || provider.requiresKey && !hasKey}>
-                {isTesting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
-                Testar
-              </Button>
-
-              {testResult && <div className="flex items-center gap-1 text-xs">
-                  {testResult.success ? <>
-                      <CheckCircle2 className="h-3 w-3 text-green-500" />
-                      <span className="text-green-600">{testResult.latencyMs}ms</span>
-                    </> : <>
-                      <XCircle className="h-3 w-3 text-destructive" />
-                      <span className="text-destructive truncate max-w-20" title={testResult.error}>
-                        Erro
-                      </span>
-                    </>}
-                </div>}
-            </div>
-          </div>
         </CardContent>
+
+        {/* Footer with Test Button - always at bottom */}
+        <CardFooter className="pt-2 border-t" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between w-full">
+            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => testConnection(provider.id)} disabled={isTesting || provider.requiresKey && !hasKey}>
+              {isTesting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
+              Testar
+            </Button>
+
+            {testResult && <div className="flex items-center gap-1 text-xs">
+                {testResult.success ? <>
+                    <CheckCircle2 className="h-3 w-3 text-green-500" />
+                    <span className="text-green-600">{testResult.latencyMs}ms</span>
+                  </> : <>
+                    <XCircle className="h-3 w-3 text-destructive" />
+                    <span className="text-destructive truncate max-w-20" title={testResult.error}>
+                      Erro
+                    </span>
+                  </>}
+              </div>}
+          </div>
+        </CardFooter>
         </Card>
       </div>;
   };
