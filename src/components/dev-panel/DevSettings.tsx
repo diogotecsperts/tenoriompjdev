@@ -68,7 +68,7 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   id: "gemini",
   name: "Google Gemini",
   description: "Modelos Gemini via Google AI Studio.",
-  models: ["gemini-2.5-pro", "gemini-2.5-flash"],
+  models: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
   requiresKey: true,
   color: "hsl(217, 91%, 60%)",
   keyPlaceholder: "AIza..."
