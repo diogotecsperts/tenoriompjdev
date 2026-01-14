@@ -62,7 +62,7 @@ const PROMPT_TYPE_LABELS: Record<string, string> = {
 };
 
 const PROVIDER_NAMES: Record<string, string> = {
-  lovable: 'Lovable',
+  lovable: 'IA Integrada',
   gemini: 'Gemini',
   openai: 'OpenAI',
   claude: 'Claude',

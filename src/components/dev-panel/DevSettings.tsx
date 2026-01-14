@@ -51,7 +51,7 @@ interface TestResult {
 }
 const AI_PROVIDERS: ProviderInfo[] = [{
   id: "lovable",
-  name: "Lovable AI",
+  name: "IA Integrada",
   description: "Gateway integrado sem necessidade de API key externa.",
   models: ["google/gemini-3-flash-preview", "google/gemini-2.5-flash", "google/gemini-2.5-pro", "openai/gpt-5", "openai/gpt-5-mini"],
   requiresKey: false,
@@ -155,7 +155,7 @@ const PDF_AI_PROVIDERS = [{
   description: 'API Google AI Studio (requer chave)'
 }, {
   id: 'lovable',
-  name: 'Lovable AI',
+  name: 'IA Integrada',
   description: 'Gateway integrado (requer modelo com suporte a PDF)'
 }];
 
@@ -1264,7 +1264,7 @@ export function DevSettings() {
 
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Zap className="h-4 w-4" />
-                <span>Lovable AI não requer API Key (recomendado)</span>
+                <span>IA Integrada não requer API Key (recomendado)</span>
               </div>
             </div>
           </CardContent>
@@ -1567,7 +1567,7 @@ export function DevSettings() {
 
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Zap className="h-4 w-4" />
-                <span>Lovable AI não requer API Key (recomendado)</span>
+                <span>IA Integrada não requer API Key (recomendado)</span>
               </div>
             </div>
           </CardContent>
@@ -1758,7 +1758,7 @@ export function DevSettings() {
         <CardContent className="prose prose-sm max-w-none dark:prose-invert">
           <ul className="space-y-2 text-muted-foreground list-disc pl-4">
             <li>
-              <strong>Lovable AI</strong> é o provider padrão e não requer configuração adicional.
+              <strong>IA Integrada</strong> é o provider padrão e não requer configuração adicional.
               Usa o gateway integrado para acessar modelos Gemini e GPT.
             </li>
             <li>
