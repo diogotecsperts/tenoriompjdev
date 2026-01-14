@@ -836,10 +836,17 @@ export function DevSettings() {
     const isAnimating = animatingProvider === provider.id;
     const isActivating = isAnimating && animationType === 'activate';
     const isPinning = isAnimating && animationType === 'pin';
-    return <div key={provider.id} className="transition-all duration-500 ease-out" style={{
-      willChange: isAnimating ? 'transform' : 'auto'
-    }}>
-        <Card className={cn("group relative overflow-hidden cursor-pointer hover:shadow-lg", "transition-all duration-300 ease-out",
+    return <div 
+      key={provider.id} 
+      className={cn(
+        "transition-all duration-500 ease-out",
+        isAnimating && "animate-card-move"
+      )} 
+      style={{
+        willChange: isAnimating ? 'transform, opacity' : 'auto'
+      }}
+    >
+        <Card className={cn("group relative overflow-hidden cursor-pointer hover:shadow-lg min-h-[280px] flex flex-col", "transition-all duration-300 ease-out",
       // Visual states
       isActive && "ring-2 ring-primary shadow-xl scale-[1.02]", isPinned && !isActive && "ring-1 ring-amber-400/50", !isAllowed && "opacity-50",
       // Temporary animations
@@ -875,7 +882,7 @@ export function DevSettings() {
           <CardDescription className="text-xs">{provider.description}</CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-3 flex-1 flex flex-col">
           {/* Models */}
           <div className="flex flex-wrap gap-1">
             {provider.models.slice(0, 3).map(model => <Badge key={model} variant="secondary" className="text-xs">
@@ -920,7 +927,7 @@ export function DevSettings() {
             </Badge>}
 
           {/* Test Connection Button */}
-          <div className="pt-2 border-t" onClick={e => e.stopPropagation()}>
+          <div className="pt-2 border-t mt-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => testConnection(provider.id)} disabled={isTesting || provider.requiresKey && !hasKey}>
                 {isTesting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
@@ -999,7 +1006,7 @@ export function DevSettings() {
                       <Crown className="h-4 w-4" />
                       <span>IA Padrão</span>
                     </div>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-all duration-300">
                       {renderProviderCard(activeProvider, true, false)}
                     </div>
                   </div>}
@@ -1010,7 +1017,7 @@ export function DevSettings() {
                       <Pin className="h-4 w-4" />
                       <span>Fixados ({pinnedNonActive.length})</span>
                     </div>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-all duration-300">
                       {pinnedNonActive.map(provider => renderProviderCard(provider, false, true))}
                     </div>
                   </div>}
@@ -1021,7 +1028,7 @@ export function DevSettings() {
                       <ArrowDownAZ className="h-4 w-4" />
                       <span>Outros Providers (A-Z)</span>
                     </div>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-all duration-300">
                       {others.map(provider => renderProviderCard(provider, false, false))}
                     </div>
                   </div>}
