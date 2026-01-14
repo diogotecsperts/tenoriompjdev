@@ -1521,14 +1521,55 @@ export function DevSettings() {
               </div>
             </div>
 
-            {/* Info Box */}
-            
-            
             {/* Warning if fallback requires key */}
-            {getPdfFallbackProvider()?.requiresKey && !savedApiKeys[config.pdf_fallback_provider] && <div className="flex items-center gap-2 text-sm text-destructive">
+            {getPdfFallbackProvider()?.requiresKey && !savedApiKeys[config.pdf_fallback_provider] && (
+              <div className="flex items-center gap-2 text-sm text-destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <span>Configure a API Key do {getPdfFallbackProvider()?.name} nos cards acima.</span>
-              </div>}
+              </div>
+            )}
+
+            {/* Footer com botão de teste e dica - Padrão igual ao Fallback principal */}
+            <div className="flex items-center justify-between pt-4 border-t">
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => testConnection(config.pdf_fallback_provider)} 
+                  disabled={testingProvider === config.pdf_fallback_provider}
+                >
+                  {testingProvider === config.pdf_fallback_provider ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Play className="h-4 w-4 mr-2" />
+                  )}
+                  Testar Fallback
+                </Button>
+                
+                {testResults[config.pdf_fallback_provider] && (
+                  <div className="flex items-center gap-1 text-sm">
+                    {testResults[config.pdf_fallback_provider].success ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <span className="text-green-600">
+                          OK ({testResults[config.pdf_fallback_provider].latencyMs}ms)
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="h-4 w-4 text-destructive" />
+                        <span className="text-destructive">Falhou</span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Zap className="h-4 w-4" />
+                <span>Lovable AI não requer API Key (recomendado)</span>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
