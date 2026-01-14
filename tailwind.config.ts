@@ -95,6 +95,10 @@ export default {
 			'scale-in': {
 				'0%': { transform: 'scale(0.8)', opacity: '0' },
 				'100%': { transform: 'scale(1)', opacity: '1' }
+			},
+			'card-move': {
+				'0%': { opacity: '0.7', transform: 'translateY(-10px)' },
+				'100%': { opacity: '1', transform: 'translateY(0)' }
 			}
 		},
 		animation: {
@@ -103,7 +107,8 @@ export default {
 			'highlight-pulse': 'highlight-pulse 0.6s ease-out',
 			'pin-bounce': 'pin-bounce 0.3s ease-out',
 			'glow-primary': 'glow-primary 1s ease-in-out',
-			'scale-in': 'scale-in 0.3s ease-out'
+			'scale-in': 'scale-in 0.3s ease-out',
+			'card-move': 'card-move 0.4s ease-out'
 		},
   		fontFamily: {
   			sans: [
