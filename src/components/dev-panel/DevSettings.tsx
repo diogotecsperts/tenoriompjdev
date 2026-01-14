@@ -846,7 +846,7 @@ export function DevSettings() {
         willChange: isAnimating ? 'transform, opacity' : 'auto'
       }}
     >
-        <Card className={cn("group relative overflow-hidden cursor-pointer hover:shadow-lg min-h-[280px] flex flex-col", "transition-all duration-300 ease-out",
+        <Card className={cn("group relative overflow-hidden cursor-pointer hover:shadow-lg h-[300px] flex flex-col", "transition-all duration-300 ease-out",
       // Visual states
       isActive && "ring-2 ring-primary shadow-xl scale-[1.02]", isPinned && !isActive && "ring-1 ring-amber-400/50", !isAllowed && "opacity-50",
       // Temporary animations
@@ -882,7 +882,7 @@ export function DevSettings() {
           <CardDescription className="text-xs">{provider.description}</CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-3 flex-1 flex flex-col">
+        <CardContent className="space-y-3 flex-1 flex flex-col overflow-y-auto">
           {/* Models */}
           <div className="flex flex-wrap gap-1">
             {provider.models.slice(0, 3).map(model => <Badge key={model} variant="secondary" className="text-xs">
@@ -1000,27 +1000,25 @@ export function DevSettings() {
           const pinnedNonActive = sortedProviders.filter(p => pinnedProviders.includes(p.id) && p.id !== config.default_ai_provider);
           const others = sortedProviders.filter(p => !pinnedProviders.includes(p.id) && p.id !== config.default_ai_provider);
           return <>
-                {/* Section: Default Provider */}
-                {activeProvider && <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm font-medium text-primary">
-                      <Crown className="h-4 w-4" />
-                      <span>IA Padrão</span>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-all duration-300">
-                      {renderProviderCard(activeProvider, true, false)}
-                    </div>
-                  </div>}
-
-                {/* Section: Pinned Providers */}
-                {pinnedNonActive.length > 0 && <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm font-medium text-amber-500">
-                      <Pin className="h-4 w-4" />
-                      <span>Fixados ({pinnedNonActive.length})</span>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-all duration-300">
-                      {pinnedNonActive.map(provider => renderProviderCard(provider, false, true))}
-                    </div>
-                  </div>}
+                {/* Section: Provider de IA (Ativo + Fixados na mesma linha) */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                    <Crown className="h-4 w-4" />
+                    <span>Provider de IA</span>
+                    {pinnedNonActive.length > 0 && (
+                      <span className="text-amber-500 flex items-center gap-1 ml-2">
+                        <Pin className="h-3 w-3" />
+                        +{pinnedNonActive.length} fixados
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-all duration-300">
+                    {/* Card Ativo primeiro */}
+                    {activeProvider && renderProviderCard(activeProvider, true, false)}
+                    {/* Cards Fixados ao lado */}
+                    {pinnedNonActive.map(provider => renderProviderCard(provider, false, true))}
+                  </div>
+                </div>
 
                 {/* Section: Other Providers (Alphabetical) */}
                 {others.length > 0 && <div className="space-y-2">
