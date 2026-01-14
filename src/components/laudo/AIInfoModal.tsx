@@ -51,7 +51,7 @@ interface AIInfoModalProps {
 
 const formatProviderName = (provider: string) => {
   const names: Record<string, string> = {
-    lovable: 'Lovable AI',
+    lovable: 'IA Integrada',
     gemini: 'Google Gemini',
     openai: 'OpenAI',
     claude: 'Anthropic Claude',

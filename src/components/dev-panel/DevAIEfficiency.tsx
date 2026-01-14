@@ -78,7 +78,7 @@ interface StepTiming {
 const PROVIDER_LABELS: Record<string, string> = {
   'gemini': 'Google Gemini',
   'openai': 'OpenAI',
-  'lovable': 'Lovable AI',
+  'lovable': 'IA Integrada',
   'openrouter': 'OpenRouter',
   'groq': 'Groq',
   'deepseek': 'DeepSeek',

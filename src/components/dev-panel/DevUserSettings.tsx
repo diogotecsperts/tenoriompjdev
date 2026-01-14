@@ -47,7 +47,7 @@ interface RolesState {
 }
 
 const AI_PROVIDERS = [
-  { id: "lovable", name: "Lovable AI", requiresKey: false },
+  { id: "lovable", name: "IA Integrada", requiresKey: false },
   { id: "openai", name: "OpenAI", requiresKey: true },
   { id: "gemini", name: "Google Gemini", requiresKey: true },
   { id: "claude", name: "Anthropic Claude", requiresKey: true },

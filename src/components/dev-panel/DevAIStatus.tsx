@@ -42,7 +42,7 @@ interface FallbackStats {
 }
 
 const PROVIDER_NAMES: Record<string, string> = {
-  lovable: 'Lovable AI',
+  lovable: 'IA Integrada',
   gemini: 'Google Gemini',
   openai: 'OpenAI',
   claude: 'Anthropic Claude',
