@@ -76,7 +76,7 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   id: "claude",
   name: "Anthropic Claude",
   description: "Modelos Claude com raciocínio avançado.",
-  models: ["claude-3.5-sonnet", "claude-3.5-haiku"],
+  models: ["claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"],
   requiresKey: true,
   color: "hsl(25, 95%, 53%)",
   keyPlaceholder: "sk-ant-..."
