@@ -846,7 +846,7 @@ export function DevSettings() {
         willChange: isAnimating ? 'transform, opacity' : 'auto'
       }}
     >
-        <Card className={cn("group relative overflow-hidden cursor-pointer hover:shadow-lg h-[300px] flex flex-col", "transition-all duration-300 ease-out",
+        <Card className={cn("group relative overflow-hidden cursor-pointer hover:shadow-lg min-h-[360px] flex flex-col", "transition-all duration-300 ease-out",
       // Visual states
       isActive && "ring-2 ring-primary shadow-xl scale-[1.02]", isPinned && !isActive && "ring-1 ring-amber-400/50", !isAllowed && "opacity-50",
       // Temporary animations
