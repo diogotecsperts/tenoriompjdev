@@ -75,8 +75,10 @@ const AI_MODELS: Record<string, { id: string; name: string }[]> = {
     { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
   ],
   claude: [
-    { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet" },
-    { id: "claude-3.5-haiku", name: "Claude 3.5 Haiku" },
+    { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet" },
+    { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet" },
+    { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku" },
+    { id: "claude-3-opus-20240229", name: "Claude 3 Opus" },
   ],
   groq: [
     { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B" },

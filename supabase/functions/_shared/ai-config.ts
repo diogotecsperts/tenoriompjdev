@@ -32,7 +32,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   lovable: 'google/gemini-2.5-flash',
   gemini: 'gemini-2.5-flash',
   openai: 'gpt-4o',
-  claude: 'claude-3.5-sonnet',
+  claude: 'claude-3-7-sonnet-20250219',
   groq: 'llama-3.3-70b-versatile',
   deepseek: 'deepseek-chat',
   openrouter: 'openai/gpt-4o'
