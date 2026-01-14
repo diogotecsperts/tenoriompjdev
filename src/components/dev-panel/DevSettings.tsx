@@ -84,7 +84,7 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   id: "groq",
   name: "Groq",
   description: "Inferência ultra-rápida com modelos open-source.",
-  models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama-3.2-90b-vision-preview", "mixtral-8x7b-32768", "gemma2-9b-it"],
+  models: ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "meta-llama/llama-guard-4-12b", "qwen/qwen3-32b", "meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct", "groq/compound", "groq/compound-mini", "whisper-large-v3", "whisper-large-v3-turbo"],
   requiresKey: true,
   color: "hsl(280, 87%, 65%)",
   keyPlaceholder: "gsk_...",
