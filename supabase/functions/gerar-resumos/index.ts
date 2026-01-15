@@ -130,9 +130,9 @@ Fundamente tecnicamente sua análise com base nos achados clínicos e exames.
 
   sugestoes_pericia: (ctx: GerarResumoRequest['contexto']) => `
 Você é um perito médico especialista em medicina do trabalho. 
-Com base nas informações do caso, elabore sugestões para auxiliar a perícia.
+Com base nas informações do caso, elabore sugestões práticas para auxiliar a perícia.
 
-**Dados do caso:**
+DADOS DO CASO:
 - CIDs/Diagnósticos alegados: ${ctx.cids || 'Não informado'}
 - História do acidente/doença: ${ctx.historiaAcidente || 'Não informado'}
 - História atual: ${ctx.historiaAtual || 'Não informado'}
@@ -140,45 +140,47 @@ Com base nas informações do caso, elabore sugestões para auxiliar a perícia.
 - Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
 - Antecedentes patológicos: ${ctx.antecedentes || 'Não informado'}
 
-Forneça:
+INSTRUÇÕES IMPORTANTES:
+- Responda APENAS em português brasileiro
+- NÃO use tabelas de forma alguma
+- Use apenas listas com marcadores (-) e títulos (##, ###)
+- Seja objetivo e direto
+- Use linguagem técnica médica
+
+ESTRUTURA DA RESPOSTA:
 
 ## PERGUNTAS SUGERIDAS PARA A ANAMNESE
 
-Liste 8-12 perguntas objetivas e relevantes para esclarecer o nexo causal e a incapacidade, organizadas por tema:
-
 ### Sobre o início e evolução
-- Perguntas sobre quando iniciaram os sintomas
-- Como evoluíram ao longo do tempo
+- Liste 2-3 perguntas específicas sobre quando iniciaram os sintomas e como evoluíram
 
 ### Sobre o trabalho
-- Perguntas sobre as atividades realizadas
-- Exposição a fatores de risco
+- Liste 2-3 perguntas sobre as atividades realizadas e exposição a fatores de risco
 
 ### Sobre tratamentos
-- Perguntas sobre tratamentos realizados
-- Resultados obtidos
+- Liste 2-3 perguntas sobre tratamentos realizados e resultados obtidos
 
-### Sobre limitações
-- Perguntas sobre atividades que não consegue mais realizar
-- Impacto na vida diária
+### Sobre limitações atuais
+- Liste 2-3 perguntas sobre atividades que não consegue mais realizar e impacto na vida diária
+
+---
 
 ## EXAME FÍSICO SUGERIDO
 
-Liste as manobras, testes específicos e regiões anatômicas que devem ser examinadas, considerando as queixas e CIDs alegados:
-
 ### Inspeção Geral
-- O que observar na inspeção inicial
+- O que observar na inspeção inicial do periciando
+- Postura, marcha, estado geral
 
-### Testes Específicos por Região
-- Manobras semiológicas relevantes para o caso
-- Testes especiais indicados
+### Testes Específicos
+- Liste 3-5 manobras ou testes relevantes para os CIDs informados
+- Para cada teste, indique brevemente o que avalia
 
 ### Avaliação Funcional
-- Amplitude de movimento
-- Força muscular
-- Sensibilidade
+- Amplitude de movimento (quais articulações avaliar)
+- Força muscular (quais grupos musculares)
+- Sensibilidade (quando aplicável)
 
-Seja objetivo e prático. Use linguagem técnica médica.
+Forneça entre 8-12 perguntas e 5-8 testes/manobras específicas relevantes para os CIDs informados.
 `
 };
 

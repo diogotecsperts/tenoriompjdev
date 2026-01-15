@@ -83,3 +83,52 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Estilos para Markdown no painel lateral estreito */
+@layer components {
+  .prose-narrow {
+    @apply text-sm leading-relaxed;
+  }
+
+  .prose-narrow h2 {
+    @apply text-base font-semibold mt-5 mb-3 text-primary border-b border-border pb-2;
+  }
+
+  .prose-narrow h3 {
+    @apply text-sm font-medium mt-4 mb-2 text-foreground;
+  }
+
+  .prose-narrow ul {
+    @apply list-disc pl-4 space-y-1.5 my-2;
+  }
+
+  .prose-narrow li {
+    @apply text-sm text-muted-foreground leading-relaxed;
+  }
+
+  .prose-narrow p {
+    @apply text-sm text-muted-foreground my-2;
+  }
+
+  .prose-narrow hr {
+    @apply my-4 border-border;
+  }
+
+  .prose-narrow strong {
+    @apply font-semibold text-foreground;
+  }
+
+  /* Fallback para tabelas (caso ainda apareçam) */
+  .prose-narrow table {
+    @apply w-full text-xs border-collapse my-4 block overflow-x-auto;
+  }
+
+  .prose-narrow th,
+  .prose-narrow td {
+    @apply border border-border p-1.5 text-left text-xs;
+  }
+
+  .prose-narrow th {
+    @apply bg-muted font-medium;
+  }
+}
