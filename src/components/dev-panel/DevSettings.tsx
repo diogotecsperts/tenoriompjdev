@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef, useLayoutEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { useEffect, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,10 +7,13 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { Loader2, Save, AlertTriangle, RefreshCw, Zap, Lock, Eye, EyeOff, Check, Globe, Cpu, Shield, Play, XCircle, CheckCircle2, Plus, Copy, Trash2, Star, FileText, Pin, PinOff, Crown, ArrowDownAZ } from "lucide-react";
+import { Loader2, Save, AlertTriangle, RefreshCw, Zap, Lock, Eye, EyeOff, Check, Globe, Cpu, Shield, Play, XCircle, CheckCircle2, Plus, Copy, Trash2, Star, FileText, Pin, PinOff, Crown, Search, Activity } from "lucide-react";
+
 interface ProviderInfo {
   id: string;
   name: string;
@@ -217,40 +220,15 @@ export function DevSettings() {
   // Pinned providers for visual organization
   const [pinnedProviders, setPinnedProviders] = useState<string[]>([]);
 
-  // Dynamic card height measurement
-  const [cardHeight, setCardHeight] = useState<number | null>(null);
-  const cardRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  // Filter state for provider table
+  const [filterText, setFilterText] = useState("");
 
-  // Animation states for visual feedback
-  const [animatingProvider, setAnimatingProvider] = useState<string | null>(null);
-  const [animationType, setAnimationType] = useState<'pin' | 'activate' | null>(null);
   useEffect(() => {
     fetchConfig();
     fetchApiKeys();
     fetchFavoriteModels();
     fetchPinnedProviders();
   }, []);
-
-  // Measure card heights after render to set uniform height
-  useLayoutEffect(() => {
-    // Small delay to ensure content is rendered
-    const timer = setTimeout(() => {
-      let maxHeight = 0;
-      cardRefs.current.forEach((el) => {
-        if (el) {
-          const height = el.getBoundingClientRect().height;
-          if (height > maxHeight) {
-            maxHeight = height;
-          }
-        }
-      });
-      // Only set if we found valid heights and it's different
-      if (maxHeight > 0 && maxHeight !== cardHeight) {
-        setCardHeight(maxHeight);
-      }
-    }, 50);
-    return () => clearTimeout(timer);
-  }, [loading, savedApiKeys, testResults]);
   const fetchPinnedProviders = async () => {
     try {
       const {
@@ -269,16 +247,6 @@ export function DevSettings() {
   const togglePinProvider = async (providerId: string) => {
     const isPinned = pinnedProviders.includes(providerId);
     const updated = isPinned ? pinnedProviders.filter(p => p !== providerId) : [...pinnedProviders, providerId];
-
-    // Trigger animation only when pinning (not unpinning)
-    if (!isPinned) {
-      setAnimatingProvider(providerId);
-      setAnimationType('pin');
-      setTimeout(() => {
-        setAnimatingProvider(null);
-        setAnimationType(null);
-      }, 600);
-    }
     try {
       const {
         error
@@ -750,13 +718,6 @@ export function DevSettings() {
       return;
     }
 
-    // Trigger activation animation
-    setAnimatingProvider(providerId);
-    setAnimationType('activate');
-    setTimeout(() => {
-      setAnimatingProvider(null);
-      setAnimationType(null);
-    }, 1000);
     setConfig(prev => ({
       ...prev,
       default_ai_provider: providerId,
@@ -850,139 +811,276 @@ export function DevSettings() {
     return AI_PROVIDERS.find(p => p.id === config.pdf_fallback_provider);
   };
 
-  // Render individual provider card with enhanced styling
-  const renderProviderCard = (provider: ProviderInfo, isActive: boolean, isPinned: boolean) => {
+  // Helper functions for table view
+  const getFilteredProviders = () => {
+    const sorted = getSortedProviders();
+    if (!filterText.trim()) return sorted;
+    return sorted.filter(p => 
+      p.name.toLowerCase().includes(filterText.toLowerCase()) ||
+      p.models.some(m => m.toLowerCase().includes(filterText.toLowerCase()))
+    );
+  };
+
+  const getProviderStatus = (provider: ProviderInfo) => {
+    const isActive = provider.id === config.default_ai_provider;
     const hasKey = savedApiKeys[provider.id];
-    const isAllowed = config.allowed_ai_providers.includes(provider.id);
+    const isInternal = !provider.requiresKey;
+    
+    if (isActive) return { label: "ATIVO", variant: "active" as const };
+    if (isInternal) return { label: "INTEGRADO", variant: "internal" as const };
+    if (hasKey) return { label: "CONFIGURADO", variant: "configured" as const };
+    return { label: "PENDENTE", variant: "pending" as const };
+  };
+
+  const getProviderStats = () => {
+    const configured = AI_PROVIDERS.filter(p => 
+      savedApiKeys[p.id] || !p.requiresKey
+    ).length;
+    const totalModels = AI_PROVIDERS.reduce((acc, p) => acc + p.models.length, 0);
+    const testedResults = Object.values(testResults).filter(r => r.success && r.latencyMs);
+    const avgLatency = testedResults.length > 0
+      ? Math.round(testedResults.reduce((acc, r) => acc + (r.latencyMs || 0), 0) / testedResults.length)
+      : 0;
+    const healthPct = Math.round(
+      (AI_PROVIDERS.filter(p => testResults[p.id]?.success !== false).length / AI_PROVIDERS.length) * 100
+    );
+    return { configured, totalModels, avgLatency, healthPct };
+  };
+
+  // Render individual provider row
+  const renderProviderRow = (provider: ProviderInfo) => {
+    const isActive = provider.id === config.default_ai_provider;
+    const isPinned = pinnedProviders.includes(provider.id);
+    const hasKey = savedApiKeys[provider.id];
+    const status = getProviderStatus(provider);
     const testResult = testResults[provider.id];
     const isTesting = testingProvider === provider.id;
-
-    // Animation states
-    const isAnimating = animatingProvider === provider.id;
-    const isActivating = isAnimating && animationType === 'activate';
-    const isPinning = isAnimating && animationType === 'pin';
-    return <div 
-      key={provider.id}
-      ref={(el) => cardRefs.current.set(provider.id, el)}
-      className={cn(
-        "transition-all duration-500 ease-out",
-        isAnimating && "animate-card-move"
-      )} 
-      style={{
-        willChange: isAnimating ? 'transform, opacity' : 'auto',
-        ...(cardHeight ? { height: cardHeight } : {})
-      }}
-    >
-        <Card className={cn("group relative cursor-pointer hover:shadow-lg h-full flex flex-col", "transition-all duration-300 ease-out",
-      // Visual states
-      isActive && "ring-2 ring-primary shadow-xl scale-[1.02]", isPinned && !isActive && "ring-1 ring-amber-400/50", !isAllowed && "opacity-50",
-      // Temporary animations
-      isActivating && "animate-glow-primary", isPinning && "animate-highlight-pulse")} onClick={() => selectProvider(provider.id)}>
-          {/* Colored top bar - thicker for active */}
-          <div className={cn("absolute top-0 left-0 w-full transition-all duration-300", isActive ? "h-2" : "h-1")} style={{
-          backgroundColor: provider.color
-        }} />
-
-          {/* Pin button - visible on hover or when pinned */}
-          <Button variant="ghost" size="icon" className={cn("absolute top-3 left-3 h-6 w-6 z-10 transition-all duration-200", "opacity-0 group-hover:opacity-100", isPinned && "opacity-100 text-amber-500", isActive && "opacity-0 group-hover:opacity-0",
-        // Hide pin for active
-        isPinning && "animate-pin-bounce")} onClick={e => {
-          e.stopPropagation();
-          togglePinProvider(provider.id);
-        }} title={isPinned ? "Desafixar" : "Fixar no topo"}>
-            {isPinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
-          </Button>
-
-          {/* Status badges */}
-          {isActive ? <Badge className={cn("absolute top-3 right-3 bg-primary text-primary-foreground shadow-lg", "transition-all duration-300", isActivating && "animate-scale-in")}>
-              <Check className="h-3 w-3 mr-1" />
-              ATIVO
-            </Badge> : isPinned ? <Badge variant="outline" className={cn("absolute top-3 right-3 border-amber-400 text-amber-500", isPinning && "animate-scale-in")}>
-              <Pin className="h-3 w-3" />
-            </Badge> : null}
-
-        <CardHeader className="pb-2 pt-6">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-base">{provider.name}</CardTitle>
-            {provider.requiresKey ? hasKey ? <Check className="h-4 w-4 text-green-500" /> : <Lock className="h-4 w-4 text-muted-foreground" /> : <Zap className="h-4 w-4 text-primary" />}
+    
+    return (
+      <TableRow 
+        key={provider.id}
+        className={cn(
+          "group transition-all duration-200 cursor-pointer",
+          isActive && "bg-primary/5 border-l-4 border-l-primary",
+          isPinned && !isActive && "bg-amber-50/50 dark:bg-amber-950/20",
+          "hover:bg-muted/50"
+        )}
+        onClick={() => selectProvider(provider.id)}
+      >
+        {/* Coluna Pin/Status */}
+        <TableCell className="w-12 text-center" onClick={e => e.stopPropagation()}>
+          {isActive ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger>
+                  <Crown className="h-4 w-4 text-primary mx-auto" />
+                </TooltipTrigger>
+                <TooltipContent>Provider Ativo</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              className={cn(
+                "h-7 w-7 transition-opacity",
+                isPinned ? "text-amber-500" : "opacity-0 group-hover:opacity-100"
+              )}
+              onClick={() => togglePinProvider(provider.id)}
+            >
+              {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+            </Button>
+          )}
+        </TableCell>
+        
+        {/* Coluna Nome */}
+        <TableCell>
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-2">
+              <div 
+                className="w-2 h-2 rounded-full shrink-0" 
+                style={{ backgroundColor: provider.color }}
+              />
+              <span className={cn(
+                "font-semibold text-sm",
+                isActive ? "text-foreground" : "text-muted-foreground"
+              )}>
+                {provider.name}
+              </span>
+              {isActive && (
+                <Badge className="bg-primary text-primary-foreground text-[10px] px-1.5 py-0">
+                  <Check className="h-2.5 w-2.5 mr-0.5" />
+                  ATIVO
+                </Badge>
+              )}
+            </div>
+            <span className="text-[11px] text-muted-foreground pl-4">
+              {provider.description}
+            </span>
           </div>
-          <CardDescription className="text-xs">{provider.description}</CardDescription>
-        </CardHeader>
-
-        <CardContent className="space-y-3 flex-1 flex flex-col">
-          {/* Models */}
-          <div className="flex flex-wrap gap-1">
-            {provider.models.slice(0, 3).map(model => <Badge key={model} variant="secondary" className="text-xs">
-                {model.length > 20 ? model.slice(0, 20) + "..." : model}
-              </Badge>)}
-            {provider.models.length > 3 && <Badge variant="outline" className="text-xs">
-                +{provider.models.length - 3}
-              </Badge>}
+        </TableCell>
+        
+        {/* Coluna Modelos */}
+        <TableCell>
+          <div className="flex flex-wrap gap-1 max-w-xs">
+            {provider.models.slice(0, 2).map(model => (
+              <Badge key={model} variant="secondary" className="text-[10px] px-1.5 py-0 font-mono">
+                {model.length > 18 ? model.slice(0, 18) + "…" : model}
+              </Badge>
+            ))}
+            {provider.models.length > 2 && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant="outline" className="text-[10px] px-1 py-0 text-primary font-semibold cursor-help">
+                      +{provider.models.length - 2}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    <div className="flex flex-wrap gap-1">
+                      {provider.models.slice(2).map(model => (
+                        <span key={model} className="text-xs font-mono">{model}</span>
+                      ))}
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
           </div>
-
-          {/* API Key input for providers that require it */}
-          {provider.requiresKey && <div className="space-y-2 pt-2 border-t" onClick={e => e.stopPropagation()}>
-              <Label className="text-xs">API Key</Label>
-              <div className="flex gap-1">
-                <Input type={showKeys[provider.id] ? "text" : "password"} value={apiKeys[provider.id] || ""} onChange={e => setApiKeys(prev => ({
-                ...prev,
-                [provider.id]: e.target.value
-              }))} placeholder={provider.keyPlaceholder} className="h-8 text-xs" />
-                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setShowKeys(prev => ({
-                ...prev,
-                [provider.id]: !prev[provider.id]
-              }))}>
+        </TableCell>
+        
+        {/* Coluna Status */}
+        <TableCell className="text-center">
+          <Badge className={cn(
+            "text-[10px] uppercase font-bold px-2",
+            status.variant === "active" && "bg-primary text-primary-foreground",
+            status.variant === "configured" && "bg-transparent border border-green-500 text-green-500",
+            status.variant === "internal" && "bg-primary/10 text-primary border-primary/20",
+            status.variant === "pending" && "bg-muted text-muted-foreground"
+          )}>
+            {status.variant === "internal" && <Zap className="h-2.5 w-2.5 mr-1" />}
+            {status.variant === "configured" && <Check className="h-2.5 w-2.5 mr-1" />}
+            {status.variant === "pending" && <Lock className="h-2.5 w-2.5 mr-1" />}
+            {status.label}
+          </Badge>
+        </TableCell>
+        
+        {/* Coluna API Key */}
+        <TableCell onClick={e => e.stopPropagation()}>
+          {provider.requiresKey ? (
+            <div className="relative flex items-center group/key max-w-[200px]">
+              <Input 
+                type={showKeys[provider.id] ? "text" : "password"}
+                value={apiKeys[provider.id] || ""}
+                onChange={e => setApiKeys(prev => ({ ...prev, [provider.id]: e.target.value }))}
+                placeholder={provider.keyPlaceholder || "sk-..."}
+                className="h-7 bg-muted/30 border-muted text-[11px] font-mono pr-16"
+              />
+              <div className="absolute right-0.5 flex gap-0.5 opacity-50 group-hover/key:opacity-100 transition-opacity">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-6 w-6"
+                  onClick={() => setShowKeys(prev => ({ ...prev, [provider.id]: !prev[provider.id] }))}
+                >
                   {showKeys[provider.id] ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                 </Button>
-                <Button size="icon" className="h-8 w-8 shrink-0" onClick={() => saveApiKey(provider.id)} disabled={savingKey === provider.id}>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-6 w-6 text-primary hover:text-primary"
+                  onClick={() => saveApiKey(provider.id)}
+                  disabled={savingKey === provider.id}
+                >
                   {savingKey === provider.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
                 </Button>
               </div>
-              {hasKey && <div className="flex items-center justify-between">
-                  <p className="text-xs text-green-600 flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Configurada
-                  </p>
-                  <Button variant="ghost" size="sm" className="h-6 text-xs text-destructive hover:text-destructive" onClick={() => deleteApiKey(provider.id)}>
-                    Remover
-                  </Button>
-                </div>}
-            </div>}
-
-          {/* Integrated badge for Lovable */}
-          {!provider.requiresKey && <Badge variant="default" className="w-fit">
-              Integrado
-            </Badge>}
-        </CardContent>
-
-        {/* Footer with Test Button - always at bottom */}
-        <CardFooter className="pt-2 border-t" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center justify-between w-full">
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => testConnection(provider.id)} disabled={isTesting || provider.requiresKey && !hasKey}>
-              {isTesting ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
-              Testar
+            </div>
+          ) : (
+            <span className="text-[11px] italic text-muted-foreground flex items-center gap-1">
+              <Zap className="h-3 w-3 text-primary" />
+              Não requer
+            </span>
+          )}
+          {hasKey && (
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-[10px] font-medium text-green-600 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                Configurada
+              </span>
+              <Button 
+                variant="link" 
+                size="sm" 
+                className="h-auto p-0 text-[10px] text-destructive hover:text-destructive"
+                onClick={() => deleteApiKey(provider.id)}
+              >
+                Remover
+              </Button>
+            </div>
+          )}
+        </TableCell>
+        
+        {/* Coluna Ações */}
+        <TableCell className="text-right" onClick={e => e.stopPropagation()}>
+          <div className={cn(
+            "flex justify-end items-center gap-2 transition-opacity",
+            !isActive && "opacity-50 group-hover:opacity-100"
+          )}>
+            {testResult && (
+              <div className="flex items-center gap-1 text-[11px]">
+                {testResult.success ? (
+                  <>
+                    <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                    <span className="text-green-600 font-mono">{testResult.latencyMs}ms</span>
+                  </>
+                ) : (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center gap-1 text-destructive">
+                          <XCircle className="h-3.5 w-3.5" />
+                          <span>Erro</span>
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent>{testResult.error}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+              </div>
+            )}
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className={cn(
+                "h-7 px-2.5 text-[11px] uppercase gap-1",
+                isActive && "border-primary"
+              )}
+              onClick={() => testConnection(provider.id)}
+              disabled={isTesting || (provider.requiresKey && !hasKey)}
+            >
+              {isTesting ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <>
+                  <Play className="h-3 w-3" />
+                  Test
+                </>
+              )}
             </Button>
-
-            {testResult && <div className="flex items-center gap-1 text-xs">
-                {testResult.success ? <>
-                    <CheckCircle2 className="h-3 w-3 text-green-500" />
-                    <span className="text-green-600">{testResult.latencyMs}ms</span>
-                  </> : <>
-                    <XCircle className="h-3 w-3 text-destructive" />
-                    <span className="text-destructive truncate max-w-20" title={testResult.error}>
-                      Erro
-                    </span>
-                  </>}
-              </div>}
           </div>
-        </CardFooter>
-        </Card>
-      </div>;
+        </TableCell>
+      </TableRow>
+    );
   };
+
   if (loading) {
     return <div className="flex items-center justify-center py-16">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>;
   }
+  
+  const stats = getProviderStats();
+  
   return <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -1009,56 +1107,76 @@ export function DevSettings() {
           </CardContent>
         </Card>}
 
-      {/* Section: AI Providers */}
+      {/* Section: AI Providers - Table View */}
       <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Cpu className="h-5 w-5 text-primary" />
-          <h2 className="text-xl font-semibold">Provider de IA Padrão</h2>
+        {/* Header com filtro */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Cpu className="h-5 w-5 text-primary" />
+            <h2 className="text-xl font-bold uppercase tracking-tight">
+              Provider Inventory <span className="text-primary">v2.0</span>
+            </h2>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Input 
+                value={filterText}
+                onChange={e => setFilterText(e.target.value)}
+                placeholder="Filtrar providers..."
+                className="h-8 w-48 sm:w-64 pr-8 text-xs"
+              />
+              <Search className="absolute right-2.5 top-2 h-4 w-4 text-muted-foreground" />
+            </div>
+          </div>
         </div>
+        
         <p className="text-sm text-muted-foreground">
-          Clique em um card para selecionar como provider padrão. Use 📌 para fixar providers favoritos no topo.
+          Clique em uma linha para selecionar como provider padrão. Use 📌 para fixar providers favoritos.
         </p>
-
-        {/* Provider Cards with Dynamic Sorting */}
-        <div className="space-y-6">
-          {(() => {
-          const sortedProviders = getSortedProviders();
-          const activeProvider = sortedProviders.find(p => p.id === config.default_ai_provider);
-          const pinnedNonActive = sortedProviders.filter(p => pinnedProviders.includes(p.id) && p.id !== config.default_ai_provider);
-          const others = sortedProviders.filter(p => !pinnedProviders.includes(p.id) && p.id !== config.default_ai_provider);
-          return <>
-                {/* Section: Provider de IA (Ativo + Fixados na mesma linha) */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-sm font-medium text-primary">
-                    <Crown className="h-4 w-4" />
-                    <span>Provider de IA</span>
-                    {pinnedNonActive.length > 0 && (
-                      <span className="text-amber-500 flex items-center gap-1 ml-2">
-                        <Pin className="h-3 w-3" />
-                        +{pinnedNonActive.length} fixados
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-all duration-300">
-                    {/* Card Ativo primeiro */}
-                    {activeProvider && renderProviderCard(activeProvider, true, false)}
-                    {/* Cards Fixados ao lado */}
-                    {pinnedNonActive.map(provider => renderProviderCard(provider, false, true))}
-                  </div>
-                </div>
-
-                {/* Section: Other Providers (Alphabetical) */}
-                {others.length > 0 && <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                      <ArrowDownAZ className="h-4 w-4" />
-                      <span>Outros Providers (A-Z)</span>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 transition-all duration-300">
-                      {others.map(provider => renderProviderCard(provider, false, false))}
-                    </div>
-                  </div>}
-              </>;
-        })()}
+        
+        {/* Tabela Principal */}
+        <div className="border rounded-lg overflow-hidden bg-card shadow-sm">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/50 hover:bg-muted/50">
+                <TableHead className="w-12"></TableHead>
+                <TableHead className="text-[11px] font-bold uppercase tracking-wider">Provider</TableHead>
+                <TableHead className="text-[11px] font-bold uppercase tracking-wider">Modelos Disponíveis</TableHead>
+                <TableHead className="w-28 text-center text-[11px] font-bold uppercase tracking-wider">Status</TableHead>
+                <TableHead className="w-56 text-[11px] font-bold uppercase tracking-wider">API Key</TableHead>
+                <TableHead className="w-32 text-right text-[11px] font-bold uppercase tracking-wider">Ações</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {getFilteredProviders().map(provider => renderProviderRow(provider))}
+            </TableBody>
+          </Table>
+        </div>
+        
+        {/* Estatísticas */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-muted/50 p-3 rounded-lg flex justify-between items-center">
+            <span className="text-[11px] uppercase text-muted-foreground font-bold">Configurados</span>
+            <span className="text-lg font-bold font-mono">{String(stats.configured).padStart(2, '0')}</span>
+          </div>
+          <div className="bg-muted/50 p-3 rounded-lg flex justify-between items-center">
+            <span className="text-[11px] uppercase text-muted-foreground font-bold">Latência Média</span>
+            <span className="text-lg font-bold font-mono text-primary">{stats.avgLatency || '--'}ms</span>
+          </div>
+          <div className="bg-muted/50 p-3 rounded-lg flex justify-between items-center">
+            <span className="text-[11px] uppercase text-muted-foreground font-bold">Total Modelos</span>
+            <span className="text-lg font-bold font-mono">{stats.totalModels}</span>
+          </div>
+          <div className="bg-muted/50 p-3 rounded-lg flex justify-between items-center">
+            <span className="text-[11px] uppercase text-muted-foreground font-bold flex items-center gap-1">
+              <Activity className="h-3 w-3" />
+              API Health
+            </span>
+            <span className={cn(
+              "text-lg font-bold font-mono",
+              stats.healthPct === 100 ? "text-green-500" : stats.healthPct >= 80 ? "text-amber-500" : "text-destructive"
+            )}>{stats.healthPct}%</span>
+          </div>
         </div>
 
         {/* Default Model Selector */}
