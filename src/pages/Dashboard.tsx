@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLaudo } from "@/contexts/LaudoContext";
+import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -28,7 +29,8 @@ import { startOfMonth, endOfMonth } from "date-fns";
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user, profile } = useAuth();
-  const { laudos, loading, createLaudo, deleteLaudo } = useLaudo();
+  const { laudos, loading, createLaudo, deleteLaudo, updateLaudoStatus } = useLaudo();
+  const { toast } = useToast();
   const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   // Fetch financial data
@@ -119,6 +121,14 @@ export default function Dashboard() {
     if (id) {
       navigate(`/laudo/${id}`);
     }
+  };
+
+  const handleReopenLaudo = async (id: string) => {
+    await updateLaudoStatus(id, 'rascunho');
+    toast({
+      title: "Laudo reaberto",
+      description: "O laudo foi reaberto e pode ser editado novamente.",
+    });
   };
 
   return (
@@ -264,6 +274,7 @@ export default function Dashboard() {
         <HistoricoRecenteTable 
           laudos={recentLaudos}
           onDelete={deleteLaudo}
+          onReopen={handleReopenLaudo}
           onViewAll={() => navigate('/historico')}
         />
       </div>

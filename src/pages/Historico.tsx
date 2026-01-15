@@ -580,15 +580,53 @@ export default function Historico() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleOpenLaudo(laudo.id)}>
-                            <Pencil className="mr-2 h-4 w-4" />
-                            Editar
-                          </DropdownMenuItem>
-                          {laudo.status === 'finalizado' && (
-                            <DropdownMenuItem onClick={() => updateLaudoStatus(laudo.id, 'rascunho')}>
-                              <RotateCcw className="mr-2 h-4 w-4" />
-                              Reabrir Laudo
+                          {laudo.status === 'finalizado' ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div>
+                                  <DropdownMenuItem 
+                                    disabled
+                                    className="opacity-50 cursor-not-allowed"
+                                  >
+                                    <Pencil className="mr-2 h-4 w-4" />
+                                    Editar
+                                  </DropdownMenuItem>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="left">
+                                <p>Laudo finalizado. Reabra para editar.</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <DropdownMenuItem onClick={() => handleOpenLaudo(laudo.id)}>
+                              <Pencil className="mr-2 h-4 w-4" />
+                              Editar
                             </DropdownMenuItem>
+                          )}
+                          {laudo.status === 'finalizado' && (
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                                  <RotateCcw className="mr-2 h-4 w-4" />
+                                  Reabrir Laudo
+                                </DropdownMenuItem>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Reabrir laudo?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    Ao reabrir este laudo, ele voltará ao status de rascunho e poderá ser editado novamente. 
+                                    Você precisará finalizá-lo novamente quando terminar as alterações.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                  <AlertDialogAction onClick={() => updateLaudoStatus(laudo.id, 'rascunho')}>
+                                    Reabrir
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
                           )}
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
