@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, ShieldAlert } from "lucide-react";
@@ -72,12 +72,12 @@ export function DevProtectedRoute({ children }: DevProtectedRouteProps) {
           <p className="text-muted-foreground mb-6">
             Você não tem permissão para acessar o painel de desenvolvedor.
           </p>
-          <a
-            href="/dashboard"
+          <Link
+            to="/dashboard"
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
             Voltar ao Dashboard
-          </a>
+          </Link>
         </div>
       </div>
     );
