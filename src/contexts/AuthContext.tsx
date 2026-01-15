@@ -84,7 +84,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         clearTimeout(timeoutId);
 
-        // CRÍTICO: Verificar se o usuário tem perfil válido
+        // Verificar se houve erro de rede/RLS vs perfil realmente inexistente
+        if (profileResult.error) {
+          const errorCode = profileResult.error.code;
+          const isTransientError = errorCode === 'PGRST301' || errorCode === '42501' || 
+                                   profileResult.error.message?.includes('network') ||
+                                   profileResult.error.message?.includes('fetch');
+          
+          if (isTransientError) {
+            // Erro transitório - não deslogar, apenas avisar
+            console.warn("Erro transitório ao carregar perfil:", profileResult.error);
+            toast({
+              variant: "destructive",
+              title: "Erro ao carregar perfil",
+              description: "Problema de conexão. Tente recarregar a página.",
+            });
+            isLoadingUserDataRef.current = false;
+            setLoading(false);
+            return;
+          }
+        }
+
+        // Perfil realmente não existe (PGRST116 = no rows returned)
         if (!profileResult.data) {
           console.error("Usuário autenticado sem perfil válido - fazendo logout");
           await supabase.auth.signOut();
