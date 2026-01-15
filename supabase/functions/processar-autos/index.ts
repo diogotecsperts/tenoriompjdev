@@ -280,6 +280,37 @@ Analise a capacidade laboral considerando:
 6. Impacto nas atividades de vida diária
 
 Fundamente tecnicamente sua análise com base nos achados clínicos e exames.
+`,
+    referencias_bibliograficas: `
+Você é um perito médico especialista em medicina do trabalho. Com base nas informações do processo, identifique e liste referências bibliográficas pertinentes e específicas para o caso.
+
+DADOS DO CASO:
+- CIDs/Diagnósticos: ${ctx.cids || 'Não informado'}
+- Histórico ocupacional: ${ctx.historicoOcupacional || 'Não informado'}
+- História do acidente/doença: ${ctx.historiaAcidente || 'Não informado'}
+- Tratamentos realizados: ${ctx.tratamentos || 'Não informado'}
+- Exames complementares: ${ctx.examesComplementares || 'Não informado'}
+- Laudos médicos: ${ctx.laudosMedicos || 'Não informado'}
+- Lesões descritas: ${ctx.lesoesDescritas || 'Não informado'}
+
+INSTRUÇÕES:
+- Liste entre 5 e 8 referências bibliográficas pertinentes ao caso específico
+- Numere cada referência (1-, 2-, 3-, etc.)
+- Inclua obras de medicina do trabalho relacionadas aos CIDs informados
+- Inclua legislação aplicável (CLT, Lei 8.213/91, NRs relevantes para o caso)
+- Inclua normas técnicas do CFM e CID-10
+- NÃO inclua referências genéricas desnecessárias
+- Seja específico: se há lesão de coluna, cite obras sobre coluna; se há LER/DORT, cite obras sobre ergonomia
+- Use formato ABNT para as referências
+
+FORMATO DE SAÍDA:
+1- AUTOR. Título da obra. Cidade: Editora, Ano.
+
+2- BRASIL. Lei/Norma específica aplicável ao caso.
+
+3- Norma técnica ou regulamentadora pertinente.
+
+Forneça referências que realmente embasem tecnicamente o laudo para este caso específico.
 `
   };
 
@@ -308,12 +339,13 @@ async function gerarResumosIA(
     summariesGenerated: number;
   };
 }> {
-  const results = {
+const results = {
     resumo_peticao: '',
     resumo_contestacao: '',
     descricao_doencas: '',
     nexo_causal: '',
-    incapacidade: ''
+    incapacidade: '',
+    referencias_bibliograficas: ''
   };
 
   // Buscar configuração de IA
@@ -367,14 +399,16 @@ async function gerarResumosIA(
   const hasMedicalContext = !!contexto.cids || !!contexto.examesComplementares || !!contexto.laudosMedicos || !!contexto.lesoesDescritas;
 
   const summariesToGenerate: Array<{ tipo: string; shouldGenerate: boolean; step: string; progress: number }> = [
-    { tipo: 'resumo_peticao', shouldGenerate: !!contexto.peticaoInicial, step: 'Gerando resumo da petição inicial...', progress: 50 },
-    { tipo: 'resumo_contestacao', shouldGenerate: !!contexto.contestacao, step: 'Gerando resumo da contestação...', progress: 60 },
+    { tipo: 'resumo_peticao', shouldGenerate: !!contexto.peticaoInicial, step: 'Gerando resumo da petição inicial...', progress: 45 },
+    { tipo: 'resumo_contestacao', shouldGenerate: !!contexto.contestacao, step: 'Gerando resumo da contestação...', progress: 55 },
     // descricao_doencas: gerar se tiver CIDs, ou se tiver histórico ou dados médicos relevantes
-    { tipo: 'descricao_doencas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando descrição técnica das doenças...', progress: 70 },
+    { tipo: 'descricao_doencas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando descrição técnica das doenças...', progress: 65 },
     // nexo_causal: gerar se tiver qualquer contexto relevante
-    { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Analisando nexo causal...', progress: 80 },
+    { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Analisando nexo causal...', progress: 75 },
     // incapacidade: gerar se tiver CIDs, exames, histórico ou dados médicos
-    { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares || hasHistoryContext || hasMedicalContext, step: 'Analisando incapacidade laboral...', progress: 90 }
+    { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares || hasHistoryContext || hasMedicalContext, step: 'Analisando incapacidade laboral...', progress: 85 },
+    // referencias_bibliograficas: gerar se tiver qualquer contexto relevante
+    { tipo: 'referencias_bibliograficas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando referências bibliográficas...', progress: 92 }
   ];
 
   // Log which summaries will be generated vs skipped

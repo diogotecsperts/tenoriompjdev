@@ -1,24 +1,53 @@
+import { useState } from "react";
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { RotateCcw } from "lucide-react";
-
-const REFERENCIAS_PADRAO = `- BARROS, B. T. Perícia Médica. São Paulo: Editora LTR, 2023.
-- BRASIL. Ministério do Trabalho e Emprego. Normas Regulamentadoras.
-- MENDES, René. Patologia do trabalho. São Paulo: Atheneu, 2005.
-- VIEIRA, Sebastião Ivone. Manual de saúde e segurança do trabalho. São Paulo: LTr, 2005.
-- OMS. Classificação Internacional de Doenças - CID-10.
-- CFM. Código de Ética Médica - Resolução CFM 2.217/2018.`;
+import { Sparkles, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export function ReferenciasBibliograficas() {
   const { currentLaudo, updateLaudo } = useLaudo();
+  const [isLoading, setIsLoading] = useState(false);
 
   if (!currentLaudo) return null;
 
-  const handleRestaurarPadrao = () => {
-    updateLaudo({ referenciasBibliograficas: REFERENCIAS_PADRAO });
+  const handleBuscarNovamente = async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('gerar-resumos', {
+        body: {
+          tipo: 'referencias_bibliograficas',
+          contexto: {
+            cids: currentLaudo.conclusaoCID || '',
+            postoTrabalho: currentLaudo.descricaoPostoTrabalho || '',
+            atividadesLaborais: currentLaudo.descricaoAtividadesLaborais || '',
+            historicoOcupacional: currentLaudo.historicoOcupacional || '',
+            tratamentos: currentLaudo.tratamentos || '',
+            examesComplementares: currentLaudo.examesComplementares || '',
+            nexoCausal: currentLaudo.nexoCausalJustificativa || '',
+            conclusao: currentLaudo.conclusaoAnalise || '',
+            metodologia: currentLaudo.metodologiaPericial || '',
+          }
+        }
+      });
+
+      if (error) throw error;
+      
+      if (data?.texto) {
+        updateLaudo({ referenciasBibliograficas: data.texto });
+        toast.success('Referências atualizadas com sucesso!');
+      } else {
+        throw new Error('Resposta vazia da IA');
+      }
+    } catch (error) {
+      console.error('Erro ao gerar referências:', error);
+      toast.error('Erro ao gerar referências. Tente novamente.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -34,20 +63,25 @@ export function ReferenciasBibliograficas() {
           <div className="flex items-center justify-between">
             <Label htmlFor="referenciasBibliograficas">Referências</Label>
             <Button 
-              variant="ghost" 
+              variant="outline" 
               size="sm" 
-              onClick={handleRestaurarPadrao}
+              onClick={handleBuscarNovamente}
+              disabled={isLoading}
               className="h-8 text-xs"
             >
-              <RotateCcw className="mr-1 h-3 w-3" />
-              Restaurar padrão
+              {isLoading ? (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              ) : (
+                <Sparkles className="mr-1 h-3 w-3" />
+              )}
+              Buscar novamente
             </Button>
           </div>
           <Textarea
             id="referenciasBibliograficas"
             value={currentLaudo.referenciasBibliograficas || ""}
             onChange={(e) => updateLaudo({ referenciasBibliograficas: e.target.value })}
-            placeholder="Liste as referências bibliográficas utilizadas..."
+            placeholder="As referências serão geradas automaticamente após importar um PDF ou clique em 'Buscar novamente'..."
             rows={8}
           />
         </div>

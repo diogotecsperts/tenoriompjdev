@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 interface GerarResumoRequest {
-  tipo: 'resumo_peticao' | 'resumo_contestacao' | 'descricao_doencas' | 'nexo_causal' | 'incapacidade' | 'sugestoes_pericia';
+  tipo: 'resumo_peticao' | 'resumo_contestacao' | 'descricao_doencas' | 'nexo_causal' | 'incapacidade' | 'sugestoes_pericia' | 'referencias_bibliograficas';
   contexto: {
     peticaoInicial?: string;
     contestacao?: string;
@@ -21,6 +21,9 @@ interface GerarResumoRequest {
     tratamentos?: string;
     historiaAcidente?: string;
     historiaAtual?: string;
+    nexoCausal?: string;
+    conclusao?: string;
+    metodologia?: string;
   };
 }
 
@@ -181,6 +184,40 @@ ESTRUTURA DA RESPOSTA:
 - Sensibilidade (quando aplicável)
 
 Forneça entre 8-12 perguntas e 5-8 testes/manobras específicas relevantes para os CIDs informados.
+`,
+
+  referencias_bibliograficas: (ctx: GerarResumoRequest['contexto']) => `
+Você é um perito médico especialista em medicina do trabalho. Com base nas informações do laudo, identifique e liste referências bibliográficas pertinentes e específicas para o caso.
+
+DADOS DO LAUDO:
+- CIDs/Diagnósticos: ${ctx.cids || 'Não informado'}
+- Posto de trabalho: ${ctx.postoTrabalho || 'Não informado'}
+- Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
+- Histórico ocupacional: ${ctx.historicoOcupacional || 'Não informado'}
+- Nexo causal: ${ctx.nexoCausal || 'Não informado'}
+- Conclusão: ${ctx.conclusao || 'Não informado'}
+- Metodologia: ${ctx.metodologia || 'Não informado'}
+- Tratamentos: ${ctx.tratamentos || 'Não informado'}
+- Exames complementares: ${ctx.examesComplementares || 'Não informado'}
+
+INSTRUÇÕES:
+- Liste entre 5 e 8 referências bibliográficas pertinentes ao caso específico
+- Numere cada referência (1-, 2-, 3-, etc.)
+- Inclua obras de medicina do trabalho relacionadas aos CIDs informados
+- Inclua legislação aplicável (CLT, Lei 8.213/91, NRs relevantes para o caso)
+- Inclua normas técnicas do CFM e CID-10
+- NÃO inclua referências genéricas desnecessárias
+- Seja específico: se há lesão de coluna, cite obras sobre coluna; se há LER/DORT, cite obras sobre ergonomia
+- Use formato ABNT para as referências
+
+FORMATO DE SAÍDA:
+1- AUTOR. Título da obra. Cidade: Editora, Ano.
+
+2- BRASIL. Lei/Norma específica aplicável ao caso.
+
+3- Norma técnica ou regulamentadora pertinente.
+
+Forneça referências que realmente embasem tecnicamente o laudo para este caso específico.
 `
 };
 
