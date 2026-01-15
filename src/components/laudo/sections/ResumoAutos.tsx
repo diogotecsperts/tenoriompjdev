@@ -14,7 +14,7 @@ export function ResumoAutos() {
 
   if (!currentLaudo) return null;
 
-  const hasPdfSource = !!(currentLaudo.ai_metadata as any)?.importJobId || !!(currentLaudo.ai_metadata as any)?.pdfFilePath;
+  const hasPdfSource = !!(currentLaudo.aiMetadata as any)?.importJobId || !!(currentLaudo.aiMetadata as any)?.pdfFilePath;
 
   const gerarResumoPeticao = async () => {
     if (!currentLaudo.resumoPeticaoInicial?.trim()) {
