@@ -22,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { ImportarAutosDialog } from "@/components/tools/ImportarAutosDialog";
@@ -36,7 +37,7 @@ const mainMenuItems = [
   { icon: FilePlus, label: "Nova Perícia", path: "/laudo/new" },
   { icon: History, label: "Histórico", path: "/historico" },
   { icon: FileText, label: "Modelos de Laudos", path: "/modelos" },
-  { icon: DollarSign, label: "Financeiro", path: "/financeiro" },
+  { icon: DollarSign, label: "Financeiro", path: "/financeiro", badge: "Em desenvolvimento" },
 ];
 
 const toolMenuItems = [
@@ -154,7 +155,16 @@ export function AppLayout({ children }: AppLayoutProps) {
               )}
             >
               <item.icon className="h-5 w-5 flex-shrink-0" />
-              {!collapsed && <span>{item.label}</span>}
+              {!collapsed && (
+                <div className="flex items-center gap-2 flex-1">
+                  <span>{item.label}</span>
+                  {item.badge && (
+                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 ml-auto">
+                      {item.badge}
+                    </Badge>
+                  )}
+                </div>
+              )}
             </Link>
           );
         })}

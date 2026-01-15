@@ -226,7 +226,12 @@ export default function Dashboard() {
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <p className="text-sm font-medium text-muted-foreground">Faturamento (Mês)</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium text-muted-foreground">Faturamento (Mês)</p>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                    Em desenvolvimento
+                  </Badge>
+                </div>
                 <p className="text-2xl font-bold text-foreground">
                   R$ {financeStats.faturamentoMes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </p>
