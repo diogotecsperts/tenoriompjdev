@@ -35,6 +35,28 @@ import {
 } from "@/components/ui/select";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
+// Brazilian phone formatting (DDD + 9 digits)
+const formatPhoneBR = (value: string): string => {
+  const numbers = value.replace(/\D/g, "");
+  const limited = numbers.slice(0, 11);
+  
+  if (limited.length === 0) return "";
+  if (limited.length <= 2) {
+    return `(${limited}`;
+  } else if (limited.length <= 7) {
+    return `(${limited.slice(0, 2)}) ${limited.slice(2)}`;
+  } else {
+    return `(${limited.slice(0, 2)}) ${limited.slice(2, 7)}-${limited.slice(7)}`;
+  }
+};
+
+// Validate complete Brazilian phone
+const isValidPhoneBR = (value: string): boolean => {
+  if (!value) return true; // Empty is valid (optional field)
+  const numbers = value.replace(/\D/g, "");
+  return numbers.length === 11;
+};
+
 export default function Configuracoes() {
   const { user, profile, refreshProfile } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -314,6 +336,17 @@ export default function Configuracoes() {
 
     setLoading(true);
     try {
+      // Validar telefone (se preenchido)
+      if (formData.telefone && !isValidPhoneBR(formData.telefone)) {
+        toast({
+          variant: "destructive",
+          title: "Telefone inválido",
+          description: "O telefone deve ter DDD + 9 dígitos. Ex: (11) 99999-9999",
+        });
+        setLoading(false);
+        return;
+      }
+
       // Validar user_id
       if (formData.user_id && formData.user_id.length < 4) {
         toast({
@@ -787,9 +820,15 @@ export default function Configuracoes() {
                       <Input
                         id="telefone"
                         value={formData.telefone}
-                        onChange={(e) => setFormData({ ...formData, telefone: e.target.value })}
+                        onChange={(e) => setFormData({ ...formData, telefone: formatPhoneBR(e.target.value) })}
                         placeholder="(00) 00000-0000"
+                        maxLength={15}
                       />
+                      {formData.telefone && !isValidPhoneBR(formData.telefone) && (
+                        <p className="text-sm text-destructive">
+                          Telefone incompleto. Use DDD + 9 dígitos.
+                        </p>
+                      )}
                     </div>
                   </div>
 
