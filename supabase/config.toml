@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.check-import-status]
 verify_jwt = true
+
+[functions.regerar-campo-pdf]
+verify_jwt = true

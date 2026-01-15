@@ -748,16 +748,19 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         resumo_peticao_inicial: extractedData.resumos_ia?.resumo_peticao || '',
         resumo_contestacao: extractedData.resumos_ia?.resumo_contestacao || '',
         descricao_tecnica_doencas: extractedData.resumos_ia?.descricao_doencas || '',
-        nexo_causal_justificativa: extractedData.resumos_ia?.nexo_causal || '',
-        analise_incapacidade_laboral: extractedData.resumos_ia?.incapacidade || '',
+        // IMPORTANT: Justificativas should NOT be auto-filled - left empty for manual input
+        nexo_causal_justificativa: '',
+        analise_incapacidade_laboral: '',
         referencias_bibliograficas: extractedData.resumos_ia?.referencias_bibliograficas || '',
         
         anotacoes: extractedData.resumo ? `[Resumo extraído automaticamente]\n${extractedData.resumo}` : '',
         status: 'rascunho',
         
-        // AI Metadata for tracking
+        // AI Metadata for tracking + PDF source for regeneration
         ai_metadata: aiUsage ? {
           importDate: new Date().toISOString(),
+          pdfFilePath: currentFilePath,
+          importJobId: currentJobId,
           pdfExtraction: {
             provider: aiUsage.pdfExtraction.provider,
             model: aiUsage.pdfExtraction.model,
@@ -767,7 +770,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             provider: aiUsage.summaries.provider,
             model: aiUsage.summaries.model,
             durationMs: aiUsage.summaries.durationMs,
-            generated: ['resumo_peticao', 'resumo_contestacao', 'descricao_doencas', 'nexo_causal', 'incapacidade', 'referencias_bibliograficas'].filter(
+            generated: ['resumo_peticao', 'resumo_contestacao', 'descricao_doencas', 'referencias_bibliograficas'].filter(
               key => extractedData.resumos_ia?.[key as keyof typeof extractedData.resumos_ia]
             )
           },

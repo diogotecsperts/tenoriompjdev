@@ -1,101 +1,105 @@
-import { useState } from "react";
 import { useLaudo } from "@/contexts/LaudoContext";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Sparkles, Loader2 } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
-import { toast } from "@/hooks/use-toast";
+import { LaudoTextareaAIField } from "@/components/laudo/LaudoTextareaAIField";
+
+const incapacidadeOptions = [
+  { value: "total_temporaria", label: "Incapacidade Total Temporária" },
+  { value: "parcial_permanente", label: "Incapacidade Parcial Permanente" },
+  { value: "parcial_temporaria", label: "Incapacidade Parcial Temporária" },
+  { value: "ausencia", label: "Ausência de Incapacidade Laboral" },
+  { value: "total_permanente", label: "Incapacidade Total Permanente" },
+];
 
 export function AnaliseIncapacidade() {
   const { currentLaudo, updateLaudo } = useLaudo();
-  const [loading, setLoading] = useState(false);
 
   if (!currentLaudo) return null;
 
-  const gerarAnalise = async () => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('gerar-resumos', {
-        body: {
-          tipo: 'incapacidade',
-          contexto: {
-            cids: currentLaudo.conclusaoCID,
-            exameFisico: currentLaudo.exameFisico,
-            examesComplementares: currentLaudo.examesComplementares,
-            tratamentos: currentLaudo.tratamentos,
-            atividadesLaborais: currentLaudo.descricaoAtividadesLaborais,
-            postoTrabalho: currentLaudo.descricaoPostoTrabalho,
-          }
-        }
-      });
+  // Check if laudo has PDF source for regeneration
+  const hasPdfSource = !!(currentLaudo.aiMetadata as any)?.pdfFilePath || 
+                       !!(currentLaudo.aiMetadata as any)?.importJobId;
 
-      if (error) throw error;
-
-      if (data?.texto) {
-        updateLaudo({ analiseIncapacidadeLaboral: data.texto });
-        toast({
-          title: "Análise gerada",
-          description: "A análise da incapacidade laboral foi gerada com sucesso.",
-        });
-      }
-    } catch (error: any) {
-      console.error('Erro ao gerar análise:', error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao gerar análise",
-        description: error.message || "Tente novamente mais tarde.",
-      });
-    } finally {
-      setLoading(false);
+  // Map old conclusaoStatus values to new incapacidadeTipo values
+  const getIncapacidadeTipo = (): string => {
+    // First check if new field exists
+    if ((currentLaudo as any).incapacidadeTipo) {
+      return (currentLaudo as any).incapacidadeTipo;
     }
+    // Fall back to mapping from old conclusaoStatus
+    const statusMap: Record<string, string> = {
+      'total-temp': 'total_temporaria',
+      'parcial-temp': 'parcial_temporaria',
+      'total-perm': 'total_permanente',
+      'parcial-perm': 'parcial_permanente',
+      'nenhuma': 'ausencia',
+    };
+    return statusMap[currentLaudo.conclusaoStatus] || '';
+  };
+
+  const handleIncapacidadeChange = (value: string) => {
+    updateLaudo({ 
+      // Update both fields for compatibility
+      conclusaoStatus: value,
+      // Use type assertion since we're adding a new field
+    } as any);
+  };
+
+  const getJustificativa = (): string => {
+    // First check new field, then fall back to old analiseIncapacidadeLaboral
+    return (currentLaudo as any).incapacidadeJustificativa || currentLaudo.analiseIncapacidadeLaboral || '';
+  };
+
+  const handleJustificativaChange = (value: string) => {
+    updateLaudo({ 
+      analiseIncapacidadeLaboral: value,
+    });
   };
 
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle>Análise da Incapacidade Laboral</CardTitle>
-            <CardDescription>
-              Avaliação técnica da capacidade laboral do periciando
-            </CardDescription>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={gerarAnalise}
-            disabled={loading}
-            className="gap-2"
-          >
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
-            Gerar com IA
-          </Button>
-        </div>
+        <CardTitle>Análise da Incapacidade Laboral</CardTitle>
+        <CardDescription>
+          Avaliação técnica da capacidade laboral do periciando
+        </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="analiseIncapacidadeLaboral">Análise</Label>
-          <Textarea
-            id="analiseIncapacidadeLaboral"
-            value={currentLaudo.analiseIncapacidadeLaboral || ""}
-            onChange={(e) => updateLaudo({ analiseIncapacidadeLaboral: e.target.value })}
-            placeholder={`Analise a capacidade laboral do periciando considerando:
-
-- Tipo de incapacidade (parcial/total, temporária/permanente)
-- Limitações funcionais identificadas
-- Compatibilidade com a função exercida
-- Possibilidade de reabilitação profissional
-- Necessidade de readaptação de função
-- Impacto nas atividades de vida diária...`}
-            rows={8}
-          />
+      <CardContent className="space-y-6">
+        <div className="space-y-3">
+          <Label>Tipo de Incapacidade</Label>
+          <RadioGroup
+            value={getIncapacidadeTipo()}
+            onValueChange={handleIncapacidadeChange}
+            className="space-y-2"
+          >
+            {incapacidadeOptions.map((option) => (
+              <div key={option.value} className="flex items-center space-x-2">
+                <RadioGroupItem value={option.value} id={`incap-${option.value}`} />
+                <Label 
+                  htmlFor={`incap-${option.value}`} 
+                  className="font-normal cursor-pointer"
+                >
+                  {option.label}
+                </Label>
+              </div>
+            ))}
+          </RadioGroup>
         </div>
+        
+        <LaudoTextareaAIField
+          id="incapacidadeJustificativa"
+          label="Justificativa da Incapacidade"
+          value={getJustificativa()}
+          onChange={handleJustificativaChange}
+          placeholder="Fundamente a análise da incapacidade, descrevendo as limitações funcionais identificadas, compatibilidade com a função exercida, possibilidade de reabilitação..."
+          rows={8}
+          enableEnhance={true}
+          enableRegenerate={false}
+          fieldKey="analiseIncapacidadeLaboral"
+          laudoId={currentLaudo.id}
+          hasPdfSource={hasPdfSource}
+        />
       </CardContent>
     </Card>
   );
