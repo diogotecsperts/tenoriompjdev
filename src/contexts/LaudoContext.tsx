@@ -87,6 +87,7 @@ export interface LaudoData {
   descricaoTecnicaDoencas: string;
   analiseIncapacidadeLaboral: string;
   referenciasBibliograficas: string;
+  resumoPericia: string; // Sugestões de IA para a perícia (uso interno)
   // AI metadata for tracking import AI usage
   aiMetadata?: AIMetadata;
 }
@@ -202,6 +203,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           descricaoTecnicaDoencas: (dbLaudo as any).descricao_tecnica_doencas || "",
           analiseIncapacidadeLaboral: (dbLaudo as any).analise_incapacidade_laboral || "",
           referenciasBibliograficas: (dbLaudo as any).referencias_bibliograficas || "",
+          resumoPericia: (dbLaudo as any).resumo_pericia || "",
           aiMetadata: (dbLaudo as any).ai_metadata || undefined,
           peritoLogoUrl: "",
         }));
@@ -336,6 +338,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           descricaoTecnicaDoencas: '',
           analiseIncapacidadeLaboral: '',
           referenciasBibliograficas: (data as any).referencias_bibliograficas || '',
+          resumoPericia: '',
         };
         
         setCurrentLaudo(newLaudo);
@@ -436,6 +439,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           descricaoTecnicaDoencas: (data as any).descricao_tecnica_doencas || '',
           analiseIncapacidadeLaboral: (data as any).analise_incapacidade_laboral || '',
           referenciasBibliograficas: (data as any).referencias_bibliograficas || '',
+          resumoPericia: (data as any).resumo_pericia || '',
           aiMetadata: (data as any).ai_metadata || undefined,
         };
         
@@ -529,6 +533,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           descricao_tecnica_doencas: currentLaudo.descricaoTecnicaDoencas,
           analise_incapacidade_laboral: currentLaudo.analiseIncapacidadeLaboral,
           referencias_bibliograficas: currentLaudo.referenciasBibliograficas,
+          resumo_pericia: currentLaudo.resumoPericia,
         } as any)
         .eq('id', currentLaudo.id)
         .eq('user_id', user.id);

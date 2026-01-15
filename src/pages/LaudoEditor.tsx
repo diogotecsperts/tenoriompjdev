@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useLaudo } from "@/contexts/LaudoContext";
+import { useLaudo, LaudoData } from "@/contexts/LaudoContext";
 import { useNavigationGuardContext } from "@/contexts/NavigationGuardContext";
 import { Button } from "@/components/ui/button";
 import { 
@@ -19,7 +19,10 @@ import {
   LayoutGrid,
   Scroll,
   CheckCircle2,
-  Sparkles
+  Sparkles,
+  Loader2,
+  RefreshCw,
+  ClipboardCopy
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
@@ -46,6 +49,8 @@ import { Progress } from "@/components/ui/progress";
 import { useLaudoProgress } from "@/hooks/useLaudoProgress";
 import { generateLaudoPDF, validateLaudoForPDF } from "@/utils/generateLaudoPDF";
 import { AIInfoModal } from "@/components/laudo/AIInfoModal";
+import { supabase } from "@/integrations/supabase/client";
+import ReactMarkdown from "react-markdown";
 
 // Import section components
 import { DadosProcesso } from "@/components/laudo/sections/DadosProcesso";
@@ -270,6 +275,10 @@ export default function LaudoEditor() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState("");
   
+  // Resumo da Pericia state
+  const [resumoPericiaOpen, setResumoPericiaOpen] = useState(false);
+  const [loadingResumoPericia, setLoadingResumoPericia] = useState(false);
+  
   // Secret AI Info Modal state
   const [showAIInfoModal, setShowAIInfoModal] = useState(false);
   const [secretClickCount, setSecretClickCount] = useState(0);
@@ -444,6 +453,61 @@ export default function LaudoEditor() {
     secretClickTimeout.current = setTimeout(() => {
       setSecretClickCount(0);
     }, 2000);
+  };
+
+  // Gerar sugestões de IA para a perícia
+  const gerarResumoPericia = async () => {
+    if (!currentLaudo) return;
+    
+    setLoadingResumoPericia(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('gerar-resumos', {
+        body: {
+          tipo: 'sugestoes_pericia',
+          contexto: {
+            cids: currentLaudo.conclusaoCID,
+            historiaAcidente: currentLaudo.historiaAcidente,
+            historiaAtual: currentLaudo.historiaAtual,
+            postoTrabalho: currentLaudo.descricaoPostoTrabalho,
+            atividadesLaborais: currentLaudo.descricaoAtividadesLaborais,
+            antecedentes: currentLaudo.antecedentes,
+          }
+        }
+      });
+      
+      if (error) throw error;
+      
+      // Salvar no contexto do laudo
+      updateLaudo({ resumoPericia: data.texto } as Partial<LaudoData>);
+      
+      toast({
+        title: "Sugestões geradas",
+        description: `Usando ${data.provider}/${data.model}`,
+      });
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao gerar sugestões",
+        description: error.message || "Tente novamente mais tarde.",
+      });
+    } finally {
+      setLoadingResumoPericia(false);
+    }
+  };
+
+  // Copiar resumo para anotações
+  const copiarParaAnotacoes = () => {
+    if (!currentLaudo?.resumoPericia) return;
+    
+    const novaAnotacao = notes 
+      ? `${notes}\n\n---\n\n### Resumo da Perícia (IA)\n${currentLaudo.resumoPericia}`
+      : `### Resumo da Perícia (IA)\n${currentLaudo.resumoPericia}`;
+    
+    setNotes(novaAnotacao);
+    toast({
+      title: "Copiado para anotações",
+      description: "O resumo foi adicionado às suas anotações",
+    });
   };
 
   // Cleanup timeout on unmount
@@ -696,6 +760,32 @@ export default function LaudoEditor() {
                 </Tooltip>
               </TooltipProvider>
 
+              {/* Resumo da Perícia Button */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => {
+                        setResumoPericiaOpen(true);
+                        if (!currentLaudo?.resumoPericia) gerarResumoPericia();
+                      }}
+                      className="relative"
+                    >
+                      <Sparkles className="h-4 w-4 sm:mr-2 text-primary" />
+                      <span className="hidden sm:inline">Resumo da Perícia</span>
+                      {currentLaudo?.resumoPericia && (
+                        <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-green-500" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Sugestões de IA para perguntas e exame físico</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
               {/* Notes Button */}
               <Button 
                 variant="outline" 
@@ -806,6 +896,81 @@ export default function LaudoEditor() {
               </Button>
             </div>
           </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Resumo da Perícia Sheet */}
+      <Sheet open={resumoPericiaOpen} onOpenChange={setResumoPericiaOpen}>
+        <SheetContent className="w-full sm:max-w-lg flex flex-col">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-primary" />
+              Resumo da Perícia
+            </SheetTitle>
+            <SheetDescription>
+              Sugestões de IA para auxiliar durante a perícia (uso interno - não aparece no PDF)
+            </SheetDescription>
+          </SheetHeader>
+          
+          <div className="mt-6 flex flex-col flex-1 min-h-0">
+            {loadingResumoPericia ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-3">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Gerando sugestões...</p>
+              </div>
+            ) : currentLaudo?.resumoPericia ? (
+              <ScrollArea className="flex-1 pr-4">
+                <div className="prose prose-sm max-w-none dark:prose-invert">
+                  <ReactMarkdown>
+                    {currentLaudo.resumoPericia}
+                  </ReactMarkdown>
+                </div>
+              </ScrollArea>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center">
+                <Sparkles className="h-12 w-12 text-muted-foreground/30 mb-4" />
+                <p className="text-muted-foreground mb-4">
+                  Preencha alguns dados do laudo para gerar sugestões
+                </p>
+                <Button onClick={gerarResumoPericia}>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Gerar Sugestões
+                </Button>
+              </div>
+            )}
+          </div>
+          
+          {/* Footer com botões */}
+          {currentLaudo?.resumoPericia && !loadingResumoPericia && (
+            <div className="pt-4 border-t flex gap-2">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      className="flex-1"
+                      onClick={gerarResumoPericia}
+                      disabled={loadingResumoPericia}
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Regenerar
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Gera novas sugestões baseadas nos dados atuais do laudo usando IA</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              
+              <Button 
+                className="flex-1"
+                onClick={copiarParaAnotacoes}
+              >
+                <ClipboardCopy className="h-4 w-4 mr-2" />
+                Salvar em Anotações
+              </Button>
+            </div>
+          )}
         </SheetContent>
       </Sheet>
 

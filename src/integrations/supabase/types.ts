@@ -409,6 +409,7 @@ export type Database = {
           reclamante: string | null
           referencias_bibliograficas: string | null
           resumo_contestacao: string | null
+          resumo_pericia: string | null
           resumo_peticao_inicial: string | null
           status: string | null
           tabela_susep: string | null
@@ -481,6 +482,7 @@ export type Database = {
           reclamante?: string | null
           referencias_bibliograficas?: string | null
           resumo_contestacao?: string | null
+          resumo_pericia?: string | null
           resumo_peticao_inicial?: string | null
           status?: string | null
           tabela_susep?: string | null
@@ -553,6 +555,7 @@ export type Database = {
           reclamante?: string | null
           referencias_bibliograficas?: string | null
           resumo_contestacao?: string | null
+          resumo_pericia?: string | null
           resumo_peticao_inicial?: string | null
           status?: string | null
           tabela_susep?: string | null
