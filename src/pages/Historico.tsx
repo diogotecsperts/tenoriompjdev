@@ -72,7 +72,8 @@ import {
   Plus,
   AlertTriangle,
   MessageSquare,
-  Save
+  Save,
+  ArrowUpDown
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -88,6 +89,7 @@ export default function Historico() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("updatedAt_desc");
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
@@ -182,9 +184,9 @@ export default function Historico() {
     setEditingObservacoes(null);
   };
 
-  // Filtered and paginated laudos
+  // Filtered and sorted laudos
   const filteredLaudos = useMemo(() => {
-    return laudos.filter(laudo => {
+    const filtered = laudos.filter(laudo => {
       const matchesSearch = searchTerm === "" || 
         laudo.vitimaName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         laudo.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -199,8 +201,28 @@ export default function Historico() {
       const matchesType = typeFilter === "all";
       
       return matchesSearch && matchesStatus && matchesType;
-    }).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [laudos, searchTerm, statusFilter, typeFilter]);
+    });
+
+    // Apply sorting
+    return filtered.sort((a, b) => {
+      switch (sortBy) {
+        case "updatedAt_desc":
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        case "updatedAt_asc":
+          return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+        case "createdAt_desc":
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case "createdAt_asc":
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case "name_asc":
+          return (a.vitimaName || "").localeCompare(b.vitimaName || "");
+        case "processo":
+          return (a.processoNumero || "").localeCompare(b.processoNumero || "");
+        default:
+          return 0;
+      }
+    });
+  }, [laudos, searchTerm, statusFilter, typeFilter, sortBy]);
 
   const totalPages = Math.ceil(filteredLaudos.length / ITEMS_PER_PAGE);
   const paginatedLaudos = filteredLaudos.slice(
@@ -269,18 +291,35 @@ export default function Historico() {
               </Button>
             </div>
 
-            {/* Filters */}
+            {/* Sorting and Filters */}
             <div className="flex gap-3 ml-auto">
+              <Select value={sortBy} onValueChange={(value) => {
+                setSortBy(value);
+                setCurrentPage(1);
+              }}>
+                <SelectTrigger className="w-[180px]">
+                  <ArrowUpDown className="mr-2 h-4 w-4" />
+                  <SelectValue placeholder="Ordenar por" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="updatedAt_desc">Última alteração</SelectItem>
+                  <SelectItem value="updatedAt_asc">Mais antigos primeiro</SelectItem>
+                  <SelectItem value="createdAt_desc">Recém criados</SelectItem>
+                  <SelectItem value="createdAt_asc">Criados há mais tempo</SelectItem>
+                  <SelectItem value="name_asc">Nome (A-Z)</SelectItem>
+                  <SelectItem value="processo">Nº Processo</SelectItem>
+                </SelectContent>
+              </Select>
               <Select value={statusFilter} onValueChange={(value) => {
                 setStatusFilter(value);
                 setCurrentPage(1);
               }}>
-                <SelectTrigger className="w-[140px]">
+                <SelectTrigger className="w-[120px]">
                   <Filter className="mr-2 h-4 w-4" />
-                  <SelectValue placeholder="Status" />
+                  <span>Status</span>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos Status</SelectItem>
+                  <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="rascunho">Rascunho</SelectItem>
                   <SelectItem value="em_analise">Em Análise</SelectItem>
                   <SelectItem value="finalizado">Concluído</SelectItem>
@@ -290,12 +329,12 @@ export default function Historico() {
                 setTypeFilter(value);
                 setCurrentPage(1);
               }}>
-                <SelectTrigger className="w-[160px]">
+                <SelectTrigger className="w-[100px]">
                   <FileText className="mr-2 h-4 w-4" />
-                  <SelectValue placeholder="Tipo" />
+                  <span>Tipo</span>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Todos os Tipos</SelectItem>
+                  <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="acidente_trabalho">Acidente de Trabalho</SelectItem>
                   <SelectItem value="doenca_ocupacional">Doença Ocupacional</SelectItem>
                   <SelectItem value="invalidez">Invalidez</SelectItem>

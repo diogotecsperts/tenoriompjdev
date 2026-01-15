@@ -240,14 +240,11 @@ export default function LaudoEditor() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [hasUnsavedChanges]);
 
-  const handleDiscardLaudo = async () => {
-    if (currentLaudo?.id) {
-      await deleteLaudo(currentLaudo.id);
-      toast({
-        title: "Laudo descartado",
-        description: "O laudo foi removido do histórico.",
-      });
-    }
+  const handleDiscardChanges = () => {
+    toast({
+      title: "Alterações descartadas",
+      description: "As alterações não foram salvas.",
+    });
     setShowExitDialog(false);
     setGuarded(false);
     if (pendingDestination) {
@@ -991,14 +988,14 @@ export default function LaudoEditor() {
               Continuar editando
             </AlertDialogCancel>
             <Button 
-              variant="destructive" 
-              onClick={handleDiscardLaudo}
+              variant="outline" 
+              onClick={handleDiscardChanges}
               className="w-full sm:w-auto"
             >
-              Descartar laudo
+              Descartar alterações
             </Button>
             <AlertDialogAction onClick={handleSaveAndExit} className="w-full sm:w-auto">
-              Salvar como rascunho
+              Salvar alterações
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
