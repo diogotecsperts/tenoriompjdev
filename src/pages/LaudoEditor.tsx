@@ -22,7 +22,9 @@ import {
   Sparkles,
   Loader2,
   RefreshCw,
-  ClipboardCopy
+  ClipboardCopy,
+  CheckCircle,
+  RotateCcw
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
@@ -40,6 +42,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { useScrollSpy } from "@/hooks/useScrollSpy";
@@ -176,7 +179,7 @@ const VIEW_MODE_STORAGE_KEY = "laudo-editor-view-mode";
 export default function LaudoEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaudo } = useLaudo();
+  const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaudo, updateLaudoStatus } = useLaudo();
   const { setGuarded, setOnNavigationRequest } = useNavigationGuardContext();
   const [activeCard, setActiveCard] = useState("preliminares");
   const [showExitDialog, setShowExitDialog] = useState(false);
@@ -714,8 +717,14 @@ export default function LaudoEditor() {
                   {currentLaudo?.title || "Novo Laudo"}
                 </h1>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Badge variant="secondary" className="text-xs px-2 py-0">
-                    Em andamento
+                  <Badge 
+                    variant="secondary" 
+                    className={cn(
+                      "text-xs px-2 py-0",
+                      currentLaudo?.status === 'finalizado' && "bg-emerald-100 text-emerald-700 hover:bg-emerald-100"
+                    )}
+                  >
+                    {currentLaudo?.status === 'finalizado' ? 'Concluído' : 'Em andamento'}
                   </Badge>
                 <span>•</span>
                   <span>Salvo automaticamente</span>
@@ -806,6 +815,45 @@ export default function LaudoEditor() {
                 <Save className="h-4 w-4 sm:mr-2" />
                 <span className="hidden sm:inline">Salvar</span>
               </Button>
+
+              {/* Finalizar/Reabrir Laudo Button */}
+              {currentLaudo?.status !== 'finalizado' ? (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700">
+                      <CheckCircle className="h-4 w-4 sm:mr-2" />
+                      <span className="hidden sm:inline">Finalizar</span>
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Finalizar Laudo</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Tem certeza que deseja marcar este laudo como concluído? 
+                        Você ainda poderá reabri-lo posteriormente se necessário.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                      <AlertDialogAction 
+                        onClick={() => currentLaudo && updateLaudoStatus(currentLaudo.id, 'finalizado')}
+                        className="bg-emerald-600 hover:bg-emerald-700"
+                      >
+                        Finalizar
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              ) : (
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => currentLaudo && updateLaudoStatus(currentLaudo.id, 'rascunho')}
+                >
+                  <RotateCcw className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Reabrir</span>
+                </Button>
+              )}
             </div>
           </div>
         </header>
