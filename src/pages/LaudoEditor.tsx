@@ -590,7 +590,7 @@ export default function LaudoEditor() {
                     <span className="font-medium">{section.label}</span>
                   </div>
                 </AccordionTrigger>
-                <AccordionContent className="pb-4">
+                <AccordionContent className="pb-4 px-2">
                   <SectionComponent />
                 </AccordionContent>
               </AccordionItem>
