@@ -194,9 +194,9 @@ export default function Historico() {
         laudo.processoNumero?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (laudo as any).observacoesHistorico?.toLowerCase().includes(searchTerm.toLowerCase());
       
-      const matchesStatus = statusFilter === "all" || 
-        (statusFilter === "rascunho" && !laudo.conclusaoStatus) ||
-        laudo.conclusaoStatus === statusFilter;
+    const matchesStatus = statusFilter === "all" || 
+      (statusFilter === "rascunho" && (!laudo.status || laudo.status === "rascunho")) ||
+      laudo.status === statusFilter;
       
       // For now, all are "Acidente de Trabalho" - will be expanded later
       const matchesType = typeFilter === "all";
