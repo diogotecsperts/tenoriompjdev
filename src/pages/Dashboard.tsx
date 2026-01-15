@@ -20,7 +20,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ImportarAutosDialog } from "@/components/tools/ImportarAutosDialog";
 import { PericiasCalendar } from "@/components/dashboard/PericiasCalendar";
-import { TiposPericiaChart } from "@/components/dashboard/TiposPericiaChart";
+import { NexoCausalChart } from "@/components/dashboard/NexoCausalChart";
 import { ProximosCompromissosCards } from "@/components/dashboard/ProximosCompromissosCards";
 import { HistoricoRecenteTable } from "@/components/dashboard/HistoricoRecenteTable";
 import { DashboardSkeleton } from "@/components/dashboard/DashboardSkeleton";
@@ -278,7 +278,7 @@ export default function Dashboard() {
             status: l.status
           }))}
         />
-        <TiposPericiaChart laudos={laudos} />
+        <NexoCausalChart laudos={laudos.map(l => ({ id: l.id, nexo_causal_tipo: l.nexoCausalTipo }))} />
       </div>
 
       {/* Appointments and History Section */}
