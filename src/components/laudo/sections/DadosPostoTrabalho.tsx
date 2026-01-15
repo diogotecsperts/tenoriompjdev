@@ -1,13 +1,15 @@
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LaudoTextareaAIField } from "@/components/laudo/LaudoTextareaAIField";
 
 export function DadosPostoTrabalho() {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
+
+  const hasPdfSource = !!(currentLaudo.ai_metadata as any)?.importJobId || !!(currentLaudo.ai_metadata as any)?.pdfFilePath;
 
   return (
     <Card>
@@ -18,7 +20,6 @@ export function DadosPostoTrabalho() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Dados Funcionais */}
         <div className="space-y-4">
           <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">
             Dados Funcionais
@@ -54,29 +55,33 @@ export function DadosPostoTrabalho() {
           </div>
         </div>
 
-        {/* Descrição do Posto */}
-        <div className="space-y-2">
-          <Label htmlFor="descricaoPostoTrabalho">Descrição do Posto de Trabalho</Label>
-          <Textarea
-            id="descricaoPostoTrabalho"
-            value={currentLaudo.descricaoPostoTrabalho || ""}
-            onChange={(e) => updateLaudo({ descricaoPostoTrabalho: e.target.value })}
-            placeholder="Descreva o ambiente físico, equipamentos utilizados, condições ergonômicas, exposição a riscos ocupacionais..."
-            rows={5}
-          />
-        </div>
+        <LaudoTextareaAIField
+          id="descricaoPostoTrabalho"
+          label="Descrição do Posto de Trabalho"
+          value={currentLaudo.descricaoPostoTrabalho || ""}
+          onChange={(value) => updateLaudo({ descricaoPostoTrabalho: value })}
+          placeholder="Descreva o ambiente físico, equipamentos utilizados, condições ergonômicas, exposição a riscos ocupacionais..."
+          rows={5}
+          enableEnhance={true}
+          enableRegenerate={true}
+          fieldKey="descricaoPostoTrabalho"
+          laudoId={currentLaudo.id}
+          hasPdfSource={hasPdfSource}
+        />
 
-        {/* Descrição das Atividades */}
-        <div className="space-y-2">
-          <Label htmlFor="descricaoAtividadesLaborais">Descrição das Atividades Laborais</Label>
-          <Textarea
-            id="descricaoAtividadesLaborais"
-            value={currentLaudo.descricaoAtividadesLaborais || ""}
-            onChange={(e) => updateLaudo({ descricaoAtividadesLaborais: e.target.value })}
-            placeholder="Descreva detalhadamente as atividades desenvolvidas pelo trabalhador, movimentos repetitivos, carga de trabalho, jornada..."
-            rows={5}
-          />
-        </div>
+        <LaudoTextareaAIField
+          id="descricaoAtividadesLaborais"
+          label="Descrição das Atividades Laborais"
+          value={currentLaudo.descricaoAtividadesLaborais || ""}
+          onChange={(value) => updateLaudo({ descricaoAtividadesLaborais: value })}
+          placeholder="Descreva detalhadamente as atividades desenvolvidas pelo trabalhador, movimentos repetitivos, carga de trabalho, jornada..."
+          rows={5}
+          enableEnhance={true}
+          enableRegenerate={true}
+          fieldKey="descricaoAtividadesLaborais"
+          laudoId={currentLaudo.id}
+          hasPdfSource={hasPdfSource}
+        />
       </CardContent>
     </Card>
   );

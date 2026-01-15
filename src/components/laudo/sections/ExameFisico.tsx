@@ -1,7 +1,6 @@
 import { useLaudo } from "@/contexts/LaudoContext";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LaudoTextareaAIField } from "@/components/laudo/LaudoTextareaAIField";
 
 export function ExameFisico() {
   const { currentLaudo, updateLaudo } = useLaudo();
@@ -17,13 +16,15 @@ export function ExameFisico() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        <Label htmlFor="exameFisico">Achados do Exame Físico</Label>
-        <Textarea
+        <LaudoTextareaAIField
           id="exameFisico"
-          value={currentLaudo.exameFisico}
-          onChange={(e) => updateLaudo({ exameFisico: e.target.value })}
+          label="Achados do Exame Físico"
+          value={currentLaudo.exameFisico || ""}
+          onChange={(value) => updateLaudo({ exameFisico: value })}
           placeholder="Descreva o estado geral, inspeção, palpação, testes especiais, amplitude de movimentos, força muscular, sinais e sintomas observados..."
           rows={12}
+          enableEnhance={true}
+          enableRegenerate={false}
         />
       </CardContent>
     </Card>

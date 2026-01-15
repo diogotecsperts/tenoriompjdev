@@ -1,12 +1,13 @@
 import { useLaudo } from "@/contexts/LaudoContext";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LaudoTextareaAIField } from "@/components/laudo/LaudoTextareaAIField";
 
 export function ExamesComplementares() {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
+
+  const hasPdfSource = !!(currentLaudo.ai_metadata as any)?.importJobId || !!(currentLaudo.ai_metadata as any)?.pdfFilePath;
 
   return (
     <Card>
@@ -17,13 +18,18 @@ export function ExamesComplementares() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        <Label htmlFor="examesComplementares">Descrição dos Exames</Label>
-        <Textarea
+        <LaudoTextareaAIField
           id="examesComplementares"
-          value={currentLaudo.examesComplementares}
-          onChange={(e) => updateLaudo({ examesComplementares: e.target.value })}
+          label="Descrição dos Exames"
+          value={currentLaudo.examesComplementares || ""}
+          onChange={(value) => updateLaudo({ examesComplementares: value })}
           placeholder="Descreva os resultados de raio-X, tomografia, ressonância magnética, exames laboratoriais e outros exames realizados..."
           rows={10}
+          enableEnhance={true}
+          enableRegenerate={true}
+          fieldKey="examesComplementares"
+          laudoId={currentLaudo.id}
+          hasPdfSource={hasPdfSource}
         />
       </CardContent>
     </Card>
