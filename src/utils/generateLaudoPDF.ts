@@ -18,21 +18,26 @@ const COLORS = {
   muted: { r: 75, g: 85, b: 99 },          // #4B5563 - Texto secundário
   white: { r: 255, g: 255, b: 255 },       // Branco puro
   background: { r: 243, g: 244, b: 246 },  // #F3F4F6 - Fundo box
-  footer: { r: 96, g: 97, b: 97 },         // #606161 - Rodapé (cinza neutro)
-  sidebar: { r: 96, g: 97, b: 97 },        // #606161 - Sidebar lateral esquerda
 };
 
 const MARGINS = {
-  left: 25,       // Margem esquerda ajustada (não precisa de sidebar extra pois é imagem)
+  left: 20,
   right: 15,
-  top: 35,        // Espaço para cabeçalho compacto
-  bottom: 35,     // Espaço para rodapé compacto
+  top: 42,        // Espaço reservado para o cabeçalho PNG
+  bottom: 38,     // Espaço reservado para o rodapé PNG
 };
 
 const PAGE = {
   width: 210,
   height: 297,
-  contentWidth: 170,
+  contentWidth: 175, // PAGE.width - MARGINS.left - MARGINS.right
+};
+
+// Área útil de conteúdo (entre cabeçalho e rodapé)
+const CONTENT_AREA = {
+  startY: MARGINS.top,
+  endY: PAGE.height - MARGINS.bottom,
+  height: PAGE.height - MARGINS.top - MARGINS.bottom, // ~217mm
 };
 
 // ========== FUNÇÕES AUXILIARES ==========
@@ -102,11 +107,12 @@ const addParagraph = (doc: jsPDF, text: string, y: number, maxWidth: number = PA
   return y + (lines.length * 5) + 5;
 };
 
-// Verifica necessidade de nova página
+// Verifica necessidade de nova página - respeita área do rodapé
 const checkNewPage = (doc: jsPDF, currentY: number, neededSpace: number = 40): number => {
-  if (currentY > PAGE.height - MARGINS.bottom - neededSpace) {
+  const maxY = CONTENT_AREA.endY; // Respeita espaço do rodapé
+  if (currentY + neededSpace > maxY) {
     doc.addPage();
-    return MARGINS.top;
+    return CONTENT_AREA.startY; // Começa abaixo do cabeçalho
   }
   return currentY;
 };
@@ -117,7 +123,7 @@ const addLabeledField = (doc: jsPDF, label: string, value: string, y: number): n
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
   const labelText = `${label}: `;
-  const labelWidth = doc.getTextWidth(labelText) + 2; // Calcular ANTES de mudar fonte + buffer
+  const labelWidth = doc.getTextWidth(labelText) + 2;
   doc.text(labelText, MARGINS.left, y);
   doc.setFont("helvetica", "normal");
   const valueLines = doc.splitTextToSize(value, PAGE.contentWidth - labelWidth);
@@ -145,7 +151,7 @@ const addJudicialAddress = (doc: jsPDF, laudo: LaudoData, y: number): number => 
   return y + 15;
 };
 
-// ========== CABEÇALHO E RODAPÉ ==========
+// ========== CABEÇALHO E RODAPÉ COM IMAGENS PNG ==========
 
 // Helper function to load image as base64
 const loadImageAsBase64 = (url: string): Promise<string | null> => {
@@ -194,152 +200,75 @@ const getImageDimensions = (base64: string): Promise<{ width: number; height: nu
   });
 };
 
-// Função para recortar e converter parte de uma imagem
-const cropImageToBase64 = async (
-  sourceBase64: string,
-  cropX: number, // percentual da largura (0-1)
-  cropY: number, // percentual da altura (0-1) 
-  cropWidth: number, // percentual da largura (0-1)
-  cropHeight: number // percentual da altura (0-1)
-): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      const sX = img.width * cropX;
-      const sY = img.height * cropY;
-      const sWidth = img.width * cropWidth;
-      const sHeight = img.height * cropHeight;
-      
-      canvas.width = sWidth;
-      canvas.height = sHeight;
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(img, sX, sY, sWidth, sHeight, 0, 0, sWidth, sHeight);
-        resolve(canvas.toDataURL("image/png"));
-      } else {
-        reject(new Error("Failed to get canvas context"));
-      }
-    };
-    img.onerror = reject;
-    img.src = sourceBase64;
-  });
-};
-
+// Adiciona cabeçalho PNG em todas as páginas
 const addHeaderToPages = async (doc: jsPDF, headerImageBase64: string | null) => {
-  const pageCount = doc.getNumberOfPages();
-  
   if (!headerImageBase64) return;
   
-  // Recortar apenas a parte do cabeçalho (topo da imagem: ~10% da altura)
-  let croppedHeader: string;
-  try {
-    croppedHeader = await cropImageToBase64(headerImageBase64, 0, 0, 1, 0.12);
-  } catch {
-    return; // Se falhar o crop, não adiciona cabeçalho
-  }
+  const pageCount = doc.getNumberOfPages();
   
-  // Obter dimensões da imagem recortada
-  let aspectRatio = 0.1;
+  // Obter dimensões reais da imagem para calcular proporção
+  let aspectRatio = 0.15;
   try {
-    const dimensions = await getImageDimensions(croppedHeader);
+    const dimensions = await getImageDimensions(headerImageBase64);
     aspectRatio = dimensions.height / dimensions.width;
   } catch {
     // Usa fallback se falhar
   }
   
-  // Aplicar em TODAS as páginas (incluindo a primeira)
+  // Largura total da página com pequena margem lateral
+  const imgWidth = PAGE.width - 16; // 194mm (8mm de margem cada lado)
+  const imgHeight = imgWidth * aspectRatio;
+  
+  // Centralizado horizontalmente
+  const xPos = 8;
+  const yPos = 5; // Posição fixa no topo
+  
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    
     try {
-      // Cabeçalho posicionado no canto superior direito
-      const imgWidth = PAGE.width - 40; // Largura quase total da página
-      const imgHeight = imgWidth * aspectRatio;
-      
-      // Centralizado horizontalmente
-      const xPos = (PAGE.width - imgWidth) / 2;
-      const yPos = 3;
-      
-      doc.addImage(croppedHeader, "PNG", xPos, yPos, imgWidth, imgHeight);
+      doc.addImage(headerImageBase64, "PNG", xPos, yPos, imgWidth, imgHeight);
     } catch {
-      // Se falhar, não adiciona cabeçalho
+      // Se falhar, continua sem cabeçalho nessa página
     }
-    
-    doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   }
 };
 
-const addFooterToPages = async (doc: jsPDF, laudo: LaudoData, footerImageBase64: string | null) => {
-  const pageCount = doc.getNumberOfPages();
-  const footerHeight = 22;
-  const sidebarWidth = 30;
-  const footerY = PAGE.height - footerHeight;
+// Adiciona rodapé PNG em todas as páginas
+const addFooterToPages = async (doc: jsPDF, footerImageBase64: string | null) => {
+  if (!footerImageBase64) return;
   
-  // Tentar recortar apenas o rodapé da imagem (parte inferior: últimos ~8%)
-  let croppedFooter: string | null = null;
-  if (footerImageBase64) {
-    try {
-      croppedFooter = await cropImageToBase64(footerImageBase64, 0, 0.92, 1, 0.08);
-    } catch {
-      // Se falhar, cria rodapé programaticamente
-    }
+  const pageCount = doc.getNumberOfPages();
+  
+  // Obter dimensões reais da imagem
+  let aspectRatio = 0.12;
+  try {
+    const dimensions = await getImageDimensions(footerImageBase64);
+    aspectRatio = dimensions.height / dimensions.width;
+  } catch {
+    // Usa fallback se falhar
   }
   
-  // Aplicar em TODAS as páginas
+  // Largura total da página (imagem vai de ponta a ponta)
+  const imgWidth = PAGE.width; // 210mm
+  const imgHeight = imgWidth * aspectRatio;
+  
+  // Posição no fundo da página
+  const yPos = PAGE.height - imgHeight;
+  
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    
-    if (croppedFooter) {
-      // Usar a imagem recortada do rodapé
-      try {
-        const dimensions = await getImageDimensions(croppedFooter);
-        const aspectRatio = dimensions.height / dimensions.width;
-        const imgWidth = PAGE.width;
-        const imgHeight = imgWidth * aspectRatio;
-        
-        doc.addImage(croppedFooter, "PNG", 0, PAGE.height - imgHeight, imgWidth, imgHeight);
-      } catch {
-        // Se falhar, usa rodapé programático abaixo
-      }
+    try {
+      doc.addImage(footerImageBase64, "PNG", 0, yPos, imgWidth, imgHeight);
+      
+      // Adicionar número da página sobre o rodapé
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8);
+      doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
+      doc.text(`Página ${i} de ${pageCount}`, PAGE.width / 2, PAGE.height - 5, { align: "center" });
+      doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+    } catch {
+      // Se falhar, continua sem rodapé nessa página
     }
-    
-    // Rodapé programático (backup ou complemento)
-    // Barra lateral cinza (estilo sidebar do papel timbrado)
-    doc.setFillColor(COLORS.sidebar.r, COLORS.sidebar.g, COLORS.sidebar.b);
-    doc.rect(0, footerY, sidebarWidth, footerHeight, "F");
-    
-    // Fundo cinza do rodapé (continuação)
-    doc.rect(sidebarWidth, footerY, PAGE.width - sidebarWidth, footerHeight, "F");
-    
-    // Logo "BT" estilizado na sidebar (simulado com texto)
-    doc.setTextColor(120, 120, 120); // Cinza mais claro para "BT" fantasma
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(24);
-    doc.text("BT", 4, footerY + 15);
-    
-    doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
-    
-    // === TEXTOS NO LADO DIREITO ===
-    // Linha 1 - Nome completo do Perito
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.text("Dr. Bruno Victor Tenório Cavalcanti Padilha", PAGE.width - MARGINS.right, footerY + 8, { align: "right" });
-    
-    // Linha 2 - Cargo + CRM
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-    doc.text("Médico Perito Judicial - CRM/AL 11313", PAGE.width - MARGINS.right, footerY + 13, { align: "right" });
-    
-    // Linha 3 - Contato
-    doc.text("(82) 99669-6656 | brunovctenorio@gmail.com", PAGE.width - MARGINS.right, footerY + 18, { align: "right" });
-    
-    // Número da página no canto inferior esquerdo (após a sidebar)
-    doc.setFont("helvetica", "italic");
-    doc.setFontSize(6);
-    doc.text(`Página ${i} de ${pageCount}`, sidebarWidth + 5, footerY + 18);
-    
-    doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   }
 };
 
@@ -349,11 +278,12 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   const doc = new jsPDF();
   let sectionNumber = 1;
   
-  // Carregar imagem do papel timbrado (página completa para recortar cabeçalho e rodapé)
-  const timbradoImageBase64 = await loadImageAsBase64("/timbrado-header.jpg");
+  // Carregar imagens separadas do papel timbrado
+  const headerImageBase64 = await loadImageAsBase64("/timbrado-cabecalho.png");
+  const footerImageBase64 = await loadImageAsBase64("/timbrado-rodape.png");
   
-  // ========== PÁGINA 1 - INÍCIO DO CONTEÚDO (SEM CAPA) ==========
-  let y = MARGINS.top;
+  // ========== PÁGINA 1 - INÍCIO DO CONTEÚDO ==========
+  let y = CONTENT_AREA.startY;
   
   // Endereçamento judicial
   y = addJudicialAddress(doc, laudo, y);
@@ -725,9 +655,9 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
     doc.text(`CRM: ${laudo.peritoCRM}`, 105, y, { align: "center" });
   }
   
-  // Adicionar cabeçalho e rodapé em TODAS as páginas (sem capa)
-  await addHeaderToPages(doc, timbradoImageBase64);
-  await addFooterToPages(doc, laudo, timbradoImageBase64);
+  // Adicionar cabeçalho e rodapé em TODAS as páginas
+  await addHeaderToPages(doc, headerImageBase64);
+  await addFooterToPages(doc, footerImageBase64);
   
   // Gerar nome do arquivo
   const processNumber = laudo.processoNumero?.replace(/[^0-9]/g, "") || "sem-numero";
