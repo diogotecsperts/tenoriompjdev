@@ -323,7 +323,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
       descricaoAtividadesLaborais: '',
       descricaoTecnicaDoencas: '',
       analiseIncapacidadeLaboral: '',
-      referenciasBibliograficas: '- BARROS, B. T. Perícia Médica. São Paulo: Editora LTR, 2023.\n- BRASIL. Ministério do Trabalho e Emprego. Normas Regulamentadoras.\n- MENDES, René. Patologia do trabalho. São Paulo: Atheneu, 2005.\n- VIEIRA, Sebastião Ivone. Manual de saúde e segurança do trabalho. São Paulo: LTr, 2005.\n- OMS. Classificação Internacional de Doenças - CID-10.\n- CFM. Código de Ética Médica - Resolução CFM 2.217/2018.',
+      referenciasBibliograficas: '',
       resumoPericia: '',
     };
 

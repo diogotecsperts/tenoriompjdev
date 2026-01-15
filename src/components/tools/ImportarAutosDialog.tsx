@@ -103,6 +103,7 @@ interface ExtractedData {
     descricao_doencas: string;
     nexo_causal: string;
     incapacidade: string;
+    referencias_bibliograficas: string;
   };
   resumo: string;
 }
@@ -162,6 +163,7 @@ const AVERAGE_STEP_TIMES: Record<string, number> = {
   descricao_doencas: 45000,  // 45s
   nexo_causal: 35000,     // 35s
   incapacidade: 25000,    // 25s
+  referencias_bibliograficas: 20000, // 20s
   finalizing: 3000        // 3s
 };
 
@@ -186,6 +188,7 @@ const PROCESSING_STEPS: Array<{ id: string; label: string }> = [
   { id: 'descricao_doencas', label: 'Descrição Técnica das Doenças' },
   { id: 'nexo_causal', label: 'Análise de Nexo Causal' },
   { id: 'incapacidade', label: 'Análise de Incapacidade' },
+  { id: 'referencias_bibliograficas', label: 'Referências Bibliográficas' },
   { id: 'finalizing', label: 'Finalizando processamento' },
 ];
 
@@ -747,6 +750,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         descricao_tecnica_doencas: extractedData.resumos_ia?.descricao_doencas || '',
         nexo_causal_justificativa: extractedData.resumos_ia?.nexo_causal || '',
         analise_incapacidade_laboral: extractedData.resumos_ia?.incapacidade || '',
+        referencias_bibliograficas: extractedData.resumos_ia?.referencias_bibliograficas || '',
         
         anotacoes: extractedData.resumo ? `[Resumo extraído automaticamente]\n${extractedData.resumo}` : '',
         status: 'rascunho',
@@ -763,7 +767,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             provider: aiUsage.summaries.provider,
             model: aiUsage.summaries.model,
             durationMs: aiUsage.summaries.durationMs,
-            generated: ['resumo_peticao', 'resumo_contestacao', 'descricao_doencas', 'nexo_causal', 'incapacidade'].filter(
+            generated: ['resumo_peticao', 'resumo_contestacao', 'descricao_doencas', 'nexo_causal', 'incapacidade', 'referencias_bibliograficas'].filter(
               key => extractedData.resumos_ia?.[key as keyof typeof extractedData.resumos_ia]
             )
           },
