@@ -19,13 +19,14 @@ const COLORS = {
   white: { r: 255, g: 255, b: 255 },       // Branco puro
   background: { r: 243, g: 244, b: 246 },  // #F3F4F6 - Fundo box
   footer: { r: 96, g: 97, b: 97 },         // #606161 - Rodapé (cinza neutro)
+  sidebar: { r: 96, g: 97, b: 97 },        // #606161 - Sidebar lateral esquerda
 };
 
 const MARGINS = {
-  left: 20,
-  right: 20,
-  top: 45,      // Espaço para cabeçalho + 2 linhas vazias adicionais
-  bottom: 45,   // Espaço para rodapé aumentado
+  left: 25,       // Margem esquerda ajustada (não precisa de sidebar extra pois é imagem)
+  right: 15,
+  top: 35,        // Espaço para cabeçalho compacto
+  bottom: 35,     // Espaço para rodapé compacto
 };
 
 const PAGE = {
@@ -193,34 +194,74 @@ const getImageDimensions = (base64: string): Promise<{ width: number; height: nu
   });
 };
 
-const addHeaderToPages = async (doc: jsPDF, laudo: LaudoData, headerImageBase64: string | null) => {
+// Função para recortar e converter parte de uma imagem
+const cropImageToBase64 = async (
+  sourceBase64: string,
+  cropX: number, // percentual da largura (0-1)
+  cropY: number, // percentual da altura (0-1) 
+  cropWidth: number, // percentual da largura (0-1)
+  cropHeight: number // percentual da altura (0-1)
+): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const sX = img.width * cropX;
+      const sY = img.height * cropY;
+      const sWidth = img.width * cropWidth;
+      const sHeight = img.height * cropHeight;
+      
+      canvas.width = sWidth;
+      canvas.height = sHeight;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(img, sX, sY, sWidth, sHeight, 0, 0, sWidth, sHeight);
+        resolve(canvas.toDataURL("image/png"));
+      } else {
+        reject(new Error("Failed to get canvas context"));
+      }
+    };
+    img.onerror = reject;
+    img.src = sourceBase64;
+  });
+};
+
+const addHeaderToPages = async (doc: jsPDF, headerImageBase64: string | null) => {
   const pageCount = doc.getNumberOfPages();
   
   if (!headerImageBase64) return;
   
-  // Obter dimensões reais da imagem para manter proporção correta
-  let aspectRatio = 0.133; // Fallback
+  // Recortar apenas a parte do cabeçalho (topo da imagem: ~10% da altura)
+  let croppedHeader: string;
   try {
-    const dimensions = await getImageDimensions(headerImageBase64);
+    croppedHeader = await cropImageToBase64(headerImageBase64, 0, 0, 1, 0.12);
+  } catch {
+    return; // Se falhar o crop, não adiciona cabeçalho
+  }
+  
+  // Obter dimensões da imagem recortada
+  let aspectRatio = 0.1;
+  try {
+    const dimensions = await getImageDimensions(croppedHeader);
     aspectRatio = dimensions.height / dimensions.width;
   } catch {
     // Usa fallback se falhar
   }
   
-  for (let i = 2; i <= pageCount; i++) {
+  // Aplicar em TODAS as páginas (incluindo a primeira)
+  for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
     
     try {
-      // Largura máxima desejada e altura proporcional
-      const maxWidth = 140; // mm
-      const imgWidth = maxWidth;
-      const imgHeight = imgWidth * aspectRatio; // Proporção REAL da imagem
+      // Cabeçalho posicionado no canto superior direito
+      const imgWidth = PAGE.width - 40; // Largura quase total da página
+      const imgHeight = imgWidth * aspectRatio;
       
-      // Centralizar horizontalmente na página
+      // Centralizado horizontalmente
       const xPos = (PAGE.width - imgWidth) / 2;
-      const yPos = 5; // Margem superior
+      const yPos = 3;
       
-      doc.addImage(headerImageBase64, "PNG", xPos, yPos, imgWidth, imgHeight);
+      doc.addImage(croppedHeader, "PNG", xPos, yPos, imgWidth, imgHeight);
     } catch {
       // Se falhar, não adiciona cabeçalho
     }
@@ -229,69 +270,74 @@ const addHeaderToPages = async (doc: jsPDF, laudo: LaudoData, headerImageBase64:
   }
 };
 
-const addFooterToPages = async (doc: jsPDF, laudo: LaudoData, logoImageBase64: string | null) => {
+const addFooterToPages = async (doc: jsPDF, laudo: LaudoData, footerImageBase64: string | null) => {
   const pageCount = doc.getNumberOfPages();
-  const footerHeight = 28; // Altura aumentada do rodapé
+  const footerHeight = 22;
+  const sidebarWidth = 30;
   const footerY = PAGE.height - footerHeight;
   
-  // Obter proporção da logo se disponível
-  let logoAspectRatio = 1;
-  if (logoImageBase64) {
+  // Tentar recortar apenas o rodapé da imagem (parte inferior: últimos ~8%)
+  let croppedFooter: string | null = null;
+  if (footerImageBase64) {
     try {
-      const dimensions = await getImageDimensions(logoImageBase64);
-      logoAspectRatio = dimensions.width / dimensions.height;
+      croppedFooter = await cropImageToBase64(footerImageBase64, 0, 0.92, 1, 0.08);
     } catch {
-      // Usa fallback se falhar
+      // Se falhar, cria rodapé programaticamente
     }
   }
   
-  for (let i = 2; i <= pageCount; i++) {
+  // Aplicar em TODAS as páginas
+  for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
     
-    // Fundo do rodapé (mais alto)
-    doc.setFillColor(COLORS.footer.r, COLORS.footer.g, COLORS.footer.b);
-    doc.rect(0, footerY, PAGE.width, footerHeight, "F");
-    
-    // === LOGO NO CANTO ESQUERDO ===
-    if (logoImageBase64) {
+    if (croppedFooter) {
+      // Usar a imagem recortada do rodapé
       try {
-        const logoHeight = footerHeight - 8; // Altura da logo com margem
-        const logoWidth = logoHeight * logoAspectRatio; // Mantém proporção
-        const logoX = MARGINS.left;
-        const logoYPos = footerY + 4; // Margem superior interna
+        const dimensions = await getImageDimensions(croppedFooter);
+        const aspectRatio = dimensions.height / dimensions.width;
+        const imgWidth = PAGE.width;
+        const imgHeight = imgWidth * aspectRatio;
         
-        doc.addImage(logoImageBase64, "PNG", logoX, logoYPos, logoWidth, logoHeight);
+        doc.addImage(croppedFooter, "PNG", 0, PAGE.height - imgHeight, imgWidth, imgHeight);
       } catch {
-        // Se falhar, continua sem logo
+        // Se falhar, usa rodapé programático abaixo
       }
     }
+    
+    // Rodapé programático (backup ou complemento)
+    // Barra lateral cinza (estilo sidebar do papel timbrado)
+    doc.setFillColor(COLORS.sidebar.r, COLORS.sidebar.g, COLORS.sidebar.b);
+    doc.rect(0, footerY, sidebarWidth, footerHeight, "F");
+    
+    // Fundo cinza do rodapé (continuação)
+    doc.rect(sidebarWidth, footerY, PAGE.width - sidebarWidth, footerHeight, "F");
+    
+    // Logo "BT" estilizado na sidebar (simulado com texto)
+    doc.setTextColor(120, 120, 120); // Cinza mais claro para "BT" fantasma
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(24);
+    doc.text("BT", 4, footerY + 15);
     
     doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
     
     // === TEXTOS NO LADO DIREITO ===
-    // Linha 1 - Nome do Perito (negrito)
+    // Linha 1 - Nome completo do Perito
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
-    doc.text(laudo.peritoNome || "Médico Perito", PAGE.width - MARGINS.right, footerY + 8, { align: "right" });
+    doc.text("Dr. Bruno Victor Tenório Cavalcanti Padilha", PAGE.width - MARGINS.right, footerY + 8, { align: "right" });
     
-    // Linha 2 - Especialidade + CRM
+    // Linha 2 - Cargo + CRM
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
-    const cargoText = `${laudo.peritoEspecialidade || "Médico Perito Judicial"} - CRM ${laudo.peritoCRM || ""}`;
-    doc.text(cargoText, PAGE.width - MARGINS.right, footerY + 13, { align: "right" });
+    doc.text("Médico Perito Judicial - CRM/AL 11313", PAGE.width - MARGINS.right, footerY + 13, { align: "right" });
     
-    // Linha 3 - Telefone | Email
-    const contatoParts = [];
-    if (laudo.peritoTelefone) contatoParts.push(laudo.peritoTelefone);
-    if (laudo.peritoEmail) contatoParts.push(laudo.peritoEmail);
-    if (contatoParts.length > 0) {
-      doc.text(contatoParts.join(" | "), PAGE.width - MARGINS.right, footerY + 18, { align: "right" });
-    }
+    // Linha 3 - Contato
+    doc.text("(82) 99669-6656 | brunovctenorio@gmail.com", PAGE.width - MARGINS.right, footerY + 18, { align: "right" });
     
-    // Linha 4 - Número da página (abaixo do contato, menor e itálico para diferenciar)
+    // Número da página no canto inferior esquerdo (após a sidebar)
     doc.setFont("helvetica", "italic");
     doc.setFontSize(6);
-    doc.text(`Página ${i} de ${pageCount}`, PAGE.width - MARGINS.right, footerY + 24, { align: "right" });
+    doc.text(`Página ${i} de ${pageCount}`, sidebarWidth + 5, footerY + 18);
     
     doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   }
@@ -303,146 +349,10 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   const doc = new jsPDF();
   let sectionNumber = 1;
   
-  // Carregar logo se existir (para a capa)
-  const logoBase64 = await loadImageAsBase64(laudo.peritoLogoUrl);
+  // Carregar imagem do papel timbrado (página completa para recortar cabeçalho e rodapé)
+  const timbradoImageBase64 = await loadImageAsBase64("/timbrado-header.jpg");
   
-  // Carregar imagem do cabeçalho (para páginas internas)
-  const headerImageBase64 = await loadImageAsBase64("/cabecalho-perito.png");
-  
-  // Carregar logo do rodapé
-  const logoRodapeBase64 = await loadImageAsBase64("/logo-rodape.png");
-  
-  // ========== PÁGINA 1 - CAPA ==========
-  
-  // Moldura única grossa (border-4 ≈ 1.5mm)
-  doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
-  doc.setLineWidth(1.5);
-  doc.rect(8, 8, 194, 281, "S");
-  
-  // Cabeçalho azul com informações do perito (py-8 ≈ padding generoso)
-  doc.setFillColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
-  doc.rect(12, 12, 186, 38, "F");
-  
-  // Adicionar logo na capa se existir
-  let textCenterX = 105;
-  if (logoBase64) {
-    try {
-      doc.addImage(logoBase64, "PNG", 20, 17, 28, 28);
-      textCenterX = 118;
-    } catch {
-      // Se falhar, continua sem logo
-    }
-  }
-  
-  // Nome do perito (text-xl, bold, uppercase)
-  doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
-  doc.setFontSize(15);
-  doc.setFont("helvetica", "bold");
-  doc.text(laudo.peritoNome?.toUpperCase() || "MÉDICO PERITO", textCenterX, 28, { align: "center" });
-  
-  // CRM com opacidade 90% (simular com cor mais clara)
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(230, 230, 235); // Branco com ~90% opacidade
-  if (laudo.peritoCRM) {
-    doc.text(`CRM: ${laudo.peritoCRM}`, textCenterX, 40, { align: "center" });
-  }
-  
-  // Título principal "LAUDO PERICIAL" (text-4xl, bold, cor primária)
-  doc.setTextColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
-  doc.setFontSize(32);
-  doc.setFont("helvetica", "bold");
-  doc.text("LAUDO PERICIAL", 105, 85, { align: "center" });
-  
-  // Subtítulo "MÉDICO" com tracking-widest (letter-spacing simulado)
-  doc.setFontSize(16);
-  doc.setFont("helvetica", "bold");
-  doc.text("M É D I C O", 105, 100, { align: "center" });
-  
-  // Linha decorativa mais grossa (border-t-4 ≈ 1.5mm, w-2/3)
-  doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
-  doc.setLineWidth(1.5);
-  doc.line(50, 115, 160, 115);
-  
-  // ===== Grid de Informações (Metadados do Processo) =====
-  // Layout: grid grid-cols-[1fr_3fr] - colunas alinhadas
-  doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
-  doc.setFontSize(11);
-  
-  const labelColX = 40;       // Posição fixa dos labels
-  const valueColX = 78;       // Posição fixa dos valores
-  const gridMaxWidth = 90;    // Largura máxima para valores
-  let coverY = 135;
-  
-  const addGridRow = (label: string, value: string | undefined | null): void => {
-    if (!value) return;
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
-    doc.text(`${label}:`, labelColX, coverY);
-    
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(COLORS.secondary.r, COLORS.secondary.g, COLORS.secondary.b);
-    const lines = doc.splitTextToSize(value, gridMaxWidth);
-    doc.text(lines, valueColX, coverY);
-    coverY += lines.length * 5 + 8;
-  };
-  
-  addGridRow("Processo nº", laudo.processoNumero);
-  addGridRow("Vara", laudo.processoVara);
-  addGridRow("Reclamante", laudo.reclamante);
-  addGridRow("Reclamada", laudo.reclamada);
-  
-  // ===== Box de Destaque (Periciando) =====
-  if (laudo.vitimaName) {
-    coverY = Math.max(coverY + 5, 200); // Garantir espaçamento mínimo
-    const boxWidth = 140;  // ~80% da largura do conteúdo
-    const boxX = (PAGE.width - boxWidth) / 2;  // Centralizado (mx-auto)
-    const boxHeight = 38;
-    
-    // Fundo cinza suave (bg-gray-100)
-    doc.setFillColor(COLORS.background.r, COLORS.background.g, COLORS.background.b);
-    doc.roundedRect(boxX, coverY, boxWidth, boxHeight, 5, 5, "F");
-    
-    // Borda mais grossa (border-2, rounded-xl)
-    doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
-    doc.setLineWidth(0.75);
-    doc.roundedRect(boxX, coverY, boxWidth, boxHeight, 5, 5, "S");
-    
-    // Rótulo com tracking-widest (text-xs, uppercase, text-gray-500)
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
-    doc.text("P E R I C I A N D O ( A )", 105, coverY + 13, { align: "center" });
-    
-    // Nome maior (text-2xl, font-black)
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
-    doc.text(laudo.vitimaName.toUpperCase(), 105, coverY + 28, { align: "center" });
-  }
-  
-  // ===== Rodapé da Capa =====
-  // Data da perícia (centralizada)
-  doc.setFontSize(11);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
-  const examDate = laudo.dataPericia ? formatDate(laudo.dataPericia) : formatDate(new Date().toISOString());
-  doc.text(`Data da Perícia: ${examDate}`, 105, 255, { align: "center" });
-  
-  // Contato separado por pipe (text-sm, cinza médio)
-  doc.setFontSize(9);
-  const contactParts = [];
-  if (laudo.peritoEmail) contactParts.push(laudo.peritoEmail);
-  if (laudo.peritoTelefone) contactParts.push(`Tel: ${laudo.peritoTelefone}`);
-  if (contactParts.length > 0) {
-    doc.text(contactParts.join("  |  "), 105, 268, { align: "center" });
-  }
-  if (laudo.peritoEndereco) {
-    doc.text(laudo.peritoEndereco, 105, 277, { align: "center" });
-  }
-  
-  // ========== CORPO DO LAUDO ==========
-  doc.addPage();
+  // ========== PÁGINA 1 - INÍCIO DO CONTEÚDO (SEM CAPA) ==========
   let y = MARGINS.top;
   
   // Endereçamento judicial
@@ -815,9 +725,9 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
     doc.text(`CRM: ${laudo.peritoCRM}`, 105, y, { align: "center" });
   }
   
-  // Adicionar cabeçalho e rodapé em todas as páginas (exceto capa)
-  await addHeaderToPages(doc, laudo, headerImageBase64);
-  await addFooterToPages(doc, laudo, logoRodapeBase64);
+  // Adicionar cabeçalho e rodapé em TODAS as páginas (sem capa)
+  await addHeaderToPages(doc, timbradoImageBase64);
+  await addFooterToPages(doc, laudo, timbradoImageBase64);
   
   // Gerar nome do arquivo
   const processNumber = laudo.processoNumero?.replace(/[^0-9]/g, "") || "sem-numero";
