@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { useLaudo } from "@/contexts/LaudoContext";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sparkles, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { LaudoTextareaAIField } from "@/components/laudo/LaudoTextareaAIField";
 
 export function ResumoAutos() {
   const { currentLaudo, updateLaudo } = useLaudo();
@@ -14,6 +13,8 @@ export function ResumoAutos() {
   const [loadingContestacao, setLoadingContestacao] = useState(false);
 
   if (!currentLaudo) return null;
+
+  const hasPdfSource = !!(currentLaudo.ai_metadata as any)?.importJobId || !!(currentLaudo.ai_metadata as any)?.pdfFilePath;
 
   const gerarResumoPeticao = async () => {
     if (!currentLaudo.resumoPeticaoInicial?.trim()) {
@@ -109,55 +110,65 @@ export function ResumoAutos() {
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="resumoPeticaoInicial">Resumo da Petição Inicial</Label>
+          <div className="flex items-center justify-end mb-1">
             <Button
               variant="outline"
               size="sm"
               onClick={gerarResumoPeticao}
               disabled={loadingPeticao}
-              className="gap-2"
+              className="gap-2 h-8 text-xs"
             >
               {loadingPeticao ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-3 w-3 animate-spin" />
               ) : (
-                <Sparkles className="h-4 w-4" />
+                <Sparkles className="h-3 w-3" />
               )}
-              Gerar com IA
+              Resumir Texto
             </Button>
           </div>
-          <Textarea
+          <LaudoTextareaAIField
             id="resumoPeticaoInicial"
+            label="Resumo da Petição Inicial"
             value={currentLaudo.resumoPeticaoInicial || ""}
-            onChange={(e) => updateLaudo({ resumoPeticaoInicial: e.target.value })}
-            placeholder="Cole o texto da petição inicial aqui e clique em 'Gerar com IA' para criar um resumo técnico..."
+            onChange={(value) => updateLaudo({ resumoPeticaoInicial: value })}
+            placeholder="Cole o texto da petição inicial aqui e clique em 'Resumir Texto' para criar um resumo técnico..."
             rows={6}
+            enableEnhance={true}
+            enableRegenerate={true}
+            fieldKey="resumoPeticaoInicial"
+            laudoId={currentLaudo.id}
+            hasPdfSource={hasPdfSource}
           />
         </div>
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="resumoContestacao">Resumo da Contestação</Label>
+          <div className="flex items-center justify-end mb-1">
             <Button
               variant="outline"
               size="sm"
               onClick={gerarResumoContestacao}
               disabled={loadingContestacao}
-              className="gap-2"
+              className="gap-2 h-8 text-xs"
             >
               {loadingContestacao ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-3 w-3 animate-spin" />
               ) : (
-                <Sparkles className="h-4 w-4" />
+                <Sparkles className="h-3 w-3" />
               )}
-              Gerar com IA
+              Resumir Texto
             </Button>
           </div>
-          <Textarea
+          <LaudoTextareaAIField
             id="resumoContestacao"
+            label="Resumo da Contestação"
             value={currentLaudo.resumoContestacao || ""}
-            onChange={(e) => updateLaudo({ resumoContestacao: e.target.value })}
-            placeholder="Cole o texto da contestação aqui e clique em 'Gerar com IA' para criar um resumo técnico..."
+            onChange={(value) => updateLaudo({ resumoContestacao: value })}
+            placeholder="Cole o texto da contestação aqui e clique em 'Resumir Texto' para criar um resumo técnico..."
             rows={6}
+            enableEnhance={true}
+            enableRegenerate={true}
+            fieldKey="resumoContestacao"
+            laudoId={currentLaudo.id}
+            hasPdfSource={hasPdfSource}
           />
         </div>
       </CardContent>

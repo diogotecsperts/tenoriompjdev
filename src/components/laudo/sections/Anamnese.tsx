@@ -1,12 +1,13 @@
 import { useLaudo } from "@/contexts/LaudoContext";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LaudoTextareaAIField } from "@/components/laudo/LaudoTextareaAIField";
 
 export function Anamnese() {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
+
+  const hasPdfSource = !!(currentLaudo.ai_metadata as any)?.importJobId || !!(currentLaudo.ai_metadata as any)?.pdfFilePath;
 
   return (
     <Card>
@@ -17,13 +18,18 @@ export function Anamnese() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        <Label htmlFor="historiaAtual">História da Moléstia Atual</Label>
-        <Textarea
+        <LaudoTextareaAIField
           id="historiaAtual"
-          value={currentLaudo.historiaAtual}
-          onChange={(e) => updateLaudo({ historiaAtual: e.target.value })}
+          label="História da Moléstia Atual"
+          value={currentLaudo.historiaAtual || ""}
+          onChange={(value) => updateLaudo({ historiaAtual: value })}
           placeholder="Descreva o início dos sintomas, evolução do quadro, queixas atuais, localização e características da dor, limitações funcionais..."
           rows={10}
+          enableEnhance={true}
+          enableRegenerate={true}
+          fieldKey="historiaAtual"
+          laudoId={currentLaudo.id}
+          hasPdfSource={hasPdfSource}
         />
       </CardContent>
     </Card>

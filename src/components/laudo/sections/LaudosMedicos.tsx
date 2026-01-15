@@ -1,12 +1,13 @@
 import { useLaudo } from "@/contexts/LaudoContext";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { LaudoTextareaAIField } from "@/components/laudo/LaudoTextareaAIField";
 
 export function LaudosMedicos() {
   const { currentLaudo, updateLaudo } = useLaudo();
 
   if (!currentLaudo) return null;
+
+  const hasPdfSource = !!(currentLaudo.ai_metadata as any)?.importJobId || !!(currentLaudo.ai_metadata as any)?.pdfFilePath;
 
   return (
     <Card>
@@ -17,13 +18,18 @@ export function LaudosMedicos() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        <Label htmlFor="laudosMedicos">Descrição dos Laudos</Label>
-        <Textarea
+        <LaudoTextareaAIField
           id="laudosMedicos"
-          value={currentLaudo.laudosMedicos}
-          onChange={(e) => updateLaudo({ laudosMedicos: e.target.value })}
+          label="Descrição dos Laudos"
+          value={currentLaudo.laudosMedicos || ""}
+          onChange={(value) => updateLaudo({ laudosMedicos: value })}
           placeholder="Transcreva os principais achados dos laudos médicos, diagnósticos apresentados, conclusões dos médicos assistentes..."
           rows={10}
+          enableEnhance={true}
+          enableRegenerate={true}
+          fieldKey="laudosMedicos"
+          laudoId={currentLaudo.id}
+          hasPdfSource={hasPdfSource}
         />
       </CardContent>
     </Card>

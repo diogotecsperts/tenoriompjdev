@@ -44,6 +44,28 @@ Máximo 3 parágrafos.`,
 
   descricaoTecnicaDoencas: `Extraia informações sobre as doenças mencionadas e descreva tecnicamente cada uma.
 Para cada CID/doença, forneça: definição, etiologia, sintomas, relação ocupacional.`,
+
+  afastamentos: `Extraia os "Períodos de Afastamento" do documento.
+Foque em: datas de início e fim de afastamentos, motivos (CID se disponível), benefícios recebidos (auxílio-doença, auxílio-acidente, aposentadoria por invalidez).
+Liste cronologicamente.`,
+
+  descricaoPostoTrabalho: `Extraia a "Descrição do Posto de Trabalho" do documento.
+Foque em: ambiente físico, equipamentos utilizados, condições ergonômicas, exposição a riscos físicos/químicos/biológicos, temperatura, ruído, iluminação.`,
+
+  descricaoAtividadesLaborais: `Extraia as "Atividades Laborais" ou "Descrição das Funções" do documento.
+Foque em: tarefas executadas diariamente, movimentos repetitivos, esforço físico, carga de trabalho, jornada, pausas, postura predominante.`,
+
+  quesitosJuizo: `Extraia os "Quesitos do Juízo" do documento.
+Liste cada quesito numerado exatamente como consta no documento, sem inventar respostas.
+Mantenha a formatação original.`,
+
+  quesitosReclamante: `Extraia os "Quesitos do Reclamante" ou "Quesitos do Autor" do documento.
+Liste cada quesito numerado exatamente como consta no documento, sem inventar respostas.
+Mantenha a formatação original.`,
+
+  quesitosReclamada: `Extraia os "Quesitos da Reclamada" ou "Quesitos da Ré" do documento.
+Liste cada quesito numerado exatamente como consta no documento, sem inventar respostas.
+Mantenha a formatação original.`,
 };
 
 serve(async (req) => {
