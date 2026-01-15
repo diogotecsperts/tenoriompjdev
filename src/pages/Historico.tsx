@@ -276,7 +276,7 @@ export default function Historico() {
                   onCheckedChange={(checked) => toggleSelectAll(!!checked)}
                 />
                 <span className="text-sm text-muted-foreground whitespace-nowrap">
-                  {someSelected ? `${selectedIds.size} selecionado(s)` : "Selecionar"}
+                  {someSelected ? `${selectedIds.size} selecionado(s)` : "Selecionar tudo"}
                 </span>
               </div>
 
