@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 interface GerarResumoRequest {
-  tipo: 'resumo_peticao' | 'resumo_contestacao' | 'descricao_doencas' | 'nexo_causal' | 'incapacidade';
+  tipo: 'resumo_peticao' | 'resumo_contestacao' | 'descricao_doencas' | 'nexo_causal' | 'incapacidade' | 'sugestoes_pericia';
   contexto: {
     peticaoInicial?: string;
     contestacao?: string;
@@ -126,6 +126,59 @@ Analise a capacidade laboral considerando:
 6. Impacto nas atividades de vida diária
 
 Fundamente tecnicamente sua análise com base nos achados clínicos e exames.
+`,
+
+  sugestoes_pericia: (ctx: GerarResumoRequest['contexto']) => `
+Você é um perito médico especialista em medicina do trabalho. 
+Com base nas informações do caso, elabore sugestões para auxiliar a perícia.
+
+**Dados do caso:**
+- CIDs/Diagnósticos alegados: ${ctx.cids || 'Não informado'}
+- História do acidente/doença: ${ctx.historiaAcidente || 'Não informado'}
+- História atual: ${ctx.historiaAtual || 'Não informado'}
+- Posto de trabalho: ${ctx.postoTrabalho || 'Não informado'}
+- Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
+- Antecedentes patológicos: ${ctx.antecedentes || 'Não informado'}
+
+Forneça:
+
+## PERGUNTAS SUGERIDAS PARA A ANAMNESE
+
+Liste 8-12 perguntas objetivas e relevantes para esclarecer o nexo causal e a incapacidade, organizadas por tema:
+
+### Sobre o início e evolução
+- Perguntas sobre quando iniciaram os sintomas
+- Como evoluíram ao longo do tempo
+
+### Sobre o trabalho
+- Perguntas sobre as atividades realizadas
+- Exposição a fatores de risco
+
+### Sobre tratamentos
+- Perguntas sobre tratamentos realizados
+- Resultados obtidos
+
+### Sobre limitações
+- Perguntas sobre atividades que não consegue mais realizar
+- Impacto na vida diária
+
+## EXAME FÍSICO SUGERIDO
+
+Liste as manobras, testes específicos e regiões anatômicas que devem ser examinadas, considerando as queixas e CIDs alegados:
+
+### Inspeção Geral
+- O que observar na inspeção inicial
+
+### Testes Específicos por Região
+- Manobras semiológicas relevantes para o caso
+- Testes especiais indicados
+
+### Avaliação Funcional
+- Amplitude de movimento
+- Força muscular
+- Sensibilidade
+
+Seja objetivo e prático. Use linguagem técnica médica.
 `
 };
 
