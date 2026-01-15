@@ -97,14 +97,16 @@ interface LaudoContextType {
   currentLaudo: LaudoData | null;
   loading: boolean;
   createLaudo: () => Promise<string | null>;
+  createLocalLaudo: () => Promise<LaudoData>;
   loadLaudo: (id: string) => Promise<void>;
   updateLaudo: (data: Partial<LaudoData>) => void;
-  saveLaudo: () => Promise<void>;
+  saveLaudo: () => Promise<{ id: string } | null>;
   deleteLaudo: (id: string) => Promise<void>;
   renameLaudo: (id: string, newTitle: string) => Promise<void>;
   updateObservacoes: (id: string, observacoes: string) => Promise<void>;
   updateLaudoStatus: (id: string, newStatus: string) => Promise<void>;
   refreshLaudos: () => Promise<void>;
+  setCurrentLaudo: (laudo: LaudoData | null) => void;
 }
 
 const LaudoContext = createContext<LaudoContextType | undefined>(undefined);
@@ -242,6 +244,91 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, [user?.id, refreshLaudos]);
+
+  // Create a local laudo in memory only (not persisted to database)
+  const createLocalLaudo = async (): Promise<LaudoData> => {
+    // Get profile data to pre-fill perito information
+    let profileData = null;
+    if (user) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('nome, email, crm, especialidade, telefone, endereco, logo_url')
+        .eq('id', user.id)
+        .single();
+      profileData = data;
+    }
+
+    const newLaudo: LaudoData = {
+      id: 'new', // Temporary ID indicating not yet persisted
+      title: `Laudo ${laudos.length + 1}`,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      status: 'rascunho',
+      anotacoes: '',
+      observacoesHistorico: '',
+      peritoNome: profileData?.nome || '',
+      peritoEspecialidade: profileData?.especialidade || '',
+      peritoCRM: profileData?.crm || '',
+      peritoEmail: profileData?.email || '',
+      peritoTelefone: profileData?.telefone || '',
+      peritoEndereco: profileData?.endereco || '',
+      peritoLogoUrl: (profileData as any)?.logo_url || '',
+      processoNumero: '',
+      processoVara: '',
+      reclamante: '',
+      reclamada: '',
+      dataAcidente: '',
+      dataPericia: '',
+      documentos: [],
+      vitimaName: '',
+      vitimaEscolaridade: '',
+      vitimaNascimento: '',
+      vitimaProfissao: '',
+      vitimaDominancia: '',
+      historicoOcupacional: '',
+      historiaAcidente: '',
+      historiaAtual: '',
+      antecedentes: '',
+      tratamentos: '',
+      afastamentos: '',
+      planejamento: [],
+      laudosMedicos: '',
+      examesComplementares: '',
+      exameFisico: '',
+      nexoCausalTipo: '',
+      nexoCausalJustificativa: '',
+      conclusaoCID: '',
+      conclusaoAnalise: '',
+      conclusaoIncapacidade: '',
+      conclusaoStatus: '',
+      conclusaoJustificativa: '',
+      conclusaoDestino: '',
+      tabelaSUSEP: '',
+      danoEstetico: '',
+      auxilioTerceiros: '',
+      quesitosJuizo: '',
+      quesitosReclamante: '',
+      quesitosReclamada: '',
+      assistenteTecnicoReclamada: '',
+      assistenteTecnicoReclamante: '',
+      localPericia: '',
+      objetivoPericia: '',
+      resumoPeticaoInicial: '',
+      resumoContestacao: '',
+      metodologiaPericial: 'Este laudo foi elaborado com base no estudo das peças contidas nos autos do processo; exame pericial do(a) reclamante, conforme parâmetros técnicos utilizados pela especialidade de Medicina do Trabalho. Análise criteriosa e imparcial das informações coligidas durante a perícia e nos autos do processo, que é exigida pelo CÓDIGO DE ÉTICA MÉDICA (Res. CFM 2.217/2018), em seus artigos 93 e 98. A literatura especializada que serviu de embasamento técnico científico das conclusões está relacionada nas referências bibliográficas (ao final).',
+      dadosFuncionaisCargo: '',
+      dadosFuncionaisAdmissao: '',
+      dadosFuncionaisAfastamento: '',
+      descricaoPostoTrabalho: '',
+      descricaoAtividadesLaborais: '',
+      descricaoTecnicaDoencas: '',
+      analiseIncapacidadeLaboral: '',
+      referenciasBibliograficas: '- BARROS, B. T. Perícia Médica. São Paulo: Editora LTR, 2023.\n- BRASIL. Ministério do Trabalho e Emprego. Normas Regulamentadoras.\n- MENDES, René. Patologia do trabalho. São Paulo: Atheneu, 2005.\n- VIEIRA, Sebastião Ivone. Manual de saúde e segurança do trabalho. São Paulo: LTr, 2005.\n- OMS. Classificação Internacional de Doenças - CID-10.\n- CFM. Código de Ética Médica - Resolução CFM 2.217/2018.',
+      resumoPericia: '',
+    };
+
+    return newLaudo;
+  };
 
   const createLaudo = async (): Promise<string | null> => {
     if (!user) return null;
@@ -466,87 +553,185 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const saveLaudo = async () => {
-    if (!currentLaudo || !user) return;
+  const saveLaudo = async (): Promise<{ id: string } | null> => {
+    if (!currentLaudo || !user) return null;
 
     try {
-      const { error } = await supabase
-        .from('laudos')
-        .update({
-          title: currentLaudo.title,
-          status: currentLaudo.status,
-          anotacoes: currentLaudo.anotacoes,
-          perito_nome: currentLaudo.peritoNome,
-          perito_especialidade: currentLaudo.peritoEspecialidade,
-          perito_crm: currentLaudo.peritoCRM,
-          perito_email: currentLaudo.peritoEmail,
-          perito_telefone: currentLaudo.peritoTelefone,
-          perito_endereco: currentLaudo.peritoEndereco,
-          processo_numero: currentLaudo.processoNumero,
-          processo_vara: currentLaudo.processoVara,
-          reclamante: currentLaudo.reclamante,
-          reclamada: currentLaudo.reclamada,
-          data_acidente: currentLaudo.dataAcidente || null,
-          data_pericia: currentLaudo.dataPericia || null,
-          documentos: currentLaudo.documentos,
-          vitima_nome: currentLaudo.vitimaName,
-          vitima_escolaridade: currentLaudo.vitimaEscolaridade,
-          vitima_nascimento: currentLaudo.vitimaNascimento || null,
-          vitima_profissao: currentLaudo.vitimaProfissao,
-          vitima_dominancia: currentLaudo.vitimaDominancia,
-          historico_ocupacional: currentLaudo.historicoOcupacional,
-          historia_acidente: currentLaudo.historiaAcidente,
-          historia_atual: currentLaudo.historiaAtual,
-          antecedentes: currentLaudo.antecedentes,
-          tratamentos: currentLaudo.tratamentos,
-          afastamentos: currentLaudo.afastamentos,
-          planejamento: currentLaudo.planejamento,
-          laudos_medicos: currentLaudo.laudosMedicos,
-          exames_complementares: currentLaudo.examesComplementares,
-          exame_fisico: currentLaudo.exameFisico,
-          nexo_causal_tipo: currentLaudo.nexoCausalTipo,
-          nexo_causal_justificativa: currentLaudo.nexoCausalJustificativa,
-          conclusao_cid: currentLaudo.conclusaoCID,
-          conclusao_analise: currentLaudo.conclusaoAnalise,
-          conclusao_incapacidade: currentLaudo.conclusaoIncapacidade,
-          conclusao_status: currentLaudo.conclusaoStatus,
-          conclusao_justificativa: currentLaudo.conclusaoJustificativa,
-          conclusao_destino: currentLaudo.conclusaoDestino,
-          tabela_susep: currentLaudo.tabelaSUSEP,
-          dano_estetico: currentLaudo.danoEstetico,
-          auxilio_terceiros: currentLaudo.auxilioTerceiros,
-          quesitos_juizo: currentLaudo.quesitosJuizo,
-          quesitos_reclamante: currentLaudo.quesitosReclamante,
-          quesitos_reclamada: currentLaudo.quesitosReclamada,
-          // Novos campos
-          assistente_tecnico_reclamada: currentLaudo.assistenteTecnicoReclamada,
-          assistente_tecnico_reclamante: currentLaudo.assistenteTecnicoReclamante,
-          local_pericia: currentLaudo.localPericia,
-          objetivo_pericia: currentLaudo.objetivoPericia,
-          resumo_peticao_inicial: currentLaudo.resumoPeticaoInicial,
-          resumo_contestacao: currentLaudo.resumoContestacao,
-          metodologia_pericial: currentLaudo.metodologiaPericial,
-          dados_funcionais_cargo: currentLaudo.dadosFuncionaisCargo,
-          dados_funcionais_admissao: currentLaudo.dadosFuncionaisAdmissao || null,
-          dados_funcionais_afastamento: currentLaudo.dadosFuncionaisAfastamento || null,
-          descricao_posto_trabalho: currentLaudo.descricaoPostoTrabalho,
-          descricao_atividades_laborais: currentLaudo.descricaoAtividadesLaborais,
-          descricao_tecnica_doencas: currentLaudo.descricaoTecnicaDoencas,
-          analise_incapacidade_laboral: currentLaudo.analiseIncapacidadeLaboral,
-          referencias_bibliograficas: currentLaudo.referenciasBibliograficas,
-          resumo_pericia: currentLaudo.resumoPericia,
-        } as any)
-        .eq('id', currentLaudo.id)
-        .eq('user_id', user.id);
+      // Check if this is a new laudo (not yet persisted)
+      const isNewLaudo = currentLaudo.id === 'new';
 
-      if (error) throw error;
+      if (isNewLaudo) {
+        // INSERT - First time saving this laudo
+        const { data, error } = await supabase
+          .from('laudos')
+          .insert({
+            user_id: user.id,
+            title: currentLaudo.title,
+            status: currentLaudo.status,
+            anotacoes: currentLaudo.anotacoes,
+            perito_nome: currentLaudo.peritoNome,
+            perito_especialidade: currentLaudo.peritoEspecialidade,
+            perito_crm: currentLaudo.peritoCRM,
+            perito_email: currentLaudo.peritoEmail,
+            perito_telefone: currentLaudo.peritoTelefone,
+            perito_endereco: currentLaudo.peritoEndereco,
+            processo_numero: currentLaudo.processoNumero,
+            processo_vara: currentLaudo.processoVara,
+            reclamante: currentLaudo.reclamante,
+            reclamada: currentLaudo.reclamada,
+            data_acidente: currentLaudo.dataAcidente || null,
+            data_pericia: currentLaudo.dataPericia || null,
+            documentos: currentLaudo.documentos,
+            vitima_nome: currentLaudo.vitimaName,
+            vitima_escolaridade: currentLaudo.vitimaEscolaridade,
+            vitima_nascimento: currentLaudo.vitimaNascimento || null,
+            vitima_profissao: currentLaudo.vitimaProfissao,
+            vitima_dominancia: currentLaudo.vitimaDominancia,
+            historico_ocupacional: currentLaudo.historicoOcupacional,
+            historia_acidente: currentLaudo.historiaAcidente,
+            historia_atual: currentLaudo.historiaAtual,
+            antecedentes: currentLaudo.antecedentes,
+            tratamentos: currentLaudo.tratamentos,
+            afastamentos: currentLaudo.afastamentos,
+            planejamento: currentLaudo.planejamento,
+            laudos_medicos: currentLaudo.laudosMedicos,
+            exames_complementares: currentLaudo.examesComplementares,
+            exame_fisico: currentLaudo.exameFisico,
+            nexo_causal_tipo: currentLaudo.nexoCausalTipo,
+            nexo_causal_justificativa: currentLaudo.nexoCausalJustificativa,
+            conclusao_cid: currentLaudo.conclusaoCID,
+            conclusao_analise: currentLaudo.conclusaoAnalise,
+            conclusao_incapacidade: currentLaudo.conclusaoIncapacidade,
+            conclusao_status: currentLaudo.conclusaoStatus,
+            conclusao_justificativa: currentLaudo.conclusaoJustificativa,
+            conclusao_destino: currentLaudo.conclusaoDestino,
+            tabela_susep: currentLaudo.tabelaSUSEP,
+            dano_estetico: currentLaudo.danoEstetico,
+            auxilio_terceiros: currentLaudo.auxilioTerceiros,
+            quesitos_juizo: currentLaudo.quesitosJuizo,
+            quesitos_reclamante: currentLaudo.quesitosReclamante,
+            quesitos_reclamada: currentLaudo.quesitosReclamada,
+            assistente_tecnico_reclamada: currentLaudo.assistenteTecnicoReclamada,
+            assistente_tecnico_reclamante: currentLaudo.assistenteTecnicoReclamante,
+            local_pericia: currentLaudo.localPericia,
+            objetivo_pericia: currentLaudo.objetivoPericia,
+            resumo_peticao_inicial: currentLaudo.resumoPeticaoInicial,
+            resumo_contestacao: currentLaudo.resumoContestacao,
+            metodologia_pericial: currentLaudo.metodologiaPericial,
+            dados_funcionais_cargo: currentLaudo.dadosFuncionaisCargo,
+            dados_funcionais_admissao: currentLaudo.dadosFuncionaisAdmissao || null,
+            dados_funcionais_afastamento: currentLaudo.dadosFuncionaisAfastamento || null,
+            descricao_posto_trabalho: currentLaudo.descricaoPostoTrabalho,
+            descricao_atividades_laborais: currentLaudo.descricaoAtividadesLaborais,
+            descricao_tecnica_doencas: currentLaudo.descricaoTecnicaDoencas,
+            analise_incapacidade_laboral: currentLaudo.analiseIncapacidadeLaboral,
+            referencias_bibliograficas: currentLaudo.referenciasBibliograficas,
+            resumo_pericia: currentLaudo.resumoPericia,
+          } as any)
+          .select()
+          .single();
 
-      await refreshLaudos();
-      
-      toast({
-        title: "Laudo salvo",
-        description: "Suas alterações foram salvas com sucesso.",
-      });
+        if (error) throw error;
+
+        if (data) {
+          // Update currentLaudo with the real ID
+          const savedLaudo: LaudoData = {
+            ...currentLaudo,
+            id: data.id,
+            createdAt: new Date(data.created_at),
+            updatedAt: new Date(data.updated_at),
+          };
+          setCurrentLaudo(savedLaudo);
+          setLaudos([savedLaudo, ...laudos]);
+          
+          toast({
+            title: "Laudo criado",
+            description: "O laudo foi salvo com sucesso.",
+          });
+          
+          return { id: data.id };
+        }
+      } else {
+        // UPDATE - Existing laudo
+        const { error } = await supabase
+          .from('laudos')
+          .update({
+            title: currentLaudo.title,
+            status: currentLaudo.status,
+            anotacoes: currentLaudo.anotacoes,
+            perito_nome: currentLaudo.peritoNome,
+            perito_especialidade: currentLaudo.peritoEspecialidade,
+            perito_crm: currentLaudo.peritoCRM,
+            perito_email: currentLaudo.peritoEmail,
+            perito_telefone: currentLaudo.peritoTelefone,
+            perito_endereco: currentLaudo.peritoEndereco,
+            processo_numero: currentLaudo.processoNumero,
+            processo_vara: currentLaudo.processoVara,
+            reclamante: currentLaudo.reclamante,
+            reclamada: currentLaudo.reclamada,
+            data_acidente: currentLaudo.dataAcidente || null,
+            data_pericia: currentLaudo.dataPericia || null,
+            documentos: currentLaudo.documentos,
+            vitima_nome: currentLaudo.vitimaName,
+            vitima_escolaridade: currentLaudo.vitimaEscolaridade,
+            vitima_nascimento: currentLaudo.vitimaNascimento || null,
+            vitima_profissao: currentLaudo.vitimaProfissao,
+            vitima_dominancia: currentLaudo.vitimaDominancia,
+            historico_ocupacional: currentLaudo.historicoOcupacional,
+            historia_acidente: currentLaudo.historiaAcidente,
+            historia_atual: currentLaudo.historiaAtual,
+            antecedentes: currentLaudo.antecedentes,
+            tratamentos: currentLaudo.tratamentos,
+            afastamentos: currentLaudo.afastamentos,
+            planejamento: currentLaudo.planejamento,
+            laudos_medicos: currentLaudo.laudosMedicos,
+            exames_complementares: currentLaudo.examesComplementares,
+            exame_fisico: currentLaudo.exameFisico,
+            nexo_causal_tipo: currentLaudo.nexoCausalTipo,
+            nexo_causal_justificativa: currentLaudo.nexoCausalJustificativa,
+            conclusao_cid: currentLaudo.conclusaoCID,
+            conclusao_analise: currentLaudo.conclusaoAnalise,
+            conclusao_incapacidade: currentLaudo.conclusaoIncapacidade,
+            conclusao_status: currentLaudo.conclusaoStatus,
+            conclusao_justificativa: currentLaudo.conclusaoJustificativa,
+            conclusao_destino: currentLaudo.conclusaoDestino,
+            tabela_susep: currentLaudo.tabelaSUSEP,
+            dano_estetico: currentLaudo.danoEstetico,
+            auxilio_terceiros: currentLaudo.auxilioTerceiros,
+            quesitos_juizo: currentLaudo.quesitosJuizo,
+            quesitos_reclamante: currentLaudo.quesitosReclamante,
+            quesitos_reclamada: currentLaudo.quesitosReclamada,
+            assistente_tecnico_reclamada: currentLaudo.assistenteTecnicoReclamada,
+            assistente_tecnico_reclamante: currentLaudo.assistenteTecnicoReclamante,
+            local_pericia: currentLaudo.localPericia,
+            objetivo_pericia: currentLaudo.objetivoPericia,
+            resumo_peticao_inicial: currentLaudo.resumoPeticaoInicial,
+            resumo_contestacao: currentLaudo.resumoContestacao,
+            metodologia_pericial: currentLaudo.metodologiaPericial,
+            dados_funcionais_cargo: currentLaudo.dadosFuncionaisCargo,
+            dados_funcionais_admissao: currentLaudo.dadosFuncionaisAdmissao || null,
+            dados_funcionais_afastamento: currentLaudo.dadosFuncionaisAfastamento || null,
+            descricao_posto_trabalho: currentLaudo.descricaoPostoTrabalho,
+            descricao_atividades_laborais: currentLaudo.descricaoAtividadesLaborais,
+            descricao_tecnica_doencas: currentLaudo.descricaoTecnicaDoencas,
+            analise_incapacidade_laboral: currentLaudo.analiseIncapacidadeLaboral,
+            referencias_bibliograficas: currentLaudo.referenciasBibliograficas,
+            resumo_pericia: currentLaudo.resumoPericia,
+          } as any)
+          .eq('id', currentLaudo.id)
+          .eq('user_id', user.id);
+
+        if (error) throw error;
+
+        await refreshLaudos();
+        
+        toast({
+          title: "Laudo salvo",
+          description: "Suas alterações foram salvas com sucesso.",
+        });
+        
+        return { id: currentLaudo.id };
+      }
     } catch (error: any) {
       console.error('Erro ao salvar laudo:', error);
       toast({
@@ -555,6 +740,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
         description: error.message
       });
     }
+    return null;
   };
 
   const deleteLaudo = async (id: string) => {
@@ -688,6 +874,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
         currentLaudo,
         loading,
         createLaudo,
+        createLocalLaudo,
         loadLaudo,
         updateLaudo,
         saveLaudo,
@@ -696,6 +883,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
         updateObservacoes,
         updateLaudoStatus,
         refreshLaudos,
+        setCurrentLaudo,
       }}
     >
       {children}
