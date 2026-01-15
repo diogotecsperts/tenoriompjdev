@@ -481,8 +481,18 @@ export default function LaudoEditor() {
       // Salvar no contexto do laudo
       updateLaudo({ resumoPericia: data.texto } as Partial<LaudoData>);
       
+      // Salvar imediatamente no banco para garantir persistência
+      const { error: saveError } = await supabase
+        .from('laudos')
+        .update({ resumo_pericia: data.texto })
+        .eq('id', currentLaudo.id);
+      
+      if (saveError) {
+        console.error('Erro ao salvar resumo da perícia:', saveError);
+      }
+      
       toast({
-        title: "Sugestões geradas",
+        title: "Sugestões geradas e salvas",
         description: `Usando ${data.provider}/${data.model}`,
       });
     } catch (error: any) {
@@ -496,19 +506,40 @@ export default function LaudoEditor() {
     }
   };
 
-  // Copiar resumo para anotações
-  const copiarParaAnotacoes = () => {
+  // Copiar resumo para anotações - salva automaticamente no banco
+  const copiarParaAnotacoes = async () => {
     if (!currentLaudo?.resumoPericia) return;
     
     const novaAnotacao = notes 
       ? `${notes}\n\n---\n\n### Resumo da Perícia (IA)\n${currentLaudo.resumoPericia}`
       : `### Resumo da Perícia (IA)\n${currentLaudo.resumoPericia}`;
     
+    // Atualizar estado local
     setNotes(novaAnotacao);
-    toast({
-      title: "Copiado para anotações",
-      description: "O resumo foi adicionado às suas anotações",
-    });
+    
+    try {
+      // Salvar diretamente no banco para garantir persistência
+      const { error } = await supabase
+        .from('laudos')
+        .update({ anotacoes: novaAnotacao })
+        .eq('id', currentLaudo.id);
+      
+      if (error) throw error;
+      
+      // Atualizar contexto local
+      updateLaudo({ anotacoes: novaAnotacao } as Partial<LaudoData>);
+      
+      toast({
+        title: "Salvo nas anotações",
+        description: "O resumo foi salvo permanentemente nas anotações.",
+      });
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao salvar",
+        description: error.message,
+      });
+    }
   };
 
   // Cleanup timeout on unmount
