@@ -23,7 +23,7 @@ const COLORS = {
 const MARGINS = {
   left: 20,
   right: 15,
-  top: 42,        // Espaço reservado para o cabeçalho PNG
+  top: 52,        // Espaço reservado para o cabeçalho PNG (aumentado para não colidir)
   bottom: 38,     // Espaço reservado para o rodapé PNG
 };
 
@@ -219,9 +219,9 @@ const addHeaderToPages = async (doc: jsPDF, headerImageBase64: string | null) =>
   const imgWidth = PAGE.width - 16; // 194mm (8mm de margem cada lado)
   const imgHeight = imgWidth * aspectRatio;
   
-  // Centralizado horizontalmente
+  // Centralizado horizontalmente, colado no topo
   const xPos = 8;
-  const yPos = 5; // Posição fixa no topo
+  const yPos = 2; // Posição mais próxima do topo (reduzido de 5mm para 2mm)
   
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
