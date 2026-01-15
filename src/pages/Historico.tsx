@@ -73,7 +73,8 @@ import {
   AlertTriangle,
   MessageSquare,
   Save,
-  ArrowUpDown
+  ArrowUpDown,
+  RotateCcw
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -83,7 +84,7 @@ const ITEMS_PER_PAGE = 10;
 
 export default function Historico() {
   const navigate = useNavigate();
-  const { laudos, deleteLaudo, loadLaudo, updateObservacoes } = useLaudo();
+  const { laudos, deleteLaudo, loadLaudo, updateObservacoes, updateLaudoStatus } = useLaudo();
   const { toast } = useToast();
   
   const [searchTerm, setSearchTerm] = useState("");
@@ -596,6 +597,12 @@ export default function Historico() {
                             <Download className="mr-2 h-4 w-4" />
                             Exportar PDF
                           </DropdownMenuItem>
+                          {laudo.status === 'finalizado' && (
+                            <DropdownMenuItem onClick={() => updateLaudoStatus(laudo.id, 'rascunho')}>
+                              <RotateCcw className="mr-2 h-4 w-4" />
+                              Reabrir Laudo
+                            </DropdownMenuItem>
+                          )}
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
                               <DropdownMenuItem 

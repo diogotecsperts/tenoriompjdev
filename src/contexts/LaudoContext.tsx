@@ -103,6 +103,7 @@ interface LaudoContextType {
   deleteLaudo: (id: string) => Promise<void>;
   renameLaudo: (id: string, newTitle: string) => Promise<void>;
   updateObservacoes: (id: string, observacoes: string) => Promise<void>;
+  updateLaudoStatus: (id: string, newStatus: string) => Promise<void>;
   refreshLaudos: () => Promise<void>;
 }
 
@@ -643,6 +644,43 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateLaudoStatus = async (id: string, newStatus: string) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('laudos')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', id)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setLaudos(prevLaudos => prevLaudos.map(l => 
+        l.id === id ? { ...l, status: newStatus, updatedAt: new Date() } : l
+      ));
+      
+      if (currentLaudo?.id === id) {
+        setCurrentLaudo({ ...currentLaudo, status: newStatus });
+      }
+
+      toast({
+        title: newStatus === 'finalizado' ? "Laudo finalizado" : "Laudo reaberto",
+        description: newStatus === 'finalizado' 
+          ? "O laudo foi marcado como concluído."
+          : "O laudo foi reaberto para edição.",
+      });
+    } catch (error: any) {
+      console.error('Erro ao atualizar status:', error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao atualizar status",
+        description: error.message
+      });
+    }
+  };
+
   return (
     <LaudoContext.Provider
       value={{
@@ -656,6 +694,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
         deleteLaudo,
         renameLaudo,
         updateObservacoes,
+        updateLaudoStatus,
         refreshLaudos,
       }}
     >
