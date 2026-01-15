@@ -51,6 +51,7 @@ import { generateLaudoPDF, validateLaudoForPDF } from "@/utils/generateLaudoPDF"
 import { AIInfoModal } from "@/components/laudo/AIInfoModal";
 import { supabase } from "@/integrations/supabase/client";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // Import section components
 import { DadosProcesso } from "@/components/laudo/sections/DadosProcesso";
@@ -919,9 +920,9 @@ export default function LaudoEditor() {
                 <p className="text-sm text-muted-foreground">Gerando sugestões...</p>
               </div>
             ) : currentLaudo?.resumoPericia ? (
-              <ScrollArea className="flex-1 pr-4">
-                <div className="prose prose-sm max-w-none dark:prose-invert">
-                  <ReactMarkdown>
+              <ScrollArea className="flex-1 pr-2">
+                <div className="prose-narrow">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {currentLaudo.resumoPericia}
                   </ReactMarkdown>
                 </div>
