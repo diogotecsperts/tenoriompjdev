@@ -63,7 +63,7 @@ import { DadosVitima } from "@/components/laudo/sections/DadosVitima";
 import { DadosAcidente } from "@/components/laudo/sections/DadosAcidente";
 import { Anamnese } from "@/components/laudo/sections/Anamnese";
 import { AntecedentesPatologicos } from "@/components/laudo/sections/AntecedentesPatologicos";
-import { Planejamento } from "@/components/laudo/sections/Planejamento";
+// Removed: Planejamento - no longer used in workflow
 import { LaudosMedicos } from "@/components/laudo/sections/LaudosMedicos";
 import { ExamesComplementares } from "@/components/laudo/sections/ExamesComplementares";
 import { ExameFisico } from "@/components/laudo/sections/ExameFisico";
@@ -116,7 +116,6 @@ const consolidatedCards = [
       { id: "acidente", label: "Dados do Acidente", component: DadosAcidente },
       { id: "anamnese", label: "Anamnese", component: Anamnese },
       { id: "antecedentes", label: "Antecedentes Patológicos", component: AntecedentesPatologicos },
-      { id: "planejamento", label: "Planejamento", component: Planejamento },
     ],
   },
   {

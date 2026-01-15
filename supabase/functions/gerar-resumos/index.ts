@@ -7,8 +7,10 @@ const corsHeaders = {
 };
 
 interface GerarResumoRequest {
-  tipo: 'resumo_peticao' | 'resumo_contestacao' | 'descricao_doencas' | 'nexo_causal' | 'incapacidade' | 'sugestoes_pericia' | 'referencias_bibliograficas';
+  tipo: 'resumo_peticao' | 'resumo_contestacao' | 'descricao_doencas' | 'nexo_causal' | 'incapacidade' | 'sugestoes_pericia' | 'referencias_bibliograficas' | 'aprimorar_texto';
   contexto: {
+    textoOriginal?: string;
+    campo?: string;
     peticaoInicial?: string;
     contestacao?: string;
     cids?: string;
@@ -218,6 +220,27 @@ FORMATO DE SAÍDA:
 3- Norma técnica ou regulamentadora pertinente.
 
 Forneça referências que realmente embasem tecnicamente o laudo para este caso específico.
+`,
+
+  aprimorar_texto: (ctx: GerarResumoRequest['contexto']) => `
+Você é um revisor especializado em textos médico-periciais. Seu trabalho é APENAS corrigir e aprimorar o texto fornecido, SEM alterar seu conteúdo técnico ou factual.
+
+TEXTO ORIGINAL:
+${ctx.textoOriginal || ''}
+
+CAMPO DO LAUDO: ${ctx.campo || 'Não especificado'}
+
+REGRAS ESTRITAS:
+1. Corrija APENAS: ortografia, gramática, concordância verbal/nominal, pontuação
+2. Melhore a formalidade e o estilo para padrão de laudo pericial
+3. NÃO altere dados técnicos: datas, números, CIDs, nomes, percentuais, medidas, lateralidade
+4. NÃO adicione informações novas
+5. NÃO remova informações existentes
+6. NÃO altere diagnósticos ou conclusões médicas
+7. Mantenha a estrutura de parágrafos original
+8. Use linguagem técnica e formal apropriada para laudos periciais
+
+Retorne APENAS o texto corrigido, sem comentários ou explicações.
 `
 };
 
