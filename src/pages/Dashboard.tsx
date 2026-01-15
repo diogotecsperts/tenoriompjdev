@@ -229,7 +229,7 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-medium text-muted-foreground">Faturamento (Mês)</p>
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                    Em desenvolvimento
+                    Em breve
                   </Badge>
                 </div>
                 <p className="text-2xl font-bold text-foreground">
