@@ -70,28 +70,38 @@ export default function Dashboard() {
   }, [financeiro]);
 
   // Calculate stats - TODOS OS HOOKS DEVEM VIR ANTES DE QUALQUER RETURN
-  const totalLaudos = laudos.length;
   
-  const thisMonthLaudos = useMemo(() => {
+  // Laudos pendentes (em rascunho)
+  const laudosPendentes = useMemo(() => {
+    return laudos.filter(l => l.status === 'rascunho').length;
+  }, [laudos]);
+  
+  // Laudos finalizados no mês atual
+  const laudosFinalizadosMes = useMemo(() => {
+    const now = new Date();
     return laudos.filter(l => {
-      const createdAt = new Date(l.updatedAt);
-      const now = new Date();
-      return createdAt.getMonth() === now.getMonth() && createdAt.getFullYear() === now.getFullYear();
+      if (l.status !== 'finalizado') return false;
+      const updatedAt = new Date(l.updatedAt);
+      return updatedAt.getMonth() === now.getMonth() && 
+             updatedAt.getFullYear() === now.getFullYear();
     }).length;
   }, [laudos]);
 
-  const lastMonthLaudos = useMemo(() => {
+  // Laudos finalizados no mês anterior (para comparação %)
+  const laudosFinalizadosMesAnterior = useMemo(() => {
+    const now = new Date();
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     return laudos.filter(l => {
-      const createdAt = new Date(l.updatedAt);
-      const now = new Date();
-      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      return createdAt.getMonth() === lastMonth.getMonth() && createdAt.getFullYear() === lastMonth.getFullYear();
+      if (l.status !== 'finalizado') return false;
+      const updatedAt = new Date(l.updatedAt);
+      return updatedAt.getMonth() === lastMonth.getMonth() && 
+             updatedAt.getFullYear() === lastMonth.getFullYear();
     }).length;
   }, [laudos]);
 
-  const percentChange = lastMonthLaudos > 0 
-    ? Math.round(((thisMonthLaudos - lastMonthLaudos) / lastMonthLaudos) * 100)
-    : thisMonthLaudos > 0 ? 100 : 0;
+  const percentChange = laudosFinalizadosMesAnterior > 0 
+    ? Math.round(((laudosFinalizadosMes - laudosFinalizadosMesAnterior) / laudosFinalizadosMesAnterior) * 100)
+    : laudosFinalizadosMes > 0 ? 100 : 0;
 
   // Get recent laudos for history table (last 5)
   const recentLaudos = useMemo(() => {
@@ -179,13 +189,14 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div className="space-y-1">
                 <p className="text-sm font-medium text-muted-foreground">Laudos Pendentes</p>
-                <p className="text-2xl font-bold text-foreground">{totalLaudos}</p>
-                <div className="flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3 text-destructive" />
-                  <span className="text-xs text-destructive font-medium">
-                    {Math.min(2, totalLaudos)} Urgentes
-                  </span>
-                </div>
+                <p className="text-2xl font-bold text-foreground">{laudosPendentes}</p>
+                <p className="text-xs text-muted-foreground">
+                  {laudosPendentes === 0 
+                    ? "Nenhum em rascunho" 
+                    : laudosPendentes === 1 
+                      ? "1 laudo em rascunho"
+                      : `${laudosPendentes} laudos em rascunho`}
+                </p>
               </div>
               <div className="h-12 w-12 rounded-xl bg-amber-100 flex items-center justify-center">
                 <Clock className="h-6 w-6 text-amber-600" />
@@ -198,8 +209,8 @@ export default function Dashboard() {
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <p className="text-sm font-medium text-muted-foreground">Finalizadas (Mês)</p>
-                <p className="text-2xl font-bold text-foreground">{thisMonthLaudos}</p>
+                <p className="text-sm font-medium text-muted-foreground">Laudos finalizados (Mês)</p>
+                <p className="text-2xl font-bold text-foreground">{laudosFinalizadosMes}</p>
                 <p className={`text-xs font-medium ${percentChange >= 0 ? 'text-emerald-600' : 'text-destructive'}`}>
                   {percentChange >= 0 ? '+' : ''}{percentChange}% vs anterior
                 </p>
