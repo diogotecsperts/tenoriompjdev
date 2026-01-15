@@ -37,7 +37,7 @@ const mainMenuItems = [
   { icon: FilePlus, label: "Nova Perícia", path: "/laudo/new" },
   { icon: History, label: "Histórico", path: "/historico" },
   { icon: FileText, label: "Modelos de Laudos", path: "/modelos" },
-  { icon: DollarSign, label: "Financeiro", path: "/financeiro", badge: "Em desenvolvimento" },
+  { icon: DollarSign, label: "Financeiro", path: "/financeiro", badge: "Em breve" },
 ];
 
 const toolMenuItems = [
@@ -159,7 +159,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                 <div className="flex items-center gap-2 flex-1">
                   <span>{item.label}</span>
                   {item.badge && (
-                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 ml-auto">
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 leading-none font-normal text-muted-foreground border-muted-foreground/30 ml-auto">
                       {item.badge}
                     </Badge>
                   )}
