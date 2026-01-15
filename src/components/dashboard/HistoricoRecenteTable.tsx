@@ -5,8 +5,8 @@ import {
   Filter, 
   MoreHorizontal, 
   Pencil, 
-  Eye, 
-  Trash2 
+  Trash2,
+  RotateCcw
 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -40,6 +40,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface Laudo {
   id: string;
@@ -52,10 +57,11 @@ interface Laudo {
 interface HistoricoRecenteTableProps {
   laudos: Laudo[];
   onDelete: (id: string) => void;
+  onReopen?: (id: string) => void;
   onViewAll: () => void;
 }
 
-export function HistoricoRecenteTable({ laudos, onDelete, onViewAll }: HistoricoRecenteTableProps) {
+export function HistoricoRecenteTable({ laudos, onDelete, onReopen, onViewAll }: HistoricoRecenteTableProps) {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -172,14 +178,59 @@ export function HistoricoRecenteTable({ laudos, onDelete, onViewAll }: Historico
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleOpenLaudo(laudo.id)}>
-                          <Pencil className="mr-2 h-4 w-4" />
-                          Editar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleOpenLaudo(laudo.id)}>
-                          <Eye className="mr-2 h-4 w-4" />
-                          Visualizar
-                        </DropdownMenuItem>
+                        {/* Botão Editar dinâmico */}
+                        {laudo.status === 'finalizado' ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <div>
+                                <DropdownMenuItem 
+                                  disabled
+                                  className="opacity-50 cursor-not-allowed"
+                                >
+                                  <Pencil className="mr-2 h-4 w-4" />
+                                  Editar
+                                </DropdownMenuItem>
+                              </div>
+                            </TooltipTrigger>
+                            <TooltipContent side="left">
+                              <p>Laudo finalizado. Reabra para editar.</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <DropdownMenuItem onClick={() => handleOpenLaudo(laudo.id)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Editar
+                          </DropdownMenuItem>
+                        )}
+                        
+                        {/* Reabrir com confirmação */}
+                        {laudo.status === 'finalizado' && onReopen && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                                <RotateCcw className="mr-2 h-4 w-4" />
+                                Reabrir Laudo
+                              </DropdownMenuItem>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Reabrir laudo?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  Ao reabrir este laudo, ele voltará ao status de rascunho e poderá ser editado novamente.
+                                  Você precisará finalizá-lo novamente quando terminar as alterações.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => onReopen(laudo.id)}>
+                                  Reabrir
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )}
+                        
+                        {/* Excluir */}
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
                             <DropdownMenuItem 
