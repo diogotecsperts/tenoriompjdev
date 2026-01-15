@@ -63,11 +63,9 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { 
   Search, 
   MoreHorizontal, 
-  Eye, 
   Pencil, 
   Trash2, 
   FileText,
-  Download,
   Filter,
   Plus,
   AlertTriangle,
@@ -585,14 +583,6 @@ export default function Historico() {
                           <DropdownMenuItem onClick={() => handleOpenLaudo(laudo.id)}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Editar
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleOpenLaudo(laudo.id)}>
-                            <Eye className="mr-2 h-4 w-4" />
-                            Visualizar
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <Download className="mr-2 h-4 w-4" />
-                            Exportar PDF
                           </DropdownMenuItem>
                           {laudo.status === 'finalizado' && (
                             <DropdownMenuItem onClick={() => updateLaudoStatus(laudo.id, 'rascunho')}>
