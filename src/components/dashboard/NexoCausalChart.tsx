@@ -23,6 +23,26 @@ const LABELS = {
   "Não definido": "Não definido",
 };
 
+// Normaliza todos os formatos possíveis de nexo_causal_tipo
+const normalizeNexoTipo = (tipo: string | null | undefined): string => {
+  if (!tipo) return "Não definido";
+  
+  const normalized = tipo.toLowerCase().trim();
+  
+  // Mapear todas as variações para categorias padronizadas
+  if (normalized === "nexo_causal" || normalized === "nexo causal" || normalized === "direto") {
+    return "Nexo Causal";
+  }
+  if (normalized === "concausal" || normalized === "concausa") {
+    return "Concausal";
+  }
+  if (normalized === "ausencia" || normalized === "ausência de nexo causal" || normalized === "sem_nexo" || normalized === "ausência") {
+    return "Ausência de Nexo Causal";
+  }
+  
+  return "Não definido";
+};
+
 export const NexoCausalChart = memo(function NexoCausalChart({ laudos }: NexoCausalChartProps) {
   const data = useMemo(() => {
     const counts: Record<string, number> = {
@@ -33,12 +53,8 @@ export const NexoCausalChart = memo(function NexoCausalChart({ laudos }: NexoCau
     };
 
     laudos.forEach((laudo) => {
-      const tipo = laudo.nexo_causal_tipo;
-      if (tipo && counts.hasOwnProperty(tipo)) {
-        counts[tipo]++;
-      } else if (!tipo || tipo === "") {
-        counts["Não definido"]++;
-      }
+      const tipoNormalizado = normalizeNexoTipo(laudo.nexo_causal_tipo);
+      counts[tipoNormalizado]++;
     });
 
     return Object.entries(counts)
