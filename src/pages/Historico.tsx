@@ -166,8 +166,6 @@ export default function Historico() {
     switch (status) {
       case "finalizado":
         return <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">Concluído</Badge>;
-      case "em_analise":
-        return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">Em Análise</Badge>;
       default:
         return <Badge variant="secondary">Rascunho</Badge>;
     }
@@ -322,7 +320,6 @@ export default function Historico() {
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
                   <SelectItem value="rascunho">Rascunho</SelectItem>
-                  <SelectItem value="em_analise">Em Análise</SelectItem>
                   <SelectItem value="finalizado">Concluído</SelectItem>
                 </SelectContent>
               </Select>
@@ -489,7 +486,7 @@ export default function Historico() {
                       </span>
                     </TableCell>
                     <TableCell>
-                      {getStatusBadge(laudo.conclusaoStatus)}
+                      {getStatusBadge(laudo.status)}
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <TooltipProvider>
