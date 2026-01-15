@@ -46,7 +46,7 @@ interface Laudo {
   title: string;
   vitimaName?: string;
   updatedAt: Date;
-  conclusaoStatus?: string;
+  status?: string;
 }
 
 interface HistoricoRecenteTableProps {
@@ -71,9 +71,6 @@ export function HistoricoRecenteTable({ laudos, onDelete, onViewAll }: Historico
   const getStatusBadge = (status?: string) => {
     if (status === "finalizado") {
       return <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">Concluído</Badge>;
-    }
-    if (status === "em_analise") {
-      return <Badge className="bg-amber-100 text-amber-700 hover:bg-amber-100">Em Análise</Badge>;
     }
     return <Badge variant="secondary">Rascunho</Badge>;
   };
@@ -161,7 +158,7 @@ export function HistoricoRecenteTable({ laudos, onDelete, onViewAll }: Historico
                     </span>
                   </TableCell>
                   <TableCell>
-                    {getStatusBadge(laudo.conclusaoStatus)}
+                    {getStatusBadge(laudo.status)}
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
