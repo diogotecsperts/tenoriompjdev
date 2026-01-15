@@ -7,14 +7,11 @@ import {
   LayoutDashboard,
   FilePlus,
   History,
-  FileText,
   FileDown,
-  FileOutput,
   Scale,
   DollarSign,
   Settings,
   LogOut,
-  User,
   ChevronLeft,
   Menu,
   Terminal,
@@ -26,7 +23,6 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { ImportarAutosDialog } from "@/components/tools/ImportarAutosDialog";
-import { GerarLaudoDialog } from "@/components/tools/GerarLaudoDialog";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -42,7 +38,6 @@ const mainMenuItems = [
 
 const toolMenuItems = [
   { icon: FileDown, label: "Importar Autos (PDF)", action: "import" },
-  { icon: FileOutput, label: "Gerar Laudo Formatado", action: "generate" },
   { icon: Scale, label: "Responder Impugnação", path: "/impugnacao" },
 ];
 
@@ -54,7 +49,6 @@ export function AppLayout({ children }: AppLayoutProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [gerarLaudoDialogOpen, setGerarLaudoDialogOpen] = useState(false);
   const [isDeveloper, setIsDeveloper] = useState(false);
 
   useEffect(() => {
@@ -74,8 +68,6 @@ export function AppLayout({ children }: AppLayoutProps) {
   const handleToolAction = (action: string) => {
     if (action === "import") {
       setImportDialogOpen(true);
-    } else if (action === "generate") {
-      setGerarLaudoDialogOpen(true);
     }
     setMobileOpen(false);
   };
@@ -346,10 +338,6 @@ export function AppLayout({ children }: AppLayoutProps) {
       <ImportarAutosDialog 
         open={importDialogOpen} 
         onOpenChange={setImportDialogOpen} 
-      />
-      <GerarLaudoDialog 
-        open={gerarLaudoDialogOpen} 
-        onOpenChange={setGerarLaudoDialogOpen} 
       />
     </>
   );
