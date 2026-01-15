@@ -55,7 +55,6 @@ interface UserWithSettings extends UserProfile {
 interface UserDataCount {
   laudos: number;
   financeiro: number;
-  modelos: number;
   impugnacoes: number;
 }
 
@@ -139,17 +138,15 @@ export function DevUsersList() {
     setLoadingDataCount(true);
     try {
       // Fetch counts in parallel
-      const [laudosRes, financeiroRes, modelosRes, impugnacoesRes] = await Promise.all([
+      const [laudosRes, financeiroRes, impugnacoesRes] = await Promise.all([
         supabase.from("laudos").select("id", { count: "exact", head: true }).eq("user_id", userId),
         supabase.from("financeiro").select("id", { count: "exact", head: true }).eq("user_id", userId),
-        supabase.from("modelos_laudo").select("id", { count: "exact", head: true }).eq("user_id", userId),
         supabase.from("impugnacoes").select("id", { count: "exact", head: true }).eq("user_id", userId),
       ]);
 
       setUserDataCount({
         laudos: laudosRes.count || 0,
         financeiro: financeiroRes.count || 0,
-        modelos: modelosRes.count || 0,
         impugnacoes: impugnacoesRes.count || 0,
       });
     } catch (error) {
@@ -441,7 +438,6 @@ export function DevUsersList() {
                     <ul className="text-sm space-y-1 text-foreground">
                       <li>• {userDataCount.laudos} laudo(s)</li>
                       <li>• {userDataCount.financeiro} lançamento(s) financeiro(s)</li>
-                      <li>• {userDataCount.modelos} modelo(s) de laudo</li>
                       <li>• {userDataCount.impugnacoes} impugnação(ões)</li>
                       <li>• Configurações e dados pessoais</li>
                       <li>• Arquivos de storage (avatars, logos, PDFs)</li>

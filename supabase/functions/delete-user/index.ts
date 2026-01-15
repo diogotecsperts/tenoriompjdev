@@ -140,15 +140,7 @@ Deno.serve(async (req) => {
       .select();
     deletionResults.laudos = laudos?.length || 0;
 
-    // 6. Delete modelos_laudo
-    const { data: modelos } = await supabaseAdmin
-      .from("modelos_laudo")
-      .delete()
-      .eq("user_id", userId)
-      .select();
-    deletionResults.modelos_laudo = modelos?.length || 0;
-
-    // 7. Delete user_settings
+    // 6. Delete user_settings
     const { data: settings } = await supabaseAdmin
       .from("user_settings")
       .delete()

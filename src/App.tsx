@@ -15,7 +15,7 @@ import { GlobalErrorListener } from "@/components/GlobalErrorListener";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Historico from "./pages/Historico";
-import Modelos from "./pages/Modelos";
+
 import LaudoEditor from "./pages/LaudoEditor";
 import Configuracoes from "./pages/Configuracoes";
 import Impugnacao from "./pages/Impugnacao";
@@ -67,14 +67,6 @@ function AppRoutes() {
         element={
           <ProtectedWithLayout>
             <Historico />
-          </ProtectedWithLayout>
-        }
-      />
-      <Route
-        path="/modelos"
-        element={
-          <ProtectedWithLayout>
-            <Modelos />
           </ProtectedWithLayout>
         }
       />

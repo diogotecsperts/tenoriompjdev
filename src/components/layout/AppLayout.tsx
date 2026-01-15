@@ -36,7 +36,7 @@ const mainMenuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
   { icon: FilePlus, label: "Nova Perícia", path: "/laudo/new" },
   { icon: History, label: "Histórico", path: "/historico" },
-  { icon: FileText, label: "Modelos de Laudos", path: "/modelos" },
+  
   { icon: DollarSign, label: "Financeiro", path: "/financeiro", badge: "Em breve" },
 ];
 
