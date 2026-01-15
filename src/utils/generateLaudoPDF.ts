@@ -27,6 +27,9 @@ const MARGINS = {
   bottom: 38,     // Espaço reservado para o rodapé PNG
 };
 
+// Margem de segurança acima do rodapé para evitar colisão
+const FOOTER_SAFETY_MARGIN = 10; // 10mm de margem fixa acima do rodapé
+
 const PAGE = {
   width: 210,
   height: 297,
@@ -36,8 +39,8 @@ const PAGE = {
 // Área útil de conteúdo (entre cabeçalho e rodapé)
 const CONTENT_AREA = {
   startY: MARGINS.top,
-  endY: PAGE.height - MARGINS.bottom,
-  height: PAGE.height - MARGINS.top - MARGINS.bottom, // ~217mm
+  endY: PAGE.height - MARGINS.bottom - FOOTER_SAFETY_MARGIN, // 297 - 38 - 10 = 249mm
+  height: PAGE.height - MARGINS.top - MARGINS.bottom - FOOTER_SAFETY_MARGIN,
 };
 
 // ========== FUNÇÕES AUXILIARES ==========
@@ -97,14 +100,55 @@ const addSubtitle = (doc: jsPDF, title: string, y: number): number => {
   return y + 7;
 };
 
-// Adiciona parágrafo com quebra de linha
+// Adiciona parágrafo com quebra de linha e JUSTIFICAÇÃO
 const addParagraph = (doc: jsPDF, text: string, y: number, maxWidth: number = PAGE.contentWidth): number => {
   if (!text) return y;
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
+  
   const lines = doc.splitTextToSize(text, maxWidth);
-  doc.text(lines, MARGINS.left, y);
-  return y + (lines.length * 5) + 5;
+  const lineHeight = 5;
+  
+  lines.forEach((line: string, index: number) => {
+    // Verificar nova página para cada linha
+    y = checkNewPage(doc, y, lineHeight + 2);
+    
+    const isLastLine = index === lines.length - 1;
+    const trimmedLine = line.trim();
+    
+    // Se é última linha ou linha curta, não justificar (alinha à esquerda)
+    if (isLastLine || doc.getTextWidth(trimmedLine) < maxWidth * 0.7) {
+      doc.text(trimmedLine, MARGINS.left, y);
+    } else {
+      // Justificar: distribuir espaço entre palavras
+      const words = trimmedLine.split(/\s+/);
+      if (words.length > 1) {
+        // Calcular largura total das palavras sem espaços
+        let totalWordsWidth = 0;
+        words.forEach(word => {
+          totalWordsWidth += doc.getTextWidth(word);
+        });
+        
+        // Calcular espaço extra entre palavras
+        const totalSpaces = words.length - 1;
+        const extraSpacePerGap = (maxWidth - totalWordsWidth) / totalSpaces;
+        
+        // Desenhar cada palavra com espaçamento calculado
+        let xPos = MARGINS.left;
+        words.forEach((word, wordIndex) => {
+          doc.text(word, xPos, y);
+          if (wordIndex < words.length - 1) {
+            xPos += doc.getTextWidth(word) + extraSpacePerGap;
+          }
+        });
+      } else {
+        doc.text(trimmedLine, MARGINS.left, y);
+      }
+    }
+    y += lineHeight;
+  });
+  
+  return y + 3; // Espaço após parágrafo
 };
 
 // Verifica necessidade de nova página - respeita área do rodapé
