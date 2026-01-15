@@ -2,38 +2,76 @@ import { useMemo, memo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 
-interface TiposPericiaChartProps {
+interface NexoCausalChartProps {
   laudos: Array<{
     id: string;
-    // In the future, add tipo field to classify pericias
+    nexo_causal_tipo?: string | null;
   }>;
 }
 
-const COLORS = [
-  "hsl(var(--primary))",
-  "hsl(var(--chart-2))",
-  "hsl(var(--chart-3))",
-  "hsl(var(--chart-4))",
-];
+const COLORS = {
+  "Nexo Causal": "hsl(var(--chart-1))",
+  "Concausal": "hsl(var(--chart-2))",
+  "Ausência de Nexo Causal": "hsl(var(--chart-3))",
+  "Não definido": "hsl(var(--muted-foreground))",
+};
 
-export const TiposPericiaChart = memo(function TiposPericiaChart({ laudos }: TiposPericiaChartProps) {
-  // Mock data for demonstration - in real app, this would come from laudos
+const LABELS = {
+  "Nexo Causal": "Nexo Direto",
+  "Concausal": "Concausa",
+  "Ausência de Nexo Causal": "Sem Nexo",
+  "Não definido": "Não definido",
+};
+
+export const NexoCausalChart = memo(function NexoCausalChart({ laudos }: NexoCausalChartProps) {
   const data = useMemo(() => {
-    const total = laudos.length || 1;
-    return [
-      { name: "Ortopedia", value: Math.ceil(total * 0.45), color: COLORS[0] },
-      { name: "Psiquiatria", value: Math.ceil(total * 0.25), color: COLORS[1] },
-      { name: "Med. Trabalho", value: Math.ceil(total * 0.20), color: COLORS[2] },
-      { name: "Outros", value: Math.floor(total * 0.10), color: COLORS[3] },
-    ].filter(item => item.value > 0);
-  }, [laudos.length]);
+    const counts: Record<string, number> = {
+      "Nexo Causal": 0,
+      "Concausal": 0,
+      "Ausência de Nexo Causal": 0,
+      "Não definido": 0,
+    };
+
+    laudos.forEach((laudo) => {
+      const tipo = laudo.nexo_causal_tipo;
+      if (tipo && counts.hasOwnProperty(tipo)) {
+        counts[tipo]++;
+      } else if (!tipo || tipo === "") {
+        counts["Não definido"]++;
+      }
+    });
+
+    return Object.entries(counts)
+      .filter(([_, value]) => value > 0)
+      .map(([name, value]) => ({
+        name,
+        label: LABELS[name as keyof typeof LABELS],
+        value,
+        color: COLORS[name as keyof typeof COLORS],
+      }));
+  }, [laudos]);
 
   const total = data.reduce((sum, item) => sum + item.value, 0);
+
+  if (total === 0) {
+    return (
+      <Card className="shadow-sm">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg font-semibold">Nexo Causal</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-center h-[140px] text-muted-foreground text-sm">
+            Nenhum laudo cadastrado
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="shadow-sm">
       <CardHeader className="pb-2">
-        <CardTitle className="text-lg font-semibold">Tipos de Perícia</CardTitle>
+        <CardTitle className="text-lg font-semibold">Nexo Causal</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="flex items-center gap-4">
@@ -73,7 +111,7 @@ export const TiposPericiaChart = memo(function TiposPericiaChart({ laudos }: Tip
                     className="h-2.5 w-2.5 rounded-full flex-shrink-0" 
                     style={{ backgroundColor: item.color }}
                   />
-                  <span className="text-sm text-muted-foreground">{item.name}</span>
+                  <span className="text-sm text-muted-foreground">{item.label}</span>
                 </div>
                 <span className="text-sm font-medium text-foreground">{item.value}</span>
               </div>
