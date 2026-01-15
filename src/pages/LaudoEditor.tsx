@@ -179,7 +179,7 @@ const VIEW_MODE_STORAGE_KEY = "laudo-editor-view-mode";
 export default function LaudoEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { currentLaudo, loadLaudo, saveLaudo, createLaudo, updateLaudo, deleteLaudo, updateLaudoStatus } = useLaudo();
+  const { currentLaudo, loadLaudo, saveLaudo, createLocalLaudo, updateLaudo, deleteLaudo, updateLaudoStatus, setCurrentLaudo } = useLaudo();
   const { setGuarded, setOnNavigationRequest } = useNavigationGuardContext();
   const [activeCard, setActiveCard] = useState("preliminares");
   const [showExitDialog, setShowExitDialog] = useState(false);
@@ -327,10 +327,10 @@ export default function LaudoEditor() {
       if (id && id !== "new") {
         await loadLaudo(id);
       } else if (id === "new" || !id) {
-        const newId = await createLaudo();
-        if (newId) {
-          navigate(`/laudo/${newId}`, { replace: true });
-        }
+        // Create laudo in memory only - don't persist to database yet
+        const localLaudo = await createLocalLaudo();
+        setCurrentLaudo(localLaudo);
+        // Stay on /laudo/new - URL will update when user saves
       }
     };
     initializeLaudo();
@@ -395,11 +395,18 @@ export default function LaudoEditor() {
     if (currentLaudo) {
       updateLaudo({ ...currentLaudo, anotacoes: notes } as any);
     }
-    await saveLaudo();
+    const result = await saveLaudo();
+    
+    // If this was a new laudo, navigate to the real URL
+    if (result?.id && currentLaudo?.id === 'new') {
+      navigate(`/laudo/${result.id}`, { replace: true });
+    }
+    
     // Update reference after save to reflect saved state
     if (currentLaudo) {
       originalLaudoRef.current = JSON.stringify({
         ...currentLaudo,
+        id: result?.id || currentLaudo.id,
         anotacoes: notes,
         createdAt: undefined,
         updatedAt: undefined,
