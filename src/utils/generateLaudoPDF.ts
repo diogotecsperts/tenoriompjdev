@@ -23,12 +23,7 @@ const COLORS = {
 const MARGINS = {
   left: 20,
   right: 15,
-  top: 52,        // Espaço reservado para o cabeçalho PNG (aumentado para não colidir)
-  bottom: 38,     // Espaço reservado para o rodapé PNG
 };
-
-// Margem de segurança acima do rodapé para evitar colisão
-const FOOTER_SAFETY_MARGIN = 10; // 10mm de margem fixa acima do rodapé
 
 const PAGE = {
   width: 210,
@@ -36,12 +31,28 @@ const PAGE = {
   contentWidth: 175, // PAGE.width - MARGINS.left - MARGINS.right
 };
 
-// Área útil de conteúdo (entre cabeçalho e rodapé)
-const CONTENT_AREA = {
-  startY: MARGINS.top,
-  endY: PAGE.height - MARGINS.bottom - FOOTER_SAFETY_MARGIN, // 297 - 38 - 10 = 249mm
-  height: PAGE.height - MARGINS.top - MARGINS.bottom - FOOTER_SAFETY_MARGIN,
+// Margens de segurança fixas
+const HEADER_SAFETY_MARGIN = 6;  // 6mm abaixo do cabeçalho
+const FOOTER_SAFETY_MARGIN = 12; // 12mm acima do rodapé
+
+// Layout dinâmico - será calculado baseado nas imagens reais
+interface PageLayout {
+  headerBottomY: number;
+  footerTopY: number;
+  contentStartY: number;
+  contentEndY: number;
+}
+
+// Layout padrão (fallback se imagens não carregarem)
+const DEFAULT_LAYOUT: PageLayout = {
+  headerBottomY: 45,
+  footerTopY: 270,
+  contentStartY: 45 + HEADER_SAFETY_MARGIN, // 51mm
+  contentEndY: 270 - FOOTER_SAFETY_MARGIN,   // 258mm
 };
+
+// Layout global que será atualizado após carregar imagens
+let pageLayout: PageLayout = { ...DEFAULT_LAYOUT };
 
 // ========== FUNÇÕES AUXILIARES ==========
 
@@ -75,8 +86,57 @@ const calculateAge = (birthDate: string): string => {
   }
 };
 
+// ========== FUNÇÕES DE MEDIÇÃO (para calcular altura real do conteúdo) ==========
+
+const SECTION_TITLE_HEIGHT = 12;
+const SUBTITLE_HEIGHT = 7;
+const LINE_HEIGHT = 5;
+const PARAGRAPH_AFTER_SPACING = 3;
+const LABELED_FIELD_AFTER_SPACING = 3;
+
+// Mede altura de um parágrafo
+const measureParagraphHeight = (doc: jsPDF, text: string, maxWidth: number = PAGE.contentWidth): number => {
+  if (!text) return 0;
+  doc.setFontSize(10);
+  const lines = doc.splitTextToSize(text, maxWidth);
+  return (lines.length * LINE_HEIGHT) + PARAGRAPH_AFTER_SPACING;
+};
+
+// Mede altura de um campo com label
+const measureLabeledFieldHeight = (doc: jsPDF, label: string, value: string): number => {
+  if (!value) return 0;
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  const labelWidth = doc.getTextWidth(`${label}: `) + 2;
+  doc.setFont("helvetica", "normal");
+  const valueLines = doc.splitTextToSize(value, PAGE.contentWidth - labelWidth);
+  return (valueLines.length * LINE_HEIGHT) + LABELED_FIELD_AFTER_SPACING;
+};
+
+// ========== FUNÇÕES DE RENDERIZAÇÃO ==========
+
+// Verifica necessidade de nova página - USA LAYOUT DINÂMICO
+const checkNewPage = (doc: jsPDF, currentY: number, neededSpace: number = 10): number => {
+  if (currentY + neededSpace > pageLayout.contentEndY) {
+    doc.addPage();
+    return pageLayout.contentStartY;
+  }
+  return currentY;
+};
+
+// Garante espaço suficiente ou quebra página
+const ensureSpace = (doc: jsPDF, y: number, requiredHeight: number): number => {
+  const remainingSpace = pageLayout.contentEndY - y;
+  if (requiredHeight > remainingSpace) {
+    doc.addPage();
+    return pageLayout.contentStartY;
+  }
+  return y;
+};
+
 // Adiciona título de seção com numeração
 const addSectionTitle = (doc: jsPDF, title: string, y: number): number => {
+  y = checkNewPage(doc, y, SECTION_TITLE_HEIGHT);
   doc.setFontSize(12);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
@@ -86,18 +146,19 @@ const addSectionTitle = (doc: jsPDF, title: string, y: number): number => {
   doc.line(MARGINS.left, y + 2, PAGE.width - MARGINS.right, y + 2);
   doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   doc.setFont("helvetica", "normal");
-  return y + 12;
+  return y + SECTION_TITLE_HEIGHT;
 };
 
 // Adiciona subtítulo
 const addSubtitle = (doc: jsPDF, title: string, y: number): number => {
+  y = checkNewPage(doc, y, SUBTITLE_HEIGHT);
   doc.setFontSize(11);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(COLORS.secondary.r, COLORS.secondary.g, COLORS.secondary.b);
   doc.text(title, MARGINS.left, y);
   doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   doc.setFont("helvetica", "normal");
-  return y + 7;
+  return y + SUBTITLE_HEIGHT;
 };
 
 // Adiciona parágrafo com quebra de linha e JUSTIFICAÇÃO
@@ -107,11 +168,10 @@ const addParagraph = (doc: jsPDF, text: string, y: number, maxWidth: number = PA
   doc.setFont("helvetica", "normal");
   
   const lines = doc.splitTextToSize(text, maxWidth);
-  const lineHeight = 5;
   
   lines.forEach((line: string, index: number) => {
     // Verificar nova página para cada linha
-    y = checkNewPage(doc, y, lineHeight + 2);
+    y = checkNewPage(doc, y, LINE_HEIGHT);
     
     const isLastLine = index === lines.length - 1;
     const trimmedLine = line.trim();
@@ -123,17 +183,14 @@ const addParagraph = (doc: jsPDF, text: string, y: number, maxWidth: number = PA
       // Justificar: distribuir espaço entre palavras
       const words = trimmedLine.split(/\s+/);
       if (words.length > 1) {
-        // Calcular largura total das palavras sem espaços
         let totalWordsWidth = 0;
         words.forEach(word => {
           totalWordsWidth += doc.getTextWidth(word);
         });
         
-        // Calcular espaço extra entre palavras
         const totalSpaces = words.length - 1;
         const extraSpacePerGap = (maxWidth - totalWordsWidth) / totalSpaces;
         
-        // Desenhar cada palavra com espaçamento calculado
         let xPos = MARGINS.left;
         words.forEach((word, wordIndex) => {
           doc.text(word, xPos, y);
@@ -145,34 +202,43 @@ const addParagraph = (doc: jsPDF, text: string, y: number, maxWidth: number = PA
         doc.text(trimmedLine, MARGINS.left, y);
       }
     }
-    y += lineHeight;
+    y += LINE_HEIGHT;
   });
   
-  return y + 3; // Espaço após parágrafo
+  return y + PARAGRAPH_AFTER_SPACING;
 };
 
-// Verifica necessidade de nova página - respeita área do rodapé
-const checkNewPage = (doc: jsPDF, currentY: number, neededSpace: number = 40): number => {
-  const maxY = CONTENT_AREA.endY; // Respeita espaço do rodapé
-  if (currentY + neededSpace > maxY) {
-    doc.addPage();
-    return CONTENT_AREA.startY; // Começa abaixo do cabeçalho
-  }
-  return currentY;
-};
-
-// Adiciona campo com label
+// Adiciona campo com label - AGORA COM VERIFICAÇÃO POR LINHA
 const addLabeledField = (doc: jsPDF, label: string, value: string, y: number): number => {
   if (!value) return y;
+  
+  // Verificar espaço antes de começar
+  const height = measureLabeledFieldHeight(doc, label, value);
+  y = checkNewPage(doc, y, Math.min(height, LINE_HEIGHT * 2)); // Pelo menos 2 linhas
+  
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
   const labelText = `${label}: `;
   const labelWidth = doc.getTextWidth(labelText) + 2;
   doc.text(labelText, MARGINS.left, y);
+  
   doc.setFont("helvetica", "normal");
   const valueLines = doc.splitTextToSize(value, PAGE.contentWidth - labelWidth);
-  doc.text(valueLines, MARGINS.left + labelWidth, y);
-  return y + (valueLines.length * 5) + 3;
+  
+  // Renderizar linha por linha para respeitar limite da página
+  valueLines.forEach((line: string, index: number) => {
+    if (index === 0) {
+      doc.text(line, MARGINS.left + labelWidth, y);
+    } else {
+      y = checkNewPage(doc, y + LINE_HEIGHT, LINE_HEIGHT);
+      doc.text(line, MARGINS.left + labelWidth, y);
+    }
+    if (index < valueLines.length - 1) {
+      y += LINE_HEIGHT;
+    }
+  });
+  
+  return y + LINE_HEIGHT + LABELED_FIELD_AFTER_SPACING;
 };
 
 // Adiciona texto de endereçamento judicial
@@ -244,13 +310,55 @@ const getImageDimensions = (base64: string): Promise<{ width: number; height: nu
   });
 };
 
+// Calcula layout dinâmico baseado nas imagens reais
+const calculateDynamicLayout = async (
+  headerImageBase64: string | null,
+  footerImageBase64: string | null
+): Promise<PageLayout> => {
+  let headerBottomY = DEFAULT_LAYOUT.headerBottomY;
+  let footerTopY = DEFAULT_LAYOUT.footerTopY;
+  
+  // Calcular altura real do cabeçalho
+  if (headerImageBase64) {
+    try {
+      const dimensions = await getImageDimensions(headerImageBase64);
+      const aspectRatio = dimensions.height / dimensions.width;
+      const imgWidth = PAGE.width - 16; // Mesma largura usada em addHeaderToPages
+      const imgHeight = imgWidth * aspectRatio;
+      const yPos = 2; // Mesma posição usada em addHeaderToPages
+      headerBottomY = yPos + imgHeight;
+    } catch {
+      // Mantém valor padrão
+    }
+  }
+  
+  // Calcular posição real do rodapé
+  if (footerImageBase64) {
+    try {
+      const dimensions = await getImageDimensions(footerImageBase64);
+      const aspectRatio = dimensions.height / dimensions.width;
+      const imgWidth = PAGE.width; // Mesma largura usada em addFooterToPages
+      const imgHeight = imgWidth * aspectRatio;
+      footerTopY = PAGE.height - imgHeight;
+    } catch {
+      // Mantém valor padrão
+    }
+  }
+  
+  return {
+    headerBottomY,
+    footerTopY,
+    contentStartY: headerBottomY + HEADER_SAFETY_MARGIN,
+    contentEndY: footerTopY - FOOTER_SAFETY_MARGIN,
+  };
+};
+
 // Adiciona cabeçalho PNG em todas as páginas
 const addHeaderToPages = async (doc: jsPDF, headerImageBase64: string | null) => {
   if (!headerImageBase64) return;
   
   const pageCount = doc.getNumberOfPages();
   
-  // Obter dimensões reais da imagem para calcular proporção
   let aspectRatio = 0.15;
   try {
     const dimensions = await getImageDimensions(headerImageBase64);
@@ -259,13 +367,10 @@ const addHeaderToPages = async (doc: jsPDF, headerImageBase64: string | null) =>
     // Usa fallback se falhar
   }
   
-  // Largura total da página com pequena margem lateral
-  const imgWidth = PAGE.width - 16; // 194mm (8mm de margem cada lado)
+  const imgWidth = PAGE.width - 16;
   const imgHeight = imgWidth * aspectRatio;
-  
-  // Centralizado horizontalmente, colado no topo
   const xPos = 8;
-  const yPos = 2; // Posição mais próxima do topo (reduzido de 5mm para 2mm)
+  const yPos = 2;
   
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
@@ -283,7 +388,6 @@ const addFooterToPages = async (doc: jsPDF, footerImageBase64: string | null) =>
   
   const pageCount = doc.getNumberOfPages();
   
-  // Obter dimensões reais da imagem
   let aspectRatio = 0.12;
   try {
     const dimensions = await getImageDimensions(footerImageBase64);
@@ -292,11 +396,8 @@ const addFooterToPages = async (doc: jsPDF, footerImageBase64: string | null) =>
     // Usa fallback se falhar
   }
   
-  // Largura total da página (imagem vai de ponta a ponta)
-  const imgWidth = PAGE.width; // 210mm
+  const imgWidth = PAGE.width;
   const imgHeight = imgWidth * aspectRatio;
-  
-  // Posição no fundo da página
   const yPos = PAGE.height - imgHeight;
   
   for (let i = 1; i <= pageCount; i++) {
@@ -304,7 +405,6 @@ const addFooterToPages = async (doc: jsPDF, footerImageBase64: string | null) =>
     try {
       doc.addImage(footerImageBase64, "PNG", 0, yPos, imgWidth, imgHeight);
       
-      // Adicionar número da página sobre o rodapé
       doc.setFont("helvetica", "italic");
       doc.setFontSize(8);
       doc.setTextColor(COLORS.white.r, COLORS.white.g, COLORS.white.b);
@@ -322,19 +422,23 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   const doc = new jsPDF();
   let sectionNumber = 1;
   
-  // Carregar imagens separadas do papel timbrado
+  // Carregar imagens do papel timbrado
   const headerImageBase64 = await loadImageAsBase64("/timbrado-cabecalho.png");
   const footerImageBase64 = await loadImageAsBase64("/timbrado-rodape.png");
   
+  // CALCULAR LAYOUT DINÂMICO baseado nas imagens reais
+  pageLayout = await calculateDynamicLayout(headerImageBase64, footerImageBase64);
+  
   // ========== PÁGINA 1 - INÍCIO DO CONTEÚDO ==========
-  let y = CONTENT_AREA.startY;
+  let y = pageLayout.contentStartY;
   
   // Endereçamento judicial
   y = addJudicialAddress(doc, laudo, y);
   
   // 1. OBJETIVO DA PERÍCIA
   if (laudo.objetivoPericia) {
-    y = checkNewPage(doc, y, 50);
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.objetivoPericia);
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 40));
     y = addSectionTitle(doc, `${sectionNumber}. OBJETIVO DA PERÍCIA`, y);
     y = addParagraph(doc, laudo.objetivoPericia, y);
     sectionNumber++;
@@ -342,7 +446,11 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 2. ASSISTENTES TÉCNICOS
   if (laudo.assistenteTecnicoReclamante || laudo.assistenteTecnicoReclamada) {
-    y = checkNewPage(doc, y, 40);
+    let sectionHeight = SECTION_TITLE_HEIGHT;
+    if (laudo.assistenteTecnicoReclamante) sectionHeight += measureLabeledFieldHeight(doc, "Assistente do Reclamante", laudo.assistenteTecnicoReclamante);
+    if (laudo.assistenteTecnicoReclamada) sectionHeight += measureLabeledFieldHeight(doc, "Assistente da Reclamada", laudo.assistenteTecnicoReclamada);
+    
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 30));
     y = addSectionTitle(doc, `${sectionNumber}. ASSISTENTES TÉCNICOS`, y);
     if (laudo.assistenteTecnicoReclamante) {
       y = addLabeledField(doc, "Assistente do Reclamante", laudo.assistenteTecnicoReclamante, y);
@@ -355,7 +463,14 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 3. IDENTIFICAÇÃO DO PERICIANDO
-  y = checkNewPage(doc, y, 60);
+  {
+    let sectionHeight = SECTION_TITLE_HEIGHT;
+    sectionHeight += measureLabeledFieldHeight(doc, "Nome", laudo.vitimaName || laudo.reclamante || "");
+    if (laudo.vitimaNascimento) sectionHeight += measureLabeledFieldHeight(doc, "Data de Nascimento", `${formatDate(laudo.vitimaNascimento)} (${calculateAge(laudo.vitimaNascimento)})`);
+    sectionHeight += measureLabeledFieldHeight(doc, "Profissão", laudo.vitimaProfissao || "");
+    
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 40));
+  }
   y = addSectionTitle(doc, `${sectionNumber}. IDENTIFICAÇÃO DO PERICIANDO`, y);
   y = addLabeledField(doc, "Nome", laudo.vitimaName || laudo.reclamante, y);
   if (laudo.vitimaNascimento) {
@@ -369,7 +484,8 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 4. RESUMO DA PETIÇÃO INICIAL
   if (laudo.resumoPeticaoInicial) {
-    y = checkNewPage(doc, y, 50);
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.resumoPeticaoInicial);
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 40));
     y = addSectionTitle(doc, `${sectionNumber}. RESUMO DA PETIÇÃO INICIAL`, y);
     y = addParagraph(doc, laudo.resumoPeticaoInicial, y);
     sectionNumber++;
@@ -377,7 +493,8 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 5. RESUMO DA CONTESTAÇÃO
   if (laudo.resumoContestacao) {
-    y = checkNewPage(doc, y, 50);
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.resumoContestacao);
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 40));
     y = addSectionTitle(doc, `${sectionNumber}. RESUMO DA CONTESTAÇÃO`, y);
     y = addParagraph(doc, laudo.resumoContestacao, y);
     sectionNumber++;
@@ -385,7 +502,8 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 6. METODOLOGIA PERICIAL
   if (laudo.metodologiaPericial) {
-    y = checkNewPage(doc, y, 50);
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.metodologiaPericial);
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 40));
     y = addSectionTitle(doc, `${sectionNumber}. METODOLOGIA PERICIAL`, y);
     y = addParagraph(doc, laudo.metodologiaPericial, y);
     sectionNumber++;
@@ -394,7 +512,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   // 7. DADOS DO POSTO DE TRABALHO
   const hasDadosPosto = laudo.dadosFuncionaisCargo || laudo.descricaoPostoTrabalho || laudo.descricaoAtividadesLaborais;
   if (hasDadosPosto) {
-    y = checkNewPage(doc, y, 60);
+    y = ensureSpace(doc, y, SECTION_TITLE_HEIGHT + 20);
     y = addSectionTitle(doc, `${sectionNumber}. DADOS DO POSTO DE TRABALHO`, y);
     
     if (laudo.dadosFuncionaisCargo) {
@@ -408,13 +526,13 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
     }
     
     if (laudo.descricaoPostoTrabalho) {
-      y = checkNewPage(doc, y);
+      y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
       y = addSubtitle(doc, "Descrição do Posto de Trabalho:", y);
       y = addParagraph(doc, laudo.descricaoPostoTrabalho, y);
     }
     
     if (laudo.descricaoAtividadesLaborais) {
-      y = checkNewPage(doc, y);
+      y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
       y = addSubtitle(doc, "Atividades Laborais:", y);
       y = addParagraph(doc, laudo.descricaoAtividadesLaborais, y);
     }
@@ -422,7 +540,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 8. ANAMNESE / HISTÓRICO
-  y = checkNewPage(doc, y, 50);
+  y = ensureSpace(doc, y, SECTION_TITLE_HEIGHT + 20);
   y = addSectionTitle(doc, `${sectionNumber}. ANAMNESE`, y);
   
   if (laudo.dataAcidente) {
@@ -430,31 +548,31 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   if (laudo.historiaAcidente) {
-    y = checkNewPage(doc, y);
+    y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
     y = addSubtitle(doc, "Descrição do Acidente:", y);
     y = addParagraph(doc, laudo.historiaAcidente, y);
   }
   
   if (laudo.historicoOcupacional) {
-    y = checkNewPage(doc, y);
+    y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
     y = addSubtitle(doc, "Histórico Ocupacional:", y);
     y = addParagraph(doc, laudo.historicoOcupacional, y);
   }
   
   if (laudo.historiaAtual) {
-    y = checkNewPage(doc, y);
+    y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
     y = addSubtitle(doc, "Queixas Atuais:", y);
     y = addParagraph(doc, laudo.historiaAtual, y);
   }
   
   if (laudo.tratamentos) {
-    y = checkNewPage(doc, y);
+    y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
     y = addSubtitle(doc, "Tratamentos Realizados:", y);
     y = addParagraph(doc, laudo.tratamentos, y);
   }
   
   if (laudo.afastamentos) {
-    y = checkNewPage(doc, y);
+    y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
     y = addSubtitle(doc, "Afastamentos:", y);
     y = addParagraph(doc, laudo.afastamentos, y);
   }
@@ -462,7 +580,8 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 9. ANTECEDENTES PATOLÓGICOS
   if (laudo.antecedentes) {
-    y = checkNewPage(doc, y, 40);
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.antecedentes);
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
     y = addSectionTitle(doc, `${sectionNumber}. ANTECEDENTES PATOLÓGICOS`, y);
     y = addParagraph(doc, laudo.antecedentes, y);
     sectionNumber++;
@@ -470,11 +589,12 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 10. DOCUMENTOS ANALISADOS
   if (laudo.documentos && laudo.documentos.length > 0) {
-    y = checkNewPage(doc, y, 50);
+    const docListHeight = laudo.documentos.length * 6;
+    y = ensureSpace(doc, y, Math.min(SECTION_TITLE_HEIGHT + docListHeight, 40));
     y = addSectionTitle(doc, `${sectionNumber}. DOCUMENTOS ANALISADOS`, y);
     
     laudo.documentos.forEach((doc_item, index) => {
-      y = checkNewPage(doc, y);
+      y = checkNewPage(doc, y, 6);
       doc.setFontSize(10);
       doc.text(`${index + 1}. ${doc_item}`, MARGINS.left + 5, y);
       y += 6;
@@ -485,7 +605,8 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 11. LAUDOS MÉDICOS APRESENTADOS
   if (laudo.laudosMedicos) {
-    y = checkNewPage(doc, y, 40);
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.laudosMedicos);
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
     y = addSectionTitle(doc, `${sectionNumber}. LAUDOS MÉDICOS APRESENTADOS`, y);
     y = addParagraph(doc, laudo.laudosMedicos, y);
     sectionNumber++;
@@ -493,7 +614,8 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 12. EXAMES COMPLEMENTARES
   if (laudo.examesComplementares) {
-    y = checkNewPage(doc, y, 40);
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.examesComplementares);
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
     y = addSectionTitle(doc, `${sectionNumber}. EXAMES COMPLEMENTARES`, y);
     y = addParagraph(doc, laudo.examesComplementares, y);
     sectionNumber++;
@@ -501,7 +623,8 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 13. EXAME FÍSICO
   if (laudo.exameFisico) {
-    y = checkNewPage(doc, y, 40);
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.exameFisico);
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
     y = addSectionTitle(doc, `${sectionNumber}. EXAME FÍSICO`, y);
     y = addParagraph(doc, laudo.exameFisico, y);
     sectionNumber++;
@@ -509,14 +632,20 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 14. DESCRIÇÃO TÉCNICA DAS DOENÇAS
   if (laudo.descricaoTecnicaDoencas) {
-    y = checkNewPage(doc, y, 40);
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.descricaoTecnicaDoencas);
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
     y = addSectionTitle(doc, `${sectionNumber}. DESCRIÇÃO TÉCNICA DAS DOENÇAS`, y);
     y = addParagraph(doc, laudo.descricaoTecnicaDoencas, y);
     sectionNumber++;
   }
   
   // 15. NEXO CAUSAL
-  y = checkNewPage(doc, y, 50);
+  {
+    let sectionHeight = SECTION_TITLE_HEIGHT;
+    if (laudo.nexoCausalTipo) sectionHeight += 8;
+    if (laudo.nexoCausalJustificativa) sectionHeight += SUBTITLE_HEIGHT + 15;
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
+  }
   y = addSectionTitle(doc, `${sectionNumber}. NEXO CAUSAL`, y);
   
   if (laudo.nexoCausalTipo) {
@@ -530,7 +659,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   if (laudo.nexoCausalJustificativa) {
-    y = checkNewPage(doc, y);
+    y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
     y = addSubtitle(doc, "Justificativa:", y);
     y = addParagraph(doc, laudo.nexoCausalJustificativa, y);
   }
@@ -538,7 +667,8 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 16. ANÁLISE DA INCAPACIDADE LABORAL
   if (laudo.analiseIncapacidadeLaboral) {
-    y = checkNewPage(doc, y, 40);
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.analiseIncapacidadeLaboral);
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
     y = addSectionTitle(doc, `${sectionNumber}. ANÁLISE DA INCAPACIDADE LABORAL`, y);
     y = addParagraph(doc, laudo.analiseIncapacidadeLaboral, y);
     sectionNumber++;
@@ -547,7 +677,12 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   // 17. AVALIAÇÃO DE SEQUELAS
   const hasSequelas = laudo.tabelaSUSEP || laudo.danoEstetico || laudo.auxilioTerceiros;
   if (hasSequelas) {
-    y = checkNewPage(doc, y, 50);
+    let sectionHeight = SECTION_TITLE_HEIGHT;
+    if (laudo.tabelaSUSEP) sectionHeight += 8;
+    if (laudo.danoEstetico) sectionHeight += 8;
+    if (laudo.auxilioTerceiros) sectionHeight += 8;
+    
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
     y = addSectionTitle(doc, `${sectionNumber}. AVALIAÇÃO DE SEQUELAS`, y);
     
     if (laudo.tabelaSUSEP) {
@@ -565,14 +700,23 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 18. DISCUSSÃO E ANÁLISE
   if (laudo.conclusaoAnalise) {
-    y = checkNewPage(doc, y, 40);
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.conclusaoAnalise);
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
     y = addSectionTitle(doc, `${sectionNumber}. DISCUSSÃO E ANÁLISE`, y);
     y = addParagraph(doc, laudo.conclusaoAnalise, y);
     sectionNumber++;
   }
   
   // 19. CONCLUSÃO
-  y = checkNewPage(doc, y, 70);
+  {
+    let sectionHeight = SECTION_TITLE_HEIGHT;
+    if (laudo.conclusaoCID) sectionHeight += 8;
+    if (laudo.conclusaoIncapacidade) sectionHeight += 8;
+    if (laudo.conclusaoStatus) sectionHeight += 8;
+    if (laudo.conclusaoDestino) sectionHeight += 8;
+    if (laudo.conclusaoJustificativa) sectionHeight += SUBTITLE_HEIGHT + 15;
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 50));
+  }
   y = addSectionTitle(doc, `${sectionNumber}. CONCLUSÃO`, y);
   
   if (laudo.conclusaoCID) {
@@ -605,7 +749,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   if (laudo.conclusaoJustificativa) {
-    y = checkNewPage(doc, y);
+    y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
     y = addSubtitle(doc, "Justificativa:", y);
     y = addParagraph(doc, laudo.conclusaoJustificativa, y);
   }
@@ -614,27 +758,27 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   // 20. RESPOSTAS AOS QUESITOS
   const hasQuesitos = laudo.quesitosJuizo || laudo.quesitosReclamante || laudo.quesitosReclamada;
   if (hasQuesitos) {
-    y = checkNewPage(doc, y, 40);
+    y = ensureSpace(doc, y, SECTION_TITLE_HEIGHT + 20);
     y = addSectionTitle(doc, `${sectionNumber}. RESPOSTAS AOS QUESITOS`, y);
     
     let subSection = 1;
     
     if (laudo.quesitosJuizo) {
-      y = checkNewPage(doc, y);
+      y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
       y = addSubtitle(doc, `${sectionNumber}.${subSection} Quesitos do Juízo`, y);
       y = addParagraph(doc, laudo.quesitosJuizo, y);
       subSection++;
     }
     
     if (laudo.quesitosReclamante) {
-      y = checkNewPage(doc, y);
+      y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
       y = addSubtitle(doc, `${sectionNumber}.${subSection} Quesitos do Reclamante`, y);
       y = addParagraph(doc, laudo.quesitosReclamante, y);
       subSection++;
     }
     
     if (laudo.quesitosReclamada) {
-      y = checkNewPage(doc, y);
+      y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
       y = addSubtitle(doc, `${sectionNumber}.${subSection} Quesitos da Reclamada`, y);
       y = addParagraph(doc, laudo.quesitosReclamada, y);
     }
@@ -643,14 +787,17 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 21. REFERÊNCIAS BIBLIOGRÁFICAS
   if (laudo.referenciasBibliograficas) {
-    y = checkNewPage(doc, y, 50);
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.referenciasBibliograficas);
+    y = ensureSpace(doc, y, Math.min(sectionHeight, 40));
     y = addSectionTitle(doc, `${sectionNumber}. REFERÊNCIAS BIBLIOGRÁFICAS`, y);
     y = addParagraph(doc, laudo.referenciasBibliograficas, y);
     sectionNumber++;
   }
   
   // ========== ENCERRAMENTO ==========
-  y = checkNewPage(doc, y, 100);
+  // Calcular altura do bloco de encerramento
+  const encerramentoHeight = 15 + measureParagraphHeight(doc, "Nada mais havendo a relatar, encerra-se o presente laudo pericial, que vai assinado digitalmente pelo perito responsável.") + 20 + 35 + 8 + 6 + 10;
+  y = ensureSpace(doc, y, Math.min(encerramentoHeight, 80));
   y += 15;
   
   doc.setFontSize(10);
