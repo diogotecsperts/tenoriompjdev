@@ -156,6 +156,73 @@ serve(async (req) => {
           pdfContent = JSON.stringify(result.textos_brutos);
         } else if (result.extractedText) {
           pdfContent = result.extractedText;
+        } else if (result.data) {
+          // Fallback: reconstruct context from structured data
+          const data = result.data;
+          const parts: string[] = [];
+          
+          // Add processo info
+          if (data.processo) {
+            parts.push(`PROCESSO: ${data.processo.numero || ''}`);
+            parts.push(`Reclamante: ${data.processo.reclamante || ''}`);
+            parts.push(`Reclamada: ${data.processo.reclamada || ''}`);
+            parts.push(`Vara: ${data.processo.vara || ''}`);
+          }
+          
+          // Add historico
+          if (data.historico) {
+            if (data.historico.historia_atual) parts.push(`HISTÓRIA ATUAL:\n${data.historico.historia_atual}`);
+            if (data.historico.historico_ocupacional) parts.push(`HISTÓRICO OCUPACIONAL:\n${data.historico.historico_ocupacional}`);
+            if (data.historico.antecedentes_patologicos) parts.push(`ANTECEDENTES PATOLÓGICOS:\n${data.historico.antecedentes_patologicos}`);
+            if (data.historico.tratamentos_realizados) parts.push(`TRATAMENTOS:\n${data.historico.tratamentos_realizados}`);
+            if (data.historico.afastamentos) parts.push(`AFASTAMENTOS:\n${data.historico.afastamentos}`);
+          }
+          
+          // Add acidente
+          if (data.acidente) {
+            if (data.acidente.descricao) parts.push(`HISTÓRIA DO ACIDENTE:\n${data.acidente.descricao}`);
+            if (data.acidente.data) parts.push(`Data do acidente: ${data.acidente.data}`);
+            if (data.acidente.local) parts.push(`Local: ${data.acidente.local}`);
+          }
+          
+          // Add exame_clinico
+          if (data.exame_clinico) {
+            if (data.exame_clinico.lesoes_descritas) parts.push(`LESÕES/QUADRO CLÍNICO:\n${data.exame_clinico.lesoes_descritas}`);
+            if (data.exame_clinico.exames_complementares) parts.push(`EXAMES COMPLEMENTARES:\n${data.exame_clinico.exames_complementares}`);
+            if (data.exame_clinico.laudos_medicos) parts.push(`LAUDOS MÉDICOS:\n${data.exame_clinico.laudos_medicos}`);
+          }
+          
+          // Add informacoes_medicas
+          if (data.informacoes_medicas) {
+            if (data.informacoes_medicas.cids_mencionados) {
+              parts.push(`CIDs MENCIONADOS: ${data.informacoes_medicas.cids_mencionados.join(', ')}`);
+            }
+            if (data.informacoes_medicas.incapacidade_alegada) {
+              parts.push(`INCAPACIDADE ALEGADA: ${data.informacoes_medicas.incapacidade_alegada}`);
+            }
+            if (data.informacoes_medicas.nexo_sugerido) {
+              parts.push(`NEXO SUGERIDO: ${data.informacoes_medicas.nexo_sugerido}`);
+            }
+          }
+          
+          // Add quesitos
+          if (data.quesitos) {
+            if (data.quesitos.juizo) parts.push(`QUESITOS DO JUÍZO:\n${data.quesitos.juizo}`);
+            if (data.quesitos.reclamante) parts.push(`QUESITOS DO RECLAMANTE:\n${data.quesitos.reclamante}`);
+            if (data.quesitos.reclamada) parts.push(`QUESITOS DA RECLAMADA:\n${data.quesitos.reclamada}`);
+          }
+          
+          // Add resumo if available
+          if (data.resumo) parts.push(`RESUMO:\n${data.resumo}`);
+          
+          // Add resumos_ia if available
+          if (result.resumos_ia) {
+            if (result.resumos_ia.resumo_peticao) parts.push(`RESUMO PETIÇÃO INICIAL:\n${result.resumos_ia.resumo_peticao}`);
+            if (result.resumos_ia.resumo_contestacao) parts.push(`RESUMO CONTESTAÇÃO:\n${result.resumos_ia.resumo_contestacao}`);
+            if (result.resumos_ia.descricao_doencas) parts.push(`DESCRIÇÃO TÉCNICA DOENÇAS:\n${result.resumos_ia.descricao_doencas}`);
+          }
+          
+          pdfContent = parts.join('\n\n');
         }
       }
     }
