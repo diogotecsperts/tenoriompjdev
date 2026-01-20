@@ -22,7 +22,14 @@ interface ModelInfo {
   inputTokenLimit: number;
   outputTokenLimit: number;
   supportsPdf: boolean;
+  isImageModel: boolean;
   description?: string;
+}
+
+function isImageModel(modelId: string): boolean {
+  return modelId.includes('image') || 
+         modelId.includes('imagen') ||
+         modelId.includes('native-audio');
 }
 
 serve(async (req) => {
@@ -87,6 +94,7 @@ serve(async (req) => {
     const models: ModelInfo[] = textModels.map(m => {
       const modelId = m.name.replace('models/', '');
       const family = getModelFamily(modelId);
+      const isImage = isImageModel(modelId);
       
       return {
         id: modelId,
@@ -94,14 +102,23 @@ serve(async (req) => {
         family,
         inputTokenLimit: m.inputTokenLimit || 0,
         outputTokenLimit: m.outputTokenLimit || 0,
-        supportsPdf: modelId.includes('vision') || 
-                     modelId.includes('pro') || 
-                     modelId.includes('flash') ||
-                     family === '3.0' ||
-                     family === '2.5',
+        supportsPdf: !isImage && (
+          modelId.includes('vision') || 
+          modelId.includes('pro') || 
+          modelId.includes('flash') ||
+          family === '3.0' ||
+          family === '2.5'
+        ),
+        isImageModel: isImage,
         description: m.description
       };
     });
+
+    // Separate text and image models
+    const textOnlyModels = models.filter(m => !m.isImageModel);
+    const imageOnlyModels = models.filter(m => m.isImageModel);
+
+    console.log(`[list-gemini-models] Text models: ${textOnlyModels.length}, Image models: ${imageOnlyModels.length}`);
 
     // Sort models: 3.0 > 2.5 > 2.0 > 1.5 > others, then by name
     models.sort((a, b) => {
@@ -136,8 +153,8 @@ serve(async (req) => {
       categories[m.family].push(m.id);
     });
 
-    // Get recommended models for PDF processing
-    const pdfModels = models
+    // Get recommended models for PDF processing (only text models)
+    const pdfModels = textOnlyModels
       .filter(m => m.supportsPdf && m.inputTokenLimit >= 100000)
       .slice(0, 5)
       .map(m => m.id);
@@ -147,10 +164,13 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({
       success: true,
-      models,
+      models: textOnlyModels,        // Return only text models in main list
+      imageModels: imageOnlyModels,  // Separate list for image models
       categories,
       pdfModels,
-      totalCount: models.length
+      totalCount: models.length,
+      textModelCount: textOnlyModels.length,
+      imageModelCount: imageOnlyModels.length
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
