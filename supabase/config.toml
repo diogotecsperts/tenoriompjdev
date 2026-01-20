@@ -17,3 +17,6 @@ verify_jwt = true
 
 [functions.regerar-campo-pdf]
 verify_jwt = true
+
+[functions.list-gemini-models]
+verify_jwt = false
