@@ -72,12 +72,14 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   name: "Google Gemini",
   description: "Modelos Gemini via Google AI Studio. Use 'Atualizar Modelos' para ver modelos disponíveis.",
   models: [
-    // Gemini 2.5 (mais recentes estáveis)
-    "gemini-2.5-pro-preview-05-06",
-    "gemini-2.5-flash-preview-05-20",
-    "gemini-2.5-flash-8b-exp-0924",
-    // Gemini 2.0 e 1.5 (estáveis)
+    // Gemini 2.5 (aliases estáveis)
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-8b",
+    // Gemini 2.0 (estáveis)
     "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    // Gemini 1.5 (estáveis)
     "gemini-1.5-pro",
     "gemini-1.5-flash"
   ],
@@ -141,13 +143,13 @@ const DEFAULT_CONFIG: SystemConfig = {
   retry_base_delay_ms: 1000
 };
 
-// Gemini Vision models available for PDF extraction (legacy - direct Gemini)
+// Gemini Vision models available for PDF extraction (aliases estáveis)
 const GEMINI_PDF_MODELS = [{
-  id: 'gemini-2.5-pro-preview-05-06',
+  id: 'gemini-2.5-pro',
   name: 'Gemini 2.5 Pro',
   description: 'Maior precisão, ideal para PDFs complexos'
 }, {
-  id: 'gemini-2.5-flash-preview-05-20',
+  id: 'gemini-2.5-flash',
   name: 'Gemini 2.5 Flash',
   description: 'Rápido e eficiente (recomendado)'
 }, {

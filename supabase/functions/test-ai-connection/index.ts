@@ -116,20 +116,29 @@ async function testLovableAI(model: string): Promise<{ success: boolean; errorMe
   }
 }
 
-// Mapeamento de nomes amigáveis para nomes corretos da API Gemini
+// Mapeamento de nomes amigáveis para nomes estáveis da API Gemini
+// IMPORTANTE: Usar aliases estáveis que a Google mantém, não versões preview específicas!
 const GEMINI_MODEL_MAP: Record<string, string> = {
-  // Gemini 3.0 (mais recentes)
-  'gemini-3-pro': 'gemini-2.5-pro-preview-05-06', // fallback até 3.0 ser lançado
-  'gemini-3-flash': 'gemini-2.5-flash-preview-05-20',
-  'gemini-3-flash-lite': 'gemini-2.5-flash-8b-exp-0924',
-  // Gemini 2.5
-  'gemini-2.5-pro': 'gemini-2.5-pro-preview-05-06',
-  'gemini-2.5-flash': 'gemini-2.5-flash-preview-05-20',
-  'gemini-2.5-flash-lite': 'gemini-2.5-flash-8b-exp-0924',
-  // Gemini 2.0 e 1.5 (estáveis)
+  // Gemini 3.0 Preview
+  'gemini-3-pro': 'gemini-2.5-pro', // fallback até 3.0 GA
+  'gemini-3-pro-preview': 'gemini-2.5-pro',
+  'gemini-3-flash': 'gemini-2.5-flash',
+  'gemini-3-flash-preview': 'gemini-2.5-flash',
+  'gemini-3-flash-lite': 'gemini-2.5-flash-8b',
+  'gemini-3-flash-lite-preview': 'gemini-2.5-flash-8b',
+  // Gemini 2.5 - Usar aliases estáveis diretamente
+  'gemini-2.5-pro': 'gemini-2.5-pro',
+  'gemini-2.5-flash': 'gemini-2.5-flash',
+  'gemini-2.5-flash-lite': 'gemini-2.5-flash-8b',
+  'gemini-2.5-flash-8b': 'gemini-2.5-flash-8b',
+  // Gemini 2.0 (estáveis)
   'gemini-2.0-flash': 'gemini-2.0-flash',
+  'gemini-2.0-flash-exp': 'gemini-2.0-flash-exp',
+  'gemini-2.0-flash-lite': 'gemini-2.0-flash-lite',
+  // Gemini 1.5 (estáveis)
   'gemini-1.5-pro': 'gemini-1.5-pro',
   'gemini-1.5-flash': 'gemini-1.5-flash',
+  'gemini-1.5-flash-8b': 'gemini-1.5-flash-8b',
 };
 
 function isImageModel(modelId: string): boolean {
