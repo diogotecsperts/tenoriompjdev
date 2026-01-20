@@ -707,7 +707,7 @@ export async function callPDFProvider(
       case 'openrouter':
         return await callOpenRouterPDF(pdfBase64, pdfConfig.model, systemPrompt, options);
       case 'gemini':
-        const geminiResult = await callGeminiVision(pdfBase64, systemPrompt, options);
+        const geminiResult = await callGeminiVision(pdfBase64, systemPrompt, pdfConfig.model, options);
         return { ...geminiResult, provider: 'gemini' };
       case 'lovable':
         return await callLovableAIPDF(pdfBase64, pdfConfig.model, systemPrompt, options);
@@ -748,7 +748,7 @@ export async function callPDFProvider(
             fallbackResult = await callOpenRouterPDF(pdfBase64, pdfConfig.fallbackModel, systemPrompt, options);
             break;
           case 'gemini':
-            const gemResult = await callGeminiVision(pdfBase64, systemPrompt, options);
+            const gemResult = await callGeminiVision(pdfBase64, systemPrompt, pdfConfig.fallbackModel, options);
             fallbackResult = { ...gemResult, provider: 'gemini' };
             break;
           case 'lovable':
@@ -1017,6 +1017,7 @@ async function callLovableAIPDF(
 export async function callGeminiVision(
   pdfBase64: string, 
   systemPrompt: string,
+  model: string,
   options?: { userId?: string; promptType?: string }
 ): Promise<{ text: string; model: string; finishReason: string; usedFallback: boolean }> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -1025,35 +1026,24 @@ export async function callGeminiVision(
 
   const startTime = Date.now();
 
-  // Buscar configuração de IA
-  const config = await getAIConfig();
-  
-  // Para PDF, precisamos de Gemini Vision
+  // Use the model passed as parameter (from pdfConfig)
+  let modelToUse = model.replace('google/', '');
+  console.log(`[Gemini Vision] Using model from pdfConfig: ${modelToUse}`);
+
+  // Get Gemini API key
   let apiKey: string | null = null;
-  let modelToUse = 'gemini-2.5-flash';
-
-  // First, check if there's a specific PDF model configured
-  const { data: pdfModelConfig } = await supabase
-    .from('system_config')
-    .select('value')
-    .eq('id', 'gemini_pdf_model')
-    .single();
-
-  if (pdfModelConfig?.value) {
-    modelToUse = String(pdfModelConfig.value);
-    console.log(`[Gemini Vision] Using configured PDF model: ${modelToUse}`);
-  }
-
+  
+  // First try from AI config
+  const config = await getAIConfig();
   if (config.provider === 'gemini' && config.apiKey) {
     apiKey = config.apiKey;
-    if (!pdfModelConfig?.value) {
-      modelToUse = config.model.replace('google/', '');
-    }
-    console.log(`[Gemini Vision] Using direct Gemini API with model: ${modelToUse}`);
+    console.log(`[Gemini Vision] Using API key from AI config`);
   } else {
+    // Try environment variable
     apiKey = Deno.env.get('GEMINI_API_KEY') || null;
     
     if (!apiKey) {
+      // Try from global_api_keys table
       const { data: keyData } = await supabase
         .from('global_api_keys')
         .select('api_key')
@@ -1064,10 +1054,7 @@ export async function callGeminiVision(
     }
 
     if (apiKey) {
-      if (!pdfModelConfig?.value && config.model && (config.model.includes('gemini') || config.provider === 'gemini')) {
-        modelToUse = config.model.replace('google/', '');
-      }
-      console.log(`[Gemini Vision] Using Gemini API key from config with model: ${modelToUse}`);
+      console.log(`[Gemini Vision] Using API key from global_api_keys`);
     } else {
       throw new Error('Gemini API key required for PDF processing. Configure it in DevPanel.');
     }
