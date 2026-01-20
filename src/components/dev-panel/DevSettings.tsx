@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,10 +9,11 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { Loader2, Save, AlertTriangle, RefreshCw, Zap, Lock, Eye, EyeOff, Check, Globe, Cpu, Shield, Play, XCircle, CheckCircle2, Plus, Copy, Trash2, Star, FileText, Pin, PinOff, Crown, Search, Activity } from "lucide-react";
+import { Loader2, Save, AlertTriangle, RefreshCw, Zap, Lock, Eye, EyeOff, Check, Globe, Cpu, Shield, Play, XCircle, CheckCircle2, Plus, Copy, Trash2, Star, FileText, Pin, PinOff, Crown, Search, Activity, Clock } from "lucide-react";
 
 interface ProviderInfo {
   id: string;
@@ -26,6 +27,19 @@ interface ProviderInfo {
   modelPlaceholder?: string;
   modelDocsUrl?: string;
 }
+
+// Informações detalhadas do modelo Gemini
+interface GeminiModelInfo {
+  id: string;
+  displayName: string;
+  family: string;
+  inputTokenLimit: number;
+  outputTokenLimit: number;
+  supportsPdf: boolean;
+  isImageModel: boolean;
+  isVersioned: boolean;
+}
+
 interface SystemConfig {
   default_ai_provider: string;
   default_ai_model: string;
@@ -43,15 +57,18 @@ interface SystemConfig {
   retry_max_attempts: number;
   retry_base_delay_ms: number;
 }
+
 interface ApiKeys {
   [key: string]: string;
 }
+
 interface TestResult {
   success: boolean;
   latencyMs?: number;
   error?: string;
   testedAt?: Date;
 }
+
 const AI_PROVIDERS: ProviderInfo[] = [{
   id: "lovable",
   name: "IA Integrada",
@@ -125,6 +142,7 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   modelPlaceholder: "provider/model-name ou provider/model:variant",
   modelDocsUrl: "https://openrouter.ai/models"
 }];
+
 const DEFAULT_CONFIG: SystemConfig = {
   default_ai_provider: "lovable",
   default_ai_model: "google/gemini-3-flash-preview",
@@ -214,6 +232,14 @@ const OPENROUTER_PDF_MODELS = [{
   context: '64K tokens',
   cost: '$0.14/M'
 }];
+
+// Helper para formatar token limit
+const formatTokenLimit = (tokens: number): string => {
+  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(0)}M`;
+  if (tokens >= 1000) return `${(tokens / 1000).toFixed(0)}K`;
+  return tokens.toString();
+};
+
 export function DevSettings() {
   const [config, setConfig] = useState<SystemConfig>(DEFAULT_CONFIG);
   const [apiKeys, setApiKeys] = useState<ApiKeys>({});
@@ -245,21 +271,116 @@ export function DevSettings() {
 
   // Dynamic Gemini models fetching
   const [dynamicGeminiModels, setDynamicGeminiModels] = useState<string[]>([]);
+  const [versionedGeminiModels, setVersionedGeminiModels] = useState<string[]>([]);
   const [geminiImageModels, setGeminiImageModels] = useState<string[]>([]);
+  const [geminiModelDetails, setGeminiModelDetails] = useState<Record<string, GeminiModelInfo>>({});
   const [loadingGeminiModels, setLoadingGeminiModels] = useState(false);
+  const [showVersionedModels, setShowVersionedModels] = useState(false);
+  const [modelsCacheUpdatedAt, setModelsCacheUpdatedAt] = useState<Date | null>(null);
+
+  // Auto-test debounce ref
+  const autoTestTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup auto-test timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (autoTestTimeoutRef.current) {
+        clearTimeout(autoTestTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     fetchConfig();
     fetchApiKeys();
     fetchFavoriteModels();
     fetchPinnedProviders();
+    fetchProviderStatus();
+    fetchGeminiModelsCache();
   }, []);
+
+  // Fetch saved provider test status
+  const fetchProviderStatus = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("system_config")
+        .select("id, value")
+        .like("id", "provider_status_%");
+      
+      if (error) throw error;
+      
+      if (data) {
+        const results: Record<string, TestResult> = {};
+        data.forEach(item => {
+          const providerId = item.id.replace("provider_status_", "");
+          const val = item.value as any;
+          if (val && typeof val === 'object') {
+            results[providerId] = {
+              success: val.success ?? false,
+              latencyMs: val.latencyMs,
+              error: val.error,
+              testedAt: val.lastTest ? new Date(val.lastTest) : undefined
+            };
+          }
+        });
+        setTestResults(prev => ({ ...prev, ...results }));
+      }
+    } catch (error) {
+      console.error("Error fetching provider status:", error);
+    }
+  };
+
+  // Fetch cached Gemini models
+  const fetchGeminiModelsCache = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("system_config")
+        .select("value")
+        .eq("id", "gemini_models_cache")
+        .single();
+      
+      if (error && error.code !== "PGRST116") throw error;
+      
+      if (data?.value) {
+        const cached = data.value as any;
+        const cacheAge = Date.now() - new Date(cached.updatedAt).getTime();
+        const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 horas
+        
+        if (cacheAge < CACHE_TTL && cached.models) {
+          // Use cached data
+          const stableIds = cached.models.map((m: GeminiModelInfo) => m.id);
+          const versionedIds = cached.versionedModels?.map((m: GeminiModelInfo) => m.id) || [];
+          const imageIds = cached.imageModels?.map((m: GeminiModelInfo) => m.id) || [];
+          
+          setDynamicGeminiModels(stableIds);
+          setVersionedGeminiModels(versionedIds);
+          setGeminiImageModels(imageIds);
+          setModelsCacheUpdatedAt(new Date(cached.updatedAt));
+          
+          // Build details map
+          const detailsMap: Record<string, GeminiModelInfo> = {};
+          [...(cached.models || []), ...(cached.versionedModels || []), ...(cached.imageModels || [])].forEach((m: GeminiModelInfo) => {
+            detailsMap[m.id] = m;
+          });
+          setGeminiModelDetails(detailsMap);
+          
+          // Update provider models list
+          const geminiProvider = AI_PROVIDERS.find(p => p.id === 'gemini');
+          if (geminiProvider) {
+            geminiProvider.models = stableIds.length > 0 ? stableIds : geminiProvider.models;
+          }
+          
+          console.log(`[DevSettings] Loaded ${stableIds.length} stable + ${versionedIds.length} versioned models from cache`);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching Gemini models cache:", error);
+    }
+  };
+
   const fetchPinnedProviders = async () => {
     try {
-      const {
-        data,
-        error
-      } = await supabase.from("system_config").select("value").eq("id", "pinned_ai_providers").single();
+      const { data, error } = await supabase.from("system_config").select("value").eq("id", "pinned_ai_providers").single();
       if (error && error.code !== "PGRST116") throw error;
       if (data?.value) {
         const parsed = Array.isArray(data.value) ? data.value : [];
@@ -269,13 +390,12 @@ export function DevSettings() {
       console.error("Error fetching pinned providers:", error);
     }
   };
+
   const togglePinProvider = async (providerId: string) => {
     const isPinned = pinnedProviders.includes(providerId);
     const updated = isPinned ? pinnedProviders.filter(p => p !== providerId) : [...pinnedProviders, providerId];
     try {
-      const {
-        error
-      } = await supabase.from("system_config").upsert({
+      const { error } = await supabase.from("system_config").upsert({
         id: "pinned_ai_providers",
         value: updated,
         updated_at: new Date().toISOString()
@@ -323,12 +443,10 @@ export function DevSettings() {
       return a.name.localeCompare(b.name);
     });
   };
+
   const fetchFavoriteModels = async () => {
     try {
-      const {
-        data,
-        error
-      } = await supabase.from("system_config").select("id, value").in("id", ["favorite_models_openrouter", "favorite_models_groq"]);
+      const { data, error } = await supabase.from("system_config").select("id, value").in("id", ["favorite_models_openrouter", "favorite_models_groq"]);
       if (error) throw error;
       if (data) {
         const favorites: Record<string, string[]> = {
@@ -349,6 +467,7 @@ export function DevSettings() {
       console.error("Error fetching favorite models:", error);
     }
   };
+
   const addFavoriteModel = async (providerId: string, model: string) => {
     if (!model.trim()) {
       toast({
@@ -369,9 +488,7 @@ export function DevSettings() {
     }
     const updated = [...current, model.trim()];
     try {
-      const {
-        error
-      } = await supabase.from("system_config").upsert({
+      const { error } = await supabase.from("system_config").upsert({
         id: `favorite_models_${providerId}`,
         value: updated,
         updated_at: new Date().toISOString()
@@ -394,12 +511,11 @@ export function DevSettings() {
       });
     }
   };
+
   const removeFavoriteModel = async (providerId: string, model: string) => {
     const updated = (favoriteModels[providerId] || []).filter(m => m !== model);
     try {
-      const {
-        error
-      } = await supabase.from("system_config").upsert({
+      const { error } = await supabase.from("system_config").upsert({
         id: `favorite_models_${providerId}`,
         value: updated,
         updated_at: new Date().toISOString()
@@ -422,6 +538,7 @@ export function DevSettings() {
       });
     }
   };
+
   const copyModelId = (model: string) => {
     navigator.clipboard.writeText(model);
     setCopiedModel(model);
@@ -431,12 +548,10 @@ export function DevSettings() {
     });
     setTimeout(() => setCopiedModel(null), 2000);
   };
+
   const fetchConfig = async () => {
     try {
-      const {
-        data,
-        error
-      } = await supabase.from("system_config").select("id, value");
+      const { data, error } = await supabase.from("system_config").select("id, value");
       if (error) throw error;
       if (data) {
         const configMap: Record<string, any> = {};
@@ -472,12 +587,10 @@ export function DevSettings() {
       setLoading(false);
     }
   };
+
   const fetchApiKeys = async () => {
     try {
-      const {
-        data,
-        error
-      } = await supabase.from("global_api_keys").select("id, api_key");
+      const { data, error } = await supabase.from("global_api_keys").select("id, api_key");
       if (error) throw error;
       if (data) {
         const keys: ApiKeys = {};
@@ -494,8 +607,8 @@ export function DevSettings() {
     }
   };
 
-  // Função para buscar modelos Gemini dinamicamente
-  const fetchGeminiModels = async () => {
+  // Função para buscar modelos Gemini dinamicamente (com suporte a cache)
+  const fetchGeminiModels = async (forceRefresh = false) => {
     const geminiKey = apiKeys.gemini;
     if (!geminiKey) {
       toast({
@@ -504,6 +617,19 @@ export function DevSettings() {
         description: "Configure uma API Key do Gemini primeiro"
       });
       return;
+    }
+
+    // Check cache first (unless force refresh)
+    if (!forceRefresh && dynamicGeminiModels.length > 0 && modelsCacheUpdatedAt) {
+      const cacheAge = Date.now() - modelsCacheUpdatedAt.getTime();
+      const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 horas
+      if (cacheAge < CACHE_TTL) {
+        toast({
+          title: "Cache válido",
+          description: `Modelos atualizados há ${Math.round(cacheAge / (60 * 60 * 1000))}h. Use refresh forçado se necessário.`
+        });
+        return;
+      }
     }
 
     setLoadingGeminiModels(true);
@@ -515,33 +641,61 @@ export function DevSettings() {
       if (error) throw error;
 
       if (data?.success && data?.models) {
-        // Text models
-        const textModelIds = data.models.map((m: { id: string }) => m.id);
-        setDynamicGeminiModels(textModelIds);
+        // Stable text models
+        const stableModelIds = data.models.map((m: GeminiModelInfo) => m.id);
+        setDynamicGeminiModels(stableModelIds);
+        
+        // Versioned models (separate list)
+        const versionedIds = data.versionedModels?.map((m: GeminiModelInfo) => m.id) || [];
+        setVersionedGeminiModels(versionedIds);
         
         // Image models (separate list)
-        const imageModelIds = data.imageModels?.map((m: { id: string }) => m.id) || [];
+        const imageModelIds = data.imageModels?.map((m: GeminiModelInfo) => m.id) || [];
         setGeminiImageModels(imageModelIds);
         
-        // Atualizar a lista de modelos do provider Gemini (only text models in main list)
+        // Build model details map
+        const detailsMap: Record<string, GeminiModelInfo> = {};
+        [...(data.models || []), ...(data.versionedModels || []), ...(data.imageModels || [])].forEach((m: GeminiModelInfo) => {
+          detailsMap[m.id] = m;
+        });
+        setGeminiModelDetails(detailsMap);
+        
+        // Update cache timestamp
+        const now = new Date();
+        setModelsCacheUpdatedAt(now);
+        
+        // Save to cache
+        await supabase.from("system_config").upsert({
+          id: "gemini_models_cache",
+          value: {
+            models: data.models,
+            versionedModels: data.versionedModels,
+            imageModels: data.imageModels,
+            categories: data.categories,
+            updatedAt: now.toISOString()
+          },
+          updated_at: now.toISOString()
+        });
+        
+        // Atualizar a lista de modelos do provider Gemini (only stable models by default)
         const geminiProvider = AI_PROVIDERS.find(p => p.id === 'gemini');
         if (geminiProvider) {
-          geminiProvider.models = textModelIds;
+          geminiProvider.models = stableModelIds;
         }
 
         toast({
           title: "Modelos Atualizados",
           description: (
             <div className="flex flex-col gap-1">
-              <span>{textModelIds.length} modelos de texto disponíveis</span>
+              <span>{stableModelIds.length} modelos estáveis</span>
+              {versionedIds.length > 0 && (
+                <span className="text-[11px] text-muted-foreground">
+                  + {versionedIds.length} modelos versionados (ocultos)
+                </span>
+              )}
               {imageModelIds.length > 0 && (
                 <span className="text-[11px] text-muted-foreground">
                   + {imageModelIds.length} modelos de imagem
-                </span>
-              )}
-              {data.categories && (
-                <span className="text-[11px] text-muted-foreground">
-                  Famílias: {Object.keys(data.categories).join(', ')}
                 </span>
               )}
             </div>
@@ -612,9 +766,7 @@ export function DevSettings() {
         value: config.retry_base_delay_ms
       }];
       for (const update of updates) {
-        const {
-          error
-        } = await supabase.from("system_config").upsert({
+        const { error } = await supabase.from("system_config").upsert({
           id: update.id,
           value: update.value,
           updated_at: new Date().toISOString()
@@ -636,6 +788,7 @@ export function DevSettings() {
       setSaving(false);
     }
   };
+
   const saveApiKey = async (providerId: string) => {
     const key = apiKeys[providerId];
     if (!key?.trim()) {
@@ -648,9 +801,7 @@ export function DevSettings() {
     }
     setSavingKey(providerId);
     try {
-      const {
-        error
-      } = await supabase.from("global_api_keys").upsert({
+      const { error } = await supabase.from("global_api_keys").upsert({
         id: providerId,
         api_key: key.trim(),
         updated_at: new Date().toISOString()
@@ -664,6 +815,16 @@ export function DevSettings() {
         title: "Sucesso",
         description: `API Key do ${AI_PROVIDERS.find(p => p.id === providerId)?.name} salva`
       });
+      
+      // Auto-teste com debounce após salvar
+      if (autoTestTimeoutRef.current) {
+        clearTimeout(autoTestTimeoutRef.current);
+      }
+      autoTestTimeoutRef.current = setTimeout(async () => {
+        console.log(`[Auto-test] Testing ${providerId} after save...`);
+        await testConnection(providerId);
+      }, 1500);
+      
     } catch (error) {
       console.error("Error saving API key:", error);
       toast({
@@ -675,19 +836,16 @@ export function DevSettings() {
       setSavingKey(null);
     }
   };
+
   const deleteApiKey = async (providerId: string) => {
     if (!confirm(`Remover API Key do ${AI_PROVIDERS.find(p => p.id === providerId)?.name}?`)) {
       return;
     }
     try {
-      const {
-        error
-      } = await supabase.from("global_api_keys").delete().eq("id", providerId);
+      const { error } = await supabase.from("global_api_keys").delete().eq("id", providerId);
       if (error) throw error;
       setApiKeys(prev => {
-        const updated = {
-          ...prev
-        };
+        const updated = { ...prev };
         delete updated[providerId];
         return updated;
       });
@@ -696,12 +854,14 @@ export function DevSettings() {
         [providerId]: false
       }));
       setTestResults(prev => {
-        const updated = {
-          ...prev
-        };
+        const updated = { ...prev };
         delete updated[providerId];
         return updated;
       });
+      
+      // Remove saved status
+      await supabase.from("system_config").delete().eq("id", `provider_status_${providerId}`);
+      
       toast({
         title: "Sucesso",
         description: "API Key removida"
@@ -715,6 +875,7 @@ export function DevSettings() {
       });
     }
   };
+
   const testConnection = async (providerId: string) => {
     const provider = AI_PROVIDERS.find(p => p.id === providerId);
     if (!provider) return;
@@ -731,10 +892,7 @@ export function DevSettings() {
     setTestingProvider(providerId);
     try {
       const startTime = Date.now();
-      const {
-        data,
-        error
-      } = await supabase.functions.invoke('test-ai-connection', {
+      const { data, error } = await supabase.functions.invoke('test-ai-connection', {
         body: {
           provider: providerId,
           model: provider.models[0],
@@ -742,62 +900,71 @@ export function DevSettings() {
         }
       });
       const latencyMs = Date.now() - startTime;
+      
+      const now = new Date();
+      let result: TestResult;
+      
       if (error) {
-        setTestResults(prev => ({
-          ...prev,
-          [providerId]: {
-            success: false,
-            error: error.message,
-            testedAt: new Date()
-          }
-        }));
+        result = {
+          success: false,
+          error: error.message,
+          testedAt: now
+        };
         toast({
           variant: "destructive",
           title: "Teste falhou",
           description: error.message
         });
       } else if (data?.success) {
-        setTestResults(prev => ({
-          ...prev,
-          [providerId]: {
-            success: true,
-            latencyMs: data.latencyMs || latencyMs,
-            testedAt: new Date()
-          }
-        }));
+        result = {
+          success: true,
+          latencyMs: data.latencyMs || latencyMs,
+          testedAt: now
+        };
         toast({
           title: "Conexão OK",
           description: `${provider.name} respondeu em ${data.latencyMs || latencyMs}ms`
         });
       } else {
-        setTestResults(prev => ({
-          ...prev,
-          [providerId]: {
-            success: false,
-            error: data?.error || 'Erro desconhecido',
-            testedAt: new Date()
-          }
-        }));
+        result = {
+          success: false,
+          error: data?.error || 'Erro desconhecido',
+          testedAt: now
+        };
         toast({
           variant: "destructive",
           title: "Teste falhou",
           description: data?.error || 'Erro desconhecido'
         });
       }
+      
+      setTestResults(prev => ({ ...prev, [providerId]: result }));
+      
+      // Salvar status no banco
+      await supabase.from("system_config").upsert({
+        id: `provider_status_${providerId}`,
+        value: {
+          lastTest: now.toISOString(),
+          success: result.success,
+          latencyMs: result.latencyMs,
+          error: result.error
+        },
+        updated_at: now.toISOString()
+      });
+      
     } catch (error) {
       console.error("Error testing connection:", error);
-      setTestResults(prev => ({
-        ...prev,
-        [providerId]: {
-          success: false,
-          error: error instanceof Error ? error.message : 'Erro de conexão',
-          testedAt: new Date()
-        }
-      }));
+      const result: TestResult = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Erro de conexão',
+        testedAt: new Date()
+      };
+      setTestResults(prev => ({ ...prev, [providerId]: result }));
     } finally {
       setTestingProvider(null);
     }
   };
+
   const selectProvider = (providerId: string) => {
     const provider = AI_PROVIDERS.find(p => p.id === providerId);
     if (!provider) return;
@@ -825,20 +992,20 @@ export function DevSettings() {
         </div>
     });
   };
+
   const toggleProvider = (providerId: string) => {
     setConfig(prev => ({
       ...prev,
       allowed_ai_providers: prev.allowed_ai_providers.includes(providerId) ? prev.allowed_ai_providers.filter(p => p !== providerId) : [...prev.allowed_ai_providers, providerId]
     }));
   };
+
   const resetAllUserQuotas = async () => {
     if (!confirm("Tem certeza que deseja zerar o uso de IA de TODOS os usuários?")) {
       return;
     }
     try {
-      const {
-        error
-      } = await supabase.from("user_settings").update({
+      const { error } = await supabase.from("user_settings").update({
         ai_requests_used: 0,
         last_reset_date: new Date().toISOString().split("T")[0]
       });
@@ -856,25 +1023,44 @@ export function DevSettings() {
       });
     }
   };
+
   const getActiveProviderModels = () => {
     const provider = AI_PROVIDERS.find(p => p.id === config.default_ai_provider);
-    return provider?.models || [];
+    if (!provider) return [];
+    
+    // For Gemini, include versioned models if toggle is on
+    if (provider.id === 'gemini' && showVersionedModels) {
+      return [...(dynamicGeminiModels.length > 0 ? dynamicGeminiModels : provider.models), ...versionedGeminiModels];
+    }
+    
+    return provider.models;
   };
+
   const getFallbackProviderModels = () => {
     const provider = AI_PROVIDERS.find(p => p.id === config.fallback_ai_provider);
-    return provider?.models || [];
+    if (!provider) return [];
+    
+    if (provider.id === 'gemini' && showVersionedModels) {
+      return [...(dynamicGeminiModels.length > 0 ? dynamicGeminiModels : provider.models), ...versionedGeminiModels];
+    }
+    
+    return provider.models;
   };
+
   const activeProviderHasCustomInput = () => {
     const provider = AI_PROVIDERS.find(p => p.id === config.default_ai_provider);
     return provider?.customModelInput || false;
   };
+
   const fallbackProviderHasCustomInput = () => {
     const provider = AI_PROVIDERS.find(p => p.id === config.fallback_ai_provider);
     return provider?.customModelInput || false;
   };
+
   const getActiveProvider = () => {
     return AI_PROVIDERS.find(p => p.id === config.default_ai_provider);
   };
+
   const getFallbackProvider = () => {
     return AI_PROVIDERS.find(p => p.id === config.fallback_ai_provider);
   };
@@ -884,10 +1070,12 @@ export function DevSettings() {
     const provider = AI_PROVIDERS.find(p => p.id === config.pdf_ai_provider);
     return provider?.models || [];
   };
+
   const pdfProviderHasCustomInput = () => {
     const provider = AI_PROVIDERS.find(p => p.id === config.pdf_ai_provider);
     return provider?.customModelInput || false;
   };
+
   const getPdfProvider = () => {
     return AI_PROVIDERS.find(p => p.id === config.pdf_ai_provider);
   };
@@ -897,10 +1085,12 @@ export function DevSettings() {
     const provider = AI_PROVIDERS.find(p => p.id === config.pdf_fallback_provider);
     return provider?.models || [];
   };
+
   const pdfFallbackProviderHasCustomInput = () => {
     const provider = AI_PROVIDERS.find(p => p.id === config.pdf_fallback_provider);
     return provider?.customModelInput || false;
   };
+
   const getPdfFallbackProvider = () => {
     return AI_PROVIDERS.find(p => p.id === config.pdf_fallback_provider);
   };
@@ -939,6 +1129,37 @@ export function DevSettings() {
       (AI_PROVIDERS.filter(p => testResults[p.id]?.success !== false).length / AI_PROVIDERS.length) * 100
     );
     return { configured, totalModels, avgLatency, healthPct };
+  };
+
+  // Render Gemini model with details (token limit, PDF support)
+  const renderGeminiModelOption = (modelId: string) => {
+    const details = geminiModelDetails[modelId];
+    const isVersioned = versionedGeminiModels.includes(modelId);
+    
+    return (
+      <SelectItem key={modelId} value={modelId}>
+        <div className="flex items-center justify-between gap-2 w-full">
+          <span className="font-mono text-xs truncate">{modelId}</span>
+          <div className="flex items-center gap-1 shrink-0">
+            {isVersioned && (
+              <Badge variant="outline" className="text-[9px] px-1 py-0 text-amber-600 border-amber-300">
+                v
+              </Badge>
+            )}
+            {details?.inputTokenLimit && (
+              <Badge variant="secondary" className="text-[9px] px-1 py-0">
+                {formatTokenLimit(details.inputTokenLimit)}
+              </Badge>
+            )}
+            {details?.supportsPdf && (
+              <Badge variant="secondary" className="text-[9px] px-1 py-0 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
+                <FileText className="h-2.5 w-2.5" />
+              </Badge>
+            )}
+          </div>
+        </div>
+      </SelectItem>
+    );
   };
 
   // Render individual provider row
@@ -1017,11 +1238,19 @@ export function DevSettings() {
         {/* Coluna Modelos */}
         <TableCell>
           <div className="flex flex-wrap gap-1 max-w-xs">
-            {provider.models.slice(0, 2).map(model => (
-              <Badge key={model} variant="secondary" className="text-[10px] px-1.5 py-0 font-mono">
-                {model.length > 18 ? model.slice(0, 18) + "…" : model}
-              </Badge>
-            ))}
+            {provider.models.slice(0, 2).map(model => {
+              const details = provider.id === 'gemini' ? geminiModelDetails[model] : null;
+              return (
+                <div key={model} className="flex items-center gap-0.5">
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-mono">
+                    {model.length > 18 ? model.slice(0, 18) + "…" : model}
+                  </Badge>
+                  {details?.supportsPdf && (
+                    <FileText className="h-2.5 w-2.5 text-blue-500" />
+                  )}
+                </div>
+              );
+            })}
             {provider.models.length > 2 && (
               <TooltipProvider>
                 <Tooltip>
@@ -1136,7 +1365,14 @@ export function DevSettings() {
                           <span>Erro</span>
                         </div>
                       </TooltipTrigger>
-                      <TooltipContent>{testResult.error}</TooltipContent>
+                      <TooltipContent className="max-w-xs">
+                        <p>{testResult.error}</p>
+                        {testResult.testedAt && (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            Testado: {testResult.testedAt.toLocaleString('pt-BR')}
+                          </p>
+                        )}
+                      </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 )}
@@ -1151,7 +1387,7 @@ export function DevSettings() {
                       variant="ghost" 
                       size="sm" 
                       className="h-7 px-2 text-[11px] gap-1"
-                      onClick={() => fetchGeminiModels()}
+                      onClick={() => fetchGeminiModels(true)}
                       disabled={loadingGeminiModels}
                     >
                       {loadingGeminiModels ? (
@@ -1166,7 +1402,13 @@ export function DevSettings() {
                       <p className="font-medium">Atualizar Modelos</p>
                       <p className="text-muted-foreground">Busca modelos disponíveis para sua API key</p>
                       {dynamicGeminiModels.length > 0 && (
-                        <p className="text-primary mt-1">{dynamicGeminiModels.length} modelos carregados</p>
+                        <p className="text-primary mt-1">{dynamicGeminiModels.length} modelos estáveis</p>
+                      )}
+                      {modelsCacheUpdatedAt && (
+                        <p className="text-[10px] text-muted-foreground flex items-center gap-1 mt-1">
+                          <Clock className="h-2.5 w-2.5" />
+                          Atualizado: {modelsCacheUpdatedAt.toLocaleString('pt-BR')}
+                        </p>
                       )}
                     </div>
                   </TooltipContent>
@@ -1304,6 +1546,31 @@ export function DevSettings() {
           </div>
         </div>
 
+        {/* Toggle para modelos versionados do Gemini */}
+        {(dynamicGeminiModels.length > 0 || versionedGeminiModels.length > 0) && (
+          <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+            <div className="flex items-center gap-2">
+              <Checkbox 
+                id="show-versioned" 
+                checked={showVersionedModels} 
+                onCheckedChange={(checked) => setShowVersionedModels(!!checked)}
+              />
+              <Label htmlFor="show-versioned" className="text-sm cursor-pointer">
+                Mostrar modelos versionados do Gemini
+              </Label>
+              <Badge variant="outline" className="text-[10px]">
+                +{versionedGeminiModels.length} modelos
+              </Badge>
+            </div>
+            {modelsCacheUpdatedAt && (
+              <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                Cache: {modelsCacheUpdatedAt.toLocaleString('pt-BR')}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Default Model Selector */}
         <Card>
           <CardHeader className="pb-3">
@@ -1367,7 +1634,7 @@ export function DevSettings() {
                 <div className="space-y-2">
                   <Label className="text-sm text-muted-foreground">Sugestões populares:</Label>
                   <div className="flex flex-wrap gap-2">
-                    {getActiveProviderModels().map(model => <Button key={model} variant={config.default_ai_model === model ? "default" : "outline"} size="sm" className="text-xs h-7" onClick={() => setConfig({
+                    {getActiveProviderModels().slice(0, 6).map(model => <Button key={model} variant={config.default_ai_model === model ? "secondary" : "outline"} size="sm" className="text-xs h-7" onClick={() => setConfig({
                   ...config,
                   default_ai_model: model
                 })}>
@@ -1375,684 +1642,465 @@ export function DevSettings() {
                       </Button>)}
                   </div>
                 </div>
-                {getActiveProvider()?.modelDocsUrl && <p className="text-xs text-muted-foreground flex items-center gap-1">
-                    <Globe className="h-3 w-3" />
-                    Ver todos os modelos em{" "}
-                    <a href={getActiveProvider()?.modelDocsUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                      {getActiveProvider()?.modelDocsUrl?.replace("https://", "")}
-                    </a>
-                  </p>}
-              </> : <Select value={config.default_ai_model} onValueChange={value => setConfig({
-            ...config,
-            default_ai_model: value
-          })}>
-                <SelectTrigger className="w-full md:w-80">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {getActiveProviderModels().map(model => <SelectItem key={model} value={model}>
-                      {model}
-                    </SelectItem>)}
-                </SelectContent>
-              </Select>}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Separator />
-
-      {/* Section: Fallback AI Configuration */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Shield className="h-5 w-5 text-primary" />
-          <h2 className="text-xl font-semibold">IA de Fallback (Segunda IA)</h2>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Quando a IA principal falhar, esta será usada automaticamente como backup.
-        </p>
-
-        <Card>
-          <CardContent className="pt-6 space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Provider de Fallback</Label>
-                <Select value={config.fallback_ai_provider} onValueChange={value => {
-                const provider = AI_PROVIDERS.find(p => p.id === value);
-                if (provider?.requiresKey && !savedApiKeys[value]) {
-                  toast({
-                    variant: "destructive",
-                    title: "API Key necessária",
-                    description: `Configure uma API Key para usar ${provider.name} como fallback`
-                  });
-                  return;
-                }
-                setConfig({
-                  ...config,
-                  fallback_ai_provider: value,
-                  fallback_ai_model: AI_PROVIDERS.find(p => p.id === value)?.models[0] || ""
-                });
-              }}>
-                  <SelectTrigger>
+              </> : <div className="space-y-2">
+                <Label>Modelo</Label>
+                <Select value={config.default_ai_model} onValueChange={value => setConfig({
+              ...config,
+              default_ai_model: value
+            })}>
+                  <SelectTrigger className="w-full md:w-96">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {AI_PROVIDERS.filter(p => !p.requiresKey || savedApiKeys[p.id]).map(provider => <SelectItem key={provider.id} value={provider.id}>
-                        {provider.name}
-                      </SelectItem>)}
+                    {config.default_ai_provider === 'gemini' 
+                      ? getActiveProviderModels().map(model => renderGeminiModelOption(model))
+                      : getActiveProviderModels().map(model => (
+                          <SelectItem key={model} value={model}>{model}</SelectItem>
+                        ))
+                    }
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Modelo de Fallback</Label>
-                {fallbackProviderHasCustomInput() ? <div className="space-y-3">
-                    <div className="flex gap-2 items-center">
-                      <Input value={config.fallback_ai_model} onChange={e => setConfig({
-                    ...config,
-                    fallback_ai_model: e.target.value
-                  })} placeholder={getFallbackProvider()?.modelPlaceholder} />
-                      <Button variant="outline" size="icon" onClick={() => addFavoriteModel(config.fallback_ai_provider, config.fallback_ai_model)} disabled={!config.fallback_ai_model.trim()} title="Adicionar aos favoritos">
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                      {config.fallback_ai_model && <Badge variant="secondary" className="flex items-center gap-1 shrink-0 text-xs">
-                          <Check className="h-3 w-3" />
-                          Definido
-                        </Badge>}
-                    </div>
-                    
-                    {/* Favorite Models for Fallback */}
-                    {favoriteModels[config.fallback_ai_provider]?.length > 0 && <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Star className="h-3 w-3 text-yellow-500" />
-                          Favoritos:
-                        </Label>
-                        <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
-                          {favoriteModels[config.fallback_ai_provider].map(model => <div key={model} className={cn("flex items-center justify-between p-1.5 rounded-md border text-xs group cursor-pointer hover:bg-muted/50 transition-colors", config.fallback_ai_model === model && "border-primary bg-primary/5")} onClick={() => setConfig({
-                      ...config,
-                      fallback_ai_model: model
-                    })}>
-                              <div className="flex items-center gap-1 min-w-0">
-                                <Star className="h-2.5 w-2.5 text-yellow-500 shrink-0" />
-                                <span className="font-mono truncate">{model}</span>
-                              </div>
-                              <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={e => {
-                          e.stopPropagation();
-                          copyModelId(model);
-                        }}>
-                                  {copiedModel === model ? <Check className="h-2.5 w-2.5 text-green-500" /> : <Copy className="h-2.5 w-2.5" />}
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-5 w-5 text-destructive hover:text-destructive" onClick={e => {
-                          e.stopPropagation();
-                          removeFavoriteModel(config.fallback_ai_provider, model);
-                        }}>
-                                  <Trash2 className="h-2.5 w-2.5" />
-                                </Button>
-                              </div>
-                            </div>)}
-                        </div>
-                      </div>}
-                    
-                    <div className="flex flex-wrap gap-1">
-                      {getFallbackProviderModels().slice(0, 4).map(model => <Button key={model} variant={config.fallback_ai_model === model ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setConfig({
-                    ...config,
-                    fallback_ai_model: model
-                  })}>
-                          {model.length > 25 ? model.slice(0, 25) + "..." : model}
-                        </Button>)}
-                    </div>
-                  </div> : <Select value={config.fallback_ai_model} onValueChange={value => setConfig({
-                ...config,
-                fallback_ai_model: value
-              })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {getFallbackProviderModels().map(model => <SelectItem key={model} value={model}>
-                          {model}
-                        </SelectItem>)}
-                    </SelectContent>
-                  </Select>}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-4 border-t">
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => testConnection(config.fallback_ai_provider)} disabled={testingProvider === config.fallback_ai_provider}>
-                  {testingProvider === config.fallback_ai_provider ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
-                  Testar Fallback
-                </Button>
-                
-                {testResults[config.fallback_ai_provider] && <div className="flex items-center gap-1 text-sm">
-                    {testResults[config.fallback_ai_provider].success ? <>
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        <span className="text-green-600">
-                          OK ({testResults[config.fallback_ai_provider].latencyMs}ms)
-                        </span>
-                      </> : <>
-                        <XCircle className="h-4 w-4 text-destructive" />
-                        <span className="text-destructive">Falhou</span>
-                      </>}
-                  </div>}
-              </div>
-
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Zap className="h-4 w-4" />
-                <span>IA Integrada não requer API Key (recomendado)</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Separator />
-
-      {/* Section: PDF Extraction - Dynamic Provider (same as Fallback) */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <FileText className="h-5 w-5 text-primary" />
-          <h2 className="text-xl font-semibold">Extração de PDF (Importação de Autos)</h2>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Configure o provider e modelo de IA para processamento de PDFs. Modelos favoritos são compartilhados com a IA principal.
-        </p>
-
-        <Card>
-          <CardContent className="pt-6 space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              {/* PDF Provider Selection - Uses AI_PROVIDERS like Fallback */}
-              <div className="space-y-2">
-                <Label>Provider para PDFs</Label>
-                <Select value={config.pdf_ai_provider} onValueChange={value => {
-                const provider = AI_PROVIDERS.find(p => p.id === value);
-                if (provider?.requiresKey && !savedApiKeys[value]) {
-                  toast({
-                    variant: "destructive",
-                    title: "API Key necessária",
-                    description: `Configure uma API Key para usar ${provider.name} para PDFs`
-                  });
-                  return;
-                }
-                setConfig({
-                  ...config,
-                  pdf_ai_provider: value,
-                  pdf_ai_model: AI_PROVIDERS.find(p => p.id === value)?.models[0] || ""
-                });
-              }}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AI_PROVIDERS.filter(p => !p.requiresKey || savedApiKeys[p.id]).map(provider => <SelectItem key={provider.id} value={provider.id}>
-                        {provider.name}
-                      </SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* PDF Model Selection - Dynamic like Fallback */}
-              <div className="space-y-2">
-                <Label>Modelo para PDFs</Label>
-                {pdfProviderHasCustomInput() ? <div className="space-y-3">
-                    <div className="flex gap-2 items-center">
-                      <Input value={config.pdf_ai_model} onChange={e => setConfig({
-                    ...config,
-                    pdf_ai_model: e.target.value
-                  })} placeholder={getPdfProvider()?.modelPlaceholder} />
-                      <Button variant="outline" size="icon" onClick={() => addFavoriteModel(config.pdf_ai_provider, config.pdf_ai_model)} disabled={!config.pdf_ai_model.trim()} title="Adicionar aos favoritos">
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                      {config.pdf_ai_model && <Badge variant="secondary" className="flex items-center gap-1 shrink-0 text-xs">
-                          <Check className="h-3 w-3" />
-                          Definido
-                        </Badge>}
-                    </div>
-                    
-                    {/* Favorite Models for PDF - Shared with main AI */}
-                    {favoriteModels[config.pdf_ai_provider]?.length > 0 && <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Star className="h-3 w-3 text-yellow-500" />
-                          Favoritos:
-                        </Label>
-                        <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
-                          {favoriteModels[config.pdf_ai_provider].map(model => <div key={model} className={cn("flex items-center justify-between p-1.5 rounded-md border text-xs group cursor-pointer hover:bg-muted/50 transition-colors", config.pdf_ai_model === model && "border-primary bg-primary/5")} onClick={() => setConfig({
-                      ...config,
-                      pdf_ai_model: model
-                    })}>
-                              <div className="flex items-center gap-1 min-w-0">
-                                <Star className="h-2.5 w-2.5 text-yellow-500 shrink-0" />
-                                <span className="font-mono truncate">{model}</span>
-                              </div>
-                              <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                <Button variant="ghost" size="icon" className="h-5 w-5" onClick={e => {
-                          e.stopPropagation();
-                          copyModelId(model);
-                        }}>
-                                  {copiedModel === model ? <Check className="h-2.5 w-2.5 text-green-500" /> : <Copy className="h-2.5 w-2.5" />}
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-5 w-5 text-destructive hover:text-destructive" onClick={e => {
-                          e.stopPropagation();
-                          removeFavoriteModel(config.pdf_ai_provider, model);
-                        }}>
-                                  <Trash2 className="h-2.5 w-2.5" />
-                                </Button>
-                              </div>
-                            </div>)}
-                        </div>
-                      </div>}
-                    
-                    {/* Quick suggestions from provider defaults */}
-                    <div className="flex flex-wrap gap-1">
-                      {getPdfProviderModels().slice(0, 4).map(model => <Button key={model} variant={config.pdf_ai_model === model ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setConfig({
-                    ...config,
-                    pdf_ai_model: model
-                  })}>
-                          {model.length > 25 ? model.slice(0, 25) + "..." : model}
-                        </Button>)}
-                    </div>
-                  </div> : <Select value={config.pdf_ai_model} onValueChange={value => setConfig({
-                ...config,
-                pdf_ai_model: value
-              })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {getPdfProviderModels().map(model => <SelectItem key={model} value={model}>
-                          {model}
-                        </SelectItem>)}
-                    </SelectContent>
-                  </Select>}
-              </div>
-            </div>
-
-            {/* Link to docs for custom input providers */}
-            {getPdfProvider()?.modelDocsUrl && <p className="text-xs text-muted-foreground flex items-center gap-1">
-                <Globe className="h-3 w-3" />
-                Ver todos os modelos em{" "}
-                <a href={getPdfProvider()?.modelDocsUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                  {getPdfProvider()?.modelDocsUrl?.replace("https://", "")}
-                </a>
-              </p>}
-
-            {/* Info Box */}
-            <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 border">
-              <Zap className="h-5 w-5 text-primary mt-0.5" />
-              <div className="space-y-1 text-sm">
-                <p className="font-medium">Dica: Favoritos são compartilhados</p>
-                <p className="text-muted-foreground">
-                  Modelos adicionados como favoritos na IA principal ou fallback também aparecem aqui automaticamente.
-                </p>
-              </div>
-            </div>
-
-            {/* Provider-specific warnings */}
-            {getPdfProvider()?.requiresKey && !savedApiKeys[config.pdf_ai_provider] && <div className="flex items-center gap-2 text-sm text-destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <span>Configure a API Key do {getPdfProvider()?.name} nos cards acima.</span>
               </div>}
           </CardContent>
         </Card>
-        
-        {/* PDF Fallback Configuration Card */}
-        <Card className="border-dashed border-amber-500/30">
+
+        {/* Fallback Model Selector */}
+        <Card>
           <CardHeader className="pb-3">
-            <div className="flex items-center gap-2">
-              <RefreshCw className="h-4 w-4 text-amber-500" />
-              <CardTitle className="text-base">Fallback para Extração de PDF</CardTitle>
-            </div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Shield className="h-4 w-4" />
+              Fallback (Backup)
+            </CardTitle>
             <CardDescription>
-              Usado automaticamente quando o provider principal falha (ex: limite de páginas excedido)
+              Provider e modelo usados quando o principal falha
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              {/* PDF Fallback Provider Selection */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Provider de Fallback</Label>
-                <Select value={config.pdf_fallback_provider} onValueChange={value => {
-                const provider = AI_PROVIDERS.find(p => p.id === value);
-                if (provider?.requiresKey && !savedApiKeys[value]) {
-                  toast({
-                    variant: "destructive",
-                    title: "API Key necessária",
-                    description: `Configure uma API Key para usar ${provider.name} como fallback`
-                  });
-                  return;
-                }
-                setConfig({
-                  ...config,
-                  pdf_fallback_provider: value,
-                  pdf_fallback_model: AI_PROVIDERS.find(p => p.id === value)?.models[0] || ""
-                });
-              }}>
+                <Label>Provider Fallback</Label>
+                <Select value={config.fallback_ai_provider} onValueChange={value => {
+              const provider = AI_PROVIDERS.find(p => p.id === value);
+              setConfig({
+                ...config,
+                fallback_ai_provider: value,
+                fallback_ai_model: provider?.models[0] || ""
+              });
+            }}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {AI_PROVIDERS.filter(p => !p.requiresKey || savedApiKeys[p.id]).map(provider => <SelectItem key={provider.id} value={provider.id}>
-                        {provider.name}
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full" style={{
+                      backgroundColor: provider.color
+                    }} />
+                          {provider.name}
+                        </div>
                       </SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
-
-              {/* PDF Fallback Model Selection */}
               <div className="space-y-2">
-                <Label>Modelo de Fallback</Label>
-                {pdfFallbackProviderHasCustomInput() ? <div className="space-y-3">
-                    <div className="flex gap-2 items-center">
-                      <Input value={config.pdf_fallback_model} onChange={e => setConfig({
-                    ...config,
-                    pdf_fallback_model: e.target.value
-                  })} placeholder={getPdfFallbackProvider()?.modelPlaceholder} />
-                      <Button variant="outline" size="icon" onClick={() => addFavoriteModel(config.pdf_fallback_provider, config.pdf_fallback_model)} disabled={!config.pdf_fallback_model.trim()} title="Adicionar aos favoritos">
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    
-                    {/* Favorite Models for PDF Fallback - Shared */}
-                    {favoriteModels[config.pdf_fallback_provider]?.length > 0 && <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Star className="h-3 w-3 text-yellow-500" />
-                          Favoritos:
-                        </Label>
-                        <div className="flex flex-col gap-1 max-h-24 overflow-y-auto">
-                          {favoriteModels[config.pdf_fallback_provider].map(model => <div key={model} className={cn("flex items-center justify-between p-1.5 rounded-md border text-xs group cursor-pointer hover:bg-muted/50 transition-colors", config.pdf_fallback_model === model && "border-primary bg-primary/5")} onClick={() => setConfig({
-                      ...config,
-                      pdf_fallback_model: model
-                    })}>
-                              <div className="flex items-center gap-1 min-w-0">
-                                <Star className="h-2.5 w-2.5 text-yellow-500 shrink-0" />
-                                <span className="font-mono truncate">{model}</span>
-                              </div>
-                            </div>)}
-                        </div>
-                      </div>}
-                    
-                    {/* Quick suggestions */}
-                    <div className="flex flex-wrap gap-1">
-                      {getPdfFallbackProviderModels().slice(0, 3).map(model => <Button key={model} variant={config.pdf_fallback_model === model ? "default" : "outline"} size="sm" className="text-xs h-6" onClick={() => setConfig({
-                    ...config,
-                    pdf_fallback_model: model
-                  })}>
-                          {model.length > 20 ? model.slice(0, 20) + "..." : model}
-                        </Button>)}
-                    </div>
-                  </div> : <Select value={config.pdf_fallback_model} onValueChange={value => setConfig({
-                ...config,
-                pdf_fallback_model: value
-              })}>
+                <Label>Modelo Fallback</Label>
+                {fallbackProviderHasCustomInput() ? <Input value={config.fallback_ai_model} onChange={e => setConfig({
+              ...config,
+              fallback_ai_model: e.target.value
+            })} placeholder={getFallbackProvider()?.modelPlaceholder} /> : <Select value={config.fallback_ai_model} onValueChange={value => setConfig({
+              ...config,
+              fallback_ai_model: value
+            })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {getPdfFallbackProviderModels().map(model => <SelectItem key={model} value={model}>
-                          {model}
-                        </SelectItem>)}
+                      {config.fallback_ai_provider === 'gemini'
+                        ? getFallbackProviderModels().map(model => renderGeminiModelOption(model))
+                        : getFallbackProviderModels().map(model => (
+                            <SelectItem key={model} value={model}>{model}</SelectItem>
+                          ))
+                      }
                     </SelectContent>
                   </Select>}
-              </div>
-            </div>
-
-            {/* Warning if fallback requires key */}
-            {getPdfFallbackProvider()?.requiresKey && !savedApiKeys[config.pdf_fallback_provider] && (
-              <div className="flex items-center gap-2 text-sm text-destructive">
-                <AlertTriangle className="h-4 w-4" />
-                <span>Configure a API Key do {getPdfFallbackProvider()?.name} nos cards acima.</span>
-              </div>
-            )}
-
-            {/* Footer com botão de teste e dica - Padrão igual ao Fallback principal */}
-            <div className="flex items-center justify-between pt-4 border-t">
-              <div className="flex items-center gap-2">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => testConnection(config.pdf_fallback_provider)} 
-                  disabled={testingProvider === config.pdf_fallback_provider}
-                >
-                  {testingProvider === config.pdf_fallback_provider ? (
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Play className="h-4 w-4 mr-2" />
-                  )}
-                  Testar Fallback
-                </Button>
-                
-                {testResults[config.pdf_fallback_provider] && (
-                  <div className="flex items-center gap-1 text-sm">
-                    {testResults[config.pdf_fallback_provider].success ? (
-                      <>
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        <span className="text-green-600">
-                          OK ({testResults[config.pdf_fallback_provider].latencyMs}ms)
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <XCircle className="h-4 w-4 text-destructive" />
-                        <span className="text-destructive">Falhou</span>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Zap className="h-4 w-4" />
-                <span>IA Integrada não requer API Key (recomendado)</span>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      <Separator />
+
+      {/* Section: PDF Extraction */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            Extração de PDF
+          </CardTitle>
+          <CardDescription>
+            Configurações específicas para processamento de documentos PDF com IA
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Primary PDF Provider */}
+          <div className="space-y-4">
+            <h4 className="font-medium text-sm">Provider Principal para PDF</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Provider</Label>
+                <Select value={config.pdf_ai_provider} onValueChange={value => {
+              // Set appropriate default model based on provider
+              let defaultModel = "";
+              if (value === "openrouter") {
+                defaultModel = OPENROUTER_PDF_MODELS[0].id;
+              } else if (value === "gemini") {
+                defaultModel = GEMINI_PDF_MODELS[0].id;
+              } else if (value === "lovable") {
+                defaultModel = "google/gemini-2.5-flash";
+              }
+              setConfig({
+                ...config,
+                pdf_ai_provider: value,
+                pdf_ai_model: defaultModel
+              });
+            }}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PDF_AI_PROVIDERS.map(provider => <SelectItem key={provider.id} value={provider.id}>
+                        <div className="flex flex-col">
+                          <span>{provider.name}</span>
+                          <span className="text-[10px] text-muted-foreground">{provider.description}</span>
+                        </div>
+                      </SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Modelo</Label>
+                {config.pdf_ai_provider === "openrouter" ? <Select value={config.pdf_ai_model} onValueChange={value => setConfig({
+              ...config,
+              pdf_ai_model: value
+            })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {OPENROUTER_PDF_MODELS.map(model => <SelectItem key={model.id} value={model.id}>
+                          <div className="flex items-center justify-between w-full gap-4">
+                            <span>{model.name}</span>
+                            <div className="flex gap-1">
+                              <Badge variant="outline" className="text-[9px]">{model.context}</Badge>
+                              <Badge variant="secondary" className="text-[9px]">{model.cost}</Badge>
+                            </div>
+                          </div>
+                        </SelectItem>)}
+                    </SelectContent>
+                  </Select> : config.pdf_ai_provider === "gemini" ? <Select value={config.pdf_ai_model} onValueChange={value => setConfig({
+              ...config,
+              pdf_ai_model: value
+            })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GEMINI_PDF_MODELS.map(model => <SelectItem key={model.id} value={model.id}>
+                          <div className="flex flex-col">
+                            <span>{model.name}</span>
+                            <span className="text-[10px] text-muted-foreground">{model.description}</span>
+                          </div>
+                        </SelectItem>)}
+                    </SelectContent>
+                  </Select> : <Select value={config.pdf_ai_model} onValueChange={value => setConfig({
+              ...config,
+              pdf_ai_model: value
+            })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AI_PROVIDERS.find(p => p.id === "lovable")?.models.map(model => <SelectItem key={model} value={model}>{model}</SelectItem>)}
+                    </SelectContent>
+                  </Select>}
+              </div>
+            </div>
+          </div>
+
+          {/* PDF Fallback Provider */}
+          <div className="space-y-4 pt-4 border-t">
+            <h4 className="font-medium text-sm flex items-center gap-2">
+              <Shield className="h-4 w-4" />
+              Fallback para PDF
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Provider Fallback</Label>
+                <Select value={config.pdf_fallback_provider} onValueChange={value => {
+              let defaultModel = "";
+              if (value === "openrouter") {
+                defaultModel = OPENROUTER_PDF_MODELS[0].id;
+              } else if (value === "gemini") {
+                defaultModel = GEMINI_PDF_MODELS[0].id;
+              } else if (value === "lovable") {
+                defaultModel = "google/gemini-2.5-flash";
+              }
+              setConfig({
+                ...config,
+                pdf_fallback_provider: value,
+                pdf_fallback_model: defaultModel
+              });
+            }}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PDF_AI_PROVIDERS.map(provider => <SelectItem key={provider.id} value={provider.id}>
+                        {provider.name}
+                      </SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Modelo Fallback</Label>
+                {config.pdf_fallback_provider === "openrouter" ? <Select value={config.pdf_fallback_model} onValueChange={value => setConfig({
+              ...config,
+              pdf_fallback_model: value
+            })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {OPENROUTER_PDF_MODELS.map(model => <SelectItem key={model.id} value={model.id}>
+                          {model.name}
+                        </SelectItem>)}
+                    </SelectContent>
+                  </Select> : config.pdf_fallback_provider === "gemini" ? <Select value={config.pdf_fallback_model} onValueChange={value => setConfig({
+              ...config,
+              pdf_fallback_model: value
+            })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GEMINI_PDF_MODELS.map(model => <SelectItem key={model.id} value={model.id}>
+                          {model.name}
+                        </SelectItem>)}
+                    </SelectContent>
+                  </Select> : <Select value={config.pdf_fallback_model} onValueChange={value => setConfig({
+              ...config,
+              pdf_fallback_model: value
+            })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AI_PROVIDERS.find(p => p.id === "lovable")?.models.map(model => <SelectItem key={model} value={model}>{model}</SelectItem>)}
+                    </SelectContent>
+                  </Select>}
+              </div>
+            </div>
+          </div>
+
+          {/* Legacy Gemini Direct */}
+          <div className="space-y-4 pt-4 border-t">
+            <h4 className="font-medium text-sm text-muted-foreground">Gemini Vision Direto (Legacy)</h4>
+            <p className="text-xs text-muted-foreground">
+              Usado apenas se os providers acima falharem e houver chave Gemini configurada.
+            </p>
+            <div className="space-y-2">
+              <Label>Modelo Gemini Vision</Label>
+              <Select value={config.gemini_pdf_model} onValueChange={value => setConfig({
+            ...config,
+            gemini_pdf_model: value
+          })}>
+                <SelectTrigger className="w-full md:w-96">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {GEMINI_PDF_MODELS.map(model => <SelectItem key={model.id} value={model.id}>
+                      <div className="flex flex-col">
+                        <span>{model.name}</span>
+                        <span className="text-[10px] text-muted-foreground">{model.description}</span>
+                      </div>
+                    </SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Separator />
 
       {/* Section: Allowed Providers */}
-      <div className="space-y-4">
-        <h2 className="text-xl font-semibold">Providers Habilitados</h2>
-        <p className="text-sm text-muted-foreground">
-          Controle quais providers de IA podem ser usados no sistema.
-        </p>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex flex-wrap gap-6">
-              {AI_PROVIDERS.map(provider => <div key={provider.id} className="flex items-center gap-3">
-                  <Switch checked={config.allowed_ai_providers.includes(provider.id)} onCheckedChange={() => toggleProvider(provider.id)} />
-                  <Label className="cursor-pointer">{provider.name}</Label>
-                </div>)}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Providers Permitidos</CardTitle>
+          <CardDescription>
+            Controle quais providers estão disponíveis para uso no sistema
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {AI_PROVIDERS.map(provider => <div key={provider.id} className="flex items-center justify-between p-3 border rounded-lg">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full" style={{
+                backgroundColor: provider.color
+              }} />
+                  <span className="text-sm font-medium">{provider.name}</span>
+                </div>
+                <Switch checked={config.allowed_ai_providers.includes(provider.id)} onCheckedChange={() => toggleProvider(provider.id)} />
+              </div>)}
+          </div>
+        </CardContent>
+      </Card>
 
       <Separator />
 
-      {/* Section: Retry & Rate Limit Settings */}
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <RefreshCw className="h-5 w-5 text-primary" />
-          <h2 className="text-xl font-semibold">Resiliência & Rate Limits</h2>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Configure o comportamento de retry automático quando a IA retorna erros temporários (429, 502, 503).
-        </p>
-
-        <Card>
-          <CardContent className="pt-6 space-y-6">
-            {/* Toggle para habilitar/desabilitar */}
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Retry Automático</Label>
-                <p className="text-sm text-muted-foreground">
-                  Tentar novamente automaticamente em caso de rate limits
-                </p>
-              </div>
-              <Switch checked={config.retry_enabled} onCheckedChange={checked => setConfig({
-              ...config,
-              retry_enabled: checked
-            })} />
-            </div>
-
-            {/* Configurações detalhadas (visíveis apenas se habilitado) */}
-            {config.retry_enabled && <div className="grid gap-4 md:grid-cols-2 pt-4 border-t">
-                {/* Máximo de Tentativas */}
-                <div className="space-y-2">
-                  <Label>Máximo de Tentativas</Label>
-                  <Select value={String(config.retry_max_attempts)} onValueChange={value => setConfig({
-                ...config,
-                retry_max_attempts: Number(value)
-              })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="1">1 tentativa</SelectItem>
-                      <SelectItem value="2">2 tentativas</SelectItem>
-                      <SelectItem value="3">3 tentativas (padrão)</SelectItem>
-                      <SelectItem value="4">4 tentativas</SelectItem>
-                      <SelectItem value="5">5 tentativas</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Número de retries antes de desistir
-                  </p>
-                </div>
-
-                {/* Delay Base */}
-                <div className="space-y-2">
-                  <Label>Delay Base (ms)</Label>
-                  <Select value={String(config.retry_base_delay_ms)} onValueChange={value => setConfig({
-                ...config,
-                retry_base_delay_ms: Number(value)
-              })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="500">500ms (rápido)</SelectItem>
-                      <SelectItem value="1000">1000ms (padrão)</SelectItem>
-                      <SelectItem value="2000">2000ms (conservador)</SelectItem>
-                      <SelectItem value="3000">3000ms (lento)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Tempo inicial de espera (dobra a cada retry)
-                  </p>
-                </div>
-              </div>}
-
-            {/* Visualização do comportamento */}
-            {config.retry_enabled && <div className="bg-muted/50 rounded-lg p-4 mt-4">
-                <Label className="text-sm">Comportamento esperado:</Label>
-                <div className="flex flex-wrap items-center gap-2 mt-2 text-sm text-muted-foreground">
-                  <span>Tentativa 1</span>
-                  {Array.from({
-                length: config.retry_max_attempts
-              }).map((_, i) => <span key={i} className="flex items-center gap-1">
-                      <span>→</span>
-                      <span className="text-amber-500 font-mono">
-                        {config.retry_base_delay_ms * Math.pow(2, i)}ms
-                      </span>
-                      <span>→ Tentativa {i + 2}</span>
-                    </span>)}
-                </div>
-              </div>}
-          </CardContent>
-        </Card>
-      </div>
-
-      <Separator />
-
-      {/* Section: General Settings */}
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Configurações Gerais</CardTitle>
-            <CardDescription>Configurações básicas do sistema</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <Label>Modo de Manutenção</Label>
-                <p className="text-sm text-muted-foreground">
-                  Bloqueia acesso de usuários ao sistema
-                </p>
-              </div>
-              <Switch checked={config.maintenance_mode} onCheckedChange={checked => setConfig({
-              ...config,
-              maintenance_mode: checked
-            })} />
-            </div>
-
-            <Separator />
-
-            <div className="space-y-2">
-              <Label>Tamanho Máximo de PDF (MB)</Label>
-              <Input type="number" value={config.max_pdf_size_mb} onChange={e => setConfig({
-              ...config,
-              max_pdf_size_mb: parseInt(e.target.value) || 50
-            })} min={1} max={100} className="w-32" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Ações em Massa</CardTitle>
-            <CardDescription>Operações que afetam múltiplos usuários</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Resetar Cotas de IA</Label>
-              <p className="text-sm text-muted-foreground mb-2">
-                Zera o contador de requisições de IA para todos os usuários
-              </p>
-              <Button variant="outline" onClick={resetAllUserQuotas}>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Resetar Todas as Cotas
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Separator />
-
-      {/* Section: How it Works */}
+      {/* Section: Retry Settings */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Globe className="h-5 w-5" />
-            Como funciona
+            <RefreshCw className="h-5 w-5" />
+            Retry e Rate Limits
           </CardTitle>
+          <CardDescription>
+            Configurações de retry automático quando providers falham
+          </CardDescription>
         </CardHeader>
-        <CardContent className="prose prose-sm max-w-none dark:prose-invert">
-          <ul className="space-y-2 text-muted-foreground list-disc pl-4">
-            <li>
-              <strong>IA Integrada</strong> é o provider padrão e não requer configuração adicional.
-              Usa o gateway integrado para acessar modelos Gemini e GPT.
-            </li>
-            <li>
-              <strong>Sistema de Fallback:</strong> Se a IA principal falhar (timeout, erro de API, etc.),
-              o sistema automaticamente tentará a IA de fallback configurada.
-            </li>
-            <li>
-              Providers externos requerem uma <strong>API key global</strong> configurada nos cards acima.
-              Essas keys são usadas quando o usuário não tem uma key própria.
-            </li>
-            <li>
-              Use o botão <strong>Testar</strong> em cada card para verificar se a conexão está funcionando
-              antes de ativar o provider.
-            </li>
-            <li>
-              O sistema registra todas as requisições de IA na tabela de logs,
-              incluindo se usou fallback, latência, e erros na aba <strong>IA</strong>.
-            </li>
-          </ul>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label>Retry Automático</Label>
+              <p className="text-sm text-muted-foreground">
+                Tentar novamente automaticamente quando uma chamada falha
+              </p>
+            </div>
+            <Switch checked={config.retry_enabled} onCheckedChange={checked => setConfig({
+          ...config,
+          retry_enabled: checked
+        })} />
+          </div>
+
+          {config.retry_enabled && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
+              <div className="space-y-2">
+                <Label>Máximo de Tentativas</Label>
+                <Select value={String(config.retry_max_attempts)} onValueChange={value => setConfig({
+            ...config,
+            retry_max_attempts: parseInt(value)
+          })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[1, 2, 3, 4, 5].map(n => <SelectItem key={n} value={String(n)}>{n} tentativa{n > 1 ? "s" : ""}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Delay Base (ms)</Label>
+                <Select value={String(config.retry_base_delay_ms)} onValueChange={value => setConfig({
+            ...config,
+            retry_base_delay_ms: parseInt(value)
+          })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[500, 1000, 2000, 3000, 5000].map(n => <SelectItem key={n} value={String(n)}>{n}ms</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Delay aumenta exponencialmente a cada tentativa
+                </p>
+              </div>
+            </div>}
+        </CardContent>
+      </Card>
+
+      <Separator />
+
+      {/* Section: System Settings */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Configurações Gerais</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label>Modo de Manutenção</Label>
+              <p className="text-sm text-muted-foreground">
+                Bloqueia acesso de usuários ao sistema
+              </p>
+            </div>
+            <Switch checked={config.maintenance_mode} onCheckedChange={checked => setConfig({
+          ...config,
+          maintenance_mode: checked
+        })} />
+          </div>
+          <Separator />
+          <div className="space-y-2">
+            <Label>Tamanho Máximo de PDF (MB)</Label>
+            <Select value={String(config.max_pdf_size_mb)} onValueChange={value => setConfig({
+          ...config,
+          max_pdf_size_mb: parseInt(value)
+        })}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[10, 20, 30, 50, 100].map(size => <SelectItem key={size} value={String(size)}>{size} MB</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Separator />
+
+      {/* Section: Mass Actions */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Ações em Massa</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-4">
+            <Button variant="outline" onClick={resetAllUserQuotas}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Resetar Cotas de IA de Todos os Usuários
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* How it Works Section */}
+      <Card className="border-dashed">
+        <CardHeader>
+          <CardTitle className="text-sm font-medium text-muted-foreground">Como Funciona</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground space-y-2">
+          <p>
+            <strong>Provider Ativo:</strong> Usado para todas as chamadas de IA do sistema.
+          </p>
+          <p>
+            <strong>Fallback:</strong> Ativado automaticamente quando o provider principal falha.
+          </p>
+          <p>
+            <strong>PDF Extraction:</strong> Chain de providers específicos para processar documentos.
+            O sistema tenta OpenRouter → Gemini Direto → Lovable AI em sequência.
+          </p>
+          <p>
+            <strong>Auto-teste:</strong> Ao salvar uma API key, o sistema testa automaticamente a conexão após 1.5s.
+          </p>
+          <p>
+            <strong>Cache de modelos:</strong> A lista de modelos do Gemini é cacheada por 24h para performance.
+          </p>
+          <p>
+            <strong>Modelos versionados:</strong> Por padrão, apenas modelos estáveis são exibidos. 
+            Use o toggle para ver também modelos com sufixos de versão/data.
+          </p>
         </CardContent>
       </Card>
     </div>;
