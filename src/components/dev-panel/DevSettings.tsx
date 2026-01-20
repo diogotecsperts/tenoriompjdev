@@ -1704,13 +1704,111 @@ export function DevSettings() {
               </div>
               <div className="space-y-2">
                 <Label>Modelo Fallback</Label>
-                {fallbackProviderHasCustomInput() ? <Input value={config.fallback_ai_model} onChange={e => setConfig({
-              ...config,
-              fallback_ai_model: e.target.value
-            })} placeholder={getFallbackProvider()?.modelPlaceholder} /> : <Select value={config.fallback_ai_model} onValueChange={value => setConfig({
-              ...config,
-              fallback_ai_model: value
-            })}>
+                {fallbackProviderHasCustomInput() ? (
+                  <div className="space-y-4">
+                    <div className="flex gap-2 items-center">
+                      <Input 
+                        value={config.fallback_ai_model} 
+                        onChange={e => setConfig({
+                          ...config,
+                          fallback_ai_model: e.target.value
+                        })} 
+                        placeholder={getFallbackProvider()?.modelPlaceholder} 
+                        className="flex-1"
+                      />
+                      <Button 
+                        variant="outline" 
+                        size="icon" 
+                        onClick={() => addFavoriteModel(config.fallback_ai_provider, config.fallback_ai_model)} 
+                        disabled={!config.fallback_ai_model.trim()} 
+                        title="Adicionar aos favoritos"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    {/* Favorite Models List for Fallback */}
+                    {favoriteModels[config.fallback_ai_provider]?.length > 0 && (
+                      <div className="space-y-2">
+                        <Label className="text-sm text-muted-foreground flex items-center gap-1">
+                          <Star className="h-3 w-3 text-yellow-500" />
+                          Meus modelos favoritos:
+                        </Label>
+                        <div className="flex flex-col gap-1">
+                          {favoriteModels[config.fallback_ai_provider].map(model => (
+                            <div 
+                              key={model} 
+                              className={cn(
+                                "flex items-center justify-between p-2 rounded-md border text-sm group cursor-pointer hover:bg-muted/50 transition-colors", 
+                                config.fallback_ai_model === model && "border-primary bg-primary/5"
+                              )} 
+                              onClick={() => setConfig({
+                                ...config,
+                                fallback_ai_model: model
+                              })}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Star className="h-3 w-3 text-yellow-500 shrink-0" />
+                                <span className="font-mono text-xs truncate">{model}</span>
+                              </div>
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-6 w-6" 
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    copyModelId(model);
+                                  }} 
+                                  title="Copiar identificador"
+                                >
+                                  {copiedModel === model ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                                </Button>
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-6 w-6 text-destructive hover:text-destructive" 
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    removeFavoriteModel(config.fallback_ai_provider, model);
+                                  }} 
+                                  title="Remover dos favoritos"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Popular suggestions for fallback */}
+                    <div className="space-y-2">
+                      <Label className="text-sm text-muted-foreground">Sugestões populares:</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {getFallbackProviderModels().slice(0, 4).map(model => (
+                          <Button 
+                            key={model} 
+                            variant={config.fallback_ai_model === model ? "secondary" : "outline"} 
+                            size="sm" 
+                            className="text-xs h-7" 
+                            onClick={() => setConfig({
+                              ...config,
+                              fallback_ai_model: model
+                            })}
+                          >
+                            {model.length > 25 ? model.slice(0, 25) + "…" : model}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <Select value={config.fallback_ai_model} onValueChange={value => setConfig({
+                    ...config,
+                    fallback_ai_model: value
+                  })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -1722,7 +1820,8 @@ export function DevSettings() {
                           ))
                       }
                     </SelectContent>
-                  </Select>}
+                  </Select>
+                )}
               </div>
             </div>
           </CardContent>
@@ -1769,61 +1868,157 @@ export function DevSettings() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {PDF_AI_PROVIDERS.map(provider => <SelectItem key={provider.id} value={provider.id}>
-                        <div className="flex flex-col">
-                          <span>{provider.name}</span>
-                          <span className="text-[10px] text-muted-foreground">{provider.description}</span>
+                    {AI_PROVIDERS.filter(p => !p.requiresKey || savedApiKeys[p.id]).map(provider => (
+                      <SelectItem key={provider.id} value={provider.id}>
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: provider.color }} />
+                          <div className="flex flex-col">
+                            <span>{provider.name}</span>
+                            <span className="text-[10px] text-muted-foreground">{provider.description}</span>
+                          </div>
                         </div>
-                      </SelectItem>)}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
                 <Label>Modelo</Label>
-                {config.pdf_ai_provider === "openrouter" ? <Select value={config.pdf_ai_model} onValueChange={value => setConfig({
-              ...config,
-              pdf_ai_model: value
-            })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {OPENROUTER_PDF_MODELS.map(model => <SelectItem key={model.id} value={model.id}>
-                          <div className="flex items-center justify-between w-full gap-4">
-                            <span>{model.name}</span>
-                            <div className="flex gap-1">
-                              <Badge variant="outline" className="text-[9px]">{model.context}</Badge>
-                              <Badge variant="secondary" className="text-[9px]">{model.cost}</Badge>
+                {pdfProviderHasCustomInput() ? (
+                  <div className="space-y-4">
+                    <div className="flex gap-2 items-center">
+                      <Input 
+                        value={config.pdf_ai_model} 
+                        onChange={e => setConfig({
+                          ...config,
+                          pdf_ai_model: e.target.value
+                        })} 
+                        placeholder={getPdfProvider()?.modelPlaceholder} 
+                        className="flex-1"
+                      />
+                      <Button 
+                        variant="outline" 
+                        size="icon" 
+                        onClick={() => addFavoriteModel(config.pdf_ai_provider, config.pdf_ai_model)} 
+                        disabled={!config.pdf_ai_model.trim()} 
+                        title="Adicionar aos favoritos"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    {/* Favorite Models List for PDF */}
+                    {favoriteModels[config.pdf_ai_provider]?.length > 0 && (
+                      <div className="space-y-2">
+                        <Label className="text-sm text-muted-foreground flex items-center gap-1">
+                          <Star className="h-3 w-3 text-yellow-500" />
+                          Meus modelos favoritos:
+                        </Label>
+                        <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
+                          {favoriteModels[config.pdf_ai_provider].map(model => (
+                            <div 
+                              key={model} 
+                              className={cn(
+                                "flex items-center justify-between p-2 rounded-md border text-sm group cursor-pointer hover:bg-muted/50 transition-colors", 
+                                config.pdf_ai_model === model && "border-primary bg-primary/5"
+                              )} 
+                              onClick={() => setConfig({
+                                ...config,
+                                pdf_ai_model: model
+                              })}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Star className="h-3 w-3 text-yellow-500 shrink-0" />
+                                <span className="font-mono text-xs truncate">{model}</span>
+                              </div>
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-6 w-6" 
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    copyModelId(model);
+                                  }} 
+                                  title="Copiar identificador"
+                                >
+                                  {copiedModel === model ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                                </Button>
+                              </div>
                             </div>
-                          </div>
-                        </SelectItem>)}
-                    </SelectContent>
-                  </Select> : config.pdf_ai_provider === "gemini" ? <Select value={config.pdf_ai_model} onValueChange={value => setConfig({
-              ...config,
-              pdf_ai_model: value
-            })}>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Popular PDF model suggestions */}
+                    <div className="space-y-2">
+                      <Label className="text-sm text-muted-foreground">Sugestões para PDF:</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {(config.pdf_ai_provider === "openrouter" ? OPENROUTER_PDF_MODELS : getPdfProviderModels().slice(0, 4).map(m => ({ id: m, name: m }))).slice(0, 4).map(model => (
+                          <Button 
+                            key={model.id} 
+                            variant={config.pdf_ai_model === model.id ? "secondary" : "outline"} 
+                            size="sm" 
+                            className="text-xs h-7" 
+                            onClick={() => setConfig({
+                              ...config,
+                              pdf_ai_model: model.id
+                            })}
+                          >
+                            {model.name.length > 20 ? model.name.slice(0, 20) + "…" : model.name}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : config.pdf_ai_provider === "gemini" ? (
+                  <Select value={config.pdf_ai_model} onValueChange={value => setConfig({
+                    ...config,
+                    pdf_ai_model: value
+                  })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {GEMINI_PDF_MODELS.map(model => <SelectItem key={model.id} value={model.id}>
-                          <div className="flex flex-col">
-                            <span>{model.name}</span>
-                            <span className="text-[10px] text-muted-foreground">{model.description}</span>
-                          </div>
-                        </SelectItem>)}
+                      {(dynamicGeminiModels.length > 0 ? dynamicGeminiModels : GEMINI_PDF_MODELS.map(m => m.id)).map(modelId => {
+                        const details = geminiModelDetails[modelId];
+                        const staticInfo = GEMINI_PDF_MODELS.find(m => m.id === modelId);
+                        return (
+                          <SelectItem key={modelId} value={modelId}>
+                            <div className="flex items-center justify-between gap-2 w-full">
+                              <div className="flex flex-col">
+                                <span>{staticInfo?.name || modelId}</span>
+                                {staticInfo?.description && (
+                                  <span className="text-[10px] text-muted-foreground">{staticInfo.description}</span>
+                                )}
+                              </div>
+                              {details?.supportsPdf && (
+                                <Badge variant="secondary" className="text-[9px] px-1 py-0 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300">
+                                  <FileText className="h-2.5 w-2.5" />
+                                </Badge>
+                              )}
+                            </div>
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
-                  </Select> : <Select value={config.pdf_ai_model} onValueChange={value => setConfig({
-              ...config,
-              pdf_ai_model: value
-            })}>
+                  </Select>
+                ) : (
+                  <Select value={config.pdf_ai_model} onValueChange={value => setConfig({
+                    ...config,
+                    pdf_ai_model: value
+                  })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {AI_PROVIDERS.find(p => p.id === "lovable")?.models.map(model => <SelectItem key={model} value={model}>{model}</SelectItem>)}
+                      {getPdfProviderModels().map(model => (
+                        <SelectItem key={model} value={model}>{model}</SelectItem>
+                      ))}
                     </SelectContent>
-                  </Select>}
+                  </Select>
+                )}
               </div>
             </div>
           </div>
@@ -1856,49 +2051,127 @@ export function DevSettings() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {PDF_AI_PROVIDERS.map(provider => <SelectItem key={provider.id} value={provider.id}>
-                        {provider.name}
-                      </SelectItem>)}
+                    {AI_PROVIDERS.filter(p => !p.requiresKey || savedApiKeys[p.id]).map(provider => (
+                      <SelectItem key={provider.id} value={provider.id}>
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: provider.color }} />
+                          {provider.name}
+                        </div>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
                 <Label>Modelo Fallback</Label>
-                {config.pdf_fallback_provider === "openrouter" ? <Select value={config.pdf_fallback_model} onValueChange={value => setConfig({
-              ...config,
-              pdf_fallback_model: value
-            })}>
+                {pdfFallbackProviderHasCustomInput() ? (
+                  <div className="space-y-4">
+                    <div className="flex gap-2 items-center">
+                      <Input 
+                        value={config.pdf_fallback_model} 
+                        onChange={e => setConfig({
+                          ...config,
+                          pdf_fallback_model: e.target.value
+                        })} 
+                        placeholder={getPdfFallbackProvider()?.modelPlaceholder} 
+                        className="flex-1"
+                      />
+                      <Button 
+                        variant="outline" 
+                        size="icon" 
+                        onClick={() => addFavoriteModel(config.pdf_fallback_provider, config.pdf_fallback_model)} 
+                        disabled={!config.pdf_fallback_model.trim()} 
+                        title="Adicionar aos favoritos"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    {/* Favorite Models List for PDF Fallback */}
+                    {favoriteModels[config.pdf_fallback_provider]?.length > 0 && (
+                      <div className="space-y-2">
+                        <Label className="text-sm text-muted-foreground flex items-center gap-1">
+                          <Star className="h-3 w-3 text-yellow-500" />
+                          Meus modelos favoritos:
+                        </Label>
+                        <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
+                          {favoriteModels[config.pdf_fallback_provider].map(model => (
+                            <div 
+                              key={model} 
+                              className={cn(
+                                "flex items-center justify-between p-2 rounded-md border text-sm group cursor-pointer hover:bg-muted/50 transition-colors", 
+                                config.pdf_fallback_model === model && "border-primary bg-primary/5"
+                              )} 
+                              onClick={() => setConfig({
+                                ...config,
+                                pdf_fallback_model: model
+                              })}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Star className="h-3 w-3 text-yellow-500 shrink-0" />
+                                <span className="font-mono text-xs truncate">{model}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Popular suggestions */}
+                    <div className="space-y-2">
+                      <Label className="text-sm text-muted-foreground">Sugestões:</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {(config.pdf_fallback_provider === "openrouter" ? OPENROUTER_PDF_MODELS : getPdfFallbackProviderModels().slice(0, 4).map(m => ({ id: m, name: m }))).slice(0, 3).map(model => (
+                          <Button 
+                            key={model.id} 
+                            variant={config.pdf_fallback_model === model.id ? "secondary" : "outline"} 
+                            size="sm" 
+                            className="text-xs h-7" 
+                            onClick={() => setConfig({
+                              ...config,
+                              pdf_fallback_model: model.id
+                            })}
+                          >
+                            {model.name.length > 18 ? model.name.slice(0, 18) + "…" : model.name}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : config.pdf_fallback_provider === "gemini" ? (
+                  <Select value={config.pdf_fallback_model} onValueChange={value => setConfig({
+                    ...config,
+                    pdf_fallback_model: value
+                  })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {OPENROUTER_PDF_MODELS.map(model => <SelectItem key={model.id} value={model.id}>
-                          {model.name}
-                        </SelectItem>)}
+                      {(dynamicGeminiModels.length > 0 ? dynamicGeminiModels : GEMINI_PDF_MODELS.map(m => m.id)).map(modelId => {
+                        const staticInfo = GEMINI_PDF_MODELS.find(m => m.id === modelId);
+                        return (
+                          <SelectItem key={modelId} value={modelId}>
+                            {staticInfo?.name || modelId}
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
-                  </Select> : config.pdf_fallback_provider === "gemini" ? <Select value={config.pdf_fallback_model} onValueChange={value => setConfig({
-              ...config,
-              pdf_fallback_model: value
-            })}>
+                  </Select>
+                ) : (
+                  <Select value={config.pdf_fallback_model} onValueChange={value => setConfig({
+                    ...config,
+                    pdf_fallback_model: value
+                  })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {GEMINI_PDF_MODELS.map(model => <SelectItem key={model.id} value={model.id}>
-                          {model.name}
-                        </SelectItem>)}
+                      {getPdfFallbackProviderModels().map(model => (
+                        <SelectItem key={model} value={model}>{model}</SelectItem>
+                      ))}
                     </SelectContent>
-                  </Select> : <Select value={config.pdf_fallback_model} onValueChange={value => setConfig({
-              ...config,
-              pdf_fallback_model: value
-            })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {AI_PROVIDERS.find(p => p.id === "lovable")?.models.map(model => <SelectItem key={model} value={model}>{model}</SelectItem>)}
-                    </SelectContent>
-                  </Select>}
+                  </Select>
+                )}
               </div>
             </div>
           </div>
