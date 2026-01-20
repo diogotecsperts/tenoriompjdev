@@ -23,6 +23,7 @@ interface ModelInfo {
   outputTokenLimit: number;
   supportsPdf: boolean;
   isImageModel: boolean;
+  isVersioned: boolean;
   description?: string;
 }
 
@@ -30,6 +31,19 @@ function isImageModel(modelId: string): boolean {
   return modelId.includes('image') || 
          modelId.includes('imagen') ||
          modelId.includes('native-audio');
+}
+
+// Detecta se é um modelo versionado (com data/sufixos de versão)
+function isVersionedModel(modelId: string): boolean {
+  const patterns = [
+    /-\d{3,4}$/,             // termina com -001, -0924, etc
+    /-preview-\d{2}-\d{2}/,  // -preview-05-20
+    /-exp-\d+/,              // -exp-0924
+    /-\d{8}/,                // datas YYYYMMDD
+    /-exp$/,                 // termina com -exp
+    /-latest$/,              // termina com -latest
+  ];
+  return patterns.some(p => p.test(modelId));
 }
 
 serve(async (req) => {
@@ -95,6 +109,7 @@ serve(async (req) => {
       const modelId = m.name.replace('models/', '');
       const family = getModelFamily(modelId);
       const isImage = isImageModel(modelId);
+      const isVersioned = isVersionedModel(modelId);
       
       return {
         id: modelId,
@@ -110,6 +125,7 @@ serve(async (req) => {
           family === '2.5'
         ),
         isImageModel: isImage,
+        isVersioned,
         description: m.description
       };
     });
@@ -117,32 +133,42 @@ serve(async (req) => {
     // Separate text and image models
     const textOnlyModels = models.filter(m => !m.isImageModel);
     const imageOnlyModels = models.filter(m => m.isImageModel);
+    
+    // Separate stable and versioned models
+    const stableModels = textOnlyModels.filter(m => !m.isVersioned);
+    const versionedModels = textOnlyModels.filter(m => m.isVersioned);
 
-    console.log(`[list-gemini-models] Text models: ${textOnlyModels.length}, Image models: ${imageOnlyModels.length}`);
+    console.log(`[list-gemini-models] Text models: ${textOnlyModels.length} (stable: ${stableModels.length}, versioned: ${versionedModels.length}), Image models: ${imageOnlyModels.length}`);
 
     // Sort models: 3.0 > 2.5 > 2.0 > 1.5 > others, then by name
-    models.sort((a, b) => {
-      const familyOrder = ['3.0', '2.5', '2.0', '1.5', '1.0', 'other'];
-      const aIdx = familyOrder.indexOf(a.family);
-      const bIdx = familyOrder.indexOf(b.family);
-      
-      if (aIdx !== bIdx) return aIdx - bIdx;
-      
-      // Within same family, sort Pro before Flash before Lite
-      const typeOrder = (id: string) => {
-        if (id.includes('pro')) return 0;
-        if (id.includes('flash') && !id.includes('lite')) return 1;
-        if (id.includes('lite') || id.includes('8b')) return 2;
-        return 3;
-      };
-      
-      const aType = typeOrder(a.id);
-      const bType = typeOrder(b.id);
-      
-      if (aType !== bType) return aType - bType;
-      
-      return a.id.localeCompare(b.id);
-    });
+    const sortModels = (modelList: ModelInfo[]) => {
+      return modelList.sort((a, b) => {
+        const familyOrder = ['3.0', '2.5', '2.0', '1.5', '1.0', 'other'];
+        const aIdx = familyOrder.indexOf(a.family);
+        const bIdx = familyOrder.indexOf(b.family);
+        
+        if (aIdx !== bIdx) return aIdx - bIdx;
+        
+        // Within same family, sort Pro before Flash before Lite
+        const typeOrder = (id: string) => {
+          if (id.includes('pro')) return 0;
+          if (id.includes('flash') && !id.includes('lite')) return 1;
+          if (id.includes('lite') || id.includes('8b')) return 2;
+          return 3;
+        };
+        
+        const aType = typeOrder(a.id);
+        const bType = typeOrder(b.id);
+        
+        if (aType !== bType) return aType - bType;
+        
+        return a.id.localeCompare(b.id);
+      });
+    };
+    
+    sortModels(stableModels);
+    sortModels(versionedModels);
+    sortModels(imageOnlyModels);
 
     // Group by category
     const categories: Record<string, string[]> = {};
@@ -153,8 +179,8 @@ serve(async (req) => {
       categories[m.family].push(m.id);
     });
 
-    // Get recommended models for PDF processing (only text models)
-    const pdfModels = textOnlyModels
+    // Get recommended models for PDF processing (only stable text models)
+    const pdfModels = stableModels
       .filter(m => m.supportsPdf && m.inputTokenLimit >= 100000)
       .slice(0, 5)
       .map(m => m.id);
@@ -164,13 +190,16 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({
       success: true,
-      models: textOnlyModels,        // Return only text models in main list
-      imageModels: imageOnlyModels,  // Separate list for image models
+      models: stableModels,           // Return only stable models in main list
+      versionedModels: versionedModels, // Separate list for versioned models
+      imageModels: imageOnlyModels,   // Separate list for image models
       categories,
       pdfModels,
       totalCount: models.length,
-      textModelCount: textOnlyModels.length,
-      imageModelCount: imageOnlyModels.length
+      stableModelCount: stableModels.length,
+      versionedModelCount: versionedModels.length,
+      imageModelCount: imageOnlyModels.length,
+      fetchedAt: new Date().toISOString()
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });

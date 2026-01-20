@@ -147,6 +147,11 @@ function isImageModel(modelId: string): boolean {
          modelId.includes('native-audio');
 }
 
+// Detecta se é modelo flash 2.5+ (suporta thinkingConfig)
+function isFlash25Model(modelId: string): boolean {
+  return modelId.includes('2.5-flash') || modelId.includes('2.0-flash');
+}
+
 async function testGemini(apiKey: string, model: string): Promise<{ success: boolean; errorMessage: string | null }> {
   if (!apiKey) {
     return { success: false, errorMessage: 'API Key não fornecida' };
@@ -183,12 +188,28 @@ async function testGemini(apiKey: string, model: string): Promise<{ success: boo
     // Standard text model test
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
     
+    // Configuração de geração com tokens suficientes
+    // IMPORTANTE: 256 tokens para evitar truncamento em modelos com "thinking"
+    const generationConfig: Record<string, any> = { 
+      maxOutputTokens: 256,
+      temperature: 0.1  // Baixa para respostas determinísticas
+    };
+    
+    // Para modelos flash 2.5+, desativar thinking para teste rápido
+    if (isFlash25Model(modelName)) {
+      generationConfig.thinkingConfig = { thinkingBudget: 0 };
+      console.log(`[test-ai-connection] Flash model detected, disabling thinking for test`);
+    }
+    
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: 'Respond with exactly: OK' }] }],
-        generationConfig: { maxOutputTokens: 10 }
+        contents: [{ 
+          role: 'user',
+          parts: [{ text: 'Respond with exactly one word: OK' }] 
+        }],
+        generationConfig
       })
     });
 
@@ -209,13 +230,30 @@ async function testGemini(apiKey: string, model: string): Promise<{ success: boo
       return { success: false, errorMessage: `HTTP ${response.status}: ${errorText.substring(0, 100)}` };
     }
 
-    // Verificar resposta válida
-    const hasContent = !!data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!hasContent) {
-      console.warn('[test-ai-connection] Gemini: empty or unexpected response format');
-      return { success: false, errorMessage: 'Resposta vazia ou formato inesperado' };
+    // Verificar finishReason para diagnóstico mais preciso
+    const finishReason = data.candidates?.[0]?.finishReason;
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    const fullText = parts.map((p: any) => p.text || '').join('').trim();
+    
+    // Se truncou por MAX_TOKENS sem produzir texto, erro específico
+    if (finishReason === 'MAX_TOKENS' && !fullText) {
+      console.warn('[test-ai-connection] Gemini: MAX_TOKENS without text output');
+      return { 
+        success: false, 
+        errorMessage: 'Saída truncada (MAX_TOKENS). Modelo pode requerer mais tokens ou desativar thinking.' 
+      };
     }
     
+    // Se não há texto mas também não é MAX_TOKENS
+    if (!fullText) {
+      console.warn('[test-ai-connection] Gemini: empty response, finishReason:', finishReason);
+      return { 
+        success: false, 
+        errorMessage: `Resposta vazia (finishReason: ${finishReason || 'unknown'})` 
+      };
+    }
+    
+    console.log(`[test-ai-connection] Gemini test successful, response: "${fullText.substring(0, 50)}"`);
     return { success: true, errorMessage: null };
   } catch (error) {
     console.error('[test-ai-connection] Gemini exception:', error);
