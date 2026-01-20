@@ -56,7 +56,7 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   id: "lovable",
   name: "IA Integrada",
   description: "Gateway integrado sem necessidade de API key externa.",
-  models: ["google/gemini-3-flash-preview", "google/gemini-2.5-flash", "google/gemini-2.5-pro", "openai/gpt-5", "openai/gpt-5-mini"],
+  models: ["google/gemini-3-flash-preview", "google/gemini-3-pro-preview", "google/gemini-2.5-flash", "google/gemini-2.5-pro", "openai/gpt-5", "openai/gpt-5-mini"],
   requiresKey: false,
   color: "hsl(168, 58%, 39%)"
 }, {
@@ -70,8 +70,17 @@ const AI_PROVIDERS: ProviderInfo[] = [{
 }, {
   id: "gemini",
   name: "Google Gemini",
-  description: "Modelos Gemini via Google AI Studio.",
-  models: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
+  description: "Modelos Gemini via Google AI Studio. Use 'Atualizar Modelos' para ver modelos disponíveis.",
+  models: [
+    // Gemini 2.5 (mais recentes estáveis)
+    "gemini-2.5-pro-preview-05-06",
+    "gemini-2.5-flash-preview-05-20",
+    "gemini-2.5-flash-8b-exp-0924",
+    // Gemini 2.0 e 1.5 (estáveis)
+    "gemini-2.0-flash",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash"
+  ],
   requiresKey: true,
   color: "hsl(217, 91%, 60%)",
   keyPlaceholder: "AIza..."
@@ -134,17 +143,21 @@ const DEFAULT_CONFIG: SystemConfig = {
 
 // Gemini Vision models available for PDF extraction (legacy - direct Gemini)
 const GEMINI_PDF_MODELS = [{
-  id: 'gemini-2.5-flash',
+  id: 'gemini-2.5-pro-preview-05-06',
+  name: 'Gemini 2.5 Pro',
+  description: 'Maior precisão, ideal para PDFs complexos'
+}, {
+  id: 'gemini-2.5-flash-preview-05-20',
   name: 'Gemini 2.5 Flash',
   description: 'Rápido e eficiente (recomendado)'
 }, {
-  id: 'gemini-2.5-pro',
-  name: 'Gemini 2.5 Pro',
-  description: 'Maior precisão, mais lento'
+  id: 'gemini-2.0-flash',
+  name: 'Gemini 2.0 Flash',
+  description: 'Versão estável'
 }, {
-  id: 'gemini-2.0-flash-exp',
-  name: 'Gemini 2.0 Flash (Exp)',
-  description: 'Versão experimental'
+  id: 'gemini-1.5-pro',
+  name: 'Gemini 1.5 Pro',
+  description: 'Versão anterior, alta precisão'
 }];
 
 // PDF AI Providers
@@ -178,6 +191,11 @@ const OPENROUTER_PDF_MODELS = [{
   name: 'Gemini 3 Pro Preview',
   context: '1M tokens',
   cost: '$2/M'
+}, {
+  id: 'google/gemini-3-flash-preview',
+  name: 'Gemini 3 Flash Preview',
+  context: '1M tokens',
+  cost: '$0.15/M'
 }, {
   id: 'anthropic/claude-3.5-sonnet',
   name: 'Claude 3.5 Sonnet',
@@ -222,6 +240,10 @@ export function DevSettings() {
 
   // Filter state for provider table
   const [filterText, setFilterText] = useState("");
+
+  // Dynamic Gemini models fetching
+  const [dynamicGeminiModels, setDynamicGeminiModels] = useState<string[]>([]);
+  const [loadingGeminiModels, setLoadingGeminiModels] = useState(false);
 
   useEffect(() => {
     fetchConfig();
@@ -468,6 +490,65 @@ export function DevSettings() {
       console.error("Error fetching API keys:", error);
     }
   };
+
+  // Função para buscar modelos Gemini dinamicamente
+  const fetchGeminiModels = async () => {
+    const geminiKey = apiKeys.gemini;
+    if (!geminiKey) {
+      toast({
+        variant: "destructive",
+        title: "API Key necessária",
+        description: "Configure uma API Key do Gemini primeiro"
+      });
+      return;
+    }
+
+    setLoadingGeminiModels(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('list-gemini-models', {
+        body: { apiKey: geminiKey }
+      });
+
+      if (error) throw error;
+
+      if (data?.success && data?.models) {
+        const modelIds = data.models.map((m: { id: string }) => m.id);
+        setDynamicGeminiModels(modelIds);
+        
+        // Atualizar a lista de modelos do provider Gemini
+        const geminiProvider = AI_PROVIDERS.find(p => p.id === 'gemini');
+        if (geminiProvider) {
+          geminiProvider.models = modelIds;
+        }
+
+        toast({
+          title: "Modelos Atualizados",
+          description: (
+            <div className="flex flex-col gap-1">
+              <span>{modelIds.length} modelos disponíveis</span>
+              {data.categories && (
+                <span className="text-[11px] text-muted-foreground">
+                  Famílias: {Object.keys(data.categories).join(', ')}
+                </span>
+              )}
+            </div>
+          )
+        });
+      } else {
+        throw new Error(data?.error || 'Erro ao buscar modelos');
+      }
+    } catch (error) {
+      console.error("Error fetching Gemini models:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao buscar modelos",
+        description: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+    } finally {
+      setLoadingGeminiModels(false);
+    }
+  };
+
   const saveConfig = async () => {
     setSaving(true);
     try {
@@ -1047,6 +1128,37 @@ export function DevSettings() {
                   </TooltipProvider>
                 )}
               </div>
+            )}
+            {/* Botão especial para Gemini: Atualizar Modelos */}
+            {provider.id === 'gemini' && hasKey && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-7 px-2 text-[11px] gap-1"
+                      onClick={() => fetchGeminiModels()}
+                      disabled={loadingGeminiModels}
+                    >
+                      {loadingGeminiModels ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <div className="text-xs">
+                      <p className="font-medium">Atualizar Modelos</p>
+                      <p className="text-muted-foreground">Busca modelos disponíveis para sua API key</p>
+                      {dynamicGeminiModels.length > 0 && (
+                        <p className="text-primary mt-1">{dynamicGeminiModels.length} modelos carregados</p>
+                      )}
+                    </div>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
             <Button 
               variant="outline" 

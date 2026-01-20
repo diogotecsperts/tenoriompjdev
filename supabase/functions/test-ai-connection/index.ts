@@ -116,13 +116,34 @@ async function testLovableAI(model: string): Promise<{ success: boolean; errorMe
   }
 }
 
+// Mapeamento de nomes amigáveis para nomes corretos da API Gemini
+const GEMINI_MODEL_MAP: Record<string, string> = {
+  // Gemini 3.0 (mais recentes)
+  'gemini-3-pro': 'gemini-2.5-pro-preview-05-06', // fallback até 3.0 ser lançado
+  'gemini-3-flash': 'gemini-2.5-flash-preview-05-20',
+  'gemini-3-flash-lite': 'gemini-2.5-flash-8b-exp-0924',
+  // Gemini 2.5
+  'gemini-2.5-pro': 'gemini-2.5-pro-preview-05-06',
+  'gemini-2.5-flash': 'gemini-2.5-flash-preview-05-20',
+  'gemini-2.5-flash-lite': 'gemini-2.5-flash-8b-exp-0924',
+  // Gemini 2.0 e 1.5 (estáveis)
+  'gemini-2.0-flash': 'gemini-2.0-flash',
+  'gemini-1.5-pro': 'gemini-1.5-pro',
+  'gemini-1.5-flash': 'gemini-1.5-flash',
+};
+
 async function testGemini(apiKey: string, model: string): Promise<{ success: boolean; errorMessage: string | null }> {
   if (!apiKey) {
     return { success: false, errorMessage: 'API Key não fornecida' };
   }
 
   try {
-    const modelName = model.replace('google/', '');
+    // Mapear nome do modelo se necessário
+    const inputModel = model.replace('google/', '');
+    const modelName = GEMINI_MODEL_MAP[inputModel] || inputModel;
+    
+    console.log(`[test-ai-connection] Testing Gemini model: ${inputModel} -> ${modelName}`);
+    
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
     
     const response = await fetch(url, {
@@ -134,14 +155,33 @@ async function testGemini(apiKey: string, model: string): Promise<{ success: boo
       })
     });
 
-    if (!response.ok) {
-      const error = await response.text();
-      return { success: false, errorMessage: `HTTP ${response.status}: ${error.substring(0, 100)}` };
+    const data = await response.json();
+    
+    // Log da resposta para debug
+    console.log('[test-ai-connection] Gemini response:', JSON.stringify(data).substring(0, 500));
+
+    // Verificar erro mesmo com HTTP 200
+    if (data.error) {
+      const errorMsg = data.error.message || JSON.stringify(data.error);
+      console.error('[test-ai-connection] Gemini API error:', errorMsg);
+      return { success: false, errorMessage: errorMsg };
     }
 
-    const data = await response.json();
-    return { success: !!data.candidates?.[0]?.content?.parts?.[0]?.text, errorMessage: null };
+    if (!response.ok) {
+      const errorText = JSON.stringify(data);
+      return { success: false, errorMessage: `HTTP ${response.status}: ${errorText.substring(0, 100)}` };
+    }
+
+    // Verificar resposta válida
+    const hasContent = !!data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!hasContent) {
+      console.warn('[test-ai-connection] Gemini: empty or unexpected response format');
+      return { success: false, errorMessage: 'Resposta vazia ou formato inesperado' };
+    }
+    
+    return { success: true, errorMessage: null };
   } catch (error) {
+    console.error('[test-ai-connection] Gemini exception:', error);
     return { success: false, errorMessage: error instanceof Error ? error.message : 'Erro desconhecido' };
   }
 }
