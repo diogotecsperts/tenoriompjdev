@@ -243,6 +243,7 @@ export function DevSettings() {
 
   // Dynamic Gemini models fetching
   const [dynamicGeminiModels, setDynamicGeminiModels] = useState<string[]>([]);
+  const [geminiImageModels, setGeminiImageModels] = useState<string[]>([]);
   const [loadingGeminiModels, setLoadingGeminiModels] = useState(false);
 
   useEffect(() => {
@@ -512,20 +513,30 @@ export function DevSettings() {
       if (error) throw error;
 
       if (data?.success && data?.models) {
-        const modelIds = data.models.map((m: { id: string }) => m.id);
-        setDynamicGeminiModels(modelIds);
+        // Text models
+        const textModelIds = data.models.map((m: { id: string }) => m.id);
+        setDynamicGeminiModels(textModelIds);
         
-        // Atualizar a lista de modelos do provider Gemini
+        // Image models (separate list)
+        const imageModelIds = data.imageModels?.map((m: { id: string }) => m.id) || [];
+        setGeminiImageModels(imageModelIds);
+        
+        // Atualizar a lista de modelos do provider Gemini (only text models in main list)
         const geminiProvider = AI_PROVIDERS.find(p => p.id === 'gemini');
         if (geminiProvider) {
-          geminiProvider.models = modelIds;
+          geminiProvider.models = textModelIds;
         }
 
         toast({
           title: "Modelos Atualizados",
           description: (
             <div className="flex flex-col gap-1">
-              <span>{modelIds.length} modelos disponíveis</span>
+              <span>{textModelIds.length} modelos de texto disponíveis</span>
+              {imageModelIds.length > 0 && (
+                <span className="text-[11px] text-muted-foreground">
+                  + {imageModelIds.length} modelos de imagem
+                </span>
+              )}
               {data.categories && (
                 <span className="text-[11px] text-muted-foreground">
                   Famílias: {Object.keys(data.categories).join(', ')}

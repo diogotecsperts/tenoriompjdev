@@ -132,6 +132,12 @@ const GEMINI_MODEL_MAP: Record<string, string> = {
   'gemini-1.5-flash': 'gemini-1.5-flash',
 };
 
+function isImageModel(modelId: string): boolean {
+  return modelId.includes('image') || 
+         modelId.includes('imagen') ||
+         modelId.includes('native-audio');
+}
+
 async function testGemini(apiKey: string, model: string): Promise<{ success: boolean; errorMessage: string | null }> {
   if (!apiKey) {
     return { success: false, errorMessage: 'API Key não fornecida' };
@@ -144,6 +150,28 @@ async function testGemini(apiKey: string, model: string): Promise<{ success: boo
     
     console.log(`[test-ai-connection] Testing Gemini model: ${inputModel} -> ${modelName}`);
     
+    // Check if it's an image model - use different test approach
+    if (isImageModel(modelName)) {
+      console.log(`[test-ai-connection] Detected image model: ${modelName}, using model info endpoint`);
+      
+      // For image models, just verify the API key can access the model info
+      const infoResponse = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}?key=${apiKey}`
+      );
+      
+      if (infoResponse.ok) {
+        const modelInfo = await infoResponse.json();
+        console.log(`[test-ai-connection] Image model accessible: ${modelInfo.displayName || modelName}`);
+        return { success: true, errorMessage: null };
+      } else {
+        const errorData = await infoResponse.json().catch(() => ({}));
+        const errorMessage = errorData.error?.message || `HTTP ${infoResponse.status}`;
+        console.error(`[test-ai-connection] Image model not accessible: ${errorMessage}`);
+        return { success: false, errorMessage };
+      }
+    }
+    
+    // Standard text model test
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
     
     const response = await fetch(url, {
