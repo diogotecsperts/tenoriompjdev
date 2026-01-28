@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAIConfig, callAI, callPDFProvider } from "../_shared/ai-config.ts";
 import { logToBackend, logError, logWarn, logInfo } from "../_shared/backend-logger.ts";
+import { extractVisualContent, storeExtractedContent } from "../_shared/pdf-visual-extractor.ts";
+import { getRelevantChunk, getFieldPrompt } from "../_shared/smart-chunker.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -570,63 +572,199 @@ async function processarPDFBackground(
 
     console.log(`[processar-autos] Processing PDF: ${fileName}, size: ${pdfBase64.length} chars`);
 
-    // Update progress: Calling AI for PDF extraction
-    await supabaseAdmin
-      .from('import_jobs')
-      .update({ 
+    // Fetch import strategy configuration
+    const { data: strategyData } = await supabaseAdmin
+      .from('system_config')
+      .select('id, value')
+      .in('id', ['import_strategy', 'text_fill_provider', 'text_fill_model', 'store_extracted_text']);
+
+    const strategyMap: Record<string, any> = {};
+    strategyData?.forEach((item: { id: string; value: any }) => { strategyMap[item.id] = item.value; });
+
+    const usesTwoPhase = strategyMap.import_strategy === 'two_phase';
+    console.log(`[processar-autos] Import strategy: ${usesTwoPhase ? 'two_phase' : 'single_pass'}`);
+
+    let extractedData: any;
+    let extractedContentPath: string | null = null;
+    let visionResult: any = null;
+
+    if (usesTwoPhase) {
+      // === TWO-PHASE EXTRACTION ===
+      console.log('[processar-autos] Starting TWO-PHASE extraction...');
+
+      // PHASE 1: Visual Extraction with Gemini OCR
+      await supabaseAdmin.from('import_jobs').update({ 
         progress: 10, 
-        current_step: 'Extraindo dados do PDF com IA...',
+        current_step: 'Fase 1: Extraindo texto com OCR...', 
         step_id: 'extraction',
         updated_at: new Date().toISOString()
-      })
-      .eq('id', jobId);
+      }).eq('id', jobId);
 
-    // Use the flexible PDF provider that supports OpenRouter, Gemini, or Lovable AI
-    console.log(`[processar-autos] Calling PDF provider for extraction...`);
-    
-    // Start PDF extraction timing
-    timings.pdfExtraction.start = Date.now();
-    
-    const visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
-      promptType: 'pdf_extraction',
-      userId: userId
-    });
-    
-    // End PDF extraction timing
-    timings.pdfExtraction.end = Date.now();
-    modelUsed = `${visionResult.provider}/${visionResult.model}`;
-    
-    console.log(`[processar-autos] PDF provider response - Provider: ${visionResult.provider}, Model: ${visionResult.model}, FinishReason: ${visionResult.finishReason}`);
+      timings.pdfExtraction.start = Date.now();
 
-    if (visionResult.finishReason === "MAX_TOKENS") {
+      // Determine if we need Files API for large PDFs (> 50MB)
+      const pdfSizeBytes = Math.ceil(pdfBase64.length * 3 / 4);
+      const useFilesAPI = pdfSizeBytes > 50_000_000;
+      console.log(`[processar-autos] PDF size: ${(pdfSizeBytes / (1024 * 1024)).toFixed(2)}MB, useFilesAPI: ${useFilesAPI}`);
+
+      try {
+        const extracted = await extractVisualContent(pdfBase64, { useFilesAPI });
+        
+        timings.pdfExtraction.end = Date.now();
+        modelUsed = `${extracted.provider}/${extracted.model}`;
+        
+        console.log(`[processar-autos] Phase 1 completed - rawText length: ${extracted.rawText.length}, pages: ${extracted.pageCount}`);
+
+        // Validate extraction result
+        if (!extracted.rawText || extracted.rawText.length < 500) {
+          throw new Error('Extração visual retornou texto muito curto, fazendo fallback para passagem única');
+        }
+
+        // Store extracted content in bucket (if configured)
+        if (strategyMap.store_extracted_text !== false) {
+          try {
+            extractedContentPath = await storeExtractedContent(extracted, userId, jobId);
+            console.log(`[processar-autos] Extracted content stored at: ${extractedContentPath}`);
+          } catch (storageError) {
+            console.warn('[processar-autos] Failed to store extracted content:', storageError);
+            // Continue without storage - not critical
+          }
+        }
+
+        // PHASE 2: Field Filling with Flexible Provider
+        await supabaseAdmin.from('import_jobs').update({ 
+          progress: 35, 
+          current_step: 'Fase 2: Preenchendo campos...', 
+          step_id: 'processing',
+          updated_at: new Date().toISOString()
+        }).eq('id', jobId);
+
+        console.log('[processar-autos] Starting Phase 2 - structured field filling...');
+        
+        const fillProvider = strategyMap.text_fill_provider || 'lovable';
+        const fillModel = strategyMap.text_fill_model || 'google/gemini-3-flash-preview';
+        
+        // Use the existing AI config for field filling (text only, no PDF)
+        const aiConfig = await getAIConfig();
+        
+        // Call AI with the extracted raw text (no binary PDF!)
+        const fillResult = await callAI(
+          { ...aiConfig, provider: fillProvider, model: fillModel },
+          systemPrompt,
+          `Analise o seguinte texto extraído de um documento de processo trabalhista e retorne o JSON estruturado:\n\n${extracted.rawText}`,
+          { promptType: 'two_phase_fill', userId }
+        );
+
+        modelUsed = `${fillProvider}/${fillModel}`;
+
+        // Parse the structured response
+        let parsedResult = tryFixTruncatedJson(fillResult.text);
+        if (!parsedResult) {
+          console.error('[processar-autos] Phase 2 failed to parse, falling back to single pass');
+          throw new Error('Fase 2 falhou na estruturação');
+        }
+
+        extractedData = ensureValidStructure(parsedResult);
+
+        // Add extracted content path to result for regeneration
+        if (extractedContentPath) {
+          (extractedData as any).extracted_content_path = extractedContentPath;
+        }
+
+        // Create a mock visionResult for compatibility with downstream code
+        visionResult = {
+          provider: fillProvider,
+          model: fillModel,
+          finishReason: 'STOP',
+          text: fillResult.text,
+          usedFallback: false
+        };
+
+        console.log('[processar-autos] Two-phase extraction completed successfully');
+
+      } catch (twoPhaseError) {
+        // FALLBACK: If two-phase fails, use single pass
+        console.warn('[processar-autos] Two-phase extraction failed, falling back to single pass:', twoPhaseError);
+        
+        await logWarn('processar-autos', `Duas fases falhou, usando passagem única: ${twoPhaseError instanceof Error ? twoPhaseError.message : 'Erro'}`, jobId);
+        
+        // Reset timing
+        timings.pdfExtraction.start = Date.now();
+        
+        await supabaseAdmin.from('import_jobs').update({ 
+          progress: 10, 
+          current_step: 'Extraindo dados do PDF com IA (modo único)...', 
+          step_id: 'extraction',
+          updated_at: new Date().toISOString()
+        }).eq('id', jobId);
+        
+        visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
+          promptType: 'pdf_extraction',
+          userId: userId
+        });
+        
+        timings.pdfExtraction.end = Date.now();
+        modelUsed = `${visionResult.provider}/${visionResult.model}`;
+        
+        const parsed = tryFixTruncatedJson(visionResult.text);
+        if (!parsed) {
+          throw new Error("Não foi possível processar a resposta da IA");
+        }
+        extractedData = ensureValidStructure(parsed);
+      }
+
+    } else {
+      // === SINGLE PASS EXTRACTION (Original flow) ===
+      console.log('[processar-autos] Using SINGLE-PASS extraction...');
+
+      await supabaseAdmin
+        .from('import_jobs')
+        .update({ 
+          progress: 10, 
+          current_step: 'Extraindo dados do PDF com IA...',
+          step_id: 'extraction',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', jobId);
+
+      timings.pdfExtraction.start = Date.now();
+      
+      visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
+        promptType: 'pdf_extraction',
+        userId: userId
+      });
+      
+      timings.pdfExtraction.end = Date.now();
+      modelUsed = `${visionResult.provider}/${visionResult.model}`;
+      
+      console.log(`[processar-autos] PDF provider response - Provider: ${visionResult.provider}, Model: ${visionResult.model}`);
+
+      if (!visionResult.text) {
+        throw new Error("Resposta inválida da IA - nenhum conteúdo extraído");
+      }
+
+      await supabaseAdmin
+        .from('import_jobs')
+        .update({ 
+          progress: 40, 
+          current_step: 'Processando dados extraídos...',
+          step_id: 'processing',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', jobId);
+
+      const parsed = tryFixTruncatedJson(visionResult.text);
+      if (!parsed) {
+        console.error("[processar-autos] Failed to parse response as JSON:", visionResult.text.substring(0, 500));
+        throw new Error("Não foi possível processar a resposta da IA");
+      }
+
+      extractedData = ensureValidStructure(parsed);
+    }
+
+    if (visionResult?.finishReason === "MAX_TOKENS") {
       console.warn("[processar-autos] Response was truncated due to max tokens limit");
     }
-
-    if (!visionResult.text) {
-      throw new Error("Resposta inválida da IA - nenhum conteúdo extraído");
-    }
-
-    console.log(`[processar-autos] Raw response length: ${visionResult.text.length}`);
-
-    // Update progress: Processing response
-    await supabaseAdmin
-      .from('import_jobs')
-      .update({ 
-        progress: 40, 
-        current_step: 'Processando dados extraídos...',
-        step_id: 'processing',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', jobId);
-
-    // Parse JSON
-    let extractedData = tryFixTruncatedJson(visionResult.text);
-    if (!extractedData) {
-      console.error("[processar-autos] Failed to parse response as JSON:", visionResult.text.substring(0, 500));
-      throw new Error("Não foi possível processar a resposta da IA");
-    }
-
-    extractedData = ensureValidStructure(extractedData);
     console.log("[processar-autos] Successfully extracted data from PDF");
 
     // Generate AI summaries with progress updates
@@ -670,14 +808,16 @@ async function processarPDFBackground(
     const result = {
       success: true,
       data: extractedData,
+      extracted_content_path: extractedContentPath, // NEW: For regeneration
       aiUsage: {
         pdfExtraction: {
-          provider: visionResult.provider,
+          provider: visionResult?.provider || 'unknown',
           model: modelUsed,
           durationMs: pdfExtractionDuration,
-          usedFallback: visionResult.usedFallback || false,
-          originalProvider: visionResult.originalProvider,
-          fallbackReason: visionResult.fallbackReason
+          usedFallback: visionResult?.usedFallback || false,
+          originalProvider: visionResult?.originalProvider,
+          fallbackReason: visionResult?.fallbackReason,
+          strategy: usesTwoPhase ? 'two_phase' : 'single_pass'
         },
         summaries: {
           provider: resumosResult.aiInfo.provider,
@@ -687,7 +827,7 @@ async function processarPDFBackground(
         },
         totalDurationMs: totalDuration
       },
-      truncated: visionResult.finishReason === "MAX_TOKENS"
+      truncated: visionResult?.finishReason === "MAX_TOKENS"
     };
 
     // Update attempt record with success

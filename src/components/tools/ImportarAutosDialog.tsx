@@ -771,10 +771,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           importDate: new Date().toISOString(),
           pdfFilePath: currentFilePath,
           importJobId: currentJobId,
+          // NEW: Store extracted content path for more accurate regeneration
+          extracted_content_path: (extractedData as any).extracted_content_path || null,
           pdfExtraction: {
             provider: aiUsage.pdfExtraction.provider,
             model: aiUsage.pdfExtraction.model,
-            durationMs: aiUsage.pdfExtraction.durationMs
+            durationMs: aiUsage.pdfExtraction.durationMs,
+            strategy: (aiUsage.pdfExtraction as any).strategy || 'single_pass'
           },
           summaries: {
             provider: aiUsage.summaries.provider,

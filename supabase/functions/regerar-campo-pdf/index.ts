@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAIConfig, callAI } from "../_shared/ai-config.ts";
+import { retrieveExtractedContent } from "../_shared/pdf-visual-extractor.ts";
+import { getRelevantChunk, getFieldPrompt } from "../_shared/smart-chunker.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -131,15 +133,55 @@ serve(async (req) => {
     const aiMetadata = laudo.ai_metadata as any;
     const pdfFilePath = aiMetadata?.pdfFilePath;
     const importJobId = aiMetadata?.importJobId;
+    const extractedContentPath = aiMetadata?.extracted_content_path;
 
-    if (!pdfFilePath && !importJobId) {
+    if (!pdfFilePath && !importJobId && !extractedContentPath) {
       return new Response(
         JSON.stringify({ error: 'Este laudo não possui um PDF de origem registrado' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Try to get PDF content from import_jobs result if available
+    // PRIORITY 1: Try to get full text from bucket (most accurate for two-phase extractions)
+    if (extractedContentPath) {
+      console.log(`[regerar-campo-pdf] Trying bucket content at: ${extractedContentPath}`);
+      
+      try {
+        const extracted = await retrieveExtractedContent(extractedContentPath);
+        
+        if (extracted?.rawText && extracted.rawText.length > 500) {
+          console.log(`[regerar-campo-pdf] Using bucket content (${extracted.rawText.length} chars)`);
+          
+          // Use smart chunker to get relevant region for this field
+          const relevantChunk = getRelevantChunk(extracted.rawText, fieldKey);
+          const specificPrompt = getFieldPrompt(fieldKey);
+          
+          // Get AI config
+          const aiConfig = await getAIConfig();
+          
+          const result = await callAI(
+            aiConfig,
+            'Você é um assistente especializado em extração de dados de documentos médicos e jurídicos. Extraia apenas as informações solicitadas, sem inventar dados.',
+            `${specificPrompt}\n\nConteúdo relevante do documento:\n${relevantChunk}`,
+            { promptType: `regerar_${fieldKey}` }
+          );
+
+          return new Response(
+            JSON.stringify({ 
+              texto: result.text,
+              provider: result.provider,
+              model: result.model,
+              source: 'bucket_full_text'
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+      } catch (bucketError) {
+        console.warn(`[regerar-campo-pdf] Bucket retrieval failed, falling back to cache:`, bucketError);
+      }
+    }
+
+    // PRIORITY 2 (FALLBACK): Try to get PDF content from import_jobs result if available
     let pdfContent = '';
     
     if (importJobId) {
