@@ -204,6 +204,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const [aiUsage, setAiUsage] = useState<AIUsageInfo | null>(null);
   const [analysisStep, setAnalysisStep] = useState<string>("");
   const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [maxPdfSizeMb, setMaxPdfSizeMb] = useState<number>(50); // Dynamic from system_config
   const [isDeveloper, setIsDeveloper] = useState(false);
   const [aiConfig, setAiConfig] = useState<AIConfigDisplay | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
@@ -238,11 +239,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         const { data: devData } = await supabase.rpc("is_developer");
         setIsDeveloper(devData === true);
 
-        // Fetch AI configuration from system_config
+        // Fetch AI configuration and max PDF size from system_config
         const { data: configData } = await supabase
           .from('system_config')
           .select('id, value')
-          .in('id', ['default_ai_provider', 'default_ai_model']);
+          .in('id', ['default_ai_provider', 'default_ai_model', 'max_pdf_size_mb']);
 
         if (configData && configData.length > 0) {
           const config: Record<string, any> = {};
@@ -252,8 +253,17 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           
           const provider = config.default_ai_provider || 'lovable';
           const model = config.default_ai_model || 'google/gemini-2.5-flash';
+          const maxSize = config.max_pdf_size_mb;
           
           setAiConfig({ provider, model });
+          
+          // Set max PDF size if configured (handle both string and number values)
+          if (maxSize !== undefined && maxSize !== null) {
+            const sizeValue = typeof maxSize === 'string' ? parseInt(maxSize, 10) : maxSize;
+            if (!isNaN(sizeValue) && sizeValue > 0) {
+              setMaxPdfSizeMb(sizeValue);
+            }
+          }
         }
       } catch (err) {
         console.error("Error checking developer role or AI config:", err);
@@ -403,11 +413,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       return;
     }
 
-    if (pdfFile.size > 50 * 1024 * 1024) {
+    if (pdfFile.size > maxPdfSizeMb * 1024 * 1024) {
       toast({
         variant: "destructive",
         title: "Arquivo muito grande",
-        description: "O arquivo deve ter no máximo 50MB.",
+        description: `O arquivo deve ter no máximo ${maxPdfSizeMb}MB.`,
       });
       return;
     }
@@ -428,11 +438,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       return;
     }
 
-    if (file.size > 50 * 1024 * 1024) {
+    if (file.size > maxPdfSizeMb * 1024 * 1024) {
       toast({
         variant: "destructive",
         title: "Arquivo muito grande",
-        description: "O arquivo deve ter no máximo 50MB.",
+        description: `O arquivo deve ter no máximo ${maxPdfSizeMb}MB.`,
       });
       return;
     }
@@ -1304,7 +1314,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                       </Button>
                     </label>
                     <p className="text-xs text-muted-foreground mt-2">
-                      Máximo 20MB • Apenas PDF
+                      Máximo {maxPdfSizeMb}MB • Apenas PDF
                     </p>
                     
                     {/* Developer-only AI Config Badge */}
