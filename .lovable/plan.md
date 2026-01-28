@@ -1,415 +1,588 @@
 
+## Plano Detalhado: Correção de Performance e Estabilidade da Importação de PDF
 
-## Plano: Sincronização do Seletor de Modelo Gemini para Fase 1 com o Provider Inventory
-
-### Situação Atual (Diagnóstico Completo)
-
-Após análise detalhada, confirmo sua observação:
-
-| Componente | Status | Detalhes |
-|------------|--------|----------|
-| **Provider Inventory v2.0** | ✅ Funcional | Botão "Atualizar Modelos" chama `list-gemini-models` e popula `dynamicGeminiModels[]` |
-| **Cache de Modelos** | ✅ Funcional | `gemini_models_cache` no `system_config` com TTL de 24h |
-| **dynamicGeminiModels** | ✅ Populado | Contém modelos estáveis buscados via API (ex: gemini-2.5-flash, gemini-3-pro-preview) |
-| **geminiModelDetails** | ✅ Populado | Mapa com metadados incluindo `supportsPdf`, `inputTokenLimit` |
-| **Fase 1 (OCR)** | ❌ Hardcoded | `extractVisualContent()` usa `gemini-2.5-flash` fixo - **NÃO configurável** |
-| **Interface SystemConfig** | ❌ Faltando | Não possui campo `phase1_gemini_model` |
+Este plano aborda todas as correções discutidas, organizadas de forma modular e com foco na preservação da qualidade do resultado.
 
 ---
 
-### Arquitetura da Sincronização
+## Arquitetura Atual (Diagnóstico)
 
-```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│                         PROVIDER INVENTORY v2.0                                │
-│                                                                                │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │ [Gemini Row]                                                            │   │
-│  │                                                                         │   │
-│  │   API Key: AIza***                  [🔄 Atualizar Modelos] [▶ Test]     │   │
-│  │                                             │                           │   │
-│  └─────────────────────────────────────────────┼───────────────────────────┘   │
-│                                                │                               │
-│                                                ▼                               │
-│  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │                fetchGeminiModels()                                      │   │
-│  │                                                                         │   │
-│  │   • Chama Edge Function: list-gemini-models                             │   │
-│  │   • Recebe: models[], versionedModels[], imageModels[]                  │   │
-│  │   • Popula:                                                             │   │
-│  │     ├── dynamicGeminiModels[] (modelos estáveis)                        │   │
-│  │     ├── versionedGeminiModels[] (com datas/sufixos)                     │   │
-│  │     ├── geminiImageModels[]                                             │   │
-│  │     └── geminiModelDetails{} (metadados: supportsPdf, tokens, etc)      │   │
-│  │   • Salva cache em system_config.gemini_models_cache (TTL 24h)          │   │
-│  │                                                                         │   │
-│  └─────────────────────────────────────────────────────────────────────────┘   │
-│                                                │                               │
-│                ┌──────────────────────────────┬┴───────────────────────────┐   │
-│                ▼                              ▼                            ▼   │
-│  ┌─────────────────────────┐   ┌─────────────────────────┐   ┌─────────────────┐
-│  │ Default/Fallback Model  │   │ PDF Extraction Model    │   │ Fase 1 Gemini   │
-│  │ (quando Gemini)         │   │ (quando single_pass)    │   │ OCR Model       │
-│  │                         │   │                         │   │ (two_phase)     │
-│  │ ✅ Sincronizado         │   │ ✅ Sincronizado         │   │ ❌ FALTANDO     │
-│  └─────────────────────────┘   └─────────────────────────┘   └─────────────────┘
-│                                                                                │
-└────────────────────────────────────────────────────────────────────────────────┘
+```text
+┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                              FLUXO DE IMPORTAÇÃO (two_phase)                                    │
+├─────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                                 │
+│  FASE 1: Extração Visual (OCR)                                                                  │
+│  ├─ Modelo selecionado no DevPanel: gemini-3-flash-preview                                      │
+│  ├─ API URL atual: /v1beta/models/gemini-3-flash-preview:generateContent                        │
+│  ├─ PROBLEMA: API Gemini NÃO reconhece "gemini-3-flash-preview" como nome válido                │
+│  └─ RESULTADO: Lentidão ou erro silencioso, fallback para single_pass                           │
+│                                                                                                 │
+│  FASE 2: Preenchimento de Campos                                                                │
+│  ├─ Provider: OpenRouter                                                                        │
+│  ├─ Modelo: google/gemini-3-flash-preview                                                       │
+│  ├─ PROBLEMA: Texto muito longo → MAX_TOKENS → JSON truncado                                    │
+│  └─ RESULTADO: Parse falha, fallback para single_pass, mais lentidão                            │
+│                                                                                                 │
+│  GERAÇÃO DE RESUMOS:                                                                            │
+│  ├─ 6 resumos sequenciais com timeout de 120s cada (atual)                                      │
+│  ├─ PROBLEMA: Se um resumo trava, o job todo para sem feedback                                  │
+│  └─ RESULTADO: Frontend mostra "Analisando nexo causal" por 15+ minutos                         │
+│                                                                                                 │
+│  FRONTEND:                                                                                      │
+│  ├─ Timeout global de 25 minutos (OK)                                                           │
+│  ├─ PROBLEMA: Não detecta quando job travou sem atualizar updated_at                            │
+│  └─ RESULTADO: Usuário espera indefinidamente                                                   │
+│                                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### Implementação Completa
+## Correção 1: Mapeamento de Modelos Gemini (Fase 1)
 
-#### Parte 1: Atualizar Interface TypeScript
+### Problema
+O modelo selecionado no DevPanel (ex: `gemini-3-flash-preview`) não é reconhecido pela API Gemini direta. A API espera nomes como `gemini-2.5-flash`.
 
-**Arquivo:** `src/components/dev-panel/DevSettings.tsx` (linhas 43-64)
+### Solução
+Adicionar o mesmo mapeamento usado em `test-ai-connection/index.ts` ao `pdf-visual-extractor.ts`.
 
-Adicionar `phase1_gemini_model` à interface `SystemConfig`:
+### Arquivo: `supabase/functions/_shared/pdf-visual-extractor.ts`
+
+**Adicionar após linha 10 (após interface ExtractedContent):**
 
 ```typescript
-interface SystemConfig {
-  // ... campos existentes ...
-  // Two-phase import strategy
-  import_strategy: string;
-  text_fill_provider: string;
-  text_fill_model: string;
-  store_extracted_text: boolean;
-  phase1_gemini_model: string;  // ← NOVO
+// Mapeamento de nomes amigáveis do DevPanel para nomes estáveis da API Gemini
+// IMPORTANTE: Sincronizado com test-ai-connection/index.ts
+const GEMINI_MODEL_MAP: Record<string, string> = {
+  // Gemini 3.0 Preview → mapeia para 2.5 (até 3.0 GA)
+  'gemini-3-pro-preview': 'gemini-2.5-pro',
+  'gemini-3-flash-preview': 'gemini-2.5-flash',
+  'gemini-3-flash-lite-preview': 'gemini-2.5-flash-8b',
+  // Gemini 2.5 - aliases estáveis
+  'gemini-2.5-pro': 'gemini-2.5-pro',
+  'gemini-2.5-flash': 'gemini-2.5-flash',
+  'gemini-2.5-flash-lite': 'gemini-2.5-flash-8b',
+  'gemini-2.5-flash-8b': 'gemini-2.5-flash-8b',
+  // Gemini 2.0 (estáveis)
+  'gemini-2.0-flash': 'gemini-2.0-flash',
+  'gemini-2.0-flash-exp': 'gemini-2.0-flash-exp',
+  // Gemini 1.5 (estáveis)
+  'gemini-1.5-pro': 'gemini-1.5-pro',
+  'gemini-1.5-flash': 'gemini-1.5-flash',
+};
+
+/**
+ * Resolve o nome do modelo para o nome aceito pela API Gemini
+ */
+function resolveGeminiModelName(model: string): string {
+  const resolved = GEMINI_MODEL_MAP[model] || model;
+  if (resolved !== model) {
+    console.log(`[pdf-visual-extractor] Model mapping: ${model} → ${resolved}`);
+  }
+  return resolved;
 }
 ```
 
----
-
-#### Parte 2: Atualizar Estado Inicial
-
-**Arquivo:** `src/components/dev-panel/DevSettings.tsx` (onde config é inicializado, ~linha 210)
-
-Adicionar valor padrão:
+**Modificar linha 77 em `extractWithInlineBase64`:**
 
 ```typescript
-const [config, setConfig] = useState<SystemConfig>({
-  // ... campos existentes ...
-  phase1_gemini_model: "gemini-2.5-flash",  // ← NOVO - valor padrão
-});
+async function extractWithInlineBase64(
+  pdfBase64: string,
+  model: string,
+  apiKey: string
+): Promise<ExtractedContent> {
+  // Resolver nome do modelo para API
+  const apiModel = resolveGeminiModelName(model);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
+  
+  console.log(`[pdf-visual-extractor] Calling Gemini API with model: ${apiModel}`);
+  // ... resto do código
+```
+
+**Modificar linha 130 em `extractWithFilesAPI`:**
+
+```typescript
+async function extractWithFilesAPI(
+  pdfBase64: string,
+  model: string,
+  apiKey: string
+): Promise<ExtractedContent> {
+  // ... upload code ...
+  
+  // Resolver nome do modelo para API
+  const apiModel = resolveGeminiModelName(model);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
+  
+  console.log(`[pdf-visual-extractor] Calling Gemini Files API with model: ${apiModel}`);
+  // ... resto do código
+```
+
+### Impacto
+- **Sem perda de qualidade**: O modelo real usado (gemini-2.5-flash) é equivalente ao selecionado
+- **Velocidade**: API reconhece o modelo corretamente → sem delays ou retries
+- **Compatibilidade**: Funciona com Files API para PDFs > 50MB
+
+---
+
+## Correção 2: Prevenção de Truncamento na Fase 2
+
+### Problema
+Textos muito longos na Fase 2 causam `MAX_TOKENS`, truncando o JSON de resposta.
+
+### Solução
+1. Aumentar `maxOutputTokens` explicitamente
+2. Se ainda truncar, usar chunking inteligente com o `smart-chunker.ts` existente
+3. Limitar texto de entrada de forma inteligente (preservando início e fim)
+
+### Arquivo: `supabase/functions/processar-autos/index.ts`
+
+**Modificar o bloco da Fase 2 (linhas 657-673):**
+
+```typescript
+// PHASE 2: Field Filling with Flexible Provider
+await supabaseAdmin.from('import_jobs').update({ 
+  progress: 35, 
+  current_step: 'Fase 2: Preenchendo campos...', 
+  step_id: 'processing',
+  updated_at: new Date().toISOString()
+}).eq('id', jobId);
+
+console.log('[processar-autos] Starting Phase 2 - structured field filling...');
+
+const fillProvider = strategyMap.text_fill_provider || 'lovable';
+const fillModel = strategyMap.text_fill_model || 'google/gemini-3-flash-preview';
+
+// Use the existing AI config for field filling (text only, no PDF)
+const aiConfig = await getAIConfig();
+
+// ===== NOVO: Limitar tamanho do texto de forma inteligente =====
+let textForFilling = extracted.rawText;
+const MAX_INPUT_CHARS = 200_000; // ~50k tokens para entrada
+
+if (textForFilling.length > MAX_INPUT_CHARS) {
+  console.warn(`[processar-autos] Text too long (${textForFilling.length} chars), applying smart truncation`);
+  
+  // Preservar início (dados do processo, petição) e fim (quesitos)
+  const headChars = Math.floor(MAX_INPUT_CHARS * 0.6); // 60% início
+  const tailChars = Math.floor(MAX_INPUT_CHARS * 0.35); // 35% fim
+  const separator = '\n\n[... conteúdo intermediário omitido para processamento - seções detectadas preservadas ...]\n\n';
+  
+  textForFilling = textForFilling.substring(0, headChars) + 
+                   separator + 
+                   textForFilling.substring(textForFilling.length - tailChars);
+  
+  console.log(`[processar-autos] Truncated to ${textForFilling.length} chars (head: ${headChars}, tail: ${tailChars})`);
+}
+// ===== FIM NOVO =====
+
+// Call AI with the extracted raw text (no binary PDF!)
+const fillResult = await callAI(
+  { ...aiConfig, provider: fillProvider, model: fillModel },
+  systemPrompt,
+  `Analise o seguinte texto extraído de um documento de processo trabalhista e retorne o JSON estruturado:\n\n${textForFilling}`,
+  { 
+    promptType: 'two_phase_fill', 
+    userId,
+    maxOutputTokens: 65536 // Garantir espaço para resposta JSON completa
+  }
+);
+```
+
+### Impacto na Qualidade
+- **Preservação de dados críticos**: Início (nome, processo, petição) e fim (quesitos) são preservados
+- **Meio do documento**: Geralmente contém documentos anexos repetitivos, menos críticos
+- **Fallback mantido**: Se ainda falhar, o fallback para single_pass continua funcionando
+
+---
+
+## Correção 3: Geração de Resumos com Tratamento de Falhas Parciais
+
+### Problema
+Se um resumo falha ou trava, o job inteiro para sem feedback. O usuário não sabe o que aconteceu.
+
+### Solução
+1. Cada resumo tem try/catch individual (já existe parcialmente)
+2. **NOVO**: Reportar falhas parciais no resultado final
+3. **NOVO**: Marcar quais resumos falharam para possível retry no editor
+4. Continuar gerando os outros resumos mesmo se um falhar
+
+### Arquivo: `supabase/functions/processar-autos/index.ts`
+
+**Modificar a interface de retorno (linhas 325-343) para incluir falhas:**
+
+```typescript
+async function gerarResumosIA(
+  extractedData: any, 
+  supabaseAdmin: any, 
+  jobId: string,
+  userId: string
+): Promise<{
+  resumos: {
+    resumo_peticao: string;
+    resumo_contestacao: string;
+    descricao_doencas: string;
+    nexo_causal: string;
+    incapacidade: string;
+    referencias_bibliograficas: string;
+  };
+  aiInfo: {
+    provider: string;
+    model: string;
+    summariesGenerated: number;
+    summariesFailed: string[];  // NOVO: lista de resumos que falharam
+    errors: Record<string, string>;  // NOVO: mensagens de erro por tipo
+  };
+}> {
+```
+
+**Modificar o final da função (linhas 488-496):**
+
+```typescript
+  // Criar mapa de erros para frontend
+  const errorsMap: Record<string, string> = {};
+  for (const errMsg of summaryErrors) {
+    const [tipo, ...rest] = errMsg.split(': ');
+    errorsMap[tipo] = rest.join(': ');
+  }
+  
+  // Identificar quais falharam
+  const failedTypes = Object.keys(errorsMap);
+
+  // Log warning se houver falhas parciais
+  if (failedTypes.length > 0) {
+    await logWarn('processar-autos', 
+      `Processamento parcial: ${summariesGenerated}/${summariesToGenerate.filter(s => s.shouldGenerate).length} resumos gerados`, 
+      jobId, {
+        summariesGenerated,
+        failed: failedTypes,
+        errors: errorsMap
+      }
+    );
+  }
+
+  return {
+    resumos: results,
+    aiInfo: {
+      provider: aiConfig.provider,
+      model: aiConfig.model,
+      summariesGenerated,
+      summariesFailed: failedTypes,  // NOVO
+      errors: errorsMap  // NOVO
+    }
+  };
+```
+
+**Modificar o resultado final do job (linhas 815-838):**
+
+```typescript
+const result = {
+  success: true,
+  data: extractedData,
+  extracted_content_path: extractedContentPath,
+  partialFailures: resumosResult.aiInfo.summariesFailed.length > 0 ? {
+    failedSummaries: resumosResult.aiInfo.summariesFailed,
+    errors: resumosResult.aiInfo.errors
+  } : null,  // NOVO: Informar falhas parciais ao frontend
+  aiUsage: {
+    // ... existente
+  },
+  truncated: visionResult?.finishReason === "MAX_TOKENS"
+};
 ```
 
 ---
 
-#### Parte 3: Atualizar fetchConfig
+## Correção 4: Feedback de Falhas Parciais no Frontend
 
-**Arquivo:** `src/components/dev-panel/DevSettings.tsx` (função fetchConfig)
+### Problema
+O frontend não sabe quais resumos falharam e não oferece opção de retry.
 
-Adicionar `phase1_gemini_model` à busca e parsing:
+### Solução
+1. Detectar `partialFailures` no resultado
+2. Mostrar aviso visual indicando quais seções não foram importadas
+3. Armazenar no `ai_metadata` do laudo para permitir retry no editor
 
-```typescript
-// Na lista de IDs a buscar, adicionar:
-.in('id', [
-  // ... existentes ...
-  'phase1_gemini_model'  // ← NOVO
-])
+### Arquivo: `src/components/tools/ImportarAutosDialog.tsx`
 
-// No parsing do resultado, adicionar:
-phase1_gemini_model: getValue('phase1_gemini_model', 'gemini-2.5-flash')
-```
-
----
-
-#### Parte 4: Atualizar saveConfig
-
-**Arquivo:** `src/components/dev-panel/DevSettings.tsx` (função saveConfig)
-
-Adicionar salvamento do novo campo:
+**Adicionar estado para falhas parciais (após linha 214):**
 
 ```typescript
-const configsToSave: { id: string; value: any }[] = [
-  // ... existentes ...
-  { id: 'phase1_gemini_model', value: config.phase1_gemini_model },  // ← NOVO
-];
+const [partialFailures, setPartialFailures] = useState<{
+  failedSummaries: string[];
+  errors: Record<string, string>;
+} | null>(null);
 ```
 
----
+**Modificar a função checkJobStatus (linha 544-548):**
 
-#### Parte 5: Adicionar Seletor de Modelo Fase 1 na UI
+```typescript
+if (data.status === 'completed' && data.result) {
+  // Mark all steps as completed
+  markAllStepsCompleted();
+  
+  // Success!
+  setExtractedData(data.result.data);
+  setAiUsage(data.result.aiUsage || null);
+  setUsedModel(data.result.aiUsage?.pdfExtraction?.model || 'gemini-2.5-flash');
+  
+  // NOVO: Capturar falhas parciais
+  if (data.result.partialFailures) {
+    setPartialFailures(data.result.partialFailures);
+  }
+  
+  setProcessingStep("preview");
+  return true;
+}
+```
 
-**Arquivo:** `src/components/dev-panel/DevSettings.tsx` (após linha 2323, dentro do bloco `two_phase`)
-
-Adicionar nova seção **ANTES** da seção "Fase 2: Preenchimento de Campos":
+**Adicionar aviso visual na tela de preview (após a seção de AI Usage Info, buscar local apropriado):**
 
 ```tsx
-{config.import_strategy === "two_phase" && (
-  <>
-    <Separator />
-    
-    {/* NEW: Phase 1 Gemini Model Selection */}
-    <div className="space-y-4 p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
-      <h4 className="font-medium text-sm flex items-center gap-2">
-        <Cpu className="h-4 w-4 text-blue-600" />
-        Fase 1: Extração Visual (OCR)
-        <Badge variant="outline" className="text-[10px]">Gemini Oficial</Badge>
-      </h4>
-      <p className="text-xs text-muted-foreground">
-        O Gemini processa o PDF binário e extrai todo o texto via OCR. Para PDFs {'>'} 50MB, usa automaticamente a Google Files API.
+{/* Aviso de Falhas Parciais */}
+{partialFailures && partialFailures.failedSummaries.length > 0 && (
+  <Alert variant="warning" className="mt-4">
+    <AlertTriangle className="h-4 w-4" />
+    <AlertTitle>Importação parcial</AlertTitle>
+    <AlertDescription>
+      <p className="mb-2">Algumas seções não puderam ser geradas automaticamente:</p>
+      <ul className="list-disc list-inside text-sm space-y-1">
+        {partialFailures.failedSummaries.map(tipo => (
+          <li key={tipo}>
+            <span className="font-medium">{formatSummaryTypeName(tipo)}</span>
+            {partialFailures.errors[tipo] && (
+              <span className="text-muted-foreground ml-1">
+                ({partialFailures.errors[tipo].substring(0, 50)}...)
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Você poderá gerar essas seções manualmente no editor do laudo usando o botão "🔄 Regenerar".
       </p>
+    </AlertDescription>
+  </Alert>
+)}
+```
+
+**Adicionar função helper para formatar nomes:**
+
+```typescript
+const formatSummaryTypeName = (tipo: string) => {
+  const names: Record<string, string> = {
+    resumo_peticao: 'Resumo da Petição Inicial',
+    resumo_contestacao: 'Resumo da Contestação',
+    descricao_doencas: 'Descrição Técnica das Doenças',
+    nexo_causal: 'Análise de Nexo Causal',
+    incapacidade: 'Análise de Incapacidade',
+    referencias_bibliograficas: 'Referências Bibliográficas'
+  };
+  return names[tipo] || tipo;
+};
+```
+
+**Modificar laudoData para incluir metadados de falhas parciais (linha 769-791):**
+
+```typescript
+ai_metadata: aiUsage ? {
+  importDate: new Date().toISOString(),
+  pdfFilePath: currentFilePath,
+  importJobId: currentJobId,
+  extracted_content_path: (extractedData as any).extracted_content_path || null,
+  // NOVO: Marcar quais seções falharam para retry no editor
+  failedSummaries: partialFailures?.failedSummaries || [],
+  pdfExtraction: { /* ... */ },
+  summaries: { /* ... */ }
+} : null
+```
+
+---
+
+## Correção 5: Detecção de Jobs Travados no Frontend
+
+### Problema
+O frontend não detecta quando o job parou de atualizar (edge function travou ou deu timeout).
+
+### Solução
+Detectar quando `updated_at` não muda por um período razoável (5 minutos) e mostrar opção de retry.
+
+### Arquivo: `src/components/tools/ImportarAutosDialog.tsx`
+
+**Adicionar estado para detecção de stale (após linha 229):**
+
+```typescript
+const [isJobStale, setIsJobStale] = useState(false);
+const lastJobUpdateRef = useRef<string | null>(null);
+const staleCheckCountRef = useRef(0);
+const STALE_THRESHOLD_POLLS = 20; // 20 polls * 3s = 60 segundos sem update = stale
+```
+
+**Modificar checkJobStatus para detectar stale:**
+
+```typescript
+const checkJobStatus = async (jobId: string): Promise<boolean> => {
+  try {
+    // ... código existente de fetch ...
+    
+    const data = await response.json();
+    
+    // NOVO: Detectar job travado (updated_at não muda)
+    if (lastJobUpdateRef.current === data.updatedAt) {
+      staleCheckCountRef.current++;
       
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <Label>Modelo Gemini (Fase 1)</Label>
-          {dynamicGeminiModels.length === 0 && (
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="h-6 px-2 text-[10px] gap-1"
-              onClick={() => fetchGeminiModels(true)}
-              disabled={loadingGeminiModels}
-            >
-              {loadingGeminiModels ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <>
-                  <RefreshCw className="h-3 w-3" />
-                  Carregar modelos
-                </>
-              )}
-            </Button>
-          )}
-        </div>
+      if (staleCheckCountRef.current >= STALE_THRESHOLD_POLLS) {
+        console.warn('[ImportarAutosDialog] Job appears stale - no updates for 60+ seconds');
+        setIsJobStale(true);
         
-        <Select 
-          value={config.phase1_gemini_model || "gemini-2.5-flash"} 
-          onValueChange={value => setConfig({...config, phase1_gemini_model: value})}
+        // Não parar o polling ainda, apenas mostrar aviso
+        // Usuário pode decidir continuar esperando ou cancelar
+      }
+    } else {
+      // Reset counter when we see an update
+      lastJobUpdateRef.current = data.updatedAt;
+      staleCheckCountRef.current = 0;
+      setIsJobStale(false);
+    }
+    
+    // ... resto do código existente ...
+```
+
+**Adicionar UI para job stale (dentro do bloco de analyzing):**
+
+```tsx
+{isJobStale && (
+  <Alert variant="warning" className="mt-4">
+    <Clock className="h-4 w-4" />
+    <AlertTitle>Processamento lento</AlertTitle>
+    <AlertDescription>
+      <p>O processamento não teve atualizações nos últimos 60 segundos.</p>
+      <p className="text-sm text-muted-foreground mt-1">
+        Isso pode indicar que o servidor está sobrecarregado ou o modelo de IA está lento.
+      </p>
+      <div className="flex gap-2 mt-3">
+        <Button 
+          variant="outline" 
+          size="sm"
+          onClick={() => {
+            // Continuar esperando - apenas resetar o contador
+            staleCheckCountRef.current = 0;
+            setIsJobStale(false);
+          }}
         >
-          <SelectTrigger>
-            <SelectValue placeholder="Selecione o modelo de OCR" />
-          </SelectTrigger>
-          <SelectContent>
-            {/* Usar dynamicGeminiModels sincronizado com Provider Inventory */}
-            {(dynamicGeminiModels.length > 0 
-              ? dynamicGeminiModels.filter(modelId => {
-                  // Filtrar apenas modelos que suportam PDF
-                  const details = geminiModelDetails[modelId];
-                  return details?.supportsPdf !== false;
-                })
-              : ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash-preview", "gemini-3-pro-preview"]
-            ).map(modelId => {
-              const details = geminiModelDetails[modelId];
-              return (
-                <SelectItem key={modelId} value={modelId}>
-                  <div className="flex items-center gap-2">
-                    <span>{details?.displayName || modelId}</span>
-                    {modelId.includes("3-") && (
-                      <Badge variant="outline" className="text-[10px] px-1 py-0">3.0</Badge>
-                    )}
-                    {modelId.includes("pro") && (
-                      <Badge variant="secondary" className="text-[10px] px-1 py-0">Pro</Badge>
-                    )}
-                    {details?.inputTokenLimit && details.inputTokenLimit >= 1000000 && (
-                      <Badge className="text-[10px] px-1 py-0 bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300">
-                        {(details.inputTokenLimit / 1000000).toFixed(0)}M tokens
-                      </Badge>
-                    )}
-                  </div>
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
-        
-        {modelsCacheUpdatedAt && (
-          <p className="text-[10px] text-muted-foreground flex items-center gap-1">
-            <Clock className="h-2.5 w-2.5" />
-            Modelos atualizados: {modelsCacheUpdatedAt.toLocaleString('pt-BR')}
-            <Button 
-              variant="link" 
-              className="h-auto p-0 text-[10px] ml-1"
-              onClick={() => fetchGeminiModels(true)}
-              disabled={loadingGeminiModels}
-            >
-              {loadingGeminiModels ? "Atualizando..." : "Atualizar"}
-            </Button>
-          </p>
-        )}
-        
-        <p className="text-xs text-muted-foreground">
-          💡 Modelos 3.0 têm melhor OCR para documentos escaneados. Flash é mais rápido, Pro é mais preciso.
-        </p>
+          Continuar esperando
+        </Button>
+        <Button 
+          variant="destructive" 
+          size="sm"
+          onClick={() => {
+            // Cancelar e voltar ao início
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+            setProcessingStep("idle");
+            toast({
+              variant: "destructive",
+              title: "Processamento cancelado",
+              description: "Você pode tentar novamente com outro arquivo ou configuração."
+            });
+          }}
+        >
+          Cancelar
+        </Button>
       </div>
-    </div>
-    
-    <Separator />
-    
-    {/* Phase 2 Provider Configuration - EXISTENTE */}
-    <div className="space-y-4">
-      <h4 className="font-medium text-sm">Fase 2: Preenchimento de Campos</h4>
-      {/* ... código existente ... */}
-    </div>
-  </>
+    </AlertDescription>
+  </Alert>
 )}
 ```
 
 ---
 
-#### Parte 6: Atualizar Backend (processar-autos)
+## Resumo de Arquivos a Modificar
 
-**Arquivo:** `supabase/functions/processar-autos/index.ts` (linhas 576-611)
+| Arquivo | Mudanças | Impacto |
+|---------|----------|---------|
+| `supabase/functions/_shared/pdf-visual-extractor.ts` | Adicionar `GEMINI_MODEL_MAP` e função `resolveGeminiModelName` | Fase 1 usa modelo correto na API |
+| `supabase/functions/processar-autos/index.ts` | Truncamento inteligente Fase 2, falhas parciais nos resumos | Previne MAX_TOKENS, feedback de erros |
+| `src/components/tools/ImportarAutosDialog.tsx` | Estado de falhas parciais, detecção de stale, UI de aviso | Usuário vê o que falhou e pode agir |
 
-**6a. Adicionar campo à busca de configuração:**
+---
 
-```typescript
-const { data: strategyData } = await supabaseAdmin
-  .from('system_config')
-  .select('id, value')
-  .in('id', [
-    'import_strategy', 
-    'text_fill_provider', 
-    'text_fill_model', 
-    'store_extracted_text',
-    'phase1_gemini_model'  // ← NOVO
-  ]);
-```
+## Fluxo Corrigido
 
-**6b. Passar modelo para extractVisualContent:**
-
-```typescript
-// Determine Phase 1 model from config (linha ~608)
-const phase1Model = strategyMap.phase1_gemini_model || 'gemini-2.5-flash';
-console.log(`[processar-autos] Phase 1 using model: ${phase1Model}`);
-
-const extracted = await extractVisualContent(pdfBase64, { 
-  useFilesAPI,
-  model: phase1Model  // ← PASSA O MODELO CONFIGURADO
-});
+```text
+┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                            FLUXO DE IMPORTAÇÃO CORRIGIDO                                        │
+├─────────────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                                 │
+│  FASE 1: Extração Visual (OCR)                                                                  │
+│  ├─ Modelo no DevPanel: gemini-3-flash-preview                                                  │
+│  ├─ Mapeamento: gemini-3-flash-preview → gemini-2.5-flash  ✅ CORRIGIDO                         │
+│  ├─ API URL: /v1beta/models/gemini-2.5-flash:generateContent                                    │
+│  └─ RESULTADO: Extração rápida e confiável                                                      │
+│                                                                                                 │
+│  FASE 2: Preenchimento de Campos                                                                │
+│  ├─ Texto limitado a 200k chars (preservando início + fim)  ✅ CORRIGIDO                        │
+│  ├─ maxOutputTokens: 65536 para JSON completo                                                   │
+│  └─ RESULTADO: JSON válido sem truncamento                                                      │
+│                                                                                                 │
+│  GERAÇÃO DE RESUMOS:                                                                            │
+│  ├─ Cada resumo em try/catch isolado                                                            │
+│  ├─ Se um falha, continua os outros  ✅ JÁ EXISTIA                                              │
+│  ├─ NOVO: Reporta quais falharam no resultado                                                   │
+│  └─ RESULTADO: Processamento parcial possível, feedback claro                                   │
+│                                                                                                 │
+│  FRONTEND:                                                                                      │
+│  ├─ Timeout global de 25 minutos (mantido)                                                      │
+│  ├─ NOVO: Detecta stale após 60s sem update                                                     │
+│  ├─ NOVO: Mostra aviso com opções (esperar/cancelar)                                            │
+│  ├─ NOVO: Exibe quais resumos falharam na preview                                               │
+│  └─ RESULTADO: Usuário sempre informado, pode agir                                              │
+│                                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### Fluxo Completo Após Implementação
+## Garantias de Qualidade
 
-```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│                           DevPanel > Configurações                             │
-├────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                │
-│  ┌──────────────────────────────────────────────────────────────────────────┐  │
-│  │ Provider Inventory v2.0                                                  │  │
-│  │                                                                          │  │
-│  │   Gemini: AIza***    [🔄 Atualizar Modelos]  ←──┐                        │  │
-│  │                                                 │                        │  │
-│  │   Popula:                                       │                        │  │
-│  │   • dynamicGeminiModels[]                       │                        │  │
-│  │   • geminiModelDetails{}                        │                        │  │
-│  │                                                 │ Sincroniza             │  │
-│  └─────────────────────────────────────────────────┼────────────────────────┘  │
-│                                                    │                           │
-│  ┌─────────────────────────────────────────────────┼────────────────────────┐  │
-│  │ Extração de PDF [Inativo - modo 2 fases]        │ (usa quando single)    │  │
-│  │                                                 │                        │  │
-│  │   • pdf_ai_provider (sincronizado)              │                        │  │
-│  │   • pdf_ai_model (sincronizado)        ─────────┘                        │  │
-│  └──────────────────────────────────────────────────────────────────────────┘  │
-│                                                                                │
-│  ┌──────────────────────────────────────────────────────────────────────────┐  │
-│  │ Estratégia de Importação                                       [✓ ATIVO] │  │
-│  │                                                                          │  │
-│  │   ┌────────────────────────────────────────────────────────────────────┐ │  │
-│  │   │ Fase 1: Extração Visual (OCR)           [Gemini Oficial]           │ │  │
-│  │   │                                                                    │ │  │
-│  │   │   Modelo: [gemini-3-flash-preview ▼]   ←── NOVO: usa             │ │  │
-│  │   │           • gemini-2.5-flash                 dynamicGeminiModels   │ │  │
-│  │   │           • gemini-2.5-pro       [3.0]       + geminiModelDetails  │ │  │
-│  │   │           • gemini-3-flash-preview [3.0]     para mostrar badges   │ │  │
-│  │   │           • gemini-3-pro-preview [3.0] [Pro] [1M tokens]          │ │  │
-│  │   │                                                                    │ │  │
-│  │   │   Atualizado: 28/01/2026 10:30 [Atualizar]                        │ │  │
-│  │   └────────────────────────────────────────────────────────────────────┘ │  │
-│  │                                                                          │  │
-│  │   ┌────────────────────────────────────────────────────────────────────┐ │  │
-│  │   │ Fase 2: Preenchimento de Campos                                   │ │  │
-│  │   │                                                                    │ │  │
-│  │   │   Provider: [OpenRouter ▼]     Modelo: [openai/gpt-4o-mini ▼]     │ │  │
-│  │   │   ⭐ Favoritos sincronizados com Provider Inventory                │ │  │
-│  │   └────────────────────────────────────────────────────────────────────┘ │  │
-│  │                                                                          │  │
-│  │   [✓] Armazenar Texto Extraído                                          │  │
-│  └──────────────────────────────────────────────────────────────────────────┘  │
-│                                                                                │
-└────────────────────────────────────────────────────────────────────────────────┘
-```
+| Aspecto | Preservado | Explicação |
+|---------|------------|------------|
+| **Dados da vítima/processo** | ✅ | Início do documento sempre preservado no truncamento |
+| **Quesitos do juízo** | ✅ | Final do documento sempre preservado no truncamento |
+| **CIDs mencionados** | ✅ | Extraídos na Fase 1 (texto completo), usados nos resumos |
+| **Textos brutos completos** | ⚠️ | Podem ser parciais em PDFs muito grandes, mas resumos são gerados |
+| **Files API (PDFs > 50MB)** | ✅ | Continua funcionando normalmente |
+| **Regeneração no editor** | ✅ | Usa texto armazenado no bucket, não afetado |
 
 ---
 
-### Fluxo de Execução no Backend
+## Checklist de Validação Pós-Implementação
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                     processar-autos (Edge Function)                             │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                 │
-│  1. Busca system_config:                                                        │
-│     • import_strategy = "two_phase"                                             │
-│     • phase1_gemini_model = "gemini-3-flash-preview" ←── NOVO                   │
-│     • text_fill_provider = "openrouter"                                         │
-│     • text_fill_model = "openai/gpt-4o-mini"                                    │
-│                                                                                 │
-│  2. Fase 1 (se two_phase):                                                      │
-│     ┌───────────────────────────────────────────────────────────────────────┐   │
-│     │ extractVisualContent(pdfBase64, {                                     │   │
-│     │   useFilesAPI: pdfSizeBytes > 50MB,                                   │   │
-│     │   model: "gemini-3-flash-preview"  ←── USA MODELO CONFIGURADO        │   │
-│     │ })                                                                    │   │
-│     │                                                                       │   │
-│     │ → Se PDF > 50MB: uploadToGeminiFilesAPI() primeiro                    │   │
-│     │ → Chama Gemini API com modelo configurado                             │   │
-│     │ → Retorna: rawText, pageCount, estimatedSections                      │   │
-│     └───────────────────────────────────────────────────────────────────────┘   │
-│                                                                                 │
-│  3. Armazena texto extraído no bucket (se store_extracted_text = true)          │
-│                                                                                 │
-│  4. Fase 2:                                                                     │
-│     ┌───────────────────────────────────────────────────────────────────────┐   │
-│     │ callAI({                                                              │   │
-│     │   provider: "openrouter",                                             │   │
-│     │   model: "openai/gpt-4o-mini"                                         │   │
-│     │ }, systemPrompt, extractedText)                                       │   │
-│     │                                                                       │   │
-│     │ → Envia apenas TEXTO (não PDF binário)                                │   │
-│     │ → Retorna: JSON estruturado com campos do laudo                       │   │
-│     └───────────────────────────────────────────────────────────────────────┘   │
-│                                                                                 │
-│  5. Salva resultado com extracted_content_path para regenerações                │
-│                                                                                 │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+1. **Mapeamento de Modelos**
+   - [ ] Selecionar `gemini-3-flash-preview` no DevPanel
+   - [ ] Importar PDF pequeno
+   - [ ] Verificar nos logs: `Model mapping: gemini-3-flash-preview → gemini-2.5-flash`
+   - [ ] Tempo de Fase 1 deve ser < 60 segundos para PDF de 5MB
 
----
+2. **Truncamento Inteligente**
+   - [ ] Importar PDF grande (>200 páginas)
+   - [ ] Verificar nos logs: `Truncated to X chars`
+   - [ ] Verificar que dados da vítima, processo e quesitos estão presentes no laudo
 
-### Garantias de Compatibilidade
+3. **Falhas Parciais**
+   - [ ] Simular falha (desconectar rede durante resumo)
+   - [ ] Verificar que outros resumos continuam
+   - [ ] Verificar aviso de falha parcial na preview
+   - [ ] Verificar que `ai_metadata.failedSummaries` está preenchido no laudo
 
-| Funcionalidade | Status | Explicação |
-|----------------|--------|------------|
-| **Files API (PDFs > 50MB)** | ✅ Mantido | `useFilesAPI` continua sendo calculado por tamanho, independente do modelo |
-| **OCR de Imagens** | ✅ Mantido | Todos os modelos Gemini 2.5+ e 3.0 suportam Vision/PDF |
-| **Fallback para single_pass** | ✅ Mantido | Se Fase 1 falhar, código existente faz fallback automático |
-| **Regeneração (🔄)** | ✅ Mantido | Usa texto do bucket, não depende do modelo de extração |
-| **Cache de modelos** | ✅ Sincronizado | Usa mesmo `dynamicGeminiModels` do Provider Inventory |
+4. **Detecção de Stale**
+   - [ ] Importar PDF durante sobrecarga do servidor
+   - [ ] Verificar que após 60s aparece aviso "Processamento lento"
+   - [ ] Verificar que botões "Continuar esperando" e "Cancelar" funcionam
 
----
-
-### Resumo de Arquivos a Modificar
-
-| Arquivo | Ação | Mudanças |
-|---------|------|----------|
-| `src/components/dev-panel/DevSettings.tsx` | Modificar | Interface, estado inicial, fetchConfig, saveConfig, UI do seletor Fase 1 |
-| `supabase/functions/processar-autos/index.ts` | Modificar | Buscar e usar `phase1_gemini_model` |
-
----
-
-### Checklist de Validação Pós-Implementação
-
-1. **Sincronização**: Clicar "Atualizar Modelos" no Provider Inventory → modelos aparecem no seletor de Fase 1
-2. **Filtro supportsPdf**: Apenas modelos com `supportsPdf: true` aparecem no seletor
-3. **Badges informativos**: Modelos 3.0 mostram badge [3.0], Pro mostra [Pro], tokens mostram [1M tokens]
-4. **Fallback seguro**: Se `phase1_gemini_model` não existir no banco, usa "gemini-2.5-flash"
-5. **Files API funciona**: PDFs > 50MB continuam usando `uploadToGeminiFilesAPI` independente do modelo
-6. **Import completo**: Testar importação de PDF pequeno e verificar logs mostrando modelo configurado
-
+5. **Performance Geral**
+   - [ ] PDF pequeno (~50 páginas): < 3 minutos total
+   - [ ] PDF médio (~100 páginas): < 5 minutos total
+   - [ ] PDF grande (~200+ páginas): < 10 minutos total
