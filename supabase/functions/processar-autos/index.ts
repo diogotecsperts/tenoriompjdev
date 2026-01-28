@@ -576,7 +576,7 @@ async function processarPDFBackground(
     const { data: strategyData } = await supabaseAdmin
       .from('system_config')
       .select('id, value')
-      .in('id', ['import_strategy', 'text_fill_provider', 'text_fill_model', 'store_extracted_text']);
+      .in('id', ['import_strategy', 'text_fill_provider', 'text_fill_model', 'store_extracted_text', 'phase1_gemini_model']);
 
     const strategyMap: Record<string, any> = {};
     strategyData?.forEach((item: { id: string; value: any }) => { strategyMap[item.id] = item.value; });
@@ -607,8 +607,15 @@ async function processarPDFBackground(
       const useFilesAPI = pdfSizeBytes > 50_000_000;
       console.log(`[processar-autos] PDF size: ${(pdfSizeBytes / (1024 * 1024)).toFixed(2)}MB, useFilesAPI: ${useFilesAPI}`);
 
+      // Get Phase 1 model from config (synchronized with Provider Inventory)
+      const phase1Model = strategyMap.phase1_gemini_model || 'gemini-2.5-flash';
+      console.log(`[processar-autos] Phase 1 using model: ${phase1Model}`);
+
       try {
-        const extracted = await extractVisualContent(pdfBase64, { useFilesAPI });
+        const extracted = await extractVisualContent(pdfBase64, { 
+          useFilesAPI,
+          model: phase1Model 
+        });
         
         timings.pdfExtraction.end = Date.now();
         modelUsed = `${extracted.provider}/${extracted.model}`;

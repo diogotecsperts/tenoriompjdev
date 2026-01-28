@@ -61,6 +61,7 @@ interface SystemConfig {
   text_fill_provider: string;
   text_fill_model: string;
   store_extracted_text: boolean;
+  phase1_gemini_model: string;
 }
 
 interface ApiKeys {
@@ -168,7 +169,8 @@ const DEFAULT_CONFIG: SystemConfig = {
   import_strategy: "two_phase",
   text_fill_provider: "openrouter",
   text_fill_model: "openai/gpt-4o-mini",
-  store_extracted_text: true
+  store_extracted_text: true,
+  phase1_gemini_model: "gemini-2.5-flash"
 };
 
 // Gemini Vision models available for PDF extraction (aliases estáveis)
@@ -588,7 +590,8 @@ export function DevSettings() {
           import_strategy: configMap.import_strategy || DEFAULT_CONFIG.import_strategy,
           text_fill_provider: configMap.text_fill_provider || DEFAULT_CONFIG.text_fill_provider,
           text_fill_model: configMap.text_fill_model || DEFAULT_CONFIG.text_fill_model,
-          store_extracted_text: configMap.store_extracted_text ?? DEFAULT_CONFIG.store_extracted_text
+          store_extracted_text: configMap.store_extracted_text ?? DEFAULT_CONFIG.store_extracted_text,
+          phase1_gemini_model: configMap.phase1_gemini_model || DEFAULT_CONFIG.phase1_gemini_model
         });
       }
     } catch (error) {
@@ -791,6 +794,9 @@ export function DevSettings() {
       }, {
         id: "store_extracted_text",
         value: config.store_extracted_text
+      }, {
+        id: "phase1_gemini_model",
+        value: config.phase1_gemini_model
       }];
       for (const update of updates) {
         const { error } = await supabase.from("system_config").upsert({
@@ -2322,6 +2328,103 @@ export function DevSettings() {
 
           {config.import_strategy === "two_phase" && (
             <>
+              <Separator />
+              
+              {/* Phase 1 Gemini Model Selection - NEW */}
+              <div className="space-y-4 p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
+                <h4 className="font-medium text-sm flex items-center gap-2">
+                  <Cpu className="h-4 w-4 text-blue-600" />
+                  Fase 1: Extração Visual (OCR)
+                  <Badge variant="outline" className="text-[10px]">Gemini Oficial</Badge>
+                </h4>
+                <p className="text-xs text-muted-foreground">
+                  O Gemini processa o PDF binário e extrai todo o texto via OCR. Para PDFs {'>'} 50MB, usa automaticamente a Google Files API.
+                </p>
+                
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Modelo Gemini (Fase 1)</Label>
+                    {dynamicGeminiModels.length === 0 && (
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-6 px-2 text-[10px] gap-1"
+                        onClick={() => fetchGeminiModels(true)}
+                        disabled={loadingGeminiModels}
+                      >
+                        {loadingGeminiModels ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <>
+                            <RefreshCw className="h-3 w-3" />
+                            Carregar modelos
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                  
+                  <Select 
+                    value={config.phase1_gemini_model || "gemini-2.5-flash"} 
+                    onValueChange={value => setConfig({...config, phase1_gemini_model: value})}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione o modelo de OCR" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* Usar dynamicGeminiModels sincronizado com Provider Inventory */}
+                      {(dynamicGeminiModels.length > 0 
+                        ? dynamicGeminiModels.filter(modelId => {
+                            // Filtrar apenas modelos que suportam PDF
+                            const details = geminiModelDetails[modelId];
+                            return details?.supportsPdf !== false;
+                          })
+                        : ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash-preview", "gemini-3-pro-preview"]
+                      ).map(modelId => {
+                        const details = geminiModelDetails[modelId];
+                        return (
+                          <SelectItem key={modelId} value={modelId}>
+                            <div className="flex items-center gap-2">
+                              <span>{details?.displayName || modelId}</span>
+                              {modelId.includes("3-") && (
+                                <Badge variant="outline" className="text-[10px] px-1 py-0">3.0</Badge>
+                              )}
+                              {modelId.includes("pro") && (
+                                <Badge variant="secondary" className="text-[10px] px-1 py-0">Pro</Badge>
+                              )}
+                              {details?.inputTokenLimit && details.inputTokenLimit >= 1000000 && (
+                                <Badge className="text-[10px] px-1 py-0 bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300">
+                                  {(details.inputTokenLimit / 1000000).toFixed(0)}M tokens
+                                </Badge>
+                              )}
+                            </div>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                  
+                  {modelsCacheUpdatedAt && (
+                    <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                      <Clock className="h-2.5 w-2.5" />
+                      Modelos atualizados: {modelsCacheUpdatedAt.toLocaleString('pt-BR')}
+                      <Button 
+                        variant="link" 
+                        className="h-auto p-0 text-[10px] ml-1"
+                        onClick={() => fetchGeminiModels(true)}
+                        disabled={loadingGeminiModels}
+                      >
+                        {loadingGeminiModels ? "Atualizando..." : "Atualizar"}
+                      </Button>
+                    </p>
+                  )}
+                  
+                  <p className="text-xs text-muted-foreground">
+                    💡 Modelos 3.0 têm melhor OCR para documentos escaneados. Flash é mais rápido, Pro é mais preciso.
+                  </p>
+                </div>
+              </div>
+              
               <Separator />
               
               {/* Phase 2 Provider Configuration */}
