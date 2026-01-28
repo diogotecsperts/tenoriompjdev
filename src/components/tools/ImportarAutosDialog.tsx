@@ -228,6 +228,18 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   // Slow AI detection state
   const [isSlowAI, setIsSlowAI] = useState(false);
   const [slowSteps, setSlowSteps] = useState<string[]>([]);
+  
+  // Partial failures state (NEW)
+  const [partialFailures, setPartialFailures] = useState<{
+    failedSummaries: string[];
+    errors: Record<string, string>;
+  } | null>(null);
+  
+  // Stale job detection (NEW)
+  const [isJobStale, setIsJobStale] = useState(false);
+  const lastJobUpdateRef = useRef<string | null>(null);
+  const staleCheckCountRef = useRef(0);
+  const STALE_THRESHOLD_POLLS = 20; // 20 polls * 3s = 60 segundos sem update = stale
 
   // Check if user is developer and fetch AI config
   useEffect(() => {
@@ -378,6 +390,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     // Remove prefixes like "google/" for cleaner display
     return model.replace('google/', '').replace('openai/', '');
   };
+  
+  // NEW: Format summary type name for display
+  const formatSummaryTypeName = (tipo: string) => {
+    const names: Record<string, string> = {
+      resumo_peticao: 'Resumo da Petição Inicial',
+      resumo_contestacao: 'Resumo da Contestação',
+      descricao_doencas: 'Descrição Técnica das Doenças',
+      nexo_causal: 'Análise de Nexo Causal',
+      incapacidade: 'Análise de Incapacidade',
+      referencias_bibliograficas: 'Referências Bibliográficas'
+    };
+    return names[tipo] || tipo;
+  };
+
 
   const formatDuration = (ms: number) => {
     if (ms < 1000) return `${ms}ms`;
@@ -525,6 +551,21 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
       const data = await response.json();
       
+      // NEW: Detect stale job (updated_at não muda)
+      if (lastJobUpdateRef.current === data.updatedAt) {
+        staleCheckCountRef.current++;
+        
+        if (staleCheckCountRef.current >= STALE_THRESHOLD_POLLS && !isJobStale) {
+          console.warn('[ImportarAutosDialog] Job appears stale - no updates for 60+ seconds');
+          setIsJobStale(true);
+        }
+      } else {
+        // Reset counter when we see an update
+        lastJobUpdateRef.current = data.updatedAt;
+        staleCheckCountRef.current = 0;
+        setIsJobStale(false);
+      }
+      
       // Update UI with current progress
       setAnalysisStep(data.currentStep || 'Processando...');
       setAnalysisProgress(data.progress || 0);
@@ -545,6 +586,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         setExtractedData(data.result.data);
         setAiUsage(data.result.aiUsage || null);
         setUsedModel(data.result.aiUsage?.pdfExtraction?.model || 'gemini-2.5-flash');
+        
+        // NEW: Capture partial failures
+        if (data.result.partialFailures) {
+          setPartialFailures(data.result.partialFailures);
+        }
+        
         setProcessingStep("preview");
         return true; // Stop polling
       }
@@ -787,6 +834,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               key => extractedData.resumos_ia?.[key as keyof typeof extractedData.resumos_ia]
             )
           },
+          // NEW: Mark which sections failed for retry in editor
+          failedSummaries: partialFailures?.failedSummaries || [],
           totalDurationMs: aiUsage.totalDurationMs
         } : null
       };
@@ -844,6 +893,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     // Reset slow AI detection
     setIsSlowAI(false);
     setSlowSteps([]);
+    // Reset partial failures
+    setPartialFailures(null);
+    // Reset stale detection
+    setIsJobStale(false);
+    lastJobUpdateRef.current = null;
+    staleCheckCountRef.current = 0;
     onOpenChange(false);
   };
 
@@ -1010,6 +1065,32 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                 )}
               </AlertDescription>
             </div>
+          </Alert>
+        )}
+        
+        {/* NEW: Warning for partial failures (specific summaries that failed) */}
+        {partialFailures && partialFailures.failedSummaries.length > 0 && (
+          <Alert className="border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Importação parcial</AlertTitle>
+            <AlertDescription>
+              <p className="mb-2">Algumas seções não puderam ser geradas automaticamente:</p>
+              <ul className="list-disc list-inside text-sm space-y-1">
+                {partialFailures.failedSummaries.map(tipo => (
+                  <li key={tipo}>
+                    <span className="font-medium">{formatSummaryTypeName(tipo)}</span>
+                    {partialFailures.errors[tipo] && (
+                      <span className="text-muted-foreground ml-1">
+                        ({partialFailures.errors[tipo].substring(0, 50)}...)
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Você poderá gerar essas seções manualmente no editor do laudo usando o botão "🔄 Regenerar".
+              </p>
+            </AlertDescription>
           </Alert>
         )}
 
@@ -1456,6 +1537,54 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   <AlertDescription className="text-blue-600/80 dark:text-blue-400/80">
                     O modelo de IA selecionado é mais lento, mas geralmente oferece 
                     resultados de maior qualidade. Aguarde...
+                  </AlertDescription>
+                </Alert>
+              )}
+              
+              {/* NEW: Stale Job Indicator */}
+              {isJobStale && (
+                <Alert className="bg-orange-500/10 border-orange-500/30">
+                  <Clock className="h-4 w-4 text-orange-500" />
+                  <AlertTitle className="text-orange-600 dark:text-orange-400">
+                    Processamento lento
+                  </AlertTitle>
+                  <AlertDescription className="text-orange-600/80 dark:text-orange-400/80">
+                    <p>O processamento não teve atualizações nos últimos 60 segundos.</p>
+                    <p className="text-sm mt-1">
+                      Isso pode indicar que o servidor está sobrecarregado ou o modelo de IA está lento.
+                    </p>
+                    <div className="flex gap-2 mt-3">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => {
+                          staleCheckCountRef.current = 0;
+                          setIsJobStale(false);
+                        }}
+                        className="text-xs"
+                      >
+                        Continuar esperando
+                      </Button>
+                      <Button 
+                        variant="destructive" 
+                        size="sm"
+                        onClick={() => {
+                          if (pollingRef.current) {
+                            clearInterval(pollingRef.current);
+                            pollingRef.current = null;
+                          }
+                          setProcessingStep("idle");
+                          toast({
+                            variant: "destructive",
+                            title: "Processamento cancelado",
+                            description: "Você pode tentar novamente com outro arquivo ou configuração."
+                          });
+                        }}
+                        className="text-xs"
+                      >
+                        Cancelar
+                      </Button>
+                    </div>
                   </AlertDescription>
                 </Alert>
               )}
