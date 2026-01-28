@@ -56,6 +56,11 @@ interface SystemConfig {
   retry_enabled: boolean;
   retry_max_attempts: number;
   retry_base_delay_ms: number;
+  // Two-phase import strategy
+  import_strategy: string;
+  text_fill_provider: string;
+  text_fill_model: string;
+  store_extracted_text: boolean;
 }
 
 interface ApiKeys {
@@ -158,7 +163,12 @@ const DEFAULT_CONFIG: SystemConfig = {
   allowed_ai_providers: ["lovable", "openai", "gemini", "claude", "groq", "deepseek", "openrouter"],
   retry_enabled: true,
   retry_max_attempts: 3,
-  retry_base_delay_ms: 1000
+  retry_base_delay_ms: 1000,
+  // Two-phase import strategy defaults
+  import_strategy: "two_phase",
+  text_fill_provider: "openrouter",
+  text_fill_model: "openai/gpt-4o-mini",
+  store_extracted_text: true
 };
 
 // Gemini Vision models available for PDF extraction (aliases estáveis)
@@ -573,7 +583,12 @@ export function DevSettings() {
           allowed_ai_providers: configMap.allowed_ai_providers || DEFAULT_CONFIG.allowed_ai_providers,
           retry_enabled: configMap.retry_enabled ?? DEFAULT_CONFIG.retry_enabled,
           retry_max_attempts: configMap.retry_max_attempts ?? DEFAULT_CONFIG.retry_max_attempts,
-          retry_base_delay_ms: configMap.retry_base_delay_ms ?? DEFAULT_CONFIG.retry_base_delay_ms
+          retry_base_delay_ms: configMap.retry_base_delay_ms ?? DEFAULT_CONFIG.retry_base_delay_ms,
+          // Two-phase import strategy
+          import_strategy: configMap.import_strategy || DEFAULT_CONFIG.import_strategy,
+          text_fill_provider: configMap.text_fill_provider || DEFAULT_CONFIG.text_fill_provider,
+          text_fill_model: configMap.text_fill_model || DEFAULT_CONFIG.text_fill_model,
+          store_extracted_text: configMap.store_extracted_text ?? DEFAULT_CONFIG.store_extracted_text
         });
       }
     } catch (error) {
@@ -764,6 +779,18 @@ export function DevSettings() {
       }, {
         id: "retry_base_delay_ms",
         value: config.retry_base_delay_ms
+      }, {
+        id: "import_strategy",
+        value: config.import_strategy
+      }, {
+        id: "text_fill_provider",
+        value: config.text_fill_provider
+      }, {
+        id: "text_fill_model",
+        value: config.text_fill_model
+      }, {
+        id: "store_extracted_text",
+        value: config.store_extracted_text
       }];
       for (const update of updates) {
         const { error } = await supabase.from("system_config").upsert({
@@ -2207,6 +2234,201 @@ export function DevSettings() {
 
       <Separator />
 
+      {/* Section: Import Strategy (Two-Phase) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Zap className="h-5 w-5" />
+            Estratégia de Importação
+          </CardTitle>
+          <CardDescription>
+            Configurações para processamento de PDF em duas fases (economia de 60%+ em custos)
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Import Strategy Mode */}
+          <div className="flex items-center justify-between">
+            <div>
+              <Label>Modo de Importação</Label>
+              <p className="text-sm text-muted-foreground">
+                Duas Fases: Gemini extrai texto → Provider mais barato preenche campos
+              </p>
+            </div>
+            <Select value={config.import_strategy} onValueChange={value => setConfig({
+              ...config,
+              import_strategy: value
+            })}>
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="single_pass">
+                  <div className="flex flex-col">
+                    <span>Passagem Única</span>
+                    <span className="text-[10px] text-muted-foreground">Um provider faz tudo</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="two_phase">
+                  <div className="flex flex-col">
+                    <span>Duas Fases (Recomendado)</span>
+                    <span className="text-[10px] text-muted-foreground">~60% mais econômico</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {config.import_strategy === "two_phase" && (
+            <>
+              <Separator />
+              
+              {/* Phase 2 Provider Configuration */}
+              <div className="space-y-4">
+                <h4 className="font-medium text-sm">Fase 2: Preenchimento de Campos</h4>
+                <p className="text-xs text-muted-foreground">
+                  Após a extração visual (Gemini), qual provider usar para preencher os campos do laudo?
+                </p>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Provider (Fase 2)</Label>
+                    <Select value={config.text_fill_provider} onValueChange={value => {
+                      let defaultModel = "";
+                      if (value === "openrouter") defaultModel = "openai/gpt-4o-mini";
+                      else if (value === "lovable") defaultModel = "google/gemini-2.5-flash";
+                      else if (value === "gemini") defaultModel = "gemini-2.5-flash";
+                      
+                      setConfig({
+                        ...config,
+                        text_fill_provider: value,
+                        text_fill_model: defaultModel
+                      });
+                    }}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="openrouter">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-pink-500" />
+                            <span>OpenRouter (Mais econômico)</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="lovable">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                            <span>IA Integrada</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="gemini">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-blue-500" />
+                            <span>Gemini Direto</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label>Modelo (Fase 2)</Label>
+                    {config.text_fill_provider === "openrouter" ? (
+                      <Input 
+                        value={config.text_fill_model} 
+                        onChange={e => setConfig({
+                          ...config,
+                          text_fill_model: e.target.value
+                        })} 
+                        placeholder="openai/gpt-4o-mini"
+                      />
+                    ) : (
+                      <Select value={config.text_fill_model} onValueChange={value => setConfig({
+                        ...config,
+                        text_fill_model: value
+                      })}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {config.text_fill_provider === "lovable" && (
+                            <>
+                              <SelectItem value="google/gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+                              <SelectItem value="google/gemini-3-flash-preview">Gemini 3 Flash Preview</SelectItem>
+                              <SelectItem value="openai/gpt-5-mini">GPT-5 Mini</SelectItem>
+                            </>
+                          )}
+                          {config.text_fill_provider === "gemini" && (
+                            <>
+                              <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
+                              <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
+                            </>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Suggested models for OpenRouter */}
+                {config.text_fill_provider === "openrouter" && (
+                  <div className="space-y-2">
+                    <Label className="text-sm text-muted-foreground">Modelos econômicos sugeridos:</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", cost: "$0.15/M" },
+                        { id: "deepseek/deepseek-chat", name: "DeepSeek", cost: "$0.14/M" },
+                        { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", cost: "$0.10/M" }
+                      ].map(model => (
+                        <Button
+                          key={model.id}
+                          variant={config.text_fill_model === model.id ? "secondary" : "outline"}
+                          size="sm"
+                          className="text-xs h-7"
+                          onClick={() => setConfig({
+                            ...config,
+                            text_fill_model: model.id
+                          })}
+                        >
+                          {model.name} <span className="text-muted-foreground ml-1">({model.cost})</span>
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+
+              {/* Store Extracted Text Toggle */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label>Armazenar Texto Extraído</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Salva o texto completo no bucket para regenerações mais precisas
+                  </p>
+                </div>
+                <Switch 
+                  checked={config.store_extracted_text} 
+                  onCheckedChange={checked => setConfig({
+                    ...config,
+                    store_extracted_text: checked
+                  })} 
+                />
+              </div>
+            </>
+          )}
+
+          {/* Info box */}
+          <div className="p-3 bg-muted/50 rounded-lg text-xs text-muted-foreground space-y-1">
+            <p><strong>Fase 1 (Extração Visual):</strong> Gemini oficial com suporte a PDF Vision extrai todo o texto, incluindo imagens escaneadas.</p>
+            <p><strong>Fase 2 (Preenchimento):</strong> Provider econômico recebe apenas texto puro (~2-5MB) e preenche cada campo do laudo.</p>
+            <p><strong>Benefício:</strong> PDFs de até 2GB são suportados via Google Files API.</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Separator />
+
       {/* Section: Allowed Providers */}
       <Card>
         <CardHeader>
@@ -2324,7 +2546,7 @@ export function DevSettings() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {[10, 20, 30, 50, 100].map(size => <SelectItem key={size} value={String(size)}>{size} MB</SelectItem>)}
+                {[10, 20, 30, 50, 100, 150, 200].map(size => <SelectItem key={size} value={String(size)}>{size} MB</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
