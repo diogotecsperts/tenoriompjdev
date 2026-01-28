@@ -9,6 +9,37 @@ export interface ExtractedContent {
   provider: string;
 }
 
+// Mapeamento de nomes amigáveis do DevPanel para nomes estáveis da API Gemini
+// IMPORTANTE: Sincronizado com test-ai-connection/index.ts
+const GEMINI_MODEL_MAP: Record<string, string> = {
+  // Gemini 3.0 Preview → mapeia para 2.5 (até 3.0 GA)
+  'gemini-3-pro-preview': 'gemini-2.5-pro',
+  'gemini-3-flash-preview': 'gemini-2.5-flash',
+  'gemini-3-flash-lite-preview': 'gemini-2.5-flash-8b',
+  // Gemini 2.5 - aliases estáveis
+  'gemini-2.5-pro': 'gemini-2.5-pro',
+  'gemini-2.5-flash': 'gemini-2.5-flash',
+  'gemini-2.5-flash-lite': 'gemini-2.5-flash-8b',
+  'gemini-2.5-flash-8b': 'gemini-2.5-flash-8b',
+  // Gemini 2.0 (estáveis)
+  'gemini-2.0-flash': 'gemini-2.0-flash',
+  'gemini-2.0-flash-exp': 'gemini-2.0-flash-exp',
+  // Gemini 1.5 (estáveis)
+  'gemini-1.5-pro': 'gemini-1.5-pro',
+  'gemini-1.5-flash': 'gemini-1.5-flash',
+};
+
+/**
+ * Resolve o nome do modelo para o nome aceito pela API Gemini
+ */
+function resolveGeminiModelName(model: string): string {
+  const resolved = GEMINI_MODEL_MAP[model] || model;
+  if (resolved !== model) {
+    console.log(`[pdf-visual-extractor] Model mapping: ${model} → ${resolved}`);
+  }
+  return resolved;
+}
+
 // Prompt otimizado para extração de texto bruto (OCR)
 const EXTRACTION_PROMPT = `Você é um sistema de OCR especializado. Extraia TODO o conteúdo textual deste documento PDF.
 
@@ -74,7 +105,11 @@ async function extractWithInlineBase64(
   model: string,
   apiKey: string
 ): Promise<ExtractedContent> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  // Resolver nome do modelo para API Gemini
+  const apiModel = resolveGeminiModelName(model);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
+  
+  console.log(`[pdf-visual-extractor] Calling Gemini API with model: ${apiModel} (original: ${model})`);
   
   const response = await fetch(url, {
     method: 'POST',
@@ -126,8 +161,12 @@ async function extractWithFilesAPI(
   console.log(`[pdf-visual-extractor] File uploaded: ${fileUri}`);
   
   try {
+    // Resolver nome do modelo para API Gemini
+    const apiModel = resolveGeminiModelName(model);
+    console.log(`[pdf-visual-extractor] Calling Gemini Files API with model: ${apiModel} (original: ${model})`);
+    
     // Call generateContent with file URI
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
     
     const response = await fetch(url, {
       method: 'POST',

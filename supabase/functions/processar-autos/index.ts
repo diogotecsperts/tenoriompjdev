@@ -334,11 +334,14 @@ async function gerarResumosIA(
     descricao_doencas: string;
     nexo_causal: string;
     incapacidade: string;
+    referencias_bibliograficas: string;
   };
   aiInfo: {
     provider: string;
     model: string;
     summariesGenerated: number;
+    summariesFailed: string[];  // NEW: lista de resumos que falharam
+    errors: Record<string, string>;  // NEW: mensagens de erro por tipo
   };
 }> {
 const results = {
@@ -358,7 +361,7 @@ const results = {
     console.warn('[gerarResumosIA] No API key configured, skipping AI summaries');
     return {
       resumos: results,
-      aiInfo: { provider: 'none', model: 'none', summariesGenerated: 0 }
+      aiInfo: { provider: 'none', model: 'none', summariesGenerated: 0, summariesFailed: [], errors: {} }
     };
   }
 
@@ -477,13 +480,30 @@ const results = {
     }
   }
 
-  // Log warning if not all summaries were generated
-  if (summariesGenerated < 3 && summaryErrors.length > 0) {
-    await logWarn('processar-autos', `Processamento parcial: ${summariesGenerated}/5 resumos gerados`, jobId, {
-      summariesGenerated,
-      totalAttempted: 5,
-      errors: summaryErrors
-    });
+  // Criar mapa de erros para frontend
+  const errorsMap: Record<string, string> = {};
+  for (const errMsg of summaryErrors) {
+    const colonIdx = errMsg.indexOf(': ');
+    if (colonIdx > 0) {
+      const tipo = errMsg.substring(0, colonIdx);
+      const msg = errMsg.substring(colonIdx + 2);
+      errorsMap[tipo] = msg;
+    }
+  }
+  
+  // Identificar quais falharam
+  const failedTypes = Object.keys(errorsMap);
+
+  // Log warning se houver falhas parciais
+  if (failedTypes.length > 0) {
+    await logWarn('processar-autos', 
+      `Processamento parcial: ${summariesGenerated}/${summariesToGenerate.filter(s => s.shouldGenerate).length} resumos gerados`, 
+      jobId, {
+        summariesGenerated,
+        failed: failedTypes,
+        errors: errorsMap
+      }
+    );
   }
 
   return {
@@ -491,7 +511,9 @@ const results = {
     aiInfo: {
       provider: aiConfig.provider,
       model: aiConfig.model,
-      summariesGenerated
+      summariesGenerated,
+      summariesFailed: failedTypes,
+      errors: errorsMap
     }
   };
 }
@@ -654,11 +676,30 @@ async function processarPDFBackground(
         // Use the existing AI config for field filling (text only, no PDF)
         const aiConfig = await getAIConfig();
         
+        // Smart truncation to prevent MAX_TOKENS in Phase 2 response
+        let textForFilling = extracted.rawText;
+        const MAX_INPUT_CHARS = 200_000; // ~50k tokens para entrada
+
+        if (textForFilling.length > MAX_INPUT_CHARS) {
+          console.warn(`[processar-autos] Text too long (${textForFilling.length} chars), applying smart truncation`);
+          
+          // Preservar início (dados do processo, petição) e fim (quesitos)
+          const headChars = Math.floor(MAX_INPUT_CHARS * 0.6); // 60% início
+          const tailChars = Math.floor(MAX_INPUT_CHARS * 0.35); // 35% fim
+          const separator = '\n\n[... conteúdo intermediário omitido para processamento - seções detectadas preservadas ...]\n\n';
+          
+          textForFilling = textForFilling.substring(0, headChars) + 
+                           separator + 
+                           textForFilling.substring(textForFilling.length - tailChars);
+          
+          console.log(`[processar-autos] Truncated to ${textForFilling.length} chars (head: ${headChars}, tail: ${tailChars})`);
+        }
+        
         // Call AI with the extracted raw text (no binary PDF!)
         const fillResult = await callAI(
           { ...aiConfig, provider: fillProvider, model: fillModel },
           systemPrompt,
-          `Analise o seguinte texto extraído de um documento de processo trabalhista e retorne o JSON estruturado:\n\n${extracted.rawText}`,
+          `Analise o seguinte texto extraído de um documento de processo trabalhista e retorne o JSON estruturado:\n\n${textForFilling}`,
           { promptType: 'two_phase_fill', userId }
         );
 
@@ -815,7 +856,12 @@ async function processarPDFBackground(
     const result = {
       success: true,
       data: extractedData,
-      extracted_content_path: extractedContentPath, // NEW: For regeneration
+      extracted_content_path: extractedContentPath, // For regeneration
+      // NEW: Inform frontend about partial failures
+      partialFailures: resumosResult.aiInfo.summariesFailed.length > 0 ? {
+        failedSummaries: resumosResult.aiInfo.summariesFailed,
+        errors: resumosResult.aiInfo.errors
+      } : null,
       aiUsage: {
         pdfExtraction: {
           provider: visionResult?.provider || 'unknown',
@@ -830,7 +876,8 @@ async function processarPDFBackground(
           provider: resumosResult.aiInfo.provider,
           model: resumosResult.aiInfo.model,
           count: resumosResult.aiInfo.summariesGenerated,
-          durationMs: summariesDuration
+          durationMs: summariesDuration,
+          failedSummaries: resumosResult.aiInfo.summariesFailed
         },
         totalDurationMs: totalDuration
       },
