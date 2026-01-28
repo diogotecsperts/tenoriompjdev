@@ -1122,6 +1122,27 @@ export function DevSettings() {
     return AI_PROVIDERS.find(p => p.id === config.pdf_fallback_provider);
   };
 
+  // Two-Phase Text Fill helper functions (Fase 2)
+  const getTextFillProviderModels = () => {
+    const provider = AI_PROVIDERS.find(p => p.id === config.text_fill_provider);
+    if (!provider) return [];
+    
+    if (provider.id === 'gemini' && dynamicGeminiModels.length > 0) {
+      return dynamicGeminiModels;
+    }
+    
+    return provider.models || [];
+  };
+
+  const textFillProviderHasCustomInput = () => {
+    const provider = AI_PROVIDERS.find(p => p.id === config.text_fill_provider);
+    return provider?.customModelInput || false;
+  };
+
+  const getTextFillProvider = () => {
+    return AI_PROVIDERS.find(p => p.id === config.text_fill_provider);
+  };
+
   // Helper functions for table view
   const getFilteredProviders = () => {
     const sorted = getSortedProviders();
@@ -1858,14 +1879,26 @@ export function DevSettings() {
       <Separator />
 
       {/* Section: PDF Extraction */}
-      <Card>
+      <Card className={cn(
+        config.import_strategy === "two_phase" && "opacity-60 border-dashed"
+      )}>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            Extração de PDF
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Extração de PDF
+            </CardTitle>
+            {config.import_strategy === "two_phase" && (
+              <Badge variant="outline" className="text-muted-foreground">
+                Inativo (modo duas fases)
+              </Badge>
+            )}
+          </div>
           <CardDescription>
-            Configurações específicas para processamento de documentos PDF com IA
+            {config.import_strategy === "two_phase" 
+              ? "Estas configurações são usadas apenas no modo 'Passagem Única'"
+              : "Configurações específicas para processamento de documentos PDF com IA"
+            }
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -2235,12 +2268,21 @@ export function DevSettings() {
       <Separator />
 
       {/* Section: Import Strategy (Two-Phase) */}
-      <Card>
+      <Card className={cn(
+        config.import_strategy === "two_phase" && "border-primary/50"
+      )}>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Zap className="h-5 w-5" />
-            Estratégia de Importação
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Zap className="h-5 w-5" />
+              Estratégia de Importação
+            </CardTitle>
+            {config.import_strategy === "two_phase" && (
+              <Badge className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+                ATIVO
+              </Badge>
+            )}
+          </div>
           <CardDescription>
             Configurações para processamento de PDF em duas fases (economia de 60%+ em custos)
           </CardDescription>
@@ -2308,39 +2350,134 @@ export function DevSettings() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="openrouter">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-pink-500" />
-                            <span>OpenRouter (Mais econômico)</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="lovable">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                            <span>IA Integrada</span>
-                          </div>
-                        </SelectItem>
-                        <SelectItem value="gemini">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-blue-500" />
-                            <span>Gemini Direto</span>
-                          </div>
-                        </SelectItem>
+                        {AI_PROVIDERS.filter(p => !p.requiresKey || savedApiKeys[p.id]).map(provider => (
+                          <SelectItem key={provider.id} value={provider.id}>
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: provider.color }} />
+                              <span>{provider.name}</span>
+                              {provider.id === "openrouter" && (
+                                <span className="text-[10px] text-muted-foreground">(Recomendado)</span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
                   
                   <div className="space-y-2">
                     <Label>Modelo (Fase 2)</Label>
-                    {config.text_fill_provider === "openrouter" ? (
-                      <Input 
-                        value={config.text_fill_model} 
-                        onChange={e => setConfig({
-                          ...config,
-                          text_fill_model: e.target.value
-                        })} 
-                        placeholder="openai/gpt-4o-mini"
-                      />
+                    {textFillProviderHasCustomInput() ? (
+                      <div className="space-y-4">
+                        {/* Input + Add Favorite Button */}
+                        <div className="flex gap-2 items-center">
+                          <Input 
+                            value={config.text_fill_model} 
+                            onChange={e => setConfig({
+                              ...config,
+                              text_fill_model: e.target.value
+                            })} 
+                            placeholder={getTextFillProvider()?.modelPlaceholder || "provider/model-name"} 
+                            className="flex-1"
+                          />
+                          <Button 
+                            variant="outline" 
+                            size="icon" 
+                            onClick={() => addFavoriteModel(config.text_fill_provider, config.text_fill_model)} 
+                            disabled={!config.text_fill_model.trim()} 
+                            title="Adicionar aos favoritos"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
+                        
+                        {/* Favorite Models from Provider Inventory */}
+                        {favoriteModels[config.text_fill_provider]?.length > 0 && (
+                          <div className="space-y-2">
+                            <Label className="text-sm text-muted-foreground flex items-center gap-1">
+                              <Star className="h-3 w-3 text-yellow-500" />
+                              Meus modelos favoritos:
+                            </Label>
+                            <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
+                              {favoriteModels[config.text_fill_provider].map(model => (
+                                <div 
+                                  key={model} 
+                                  className={cn(
+                                    "flex items-center justify-between p-2 rounded-md border text-sm group cursor-pointer hover:bg-muted/50 transition-colors", 
+                                    config.text_fill_model === model && "border-primary bg-primary/5"
+                                  )} 
+                                  onClick={() => setConfig({
+                                    ...config,
+                                    text_fill_model: model
+                                  })}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <Star className="h-3 w-3 text-yellow-500 shrink-0" />
+                                    <span className="font-mono text-xs truncate">{model}</span>
+                                  </div>
+                                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                    <Button 
+                                      variant="ghost" 
+                                      size="icon" 
+                                      className="h-6 w-6" 
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        copyModelId(model);
+                                      }} 
+                                      title="Copiar identificador"
+                                    >
+                                      {copiedModel === model ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Popular Suggestions */}
+                        <div className="space-y-2">
+                          <Label className="text-sm text-muted-foreground">Sugestões econômicas:</Label>
+                          <div className="flex flex-wrap gap-2">
+                            {(config.text_fill_provider === "openrouter" 
+                              ? [
+                                  { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", cost: "$0.15/M" },
+                                  { id: "deepseek/deepseek-chat", name: "DeepSeek", cost: "$0.14/M" },
+                                  { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", cost: "$0.10/M" }
+                                ]
+                              : getTextFillProviderModels().slice(0, 4).map(m => ({ id: m, name: m, cost: "" }))
+                            ).map(model => (
+                              <Button
+                                key={model.id}
+                                variant={config.text_fill_model === model.id ? "secondary" : "outline"}
+                                size="sm"
+                                className="text-xs h-7"
+                                onClick={() => setConfig({
+                                  ...config,
+                                  text_fill_model: model.id
+                                })}
+                              >
+                                {model.name.length > 20 ? model.name.slice(0, 20) + "…" : model.name}
+                                {model.cost && <span className="text-muted-foreground ml-1">({model.cost})</span>}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : config.text_fill_provider === "gemini" ? (
+                      <Select value={config.text_fill_model} onValueChange={value => setConfig({
+                        ...config,
+                        text_fill_model: value
+                      })}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(dynamicGeminiModels.length > 0 ? dynamicGeminiModels : ["gemini-2.5-flash", "gemini-2.5-pro"]).map(modelId => (
+                            <SelectItem key={modelId} value={modelId}>{modelId}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     ) : (
                       <Select value={config.text_fill_model} onValueChange={value => setConfig({
                         ...config,
@@ -2350,51 +2487,14 @@ export function DevSettings() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {config.text_fill_provider === "lovable" && (
-                            <>
-                              <SelectItem value="google/gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
-                              <SelectItem value="google/gemini-3-flash-preview">Gemini 3 Flash Preview</SelectItem>
-                              <SelectItem value="openai/gpt-5-mini">GPT-5 Mini</SelectItem>
-                            </>
-                          )}
-                          {config.text_fill_provider === "gemini" && (
-                            <>
-                              <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>
-                              <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro</SelectItem>
-                            </>
-                          )}
+                          {getTextFillProviderModels().map(model => (
+                            <SelectItem key={model} value={model}>{model}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     )}
                   </div>
                 </div>
-                
-                {/* Suggested models for OpenRouter */}
-                {config.text_fill_provider === "openrouter" && (
-                  <div className="space-y-2">
-                    <Label className="text-sm text-muted-foreground">Modelos econômicos sugeridos:</Label>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        { id: "openai/gpt-4o-mini", name: "GPT-4o Mini", cost: "$0.15/M" },
-                        { id: "deepseek/deepseek-chat", name: "DeepSeek", cost: "$0.14/M" },
-                        { id: "google/gemini-2.5-flash", name: "Gemini 2.5 Flash", cost: "$0.10/M" }
-                      ].map(model => (
-                        <Button
-                          key={model.id}
-                          variant={config.text_fill_model === model.id ? "secondary" : "outline"}
-                          size="sm"
-                          className="text-xs h-7"
-                          onClick={() => setConfig({
-                            ...config,
-                            text_fill_model: model.id
-                          })}
-                        >
-                          {model.name} <span className="text-muted-foreground ml-1">({model.cost})</span>
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
 
               <Separator />
