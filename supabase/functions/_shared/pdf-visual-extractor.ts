@@ -67,6 +67,146 @@ export interface StreamInput {
 }
 
 /**
+ * Helper resiliente para chamar generateContent com arquivo via Files API
+ * Tenta múltiplos formatos de payload para compatibilidade com variações da API
+ */
+async function callGeminiGenerateContentWithFile(
+  apiKey: string,
+  apiModel: string,
+  fileUri: string,
+  prompt: string
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
+  
+  // Derivar o fileUri curto (files/abc) a partir da URI completa
+  const shortFileUri = fileUri.includes('/files/') 
+    ? `files/${fileUri.split('/files/')[1]}`
+    : fileUri;
+  
+  const hasFullUri = fileUri.startsWith('https://');
+  
+  // Configurações base de geração
+  const generationConfig = {
+    temperature: 0.1,
+    topP: 0.95,
+    maxOutputTokens: 65536,
+  };
+
+  // Definir as tentativas em ordem
+  const attempts: Array<{
+    name: string;
+    payload: object;
+  }> = [
+    // Tentativa A: camelCase com URI completa (padrão callGeminiVision)
+    {
+      name: 'A-camelCase-fullUri',
+      payload: {
+        contents: [{
+          parts: [
+            { fileData: { fileUri: fileUri, mimeType: 'application/pdf' } },
+            { text: prompt }
+          ]
+        }],
+        generationConfig
+      }
+    },
+    // Tentativa B: camelCase com URI curta (files/abc)
+    ...(hasFullUri ? [{
+      name: 'B-camelCase-shortUri',
+      payload: {
+        contents: [{
+          parts: [
+            { fileData: { fileUri: shortFileUri, mimeType: 'application/pdf' } },
+            { text: prompt }
+          ]
+        }],
+        generationConfig
+      }
+    }] : []),
+    // Tentativa C: snake_case com URI completa
+    {
+      name: 'C-snake_case-fullUri',
+      payload: {
+        contents: [{
+          parts: [
+            { file_data: { file_uri: fileUri, mime_type: 'application/pdf' } },
+            { text: prompt }
+          ]
+        }],
+        generationConfig
+      }
+    },
+    // Tentativa D: snake_case com URI curta
+    ...(hasFullUri ? [{
+      name: 'D-snake_case-shortUri',
+      payload: {
+        contents: [{
+          parts: [
+            { file_data: { file_uri: shortFileUri, mime_type: 'application/pdf' } },
+            { text: prompt }
+          ]
+        }],
+        generationConfig
+      }
+    }] : []),
+  ];
+
+  let lastError = '';
+  
+  for (const attempt of attempts) {
+    console.log(`[pdf-visual-extractor] Trying ${attempt.name} with model: ${apiModel}`);
+    
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(attempt.payload)
+      });
+
+      const responseText = await response.text();
+      
+      if (response.ok) {
+        console.log(`[pdf-visual-extractor] SUCCESS with ${attempt.name}`);
+        try {
+          const data = JSON.parse(responseText);
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          return { ok: true, text };
+        } catch (parseErr) {
+          console.error(`[pdf-visual-extractor] ${attempt.name} - Failed to parse response JSON:`, parseErr);
+          return { ok: false, error: `Parse error: ${parseErr}` };
+        }
+      }
+      
+      // Check if it's an INVALID_ARGUMENT error (retry-able)
+      const isInvalidArgument = response.status === 400 && 
+        (responseText.includes('INVALID_ARGUMENT') || responseText.toLowerCase().includes('invalid argument'));
+      
+      if (isInvalidArgument) {
+        console.warn(`[pdf-visual-extractor] ${attempt.name} failed with INVALID_ARGUMENT (400), trying next format...`);
+        console.warn(`[pdf-visual-extractor] Response: ${responseText.substring(0, 500)}`);
+        lastError = `${attempt.name}: ${responseText}`;
+        continue; // Try next format
+      }
+      
+      // For other errors (401, 403, 429, 5xx), don't retry - return immediately
+      console.error(`[pdf-visual-extractor] ${attempt.name} failed with non-retryable error (${response.status})`);
+      console.error(`[pdf-visual-extractor] Response: ${responseText.substring(0, 1000)}`);
+      return { ok: false, error: `HTTP ${response.status}: ${responseText}` };
+      
+    } catch (fetchErr) {
+      console.error(`[pdf-visual-extractor] ${attempt.name} fetch error:`, fetchErr);
+      lastError = `${attempt.name}: ${fetchErr}`;
+      // Network errors are retry-able
+      continue;
+    }
+  }
+  
+  // All attempts failed
+  console.error(`[pdf-visual-extractor] All payload attempts failed. Last error: ${lastError}`);
+  return { ok: false, error: `All attempts failed. Last: ${lastError}` };
+}
+
+/**
  * Extrai texto visual de um PDF usando Gemini Vision
  * Esta função é usada na Fase 1 do processamento em duas fases
  * 
@@ -157,37 +297,14 @@ async function extractWithFilesAPIBytes(
     const apiModel = resolveGeminiModelName(model);
     console.log(`[pdf-visual-extractor] Calling Gemini Files API with model: ${apiModel} (original: ${model})`);
 
-    // Call generateContent with file URI
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
-
-    // IMPORTANT: Use camelCase for API fields (fileData, fileUri, mimeType)
-    // and maxOutputTokens within model limits (65536)
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: EXTRACTION_PROMPT },
-            { fileData: { fileUri: fileUri, mimeType: 'application/pdf' } }
-          ]
-        }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 65536,
-        }
-      })
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Gemini Vision (Files API) error (${response.status}): ${error}`);
+    // Usar helper resiliente
+    const result = await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
+    
+    if (!result.ok) {
+      throw new Error(`Gemini Vision (Files API Bytes) error: ${result.error}`);
     }
 
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-    return parseExtractionResult(text, model, 'gemini-files-api');
+    return parseExtractionResult(result.text, model, 'gemini-files-api');
   } finally {
     // Clean up uploaded file
     try {
@@ -221,37 +338,14 @@ async function extractWithFilesAPIStream(
     const apiModel = resolveGeminiModelName(model);
     console.log(`[pdf-visual-extractor] Calling Gemini generateContent with model: ${apiModel}, fileUri: ${fileUri}`);
 
-    // Call generateContent with file URI
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
-
-    // IMPORTANT: maxOutputTokens must be within model limits (65536 for most Gemini models)
-    // Using 65536 instead of 1048576 which causes INVALID_ARGUMENT error
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: EXTRACTION_PROMPT },
-            { fileData: { fileUri: fileUri, mimeType: 'application/pdf' } }
-          ]
-        }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 65536,
-        }
-      })
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Gemini Vision (Streaming) error (${response.status}): ${error}`);
+    // Usar helper resiliente
+    const result = await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
+    
+    if (!result.ok) {
+      throw new Error(`Gemini Vision (Streaming) error: ${result.error}`);
     }
 
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-    return parseExtractionResult(text, model, 'gemini-streaming');
+    return parseExtractionResult(result.text, model, 'gemini-streaming');
   } finally {
     // Clean up uploaded file
     try {
@@ -275,8 +369,9 @@ async function extractWithInlineBase64(
   const apiModel = resolveGeminiModelName(model);
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
   
-  console.log(`[pdf-visual-extractor] Calling Gemini API with model: ${apiModel} (original: ${model})`);
+  console.log(`[pdf-visual-extractor] Calling Gemini API (inline base64) with model: ${apiModel} (original: ${model})`);
   
+  // Usar maxOutputTokens seguro (65536 em vez de 1048576)
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -294,7 +389,7 @@ async function extractWithInlineBase64(
       }],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: 1048576, // Maximum for large extractions
+        maxOutputTokens: 65536,
       }
     })
   });
@@ -331,37 +426,14 @@ async function extractWithFilesAPI(
     const apiModel = resolveGeminiModelName(model);
     console.log(`[pdf-visual-extractor] Calling Gemini Files API with model: ${apiModel} (original: ${model})`);
     
-    // Call generateContent with file URI
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
+    // Usar helper resiliente
+    const result = await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
     
-    // IMPORTANT: Use camelCase for API fields (fileData, fileUri, mimeType)
-    // and maxOutputTokens within model limits (65536)
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: EXTRACTION_PROMPT },
-            { fileData: { fileUri: fileUri, mimeType: 'application/pdf' } }
-          ]
-        }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 65536,
-        }
-      })
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Gemini Vision (Files API) error (${response.status}): ${error}`);
+    if (!result.ok) {
+      throw new Error(`Gemini Vision (Files API) error: ${result.error}`);
     }
 
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    
-    return parseExtractionResult(text, model, 'gemini-files-api');
+    return parseExtractionResult(result.text, model, 'gemini-files-api');
   } finally {
     // Clean up uploaded file
     try {
