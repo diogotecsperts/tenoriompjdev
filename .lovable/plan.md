@@ -1,293 +1,335 @@
 
 
-## Plano: Refinamento Completo dos Prompts de Extração para Máxima Qualidade
+## Plano: Adicionar Campos de Avaliação de Sequelas e Melhorar Extração de Quesitos
 
-### Análise do Problema
+### Diagnóstico do Problema
 
-A análise revelou a causa raiz das extrações pobres:
-
-```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     PROMPT DE IMPORTAÇÃO ATUAL                          │
-│                                                                         │
-│  → Prompt ÚNICO pedindo 30+ campos                                      │
-│  → IA tenta caber tudo em um JSON                                       │
-│  → Resultado: resumos de 1-2 linhas por campo                           │
-│  → Campos como exameFisico e conclusaoAnalise NÃO mapeados              │
-└─────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     PROMPT DE REGENERAÇÃO                               │
-│                                                                         │
-│  → Prompt FOCADO em 1 campo                                             │
-│  → IA tem liberdade para detalhar                                       │
-│  → Resultado: parágrafos completos, estruturados                        │
-│  → Usa texto bruto completo do documento                                │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
-### Campos Identificados Como Problemáticos
-
-| Campo | Problema | Solução |
-|-------|----------|---------|
-| `historico.historia_atual` | Muito resumido | Instruções explícitas de detalhe |
-| `historico.historico_ocupacional` | Muito resumido | Instruções explícitas de detalhe |
-| `acidente.descricao` (História do Acidente) | Muito curto | Reforçar extração completa |
-| `historico.antecedentes_patologicos` | Preguiçoso | Listar todas condições |
-| `historico.tratamentos_realizados` | Preguiçoso | Listar todos tratamentos |
-| `historico.afastamentos` | Muito resumido | Incluir datas e motivos |
-| `posto_trabalho.descricao_ambiente` | Vazio ou curto | Prioridade máxima |
-| `posto_trabalho.descricao_atividades` | Vazio ou curto | Prioridade máxima |
-| `exame_clinico.laudos_medicos` | Resumido demais | Estruturar como exemplo dado |
-| `exame_clinico.exames_complementares` | Muito curto | Listar cada exame separado |
-| `exame_fisico` (NOVO) | NÃO EXISTE no schema | Adicionar ao schema |
-| `conclusao_analise` | NÃO MAPEADO | Mapear do resumo de incapacidade |
-| `nexo_sugerido` / `tipo_incapacidade` | Não marcando | Corrigir lógica de mapeamento |
+| Campo | Schema JSON | Prompt de Regeneração | enableRegenerate | Status |
+|-------|-------------|----------------------|------------------|--------|
+| tabelaSUSEP | NÃO existe | NÃO existe | `false` | Totalmente ignorado |
+| danoEstetico | NÃO existe | NÃO existe | `false` | Totalmente ignorado |
+| auxilioTerceiros | NÃO existe | NÃO existe | `false` | Totalmente ignorado |
+| quesitosJuizo | Existe | Genérico (3 linhas) | `true` | Prompt fraco |
+| quesitosReclamante | Existe | Genérico (3 linhas) | `true` | Prompt fraco |
+| quesitosReclamada | Existe | Genérico (3 linhas) | `true` | Prompt fraco |
 
 ---
 
 ## Mudanças Propostas
 
-### 1. Backend: Expandir o Schema JSON com Campo `exame_fisico`
+### 1. Backend: Expandir Schema JSON com Seção `avaliacao_sequelas`
 
 **Arquivo:** `supabase/functions/processar-autos/index.ts`
 
-Adicionar campo `exame_fisico` dentro de `exame_clinico`:
+Adicionar nova seção ao schema JSON (após `informacoes_medicas`):
 
 ```json
-"exame_clinico": {
-  "laudos_medicos": "",
-  "exames_complementares": "",
-  "lesoes_descritas": "",
-  "exame_fisico": ""  // NOVO
+"avaliacao_sequelas": {
+  "tabela_susep": "",
+  "dano_estetico": "",
+  "auxilio_terceiros": ""
 }
 ```
 
-### 2. Backend: Reescrever Instruções do Prompt para Máxima Qualidade
+### 2. Backend: Adicionar Instruções Detalhadas para Avaliação de Sequelas
 
 **Arquivo:** `supabase/functions/processar-autos/index.ts`
 
-Substituir as instruções genéricas por instruções DETALHADAS e EXIGENTES:
+Adicionar seção de instruções específicas (após seção 7 - Informações Médicas):
 
 ```text
-REGRAS GERAIS DE EXTRAÇÃO:
-- NÃO RESUMA. Extraia o máximo de detalhes disponíveis.
-- Campos de texto descritivo devem ter NO MÍNIMO 3 parágrafos quando a informação existir.
-- Use linguagem técnica médico-legal apropriada para laudos periciais.
-- Estruture as informações em tópicos quando apropriado.
+7.5. AVALIAÇÃO DE SEQUELAS - PARA LAUDOS COM SEQUELAS PERMANENTES:
 
-INSTRUÇÕES ESPECÍFICAS POR SEÇÃO:
+   7.5.1. tabela_susep (Tabela SUSEP/DPVAT):
+          Busque nos autos informações sobre grau de invalidez ou sequelas permanentes:
+          - Percentual de invalidez mencionado em laudos médicos
+          - Referências à Tabela SUSEP/DPVAT ou outras tabelas de invalidez
+          - Item específico da tabela aplicável à lesão
+          - Grau de comprometimento funcional documentado
+          - Laudo do INSS sobre invalidez (se B91 ou aposentadoria)
+          - Perícias anteriores que quantificaram sequelas
+          ESTRUTURE: "X% de invalidez conforme item Y da Tabela SUSEP - [descrição da sequela]"
+          Se não houver menção a percentuais de invalidez, deixe vazio.
 
-1. VÍTIMA: Dados pessoais completos. "dominancia" = MÃO DOMINANTE (destro/canhoto/ambidestro).
+   7.5.2. dano_estetico:
+          Extraia informações sobre danos estéticos documentados:
+          - Cicatrizes visíveis (localização, tamanho, característica)
+          - Deformidades permanentes (tipo, gravidade)
+          - Amputações ou perdas anatômicas
+          - Alterações de marcha ou postura visíveis
+          - Grau do dano estético se mencionado (leve, moderado, grave, gravíssimo)
+          - Impacto psicológico do dano estético
+          Busque em: laudos médicos, perícias, fotos anexadas aos autos.
+          Se não houver menção a dano estético, deixe vazio.
 
-2. PROCESSO: Número completo, vara, nomes das partes exatamente como aparecem.
-
-3. ACIDENTE - EXTRAÇÃO DETALHADA OBRIGATÓRIA:
-   - data: Data exata do evento (YYYY-MM-DD)
-   - descricao: TRANSCREVA INTEGRALMENTE a descrição do acidente/evento.
-     Inclua: circunstâncias, local exato, horário, mecanismo da lesão,
-     testemunhas se mencionadas, atendimento inicial, consequências imediatas.
-     MÍNIMO 2 parágrafos. NÃO RESUMA.
-   - local: Local completo onde ocorreu
-
-4. DOCUMENTOS: Marque true para cada tipo de documento encontrado nos autos.
-
-5. HISTÓRICO - SEÇÃO CRÍTICA, EXTRAIR COM MÁXIMO DETALHE:
-   
-   5.1. historia_atual (Queixas Atuais / Anamnese):
-        Extraia TODAS as queixas relatadas pelo periciando:
-        - Sintomas atuais e sua intensidade
-        - Localização e irradiação da dor
-        - Fatores de melhora e piora
-        - Impacto nas atividades diárias e laborais
-        - Uso de medicamentos
-        - Qualidade do sono, humor, limitações funcionais
-        MÍNIMO 3 parágrafos. Não omita nenhuma queixa mencionada.
-   
-   5.2. historico_ocupacional:
-        Liste CRONOLOGICAMENTE todos os empregos:
-        - Nome da empresa, período de trabalho
-        - Cargo/função exercida
-        - Atividades desenvolvidas
-        - Exposição a riscos ocupacionais
-        - Motivo da saída
-        MÍNIMO 2 parágrafos ou lista completa.
-   
-   5.3. antecedentes_patologicos:
-        Liste TODAS as condições de saúde prévias:
-        - Doenças crônicas (diabetes, hipertensão, etc.)
-        - Cirurgias anteriores (data, tipo, local)
-        - Internações hospitalares
-        - Uso de medicamentos crônicos
-        - Histórico familiar relevante
-        - Hábitos (tabagismo, etilismo)
-        NÃO deixe vazio se houver QUALQUER menção a saúde prévia.
-   
-   5.4. tratamentos_realizados:
-        Liste TODOS os tratamentos:
-        - Medicamentos utilizados (nome, dose, período)
-        - Fisioterapia (quantidade de sessões, resultado)
-        - Cirurgias realizadas (data, tipo, resultado)
-        - Internações (período, motivo)
-        - Acompanhamento especializado
-        - Resposta aos tratamentos
-        ESTRUTURE em lista quando possível.
-   
-   5.5. afastamentos:
-        Liste TODOS os períodos de afastamento:
-        - Data de início e término de cada afastamento
-        - CID do afastamento se disponível
-        - Tipo de benefício (auxílio-doença B31/B91, aposentadoria, etc.)
-        - Tempo total afastado
-        EXTRAIA DATAS EXATAS quando disponíveis.
-
-6. EXAME CLÍNICO - EXTRAÇÃO COMPLETA:
-   
-   6.1. laudos_medicos:
-        Extraia de CADA laudo/parecer médico:
-        - Data do documento
-        - Médico/especialidade responsável
-        - Diagnósticos (com CID se disponível)
-        - Conclusões do médico
-        - Recomendações e restrições
-        - Limitações apontadas
-        ESTRUTURE por documento, não resuma.
-   
-   6.2. exames_complementares:
-        Liste CADA exame separadamente:
-        - Tipo de exame (RX, RNM, TC, EMG, etc.)
-        - Data de realização
-        - Resultado/achados principais
-        - Conclusão do laudo
-        Ex: "RNM Coluna Lombar (15/03/2023): Protrusão discal L4-L5..."
-   
-   6.3. lesoes_descritas:
-        Todas as lesões mencionadas em documentos médicos.
-   
-   6.4. exame_fisico (NOVO):
-        Se houver descrição de exame físico nos autos, extraia:
-        - Estado geral do periciando
-        - Inspeção, palpação
-        - Testes especiais realizados
-        - Amplitude de movimentos
-        - Força muscular
-        - Alterações neurológicas
-        Deixe vazio APENAS se não houver nenhum exame físico descrito.
-
-7. INFORMAÇÕES MÉDICAS - PRIORIDADE MÁXIMA:
-   
-   7.1. cids_mencionados:
-        EXTRAIA ABSOLUTAMENTE TODOS os códigos CID-10 do documento.
-        Procure em: laudos, atestados, receitas, CAT, decisões INSS.
-        Formato: ["J15.9", "M54.2", "G56.0"]
-        NÃO deixe vazio se houver qualquer código CID.
-   
-   7.2. incapacidade_alegada:
-        Descreva o tipo de incapacidade mencionada nos autos.
-   
-   7.3. nexo_sugerido:
-        Retorne "direto", "concausa", "agravamento" ou "" baseado em:
-        - Se CAT foi emitida → geralmente sugere nexo direto
-        - Se há decisão INSS B91 → nexo reconhecido administrativamente
-        - Se laudo médico afirma relação → avaliar o tipo
-   
-   7.4. tipo_incapacidade:
-        Retorne baseado nas evidências:
-        - "total_permanente" - se aposentadoria por invalidez ou incapacidade total
-        - "total_temporaria" - se afastamento temporário total
-        - "parcial_permanente" - se sequelas permanentes mas trabalha
-        - "parcial_temporaria" - se limitações temporárias
-        - "ausencia" - se laudos indicam capacidade preservada
-        - "" - se não há informação suficiente
-
-8. QUESITOS: Copie INTEGRALMENTE cada quesito, numerado, sem alterar.
-
-9. TEXTOS BRUTOS - MUITO IMPORTANTE:
-   Copie o MÁXIMO possível da petição inicial e contestação.
-   Esses textos são a fonte para geração de resumos detalhados.
-
-10. POSTO DE TRABALHO - CRÍTICO PARA O LAUDO:
-    
-    10.1. cargo_funcao: Cargo exato exercido
-    10.2. data_admissao: YYYY-MM-DD
-    10.3. data_afastamento: YYYY-MM-DD
-    
-    10.4. descricao_ambiente (DETALHAR):
-          - Ambiente físico (interno/externo, condições)
-          - Equipamentos e máquinas utilizados
-          - Mobiliário (mesa, cadeira, altura)
-          - Condições ergonômicas
-          - Exposição a riscos (ruído, calor, produtos químicos)
-          - Uso de EPIs
-          MÍNIMO 2 parágrafos se houver informação.
-    
-    10.5. descricao_atividades (DETALHAR):
-          - Tarefas diárias executadas
-          - Movimentos repetitivos
-          - Esforço físico (peso carregado, frequência)
-          - Postura predominante (sentado, em pé, agachado)
-          - Jornada de trabalho
-          - Pausas durante o trabalho
-          - Ritmo e pressão de produção
-          MÍNIMO 2 parágrafos se houver informação.
-
-11. RESUMO: Síntese breve do caso (máximo 300 caracteres).
+   7.5.3. auxilio_terceiros:
+          Extraia informações sobre necessidade de auxílio de terceiros:
+          - Se o periciando necessita de ajuda para atividades da vida diária (alimentar-se, vestir-se, higiene pessoal)
+          - Se necessita de ajuda para locomoção
+          - Se necessita de cuidador permanente
+          - Tipo de auxílio necessário e frequência
+          - Laudo ou perícia que ateste a necessidade
+          Busque em: laudos médicos, laudos de assistente social, perícias anteriores.
+          Se não houver menção a necessidade de auxílio, deixe vazio.
 ```
 
-### 3. Backend: Atualizar `ensureValidStructure()` para Novo Campo
+### 3. Backend: Melhorar Instruções para Quesitos
 
 **Arquivo:** `supabase/functions/processar-autos/index.ts`
 
-Adicionar `exame_fisico` no default:
+Substituir a seção 8 (Quesitos) por instruções mais detalhadas:
+
+```text
+8. QUESITOS - EXTRAÇÃO INTEGRAL OBRIGATÓRIA:
+
+   Os quesitos são perguntas técnicas formuladas pelo Juízo e pelas partes para serem respondidas pelo perito.
+   É ABSOLUTAMENTE ESSENCIAL extrair TODOS os quesitos INTEGRALMENTE, pois são a base do laudo.
+
+   8.1. juizo (Quesitos do Juízo):
+        Extraia TODOS os quesitos formulados pelo Juiz/Juízo, geralmente encontrados em despachos ou 
+        decisões judiciais. Copie EXATAMENTE como aparecem, mantendo:
+        - Numeração original (1, 2, 3... ou I, II, III... ou a, b, c...)
+        - Texto integral de cada quesito sem alterações
+        - Ordem original dos quesitos
+        Busque por: "O(A) perito(a) deverá responder...", "Quesitos do MM. Juízo", "Deverá o expert informar..."
+        NÃO RESUMA. Copie literalmente cada quesito.
+
+   8.2. reclamante (Quesitos do Reclamante/Autor):
+        Extraia TODOS os quesitos formulados pelo advogado do reclamante, geralmente na petição inicial 
+        ou em petição específica de quesitos. Copie EXATAMENTE como aparecem, mantendo:
+        - Numeração original
+        - Texto integral sem alterações
+        - Ordem original
+        Busque por: "Quesitos do reclamante", "Quesitos do autor", assinatura do advogado do autor.
+        NÃO RESUMA. Copie literalmente cada quesito, incluindo sub-quesitos (Ex: 3.1, 3.2).
+
+   8.3. reclamada (Quesitos da Reclamada/Ré):
+        Extraia TODOS os quesitos formulados pelo advogado da reclamada, geralmente na contestação 
+        ou em petição específica. Copie EXATAMENTE como aparecem, mantendo:
+        - Numeração original
+        - Texto integral sem alterações
+        - Ordem original
+        Busque por: "Quesitos da reclamada", "Quesitos da ré", assinatura do advogado da empresa.
+        NÃO RESUMA. Copie literalmente cada quesito, incluindo sub-quesitos.
+
+   ATENÇÃO: Os quesitos podem estar em anexos separados ou no corpo das petições.
+   Busque em TODO o documento. NÃO invente quesitos - extraia APENAS os que existem.
+```
+
+### 4. Backend: Atualizar `ensureValidStructure()`
+
+**Arquivo:** `supabase/functions/processar-autos/index.ts`
+
+Adicionar valores default para `avaliacao_sequelas`:
 
 ```typescript
-exame_clinico: {
-  laudos_medicos: "",
-  exames_complementares: "",
-  lesoes_descritas: "",
-  exame_fisico: ""  // NOVO
+avaliacao_sequelas: {
+  tabela_susep: "",
+  dano_estetico: "",
+  auxilio_terceiros: ""
 }
 ```
 
-### 4. Frontend: Adicionar Mapeamentos Faltantes
-
-**Arquivo:** `src/components/tools/ImportarAutosDialog.tsx`
-
-Adicionar no `ExtractedData.exame_clinico`:
-```typescript
-exame_clinico: {
-  laudos_medicos: string;
-  exames_complementares: string;
-  lesoes_descritas: string;
-  exame_fisico: string;  // NOVO
-};
-```
-
-Adicionar no `laudoData`:
-```typescript
-// Exame Físico (estava faltando!)
-exame_fisico: extractedData.exame_clinico?.exame_fisico || '',
-
-// Análise Conclusiva (mapear do resumo de incapacidade)
-conclusao_analise: extractedData.resumos_ia?.incapacidade || '',
-```
-
-### 5. Backend: Adicionar Campo ao Prompt de Regeneração
+### 5. Backend: Adicionar Prompts Detalhados de Regeneração para Sequelas
 
 **Arquivo:** `supabase/functions/regerar-campo-pdf/index.ts`
 
-Adicionar prompt específico para `exameFisico`:
+Adicionar três novos prompts:
 
 ```typescript
-exameFisico: `Extraia APENAS as informações do "Exame Físico" realizadas no periciando.
-Foque em: estado geral, inspeção, palpação, testes especiais ortopédicos/neurológicos, 
-amplitude de movimentos, força muscular, reflexos, alterações sensoriais.
-Se não houver exame físico descrito no documento, retorne "Exame físico não descrito nos autos."`,
+tabelaSUSEP: `Extraia informações para avaliação pela "Tabela SUSEP/DPVAT" de invalidez permanente.
 
-conclusaoAnalise: `Elabore a "Análise Conclusiva" para o laudo pericial com base em todas as informações.
-Foque em: síntese do quadro clínico, correlação com as atividades laborais, 
-fundamentação técnica para as conclusões sobre nexo e incapacidade.
-Use linguagem técnica médico-legal.`,
+BUSQUE NOS AUTOS:
+- Percentuais de invalidez mencionados em laudos médicos ou perícias anteriores
+- Referências específicas à Tabela SUSEP, DPVAT ou outras tabelas de invalidez
+- Item da tabela aplicável às lesões/sequelas identificadas
+- Grau de comprometimento funcional ou anatômico documentado
+- Decisões do INSS sobre grau de invalidez (B91, aposentadoria por invalidez)
+- Laudos periciais anteriores que quantificaram sequelas
+
+ESTRUTURE A RESPOSTA:
+Se encontrar informações, formate assim:
+"[X%] de invalidez permanente conforme item [Y] da Tabela SUSEP/DPVAT
+Sequela: [descrição da lesão/sequela]
+Fundamentação: [fonte da informação - laudo de Dr. X, perícia do INSS, etc.]"
+
+Se não houver menção a percentuais de invalidez, retorne:
+"Não foram identificados nos autos documentos que quantifiquem o grau de invalidez permanente segundo a Tabela SUSEP/DPVAT."`,
+
+danoEstetico: `Extraia informações sobre "Dano Estético" do documento.
+
+BUSQUE NOS AUTOS:
+- Cicatrizes visíveis: localização anatômica, dimensões aproximadas, características (hipertrófica, queloidiana, hiperpigmentada)
+- Deformidades permanentes: tipo (angular, rotacional), gravidade, visibilidade
+- Amputações ou perdas anatômicas: nível, membro afetado
+- Alterações de marcha ou postura permanentes e visíveis
+- Assimetrias corporais resultantes de lesões
+- Fotos anexadas aos autos que documentem o dano
+
+CLASSIFICAÇÃO DO DANO ESTÉTICO (se mencionada ou possível inferir):
+- Leve: cicatrizes discretas, pouco visíveis, em áreas normalmente cobertas
+- Moderado: cicatrizes visíveis em áreas expostas, pequenas deformidades
+- Grave: deformidades significativas, cicatrizes extensas, alterações funcionais visíveis
+- Gravíssimo: grandes deformidades, amputações, desfiguramento
+
+ESTRUTURE A RESPOSTA:
+Descreva objetivamente os achados estéticos documentados, a localização, e se possível classifique a gravidade.
+
+Se não houver menção a dano estético, retorne:
+"Não foram identificados nos autos documentos que descrevam dano estético decorrente das lesões."`,
+
+auxilioTerceiros: `Extraia informações sobre "Necessidade de Auxílio de Terceiros" do documento.
+
+BUSQUE NOS AUTOS:
+- Se o periciando necessita de ajuda para Atividades da Vida Diária (AVDs):
+  * Alimentar-se (cortar alimentos, levar à boca)
+  * Vestir-se e despir-se
+  * Higiene pessoal (banho, uso do banheiro)
+  * Locomoção dentro e fora de casa
+- Se necessita de cuidador permanente ou intermitente
+- Tipo de auxílio necessário e frequência (24 horas, apenas para certas atividades)
+- Laudos médicos, de assistente social ou perícias que atestem a necessidade
+- Prescrição médica de acompanhante ou cuidador
+
+ESTRUTURE A RESPOSTA:
+Descreva as limitações funcionais que demandam auxílio, as atividades para as quais necessita de ajuda, 
+o tipo de cuidador necessário (familiar, profissional), e a fonte documental da informação.
+
+Se não houver menção a necessidade de auxílio, retorne:
+"Não foram identificados nos autos documentos que indiquem necessidade de auxílio permanente de terceiros para atividades da vida diária."`
+```
+
+### 6. Backend: Melhorar Prompts de Regeneração para Quesitos
+
+**Arquivo:** `supabase/functions/regerar-campo-pdf/index.ts`
+
+Substituir os prompts genéricos por prompts robustos:
+
+```typescript
+quesitosJuizo: `Extraia INTEGRALMENTE os "Quesitos do Juízo" do documento.
+
+Os quesitos do Juízo são perguntas técnicas formuladas pelo Juiz para o perito responder.
+
+ONDE BUSCAR:
+- Despachos judiciais (busque por "O perito deverá responder...", "Quesitos do MM. Juízo")
+- Decisões que nomeiam o perito
+- Atas de audiência com determinação de quesitos
+- Intimações do perito
+
+COMO EXTRAIR:
+- Copie CADA quesito EXATAMENTE como aparece no documento
+- Mantenha a numeração original (1, 2, 3... ou I, II, III... ou a, b, c...)
+- NÃO altere o texto - transcreva literalmente
+- Inclua todos os sub-quesitos se houver (Ex: 1.1, 1.2, 2.a, 2.b)
+- Preserve a ordem original dos quesitos
+
+FORMATO ESPERADO:
+1. [Texto completo do primeiro quesito]
+2. [Texto completo do segundo quesito]
+...
+
+Se não encontrar quesitos do Juízo, retorne: "Quesitos do Juízo não identificados nos autos."`,
+
+quesitosReclamante: `Extraia INTEGRALMENTE os "Quesitos do Reclamante" (ou do Autor) do documento.
+
+Os quesitos do Reclamante são perguntas formuladas pelo advogado da parte autora.
+
+ONDE BUSCAR:
+- Petição inicial (geralmente ao final)
+- Petição específica de quesitos do reclamante
+- Rol de quesitos anexado aos autos
+- Emendas à inicial com quesitos
+
+COMO EXTRAIR:
+- Copie CADA quesito EXATAMENTE como aparece no documento
+- Mantenha a numeração original
+- NÃO altere, resuma ou parafraseie o texto
+- Inclua todos os sub-quesitos (Ex: 3.1, 3.2, 3.a, 3.b)
+- Preserve a ordem original
+
+FORMATO ESPERADO:
+1. [Texto completo do primeiro quesito]
+2. [Texto completo do segundo quesito]
+...
+
+Se não encontrar quesitos do Reclamante, retorne: "Quesitos do Reclamante não identificados nos autos."`,
+
+quesitosReclamada: `Extraia INTEGRALMENTE os "Quesitos da Reclamada" (ou da Ré) do documento.
+
+Os quesitos da Reclamada são perguntas formuladas pelo advogado da parte ré/empresa.
+
+ONDE BUSCAR:
+- Contestação (geralmente ao final)
+- Petição específica de quesitos da reclamada
+- Rol de quesitos anexado aos autos
+- Réplica ou outras manifestações com quesitos
+
+COMO EXTRAIR:
+- Copie CADA quesito EXATAMENTE como aparece no documento
+- Mantenha a numeração original
+- NÃO altere, resuma ou parafraseie o texto
+- Inclua todos os sub-quesitos
+- Preserve a ordem original
+
+FORMATO ESPERADO:
+1. [Texto completo do primeiro quesito]
+2. [Texto completo do segundo quesito]
+...
+
+Se não encontrar quesitos da Reclamada, retorne: "Quesitos da Reclamada não identificados nos autos."`
+```
+
+### 7. Frontend: Expandir Interface `ExtractedData`
+
+**Arquivo:** `src/components/tools/ImportarAutosDialog.tsx`
+
+Adicionar nova seção à interface:
+
+```typescript
+interface ExtractedData {
+  // ... campos existentes ...
+  avaliacao_sequelas: {
+    tabela_susep: string;
+    dano_estetico: string;
+    auxilio_terceiros: string;
+  };
+  // ... resto ...
+}
+```
+
+### 8. Frontend: Adicionar Mapeamento no `laudoData`
+
+**Arquivo:** `src/components/tools/ImportarAutosDialog.tsx`
+
+Adicionar mapeamento:
+
+```typescript
+// Avaliação de Sequelas (NOVOS)
+tabela_susep: extractedData.avaliacao_sequelas?.tabela_susep || '',
+dano_estetico: extractedData.avaliacao_sequelas?.dano_estetico || '',
+auxilio_terceiros: extractedData.avaliacao_sequelas?.auxilio_terceiros || '',
+```
+
+### 9. Frontend: Habilitar Regeneração nos Campos de Sequelas
+
+**Arquivo:** `src/components/laudo/sections/AvaliacaoSequelas.tsx`
+
+Mudar `enableRegenerate={false}` para `enableRegenerate={true}` e adicionar props:
+
+```tsx
+<LaudoTextareaAIField
+  id="tabelaSUSEP"
+  label="Tabela SUSEP/DPVAT"
+  value={currentLaudo.tabelaSUSEP || ""}
+  onChange={(value) => updateLaudo({ tabelaSUSEP: value })}
+  placeholder="..."
+  rows={5}
+  enableEnhance={true}
+  enableRegenerate={true}           // MUDAR
+  fieldKey="tabelaSUSEP"            // ADICIONAR
+  laudoId={currentLaudo.id}         // ADICIONAR
+  hasPdfSource={hasPdfSource}       // ADICIONAR
+/>
 ```
 
 ---
@@ -296,20 +338,21 @@ Use linguagem técnica médico-legal.`,
 
 | Arquivo | Ação | Descrição |
 |---------|------|-----------|
-| `processar-autos/index.ts` | **Modificar** | Reescrever instruções do prompt principal com exigência de detalhes |
-| `processar-autos/index.ts` | **Modificar** | Adicionar `exame_fisico` ao schema JSON e `ensureValidStructure()` |
-| `ImportarAutosDialog.tsx` | **Modificar** | Adicionar `exame_fisico` à interface e mapeamento |
-| `ImportarAutosDialog.tsx` | **Modificar** | Adicionar mapeamento de `conclusao_analise` |
-| `regerar-campo-pdf/index.ts` | **Modificar** | Adicionar prompts para `exameFisico` e `conclusaoAnalise` |
+| `processar-autos/index.ts` | Modificar | Adicionar `avaliacao_sequelas` ao schema + instruções detalhadas + melhorar quesitos |
+| `processar-autos/index.ts` | Modificar | Atualizar `ensureValidStructure()` com novos campos |
+| `regerar-campo-pdf/index.ts` | Modificar | Adicionar 3 prompts (tabelaSUSEP, danoEstetico, auxilioTerceiros) + melhorar 3 prompts (quesitos) |
+| `ImportarAutosDialog.tsx` | Modificar | Expandir interface + adicionar mapeamentos |
+| `AvaliacaoSequelas.tsx` | Modificar | Habilitar regeneração com `fieldKey`, `laudoId`, `hasPdfSource` |
 
 ---
 
 ## Proteção da Infraestrutura
 
-1. **Apenas instruções do prompt são alteradas** - a lógica de processamento permanece idêntica
-2. **Schema é expandido, não substituído** - retrocompatibilidade garantida
+1. **Schema é expandido, não substituído** - retrocompatibilidade garantida
+2. **`ensureValidStructure()` garante defaults** - dados antigos não quebram
 3. **Mapeamentos usam operador `||`** - campos undefined não causam erro
-4. **Nenhuma mudança em callAI, callPDFProvider ou fluxo de processamento**
+4. **Nenhuma alteração em lógica de processamento** - apenas instruções de prompts
+5. **Colunas já existem no banco** - `tabela_susep`, `dano_estetico`, `auxilio_terceiros`
 
 ---
 
@@ -317,17 +360,10 @@ Use linguagem técnica médico-legal.`,
 
 | Campo | Antes | Depois |
 |-------|-------|--------|
-| História do Acidente | 1-2 linhas | 2+ parágrafos com detalhes |
-| Histórico Ocupacional | Resumido | Lista cronológica completa |
-| História Atual (Anamnese) | Muito curto | 3+ parágrafos de queixas |
-| Antecedentes | Preguiçoso | Lista completa de condições |
-| Tratamentos | Resumido | Lista estruturada |
-| Afastamentos | Incompleto | Datas e benefícios |
-| Posto de Trabalho | Vazio | 2+ parágrafos descritivos |
-| Atividades Laborais | Vazio | 2+ parágrafos descritivos |
-| Laudos Médicos | Resumido | Estruturado por documento |
-| Exames Complementares | 1 linha | Lista de cada exame |
-| Exame Físico | VAZIO (sem campo) | Preenchido se disponível |
-| Conclusão Análise | VAZIO | Preenchido do resumo de incapacidade |
-| Nexo/Incapacidade | Não marcados | Marcados automaticamente |
+| Tabela SUSEP/DPVAT | Vazio, sem regenerar | Preenchido se houver + regeneração disponível |
+| Dano Estético | Vazio, sem regenerar | Preenchido se houver + regeneração disponível |
+| Auxílio de Terceiros | Vazio, sem regenerar | Preenchido se houver + regeneração disponível |
+| Quesitos do Juízo | Resumido/incompleto | Cópia integral, numerada, estruturada |
+| Quesitos do Reclamante | Resumido/incompleto | Cópia integral, numerada, estruturada |
+| Quesitos da Reclamada | Resumido/incompleto | Cópia integral, numerada, estruturada |
 
