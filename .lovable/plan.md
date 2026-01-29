@@ -1,148 +1,127 @@
 
 
-## Plano: Corrigir Memory Limit Exceeded para PDFs Grandes em Single-Pass
+## Plano: Streaming Direto para Gemini Files API (Sem Carregar 67MB na RAM)
 
 ---
 
-## Diagnóstico Confirmado (Logs)
+## O Problema Identificado
+
+Você está **absolutamente certo** - a API Gemini oficial suporta arquivos até **2GB**. O problema não é o Gemini, é a **memória do Edge Function Worker** (~150MB limite).
 
 ```text
-[processar-autos] Downloaded PDF: ME IMPORTE 4.pdf, size: 68.44MB
-[processar-autos] Using SINGLE-PASS extraction...
-Memory limit exceeded
+┌─────────────────────────────────────────────────────────────────┐
+│                    FLUXO ATUAL (CRASH)                          │
+├─────────────────────────────────────────────────────────────────┤
+│  1. Download PDF do Storage → 67MB na RAM                       │
+│  2. Converter para ArrayBuffer → +67MB (cópia)                  │
+│  3. Enviar para Files API...                                    │
+│                                                                 │
+│  >>> 67MB + 67MB + overhead = ~150MB → WORKER_LIMIT <<<        │
+└─────────────────────────────────────────────────────────────────┘
 ```
-
-**Causa Raiz:** O modo SINGLE-PASS converte o PDF inteiro para base64 na memória antes de enviar para a API:
-
-```typescript
-// Linha 974 - PROBLEMA
-const pdfBase64 = base64FromBytes();  // 68MB → ~91MB string
-visionResult = await callPDFProvider(pdfBase64, systemPrompt, ...);
-```
-
-**Resultado:** 68MB (Uint8Array) + 91MB (base64 string) = ~160MB em memória simultânea → WORKER_LIMIT
 
 ---
 
-## Solução: Usar Files API para PDFs Grandes em Single-Pass
+## A Solução: Streaming
 
-A solução é reutilizar a lógica já existente no modo TWO-PHASE (linha 796-811) que usa a Gemini Files API para PDFs grandes, evitando a conversão base64 em memória.
-
-### Alterações no `processar-autos/index.ts`
-
-**SINGLE-PASS (linha 957-1011):**
+O Deno/Supabase suporta **streaming de arquivos** - em vez de carregar tudo na memória, passamos um `ReadableStream` diretamente do Storage para a Files API do Gemini:
 
 ```text
-ANTES:
-1. Baixa PDF como bytes ✅
-2. Converte TUDO para base64 ❌ (estoura memória)
-3. Envia base64 para callPDFProvider ❌
-
-DEPOIS:
-1. Baixa PDF como bytes ✅
-2. Se PDF > 20MB → usar Files API (upload bytes direto) ✅
-3. Se PDF ≤ 20MB → usar base64 inline (rápido) ✅
-4. Libera bytes imediatamente após upload ✅
+┌─────────────────────────────────────────────────────────────────┐
+│                    FLUXO NOVO (STREAMING)                       │
+├─────────────────────────────────────────────────────────────────┤
+│  Storage ──(stream)──> Files API                                │
+│                                                                 │
+│  Memória usada: ~1MB (buffer de streaming)                      │
+│  Tamanho do arquivo: irrelevante (até 2GB)                      │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-### Código Atualizado (Single-Pass)
+---
+
+## Mudanças Técnicas
+
+### 1. Nova Função: `uploadToGeminiFilesAPIStream`
 
 ```typescript
-// === SINGLE PASS EXTRACTION (linha ~957) ===
-console.log('[processar-autos] Using SINGLE-PASS extraction...');
+// Em gemini-files-api.ts
+export async function uploadToGeminiFilesAPIStream(
+  stream: ReadableStream<Uint8Array>,
+  fileSize: number,
+  apiKey: string
+): Promise<string> {
+  console.log(`[gemini-files-api] Starting STREAMING upload, size: ${(fileSize / (1024 * 1024)).toFixed(2)}MB`);
 
-// ... update progress ...
-
-timings.pdfExtraction.start = Date.now();
-
-// NOVO: Decidir estratégia baseado no tamanho
-const LARGE_PDF_THRESHOLD = 20_000_000; // 20MB
-const isLargePDF = pdfSizeBytes > LARGE_PDF_THRESHOLD;
-
-if (isLargePDF) {
-  console.log(`[processar-autos] Large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), using Files API...`);
-  
-  // Usar extractVisualContent que já suporta Files API com bytes
-  const extracted = await extractVisualContent(pdfBytes!, { 
-    useFilesAPI: true,
-    model: 'gemini-2.5-flash'  // ou buscar da config
-  });
-  
-  // Limpar bytes imediatamente
-  pdfBytes = null;
-  console.log('[processar-autos] MEMORY: Cleared PDF bytes after Files API upload');
-  
-  // O texto extraído serve como entrada para o parsing
-  const fillResult = await callAI(
-    await getAIConfig(),
-    systemPrompt,
-    `Analise o seguinte texto extraído e retorne JSON estruturado:\n\n${extracted.rawText}`,
-    { promptType: 'single_pass_large', userId, maxOutputTokens: 65536, jsonMode: true }
+  // Step 1: Initialize resumable upload
+  const initResponse = await fetch(
+    `${FILES_API_BASE}/upload/v1beta/files?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: {
+        'X-Goog-Upload-Protocol': 'resumable',
+        'X-Goog-Upload-Command': 'start',
+        'X-Goog-Upload-Header-Content-Length': fileSize.toString(),
+        'X-Goog-Upload-Header-Content-Type': 'application/pdf',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        file: { displayName: `import_${Date.now()}.pdf` }
+      })
+    }
   );
-  
-  visionResult = {
-    provider: 'gemini-files-api',
-    model: extracted.model,
-    text: fillResult.text,
-    finishReason: 'STOP',
-    usedFallback: false
-  };
 
-} else {
-  // PDFs pequenos: usar base64 inline (original)
-  const pdfBase64 = base64FromBytes();
-  pdfBytes = null; // Limpar bytes após conversão
-  
-  visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
-    promptType: 'pdf_extraction',
-    userId: userId
+  const uploadUrl = initResponse.headers.get('X-Goog-Upload-URL');
+
+  // Step 2: Stream upload (SEM carregar na memória)
+  const uploadResponse = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Length': fileSize.toString(),
+      'X-Goog-Upload-Offset': '0',
+      'X-Goog-Upload-Command': 'upload, finalize',
+    },
+    body: stream  // Deno passa o stream direto, sem buffering
   });
-}
 
-timings.pdfExtraction.end = Date.now();
+  // ... processar resposta e retornar URI
+}
 ```
 
----
+### 2. Atualizar `processar-autos/index.ts`
 
-## Por Que Isso Vai Funcionar
+```typescript
+// Em vez de:
+const { data: fileData } = await supabaseAdmin.storage
+  .from('processos-pdf')
+  .download(filePath);
+const pdfBytes = new Uint8Array(await fileData.arrayBuffer()); // ❌ 67MB na RAM
 
-| Cenário | Antes | Depois |
-|---------|-------|--------|
-| PDF 68MB (grande) | ❌ base64 = 91MB extra → crash | ✅ Files API = upload direto, sem base64 |
-| PDF 5MB (pequeno) | ✅ base64 inline rápido | ✅ base64 inline rápido (sem mudança) |
-| Memória máxima | ~160MB (bytes + base64) | ~68MB (apenas bytes durante upload) |
+// Usar:
+const { data: fileData } = await supabaseAdmin.storage
+  .from('processos-pdf')
+  .download(filePath);
 
----
+// Obter tamanho sem carregar na memória
+const fileSizeBytes = fileData.size;
 
-## Fluxo Atualizado (Single-Pass)
+// Criar stream do Blob
+const pdfStream = fileData.stream(); // ✅ Stream, não carrega tudo
 
-```text
-┌─────────────────────────────────────────────────┐
-│            PDF RECEBIDO                         │
-└─────────────────────────────────────────────────┘
-                    │
-                    ▼
-       ┌────────────────────────┐
-       │   Tamanho > 20MB?      │
-       └────────────────────────┘
-              │            │
-         SIM  │            │  NÃO
-              ▼            ▼
-   ┌──────────────┐  ┌──────────────┐
-   │ Files API    │  │ Base64       │
-   │ (bytes)      │  │ (inline)     │
-   └──────────────┘  └──────────────┘
-              │            │
-              └─────┬──────┘
-                    ▼
-       ┌────────────────────────┐
-       │  Limpar bytes IMEDIATO │
-       └────────────────────────┘
-                    │
-                    ▼
-       ┌────────────────────────┐
-       │  Parse JSON + Resumos  │
-       └────────────────────────┘
+// Upload via streaming
+const fileUri = await uploadToGeminiFilesAPIStream(pdfStream, fileSizeBytes, apiKey);
+
+// Agora temos o fileUri para usar no generateContent
+```
+
+### 3. Atualizar `extractVisualContent`
+
+Nova assinatura que aceita stream:
+
+```typescript
+export async function extractVisualContent(
+  pdfInput: string | Uint8Array | { stream: ReadableStream; size: number },
+  options: { useFilesAPI?: boolean; model?: string; geminiApiKey?: string }
+): Promise<ExtractedContent>
 ```
 
 ---
@@ -151,13 +130,51 @@ timings.pdfExtraction.end = Date.now();
 
 | Arquivo | Mudança |
 |---------|---------|
-| `supabase/functions/processar-autos/index.ts` | Adicionar detecção de tamanho e uso de Files API no modo single-pass |
+| `supabase/functions/_shared/gemini-files-api.ts` | Adicionar `uploadToGeminiFilesAPIStream` |
+| `supabase/functions/_shared/pdf-visual-extractor.ts` | Suportar input como stream |
+| `supabase/functions/processar-autos/index.ts` | Usar streaming em vez de carregar bytes |
+
+---
+
+## Comparação de Memória
+
+| Abordagem | PDF 67MB | PDF 200MB | PDF 500MB |
+|-----------|----------|-----------|-----------|
+| Atual (bytes) | ❌ Crash | ❌ Crash | ❌ Crash |
+| **Streaming** | ✅ ~5MB | ✅ ~5MB | ✅ ~5MB |
+
+---
+
+## Fluxo Final
+
+```text
+┌──────────────────┐     ┌───────────────────┐     ┌─────────────────┐
+│  Supabase        │     │  Edge Function    │     │  Gemini Files   │
+│  Storage         │     │  (memória baixa)  │     │  API            │
+│                  │     │                   │     │                 │
+│  PDF 67MB ───────┼─────┼──► Stream ────────┼─────┼──► Upload       │
+│                  │     │   (~1MB buffer)   │     │                 │
+└──────────────────┘     └───────────────────┘     └─────────────────┘
+                                  │
+                                  ▼
+                         ┌───────────────────┐
+                         │  fileUri recebido │
+                         │  (sem PDF na RAM) │
+                         └───────────────────┘
+                                  │
+                                  ▼
+                         ┌───────────────────┐
+                         │  generateContent  │
+                         │  usando fileUri   │
+                         └───────────────────┘
+```
 
 ---
 
 ## Resultado Esperado
 
-- **PDF 68MB:** Processa via Files API sem crash
-- **PDF 5MB:** Continua usando base64 inline (rápido)
-- **Memória:** Nunca excede ~70MB para qualquer tamanho de PDF
+- **PDF 67MB:** Processa via streaming sem usar mais que ~10MB de RAM
+- **PDF 200MB:** Funciona igual (streaming é independente do tamanho)
+- **Limite teórico:** 2GB (limite da Files API do Gemini)
+- **Erro WORKER_LIMIT:** Eliminado para arquivos grandes
 
