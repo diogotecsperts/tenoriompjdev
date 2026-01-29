@@ -97,6 +97,11 @@ const systemPrompt = `Você é um perito médico especialista em medicina do tra
     "nexo_sugerido": "",
     "tipo_incapacidade": ""
   },
+  "avaliacao_sequelas": {
+    "tabela_susep": "",
+    "dano_estetico": "",
+    "auxilio_terceiros": ""
+  },
   "quesitos": {
     "juizo": "",
     "reclamante": "",
@@ -260,9 +265,77 @@ const systemPrompt = `Você é um perito médico especialista em medicina do tra
         - "ausencia" → laudos indicam capacidade laboral preservada
         - "" → se não há informação suficiente para classificar
 
-8. QUESITOS:
-   Copie INTEGRALMENTE cada quesito, exatamente como aparece no documento.
-   Numere cada quesito. Não altere o texto. Separe por categoria (juízo, reclamante, reclamada).
+7.5. AVALIAÇÃO DE SEQUELAS - PARA LAUDOS COM SEQUELAS PERMANENTES:
+
+   7.5.1. tabela_susep (Tabela SUSEP/DPVAT):
+          Busque nos autos informações sobre grau de invalidez ou sequelas permanentes:
+          - Percentual de invalidez mencionado em laudos médicos ou perícias anteriores
+          - Referências à Tabela SUSEP/DPVAT ou outras tabelas de invalidez
+          - Item específico da tabela aplicável à lesão/sequela
+          - Grau de comprometimento funcional documentado
+          - Laudo do INSS sobre invalidez (se B91 ou aposentadoria por invalidez)
+          - Perícias anteriores que quantificaram sequelas
+          ESTRUTURE: "[X%] de invalidez permanente conforme item [Y] da Tabela SUSEP - [descrição da sequela]"
+          Se não houver menção a percentuais de invalidez, deixe vazio.
+
+   7.5.2. dano_estetico:
+          Extraia informações sobre danos estéticos documentados:
+          - Cicatrizes visíveis (localização anatômica, tamanho, características)
+          - Deformidades permanentes (tipo, gravidade, visibilidade)
+          - Amputações ou perdas anatômicas
+          - Alterações de marcha ou postura permanentes e visíveis
+          - Grau do dano estético se mencionado (leve, moderado, grave, gravíssimo)
+          - Impacto psicológico do dano estético
+          Busque em: laudos médicos, perícias, fotos anexadas aos autos.
+          Se não houver menção a dano estético, deixe vazio.
+
+   7.5.3. auxilio_terceiros:
+          Extraia informações sobre necessidade de auxílio de terceiros:
+          - Se o periciando necessita de ajuda para AVDs (alimentar-se, vestir-se, higiene pessoal)
+          - Se necessita de ajuda para locomoção dentro e fora de casa
+          - Se necessita de cuidador permanente ou intermitente
+          - Tipo de auxílio necessário e frequência (24 horas, apenas para certas atividades)
+          - Laudo médico, de assistente social ou perícia que ateste a necessidade
+          Busque em: laudos médicos, laudos de assistente social, perícias anteriores.
+          Se não houver menção a necessidade de auxílio, deixe vazio.
+
+8. QUESITOS - EXTRAÇÃO INTEGRAL OBRIGATÓRIA:
+
+   Os quesitos são perguntas técnicas formuladas pelo Juízo e pelas partes para serem respondidas pelo perito.
+   É ABSOLUTAMENTE ESSENCIAL extrair TODOS os quesitos INTEGRALMENTE, pois são a base do laudo pericial.
+
+   8.1. juizo (Quesitos do Juízo):
+        Extraia TODOS os quesitos formulados pelo Juiz/Juízo, geralmente encontrados em despachos ou 
+        decisões judiciais. Copie EXATAMENTE como aparecem, mantendo:
+        - Numeração original (1, 2, 3... ou I, II, III... ou a, b, c...)
+        - Texto integral de CADA quesito sem alterações
+        - Ordem original dos quesitos
+        - Todos os sub-quesitos se houver (Ex: 1.1, 1.2, 2.a, 2.b)
+        Busque por: "O(A) perito(a) deverá responder...", "Quesitos do MM. Juízo", "Deverá o expert informar..."
+        NÃO RESUMA. Copie LITERALMENTE cada quesito. NÃO invente quesitos.
+
+   8.2. reclamante (Quesitos do Reclamante/Autor):
+        Extraia TODOS os quesitos formulados pelo advogado do reclamante, geralmente na petição inicial 
+        ou em petição específica de quesitos. Copie EXATAMENTE como aparecem, mantendo:
+        - Numeração original
+        - Texto integral de cada quesito sem alterações
+        - Ordem original
+        - Todos os sub-quesitos
+        Busque por: "Quesitos do reclamante", "Quesitos do autor", assinatura do advogado do autor.
+        NÃO RESUMA. Copie literalmente. NÃO invente quesitos.
+
+   8.3. reclamada (Quesitos da Reclamada/Ré):
+        Extraia TODOS os quesitos formulados pelo advogado da reclamada, geralmente na contestação 
+        ou em petição específica. Copie EXATAMENTE como aparecem, mantendo:
+        - Numeração original
+        - Texto integral de cada quesito sem alterações
+        - Ordem original
+        - Todos os sub-quesitos
+        Busque por: "Quesitos da reclamada", "Quesitos da ré", assinatura do advogado da empresa.
+        NÃO RESUMA. Copie literalmente. NÃO invente quesitos.
+
+   ATENÇÃO: Os quesitos podem estar em anexos separados ou no corpo das petições.
+   Busque em TODO o documento. NÃO invente quesitos - extraia APENAS os que existem.
 
 9. TEXTOS BRUTOS - MUITO IMPORTANTE:
    - peticao_inicial: Copie o TEXTO COMPLETO da petição inicial (a íntegra ou o máximo possível)
@@ -498,6 +571,7 @@ function ensureValidStructure(data: any): object {
     posto_trabalho: { cargo_funcao: "", data_admissao: "", data_afastamento: "", descricao_ambiente: "", descricao_atividades: "" },
     exame_clinico: { laudos_medicos: "", exames_complementares: "", lesoes_descritas: "", exame_fisico: "" },
     informacoes_medicas: { cids_mencionados: [], incapacidade_alegada: "", nexo_sugerido: "", tipo_incapacidade: "" },
+    avaliacao_sequelas: { tabela_susep: "", dano_estetico: "", auxilio_terceiros: "" },
     quesitos: { juizo: "", reclamante: "", reclamada: "" },
     textos_brutos: { peticao_inicial: "", contestacao: "" },
     resumo: ""
@@ -516,6 +590,7 @@ function ensureValidStructure(data: any): object {
     posto_trabalho: { ...defaultStructure.posto_trabalho, ...(data.posto_trabalho || {}) },
     exame_clinico: { ...defaultStructure.exame_clinico, ...(data.exame_clinico || {}) },
     informacoes_medicas: { ...defaultStructure.informacoes_medicas, ...(data.informacoes_medicas || {}) },
+    avaliacao_sequelas: { ...defaultStructure.avaliacao_sequelas, ...(data.avaliacao_sequelas || {}) },
     quesitos: { ...defaultStructure.quesitos, ...(data.quesitos || {}) },
     textos_brutos: { ...defaultStructure.textos_brutos, ...(data.textos_brutos || {}) },
     resumo: data.resumo || ""

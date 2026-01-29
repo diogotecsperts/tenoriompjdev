@@ -7,6 +7,11 @@ export function AvaliacaoSequelas() {
 
   if (!currentLaudo) return null;
 
+  // Check if laudo has an associated PDF for regeneration
+  const hasPdfSource = !!(currentLaudo.aiMetadata as any)?.pdfFilePath || 
+                       !!(currentLaudo.aiMetadata as any)?.importJobId ||
+                       !!(currentLaudo.aiMetadata as any)?.extracted_content_path;
+
   return (
     <Card>
       <CardHeader>
@@ -24,7 +29,10 @@ export function AvaliacaoSequelas() {
           placeholder="Descreva o percentual de invalidez conforme tabela SUSEP/DPVAT, especificando o item aplicável..."
           rows={5}
           enableEnhance={true}
-          enableRegenerate={false}
+          enableRegenerate={true}
+          fieldKey="tabelaSUSEP"
+          laudoId={currentLaudo.id}
+          hasPdfSource={hasPdfSource}
         />
         <LaudoTextareaAIField
           id="danoEstetico"
@@ -34,7 +42,10 @@ export function AvaliacaoSequelas() {
           placeholder="Avalie a existência e grau de dano estético (leve, moderado, grave), descrevendo cicatrizes, deformidades..."
           rows={5}
           enableEnhance={true}
-          enableRegenerate={false}
+          enableRegenerate={true}
+          fieldKey="danoEstetico"
+          laudoId={currentLaudo.id}
+          hasPdfSource={hasPdfSource}
         />
         <LaudoTextareaAIField
           id="auxilioTerceiros"
@@ -44,7 +55,10 @@ export function AvaliacaoSequelas() {
           placeholder="Avalie se o periciando necessita de auxílio permanente de terceiros para atividades da vida diária..."
           rows={5}
           enableEnhance={true}
-          enableRegenerate={false}
+          enableRegenerate={true}
+          fieldKey="auxilioTerceiros"
+          laudoId={currentLaudo.id}
+          hasPdfSource={hasPdfSource}
         />
       </CardContent>
     </Card>

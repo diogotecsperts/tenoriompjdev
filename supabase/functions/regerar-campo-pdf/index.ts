@@ -217,17 +217,138 @@ A ANÁLISE DEVE CONTER:
 Use linguagem técnica médico-legal. Seja objetivo e fundamentado.
 MÍNIMO 2 parágrafos.`,
 
-  quesitosJuizo: `Extraia os "Quesitos do Juízo" do documento.
-Liste cada quesito numerado EXATAMENTE como consta no documento, sem inventar respostas.
-Mantenha a formatação e numeração original.`,
+  tabelaSUSEP: `Extraia informações para avaliação pela "Tabela SUSEP/DPVAT" de invalidez permanente.
 
-  quesitosReclamante: `Extraia os "Quesitos do Reclamante" ou "Quesitos do Autor" do documento.
-Liste cada quesito numerado EXATAMENTE como consta no documento, sem inventar respostas.
-Mantenha a formatação e numeração original.`,
+BUSQUE NOS AUTOS:
+- Percentuais de invalidez mencionados em laudos médicos ou perícias anteriores
+- Referências específicas à Tabela SUSEP, DPVAT ou outras tabelas de invalidez
+- Item da tabela aplicável às lesões/sequelas identificadas
+- Grau de comprometimento funcional ou anatômico documentado
+- Decisões do INSS sobre grau de invalidez (B91, aposentadoria por invalidez)
+- Laudos periciais anteriores que quantificaram sequelas
 
-  quesitosReclamada: `Extraia os "Quesitos da Reclamada" ou "Quesitos da Ré" do documento.
-Liste cada quesito numerado EXATAMENTE como consta no documento, sem inventar respostas.
-Mantenha a formatação e numeração original.`,
+ESTRUTURE A RESPOSTA:
+Se encontrar informações, formate assim:
+"[X%] de invalidez permanente conforme item [Y] da Tabela SUSEP/DPVAT
+Sequela: [descrição da lesão/sequela]
+Fundamentação: [fonte da informação - laudo de Dr. X, perícia do INSS, etc.]"
+
+Se não houver menção a percentuais de invalidez, retorne:
+"Não foram identificados nos autos documentos que quantifiquem o grau de invalidez permanente segundo a Tabela SUSEP/DPVAT."`,
+
+  danoEstetico: `Extraia informações sobre "Dano Estético" do documento.
+
+BUSQUE NOS AUTOS:
+- Cicatrizes visíveis: localização anatômica, dimensões aproximadas, características (hipertrófica, queloidiana, hiperpigmentada)
+- Deformidades permanentes: tipo (angular, rotacional), gravidade, visibilidade
+- Amputações ou perdas anatômicas: nível, membro afetado
+- Alterações de marcha ou postura permanentes e visíveis
+- Assimetrias corporais resultantes de lesões
+- Fotos anexadas aos autos que documentem o dano
+
+CLASSIFICAÇÃO DO DANO ESTÉTICO (se mencionada ou possível inferir):
+- Leve: cicatrizes discretas, pouco visíveis, em áreas normalmente cobertas
+- Moderado: cicatrizes visíveis em áreas expostas, pequenas deformidades
+- Grave: deformidades significativas, cicatrizes extensas, alterações funcionais visíveis
+- Gravíssimo: grandes deformidades, amputações, desfiguramento
+
+ESTRUTURE A RESPOSTA:
+Descreva objetivamente os achados estéticos documentados, a localização, e se possível classifique a gravidade.
+
+Se não houver menção a dano estético, retorne:
+"Não foram identificados nos autos documentos que descrevam dano estético decorrente das lesões."`,
+
+  auxilioTerceiros: `Extraia informações sobre "Necessidade de Auxílio de Terceiros" do documento.
+
+BUSQUE NOS AUTOS:
+- Se o periciando necessita de ajuda para Atividades da Vida Diária (AVDs):
+  * Alimentar-se (cortar alimentos, levar à boca)
+  * Vestir-se e despir-se
+  * Higiene pessoal (banho, uso do banheiro)
+  * Locomoção dentro e fora de casa
+- Se necessita de cuidador permanente ou intermitente
+- Tipo de auxílio necessário e frequência (24 horas, apenas para certas atividades)
+- Laudos médicos, de assistente social ou perícias que atestem a necessidade
+- Prescrição médica de acompanhante ou cuidador
+
+ESTRUTURE A RESPOSTA:
+Descreva as limitações funcionais que demandam auxílio, as atividades para as quais necessita de ajuda, 
+o tipo de cuidador necessário (familiar, profissional), e a fonte documental da informação.
+
+Se não houver menção a necessidade de auxílio, retorne:
+"Não foram identificados nos autos documentos que indiquem necessidade de auxílio permanente de terceiros para atividades da vida diária."`,
+
+  quesitosJuizo: `Extraia INTEGRALMENTE os "Quesitos do Juízo" do documento.
+
+Os quesitos do Juízo são perguntas técnicas formuladas pelo Juiz para o perito responder.
+
+ONDE BUSCAR:
+- Despachos judiciais (busque por "O perito deverá responder...", "Quesitos do MM. Juízo")
+- Decisões que nomeiam o perito
+- Atas de audiência com determinação de quesitos
+- Intimações do perito
+
+COMO EXTRAIR:
+- Copie CADA quesito EXATAMENTE como aparece no documento
+- Mantenha a numeração original (1, 2, 3... ou I, II, III... ou a, b, c...)
+- NÃO altere o texto - transcreva literalmente
+- Inclua todos os sub-quesitos se houver (Ex: 1.1, 1.2, 2.a, 2.b)
+- Preserve a ordem original dos quesitos
+
+FORMATO ESPERADO:
+1. [Texto completo do primeiro quesito]
+2. [Texto completo do segundo quesito]
+...
+
+Se não encontrar quesitos do Juízo, retorne: "Quesitos do Juízo não identificados nos autos."`,
+
+  quesitosReclamante: `Extraia INTEGRALMENTE os "Quesitos do Reclamante" (ou do Autor) do documento.
+
+Os quesitos do Reclamante são perguntas formuladas pelo advogado da parte autora.
+
+ONDE BUSCAR:
+- Petição inicial (geralmente ao final)
+- Petição específica de quesitos do reclamante
+- Rol de quesitos anexado aos autos
+- Emendas à inicial com quesitos
+
+COMO EXTRAIR:
+- Copie CADA quesito EXATAMENTE como aparece no documento
+- Mantenha a numeração original
+- NÃO altere, resuma ou parafraseie o texto
+- Inclua todos os sub-quesitos (Ex: 3.1, 3.2, 3.a, 3.b)
+- Preserve a ordem original
+
+FORMATO ESPERADO:
+1. [Texto completo do primeiro quesito]
+2. [Texto completo do segundo quesito]
+...
+
+Se não encontrar quesitos do Reclamante, retorne: "Quesitos do Reclamante não identificados nos autos."`,
+
+  quesitosReclamada: `Extraia INTEGRALMENTE os "Quesitos da Reclamada" (ou da Ré) do documento.
+
+Os quesitos da Reclamada são perguntas formuladas pelo advogado da parte ré/empresa.
+
+ONDE BUSCAR:
+- Contestação (geralmente ao final)
+- Petição específica de quesitos da reclamada
+- Rol de quesitos anexado aos autos
+- Réplica ou outras manifestações com quesitos
+
+COMO EXTRAIR:
+- Copie CADA quesito EXATAMENTE como aparece no documento
+- Mantenha a numeração original
+- NÃO altere, resuma ou parafraseie o texto
+- Inclua todos os sub-quesitos
+- Preserve a ordem original
+
+FORMATO ESPERADO:
+1. [Texto completo do primeiro quesito]
+2. [Texto completo do segundo quesito]
+...
+
+Se não encontrar quesitos da Reclamada, retorne: "Quesitos da Reclamada não identificados nos autos."`,
 };
 
 serve(async (req) => {
