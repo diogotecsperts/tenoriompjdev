@@ -28,7 +28,8 @@ import {
   History,
   ChevronDown,
   XCircle,
-  Turtle
+  Turtle,
+  Layers
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -1438,7 +1439,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               </div>
 
               {selectedFile && (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {/* Developer-only AI Config Badge when file is selected */}
                   {isDeveloper && aiConfig && (
                     <div className="flex items-center justify-center">
@@ -1448,6 +1449,21 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                       </Badge>
                     </div>
                   )}
+                  
+                  {/* Large PDF Auto-Split Indicator */}
+                  {selectedFile.size > 45 * 1024 * 1024 && (
+                    <Alert className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
+                      <Layers className="h-4 w-4 text-amber-600" />
+                      <AlertTitle className="text-amber-700 dark:text-amber-400 text-sm font-medium">
+                        PDF Grande Detectado
+                      </AlertTitle>
+                      <AlertDescription className="text-amber-600 dark:text-amber-300 text-xs">
+                        Este arquivo ({formatFileSize(selectedFile.size)}) será dividido automaticamente em partes menores para processamento. 
+                        Isso é normal e não afeta a qualidade da extração.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                  
                   <Button onClick={processFile} className="w-full">
                     <Sparkles className="h-4 w-4 mr-2" />
                     Processar com IA

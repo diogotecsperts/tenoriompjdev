@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { getAIConfig, callAI, callPDFProvider } from "../_shared/ai-config.ts";
 import { logToBackend, logError, logWarn, logInfo } from "../_shared/backend-logger.ts";
-import { extractVisualContent, storeExtractedContent } from "../_shared/pdf-visual-extractor.ts";
+import { extractVisualContent, storeExtractedContent, ExtractedContent } from "../_shared/pdf-visual-extractor.ts";
 import { getRelevantChunk, getFieldPrompt } from "../_shared/smart-chunker.ts";
 import { splitPDF, needsSplit } from "../_shared/pdf-splitter.ts";
 import { extractWithMistralOCR, getMistralAPIKey } from "../_shared/mistral-ocr.ts";
@@ -881,7 +881,7 @@ async function processarPDFBackground(
     const { data: strategyData } = await supabaseAdmin
       .from('system_config')
       .select('id, value')
-      .in('id', ['import_strategy', 'text_fill_provider', 'text_fill_model', 'store_extracted_text', 'phase1_gemini_model']);
+      .in('id', ['import_strategy', 'text_fill_provider', 'text_fill_model', 'store_extracted_text', 'phase1_gemini_model', 'phase1_ocr_provider']);
 
     const strategyMap: Record<string, any> = {};
     strategyData?.forEach((item: { id: string; value: any }) => { strategyMap[item.id] = item.value; });
@@ -907,6 +907,10 @@ async function processarPDFBackground(
 
       timings.pdfExtraction.start = Date.now();
 
+      // Determine OCR provider from config
+      const ocrProvider = strategyMap.phase1_ocr_provider || 'gemini';
+      console.log(`[processar-autos] Phase 1 OCR provider: ${ocrProvider}`);
+
       // Determine extraction method: streaming > bytes with Files API > bytes inline
       const useFilesAPI = pdfSizeBytes > 50_000_000;
       console.log(`[processar-autos] PDF size: ${(pdfSizeBytes / (1024 * 1024)).toFixed(2)}MB, useFilesAPI: ${useFilesAPI}, streaming: ${!!pdfStream}`);
@@ -916,26 +920,120 @@ async function processarPDFBackground(
       console.log(`[processar-autos] Phase 1 using model: ${phase1Model}`);
 
       try {
-        let extracted;
+        let extracted: ExtractedContent;
         
-        if (pdfStream) {
-          // STREAMING MODE: For large files, stream directly to Files API
-          console.log('[processar-autos] Using STREAMING mode for Phase 1...');
-          extracted = await extractVisualContent(
-            { stream: pdfStream, size: pdfSizeBytes }, 
-            { model: phase1Model }
-          );
-          pdfStream = null; // Stream is consumed
-        } else if (pdfBytes) {
-          // BYTES MODE: Use existing logic
-          extracted = await extractVisualContent(pdfBytes, { 
-            useFilesAPI,
-            model: phase1Model 
-          });
-          // MEMORY OPTIMIZATION: Clear PDF bytes after Phase 1 extraction
+        // Check if Mistral OCR is configured
+        if (ocrProvider === 'mistral') {
+          console.log('[processar-autos] Using MISTRAL OCR for Phase 1...');
+          
+          const mistralKey = getMistralAPIKey();
+          if (!mistralKey) {
+            throw new Error('MISTRAL_API_KEY não configurada. Configure nas secrets do Supabase.');
+          }
+          
+          // For Mistral, we need bytes (not stream)
+          let bytesForMistral: Uint8Array;
+          
+          if (pdfStream) {
+            // Convert stream to bytes for Mistral
+            const chunks: Uint8Array[] = [];
+            const reader = pdfStream.getReader();
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              chunks.push(value);
+            }
+            pdfStream = null;
+            
+            const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+            bytesForMistral = new Uint8Array(totalLength);
+            let offset = 0;
+            for (const chunk of chunks) {
+              bytesForMistral.set(chunk, offset);
+              offset += chunk.length;
+            }
+          } else if (pdfBytes) {
+            bytesForMistral = pdfBytes;
+          } else {
+            throw new Error('No PDF input available for Mistral OCR');
+          }
+          
+          // Check if split is needed for Mistral (limit: 50MB per file)
+          if (needsSplit(bytesForMistral.byteLength)) {
+            console.log('[processar-autos] PDF needs split for Mistral processing...');
+            
+            await supabaseAdmin.from('import_jobs').update({ 
+              current_step: 'Dividindo PDF grande em partes...', 
+              updated_at: new Date().toISOString()
+            }).eq('id', jobId);
+            
+            const { parts, pageRanges, totalPages } = await splitPDF(bytesForMistral, { maxSizeBytes: SPLIT_TARGET_SIZE });
+            const extractedTexts: string[] = [];
+            let totalPageCount = 0;
+            
+            for (let i = 0; i < parts.length; i++) {
+              const part = parts[i];
+              const range = pageRanges[i];
+              
+              await supabaseAdmin.from('import_jobs').update({ 
+                current_step: `Processando parte ${i + 1}/${parts.length} (págs ${range.start}-${range.end})...`,
+                progress: Math.round(10 + (i / parts.length) * 30),
+                updated_at: new Date().toISOString()
+              }).eq('id', jobId);
+              
+              const partResult = await extractWithMistralOCR(part, mistralKey);
+              extractedTexts.push(`\n=== PARTE ${i + 1} (Páginas ${range.start}-${range.end}) ===\n${partResult.text}`);
+              totalPageCount += partResult.pageCount;
+              
+              // Free memory
+              parts[i] = null!;
+            }
+            
+            extracted = {
+              rawText: extractedTexts.join('\n\n'),
+              pageCount: totalPageCount,
+              estimatedSections: ['split-extraction'],
+              extractedAt: new Date().toISOString(),
+              provider: 'mistral-ocr',
+              model: 'mistral-ocr-latest'
+            };
+          } else {
+            // Process directly with Mistral
+            const mistralResult = await extractWithMistralOCR(bytesForMistral, mistralKey);
+            extracted = {
+              rawText: mistralResult.text,
+              pageCount: mistralResult.pageCount,
+              estimatedSections: ['mistral-ocr-extraction'],
+              extractedAt: new Date().toISOString(),
+              provider: mistralResult.provider,
+              model: mistralResult.model
+            };
+          }
+          
+          // Clear bytes after Mistral processing
           pdfBytes = null;
+          
         } else {
-          throw new Error('No PDF input available (bytes or stream)');
+          // Use Gemini (default)
+          if (pdfStream) {
+            // STREAMING MODE: For large files, stream directly to Files API
+            console.log('[processar-autos] Using STREAMING mode for Phase 1...');
+            extracted = await extractVisualContent(
+              { stream: pdfStream, size: pdfSizeBytes }, 
+              { model: phase1Model }
+            );
+            pdfStream = null; // Stream is consumed
+          } else if (pdfBytes) {
+            // BYTES MODE: Use existing logic
+            extracted = await extractVisualContent(pdfBytes, { 
+              useFilesAPI,
+              model: phase1Model 
+            });
+            // MEMORY OPTIMIZATION: Clear PDF bytes after Phase 1 extraction
+            pdfBytes = null;
+          } else {
+            throw new Error('No PDF input available (bytes or stream)');
+          }
         }
         
         console.log('[processar-autos] MEMORY: Cleared PDF input after Phase 1 extraction');
