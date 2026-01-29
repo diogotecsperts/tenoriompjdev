@@ -978,18 +978,25 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get user_id from auth token
+    // Get user_id from auth token using getClaims (more reliable than getUser)
     const authHeader = req.headers.get('Authorization');
     let userId: string | null = null;
 
-    if (authHeader) {
+    if (authHeader?.startsWith('Bearer ')) {
       const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
       const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
         global: { headers: { Authorization: authHeader } }
       });
       
-      const { data: { user } } = await supabaseClient.auth.getUser();
-      userId = user?.id || null;
+      const token = authHeader.replace('Bearer ', '');
+      const { data, error } = await supabaseClient.auth.getClaims(token);
+      
+      if (!error && data?.claims?.sub) {
+        userId = data.claims.sub as string;
+        console.log('[processar-autos] User authenticated via getClaims:', userId);
+      } else {
+        console.warn('[processar-autos] getClaims failed:', error?.message || 'No claims found');
+      }
     }
 
     if (!userId) {
