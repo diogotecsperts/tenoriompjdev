@@ -89,7 +89,7 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   description: "Precisão elite (~94.9%) para tabelas e documentos escaneados. OCR especializado.",
   models: ["mistral-ocr-latest"],
   requiresKey: true,
-  color: "hsl(25, 95%, 55%)",
+  color: "hsl(168, 58%, 39%)",
   keyPlaceholder: "..."
 }, {
   id: "openai",
@@ -2400,16 +2400,16 @@ export function DevSettings() {
                     <SelectContent>
                       <SelectItem value="gemini">
                         <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-blue-500" />
+                          <div className="w-2 h-2 rounded-full bg-primary" />
                           <span>Google Gemini</span>
                           <Badge variant="outline" className="text-[10px]">Padrão</Badge>
                         </div>
                       </SelectItem>
                       <SelectItem value="mistral">
                         <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-orange-500" />
+                          <div className="w-2 h-2 rounded-full bg-primary" />
                           <span>Mistral OCR</span>
-                          <Badge className="text-[10px] bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300">Elite</Badge>
+                          <Badge variant="secondary" className="text-[10px]">Elite</Badge>
                         </div>
                       </SelectItem>
                     </SelectContent>
