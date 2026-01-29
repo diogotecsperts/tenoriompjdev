@@ -970,17 +970,51 @@ async function processarPDFBackground(
 
       timings.pdfExtraction.start = Date.now();
       
-      // Single-pass requires base64
-      const pdfBase64 = base64FromBytes();
+      // HYBRID STRATEGY: Use Files API for large PDFs to avoid memory overflow
+      const LARGE_PDF_THRESHOLD = 20_000_000; // 20MB
+      const isLargePDF = pdfSizeBytes > LARGE_PDF_THRESHOLD;
 
-      visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
-        promptType: 'pdf_extraction',
-        userId: userId
-      });
-      
-      // MEMORY OPTIMIZATION: Clear PDF after extraction in single-pass mode
-      pdfBytes = null;
-      console.log('[processar-autos] MEMORY: Cleared PDF bytes after single-pass extraction');
+      if (isLargePDF) {
+        console.log(`[processar-autos] Large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), using Files API for single-pass...`);
+        
+        // Use extractVisualContent which supports Files API with bytes
+        const extracted = await extractVisualContent(pdfBytes!, { 
+          useFilesAPI: true,
+          model: 'gemini-2.0-flash'
+        });
+        
+        // Clear bytes immediately after upload
+        pdfBytes = null;
+        console.log('[processar-autos] MEMORY: Cleared PDF bytes after Files API upload');
+        
+        // The extracted text serves as input for structured parsing
+        const fillResult = await callAI(
+          await getAIConfig(),
+          systemPrompt,
+          `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${extracted.rawText}`,
+          { promptType: 'single_pass_large', userId, maxOutputTokens: 65536, jsonMode: true }
+        );
+        
+        visionResult = {
+          provider: 'gemini-files-api',
+          model: extracted.model,
+          text: fillResult.text,
+          finishReason: 'STOP',
+          usedFallback: false
+        };
+      } else {
+        // Small PDFs: use base64 inline (original flow)
+        const pdfBase64 = base64FromBytes();
+        
+        // Clear bytes after conversion
+        pdfBytes = null;
+        console.log('[processar-autos] MEMORY: Cleared PDF bytes after base64 conversion');
+
+        visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
+          promptType: 'pdf_extraction',
+          userId: userId
+        });
+      }
       
       timings.pdfExtraction.end = Date.now();
       modelUsed = `${visionResult.provider}/${visionResult.model}`;
