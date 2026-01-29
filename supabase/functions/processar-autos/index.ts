@@ -764,6 +764,352 @@ const results = {
   };
 }
 
+/**
+ * Process chunked PDF upload (client-side split)
+ * Each part is already < 20MB and uploaded to storage
+ * This processes each part with OCR, combines results, then structures with AI
+ */
+async function processarChunkedPDFBackground(
+  jobId: string,
+  fileParts: string[],
+  pageRanges: Array<{ start: number; end: number }>,
+  totalPages: number,
+  fileName: string,
+  supabaseAdmin: any,
+  userId: string
+) {
+  let attemptId: string | null = null;
+  let modelUsed = 'unknown';
+  
+  // Heartbeat interval for long-running operations
+  let heartbeatInterval: number | null = null;
+  
+  const startHeartbeat = async (stepDescription: string) => {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    heartbeatInterval = setInterval(async () => {
+      try {
+        await supabaseAdmin.from('import_jobs').update({ 
+          updated_at: new Date().toISOString()
+        }).eq('id', jobId);
+        console.log(`[processar-autos-chunked] Heartbeat: ${stepDescription}`);
+      } catch (e) {
+        console.warn('[processar-autos-chunked] Heartbeat update failed:', e);
+      }
+    }, 12000) as unknown as number;
+  };
+  
+  const stopHeartbeat = () => {
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
+  };
+  
+  // Timing tracking
+  const timings = {
+    total: { start: Date.now(), end: 0 },
+    pdfExtraction: { start: 0, end: 0 },
+    summaries: { start: 0, end: 0 }
+  };
+  
+  try {
+    console.log(`[processar-autos-chunked] Starting chunked processing for job ${jobId}: ${fileParts.length} parts, ${totalPages} pages`);
+    
+    await logInfo('processar-autos', `Iniciando processamento chunked: ${fileParts.length} partes, ${totalPages} páginas`, jobId, {
+      partsCount: fileParts.length,
+      totalPages,
+      fileName
+    });
+
+    // Create attempt record
+    const { data: attemptData, error: attemptError } = await supabaseAdmin
+      .from('import_attempts')
+      .insert({
+        job_id: jobId,
+        attempt_number: 1,
+        status: 'processing'
+      })
+      .select('id')
+      .single();
+
+    if (!attemptError && attemptData) {
+      attemptId = attemptData.id;
+      console.log(`[processar-autos-chunked] Created attempt (${attemptId}) for job ${jobId}`);
+    }
+
+    // Start PDF extraction timing
+    timings.pdfExtraction.start = Date.now();
+    
+    // Start heartbeat for long-running OCR operations
+    await startHeartbeat('Chunked OCR extraction');
+    
+    // Get Mistral API key for OCR
+    const mistralKey = getMistralAPIKey();
+    if (!mistralKey) {
+      throw new Error('MISTRAL_API_KEY não configurada para processamento chunked');
+    }
+    
+    // Process each part with OCR
+    const extractedTexts: string[] = [];
+    let processedPageCount = 0;
+    
+    for (let i = 0; i < fileParts.length; i++) {
+      const partPath = fileParts[i];
+      const range = pageRanges[i];
+      
+      await supabaseAdmin.from('import_jobs').update({ 
+        current_step: `Extraindo parte ${i + 1}/${fileParts.length} (págs ${range.start}-${range.end})...`,
+        progress: Math.round(5 + (i / fileParts.length) * 35),
+        step_id: 'extraction',
+        updated_at: new Date().toISOString()
+      }).eq('id', jobId);
+      
+      console.log(`[processar-autos-chunked] Downloading part ${i + 1}/${fileParts.length}: ${partPath}`);
+      
+      // Download part from storage
+      const { data: partData, error: downloadError } = await supabaseAdmin.storage
+        .from('processos-pdf')
+        .download(partPath);
+      
+      if (downloadError || !partData) {
+        throw new Error(`Falha ao baixar parte ${i + 1}: ${downloadError?.message || 'Dados vazios'}`);
+      }
+      
+      const partBytes = new Uint8Array(await partData.arrayBuffer());
+      const partSizeMB = (partBytes.byteLength / 1024 / 1024).toFixed(2);
+      console.log(`[processar-autos-chunked] Part ${i + 1} downloaded: ${partSizeMB}MB`);
+      
+      // Process with Mistral OCR
+      try {
+        const mistralResult = await extractWithMistralOCR(partBytes, mistralKey);
+        const pageCount = range.end - range.start + 1;
+        
+        extractedTexts.push(`\n=== PARTE ${i + 1} (Páginas ${range.start}-${range.end}) ===\n${mistralResult.text}`);
+        processedPageCount += pageCount;
+        
+        console.log(`[processar-autos-chunked] Part ${i + 1} OCR complete: ${mistralResult.text.length} chars, ${pageCount} pages`);
+      } catch (ocrError) {
+        console.error(`[processar-autos-chunked] OCR failed for part ${i + 1}:`, ocrError);
+        throw new Error(`Falha no OCR da parte ${i + 1}: ${ocrError instanceof Error ? ocrError.message : 'Erro desconhecido'}`);
+      }
+    }
+    
+    timings.pdfExtraction.end = Date.now();
+    stopHeartbeat();
+    
+    // Combine all extracted texts
+    const combinedText = extractedTexts.join('\n\n');
+    console.log(`[processar-autos-chunked] All parts processed: ${combinedText.length} chars total, ${processedPageCount} pages`);
+    
+    await logInfo('processar-autos', `OCR chunked concluído: ${fileParts.length} partes processadas`, jobId, {
+      totalChars: combinedText.length,
+      processedPages: processedPageCount,
+      extractionTimeMs: timings.pdfExtraction.end - timings.pdfExtraction.start
+    });
+
+    // PHASE 2: Structure the combined text with AI
+    await supabaseAdmin.from('import_jobs').update({ 
+      progress: 42, 
+      current_step: 'Estruturando dados com IA...', 
+      step_id: 'processing',
+      updated_at: new Date().toISOString()
+    }).eq('id', jobId);
+
+    console.log('[processar-autos-chunked] Starting structured field filling...');
+    
+    // Get AI config
+    const aiConfig = await getAIConfig();
+    
+    // Smart truncation to prevent MAX_TOKENS
+    let textForFilling = combinedText;
+    const MAX_INPUT_CHARS = 200_000;
+
+    if (textForFilling.length > MAX_INPUT_CHARS) {
+      console.warn(`[processar-autos-chunked] Text too long (${textForFilling.length} chars), applying smart truncation`);
+      
+      const headChars = Math.floor(MAX_INPUT_CHARS * 0.6);
+      const tailChars = Math.floor(MAX_INPUT_CHARS * 0.35);
+      const separator = '\n\n[... conteúdo intermediário omitido para processamento ...]\n\n';
+      
+      textForFilling = textForFilling.substring(0, headChars) + 
+                       separator + 
+                       textForFilling.substring(textForFilling.length - tailChars);
+      
+      console.log(`[processar-autos-chunked] Truncated to ${textForFilling.length} chars`);
+    }
+    
+    // Call AI with the combined text
+    const fillResult = await callAI(
+      aiConfig,
+      systemPrompt,
+      `Analise o seguinte texto extraído de ${fileParts.length} partes de um documento de processo trabalhista (${totalPages} páginas) e retorne o JSON estruturado:\n\n${textForFilling}`,
+      { promptType: 'chunked_import', userId, maxOutputTokens: 65536, jsonMode: true }
+    );
+
+    modelUsed = `${aiConfig.provider}/${aiConfig.model}`;
+
+    // Parse the structured response
+    let parsedResult = tryFixTruncatedJson(fillResult.text);
+    if (!parsedResult) {
+      console.error('[processar-autos-chunked] JSON parsing failed');
+      await logError('processar-autos', 'Chunked JSON parse failed', jobId, {
+        textLength: fillResult.text?.length,
+        textPreview: fillResult.text?.substring(0, 1000),
+        textEnding: fillResult.text?.slice(-500)
+      });
+      throw new Error('Falha na estruturação dos dados');
+    }
+
+    let extractedData = ensureValidStructure(parsedResult);
+    console.log('[processar-autos-chunked] Data structured successfully');
+
+    // PHASE 3: Generate AI summaries
+    timings.summaries.start = Date.now();
+    
+    await supabaseAdmin.from('import_jobs').update({ 
+      progress: 45, 
+      current_step: 'Gerando resumos com IA...', 
+      step_id: 'resumo_peticao',
+      updated_at: new Date().toISOString()
+    }).eq('id', jobId);
+
+    const resumosResult = await gerarResumosIA(extractedData, supabaseAdmin, jobId, userId);
+    
+    timings.summaries.end = Date.now();
+    
+    console.log('[processar-autos-chunked] AI summaries generated');
+
+    // Add resumos to extracted data
+    (extractedData as any).resumos_ia = resumosResult.resumos;
+
+    // Finalize
+    await supabaseAdmin.from('import_jobs').update({ 
+      progress: 95, 
+      current_step: 'Finalizando processamento...',
+      step_id: 'finalizing',
+      updated_at: new Date().toISOString()
+    }).eq('id', jobId);
+
+    timings.total.end = Date.now();
+
+    // Calculate durations
+    const pdfExtractionDuration = timings.pdfExtraction.end - timings.pdfExtraction.start;
+    const summariesDuration = timings.summaries.end - timings.summaries.start;
+    const totalDuration = timings.total.end - timings.total.start;
+
+    console.log(`[processar-autos-chunked] Timing - OCR: ${pdfExtractionDuration}ms, Summaries: ${summariesDuration}ms, Total: ${totalDuration}ms`);
+
+    // Build result
+    const result = {
+      success: true,
+      data: extractedData,
+      partialFailures: resumosResult.aiInfo.summariesFailed.length > 0 ? {
+        failedSummaries: resumosResult.aiInfo.summariesFailed,
+        errors: resumosResult.aiInfo.errors
+      } : null,
+      aiUsage: {
+        pdfExtraction: {
+          provider: 'mistral',
+          model: 'mistral-ocr-latest',
+          durationMs: pdfExtractionDuration,
+          usedFallback: false,
+          strategy: 'client_side_split',
+          partsProcessed: fileParts.length
+        },
+        summaries: {
+          provider: resumosResult.aiInfo.provider,
+          model: resumosResult.aiInfo.model,
+          count: resumosResult.aiInfo.summariesGenerated,
+          durationMs: summariesDuration,
+          failedSummaries: resumosResult.aiInfo.summariesFailed
+        },
+        totalDurationMs: totalDuration
+      },
+      chunkedInfo: {
+        partsCount: fileParts.length,
+        totalPages,
+        originalFileName: fileName
+      }
+    };
+
+    // Update attempt record with success
+    if (attemptId) {
+      await supabaseAdmin
+        .from('import_attempts')
+        .update({
+          status: 'completed',
+          result: {
+            summariesCount: resumosResult.aiInfo.summariesGenerated,
+            partsProcessed: fileParts.length,
+            model: modelUsed,
+            totalDurationMs: totalDuration
+          },
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', attemptId);
+    }
+
+    // Save result as completed
+    await supabaseAdmin
+      .from('import_jobs')
+      .update({ 
+        status: 'completed',
+        progress: 100, 
+        current_step: 'Processamento concluído!',
+        step_id: 'completed',
+        result: result,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', jobId);
+
+    console.log(`[processar-autos-chunked] Job ${jobId} completed successfully`);
+
+    await logInfo('processar-autos', `Job chunked concluído com sucesso`, jobId, {
+      partsProcessed: fileParts.length,
+      totalPages,
+      totalDurationMs: totalDuration,
+      summariesGenerated: resumosResult.aiInfo.summariesGenerated
+    });
+
+  } catch (error) {
+    console.error(`[processar-autos-chunked] Job ${jobId} failed:`, error);
+    
+    const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido no processamento chunked';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
+    await logError('processar-autos', `Job chunked falhou: ${errorMessage}`, jobId, {
+      errorMessage,
+      errorStack,
+      partsCount: fileParts.length
+    });
+    
+    // Update attempt record with failure
+    if (attemptId) {
+      await supabaseAdmin
+        .from('import_attempts')
+        .update({
+          status: 'failed',
+          error: errorMessage,
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', attemptId);
+    }
+    
+    // Save error
+    await supabaseAdmin
+      .from('import_jobs')
+      .update({ 
+        status: 'failed',
+        error: errorMessage,
+        current_step: 'Erro no processamento',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', jobId);
+  } finally {
+    stopHeartbeat();
+  }
+}
+
 // Background processing function
 // MEMORY OPTIMIZATION: Download in background + prefer bytes/Files API to avoid base64 duplication
 async function processarPDFBackground(
