@@ -1515,14 +1515,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                 {currentOCRProvider && stepsStatus.find(s => s.id === 'extraction')?.status === 'processing' && (
                   <Badge 
                     variant="outline" 
-                    className={cn(
-                      "mt-2 text-xs flex items-center gap-1.5",
-                      currentOCRProvider === 'mistral-ocr' 
-                        ? "border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-700 dark:bg-orange-950/30 dark:text-orange-400" 
-                        : "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/30 dark:text-blue-400"
-                    )}
+                    className="mt-2 text-xs flex items-center gap-1.5 border-border bg-muted/50 text-foreground"
                   >
-                    <Eye className="h-3 w-3" />
+                    <Eye className="h-3 w-3 text-primary" />
                     {currentOCRProvider === 'mistral-ocr' ? 'Mistral OCR' : 'Gemini Vision'}
                   </Badge>
                 )}
