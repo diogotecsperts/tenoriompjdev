@@ -67,7 +67,29 @@ export interface StreamInput {
 }
 
 /**
+ * Gera variantes de URI HTTPS completas para tentar (com e sem /v1beta)
+ * A API pode aceitar diferentes formatos dependendo da versão
+ */
+function getFileUriVariants(fileUri: string): string[] {
+  const variants: string[] = [fileUri]; // Original primeiro
+  
+  // Se tem /v1beta/, adicionar variante sem /v1beta/
+  if (fileUri.includes('/v1beta/files/')) {
+    const withoutV1beta = fileUri.replace('/v1beta/files/', '/files/');
+    variants.push(withoutV1beta);
+  }
+  // Se não tem /v1beta/, adicionar variante com /v1beta/
+  else if (fileUri.includes('googleapis.com/files/') && !fileUri.includes('/v1beta/')) {
+    const withV1beta = fileUri.replace('/files/', '/v1beta/files/');
+    variants.push(withV1beta);
+  }
+  
+  return variants;
+}
+
+/**
  * Helper resiliente para chamar generateContent com arquivo via Files API
+ * IMPORTANTE: Usa apenas URIs HTTPS completas (nunca formato curto files/ID)
  * Tenta múltiplos formatos de payload para compatibilidade com variações da API
  */
 async function callGeminiGenerateContentWithFile(
@@ -78,78 +100,57 @@ async function callGeminiGenerateContentWithFile(
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
   
-  // Derivar o fileUri curto (files/abc) a partir da URI completa
-  const shortFileUri = fileUri.includes('/files/') 
-    ? `files/${fileUri.split('/files/')[1]}`
-    : fileUri;
+  // Gerar variantes de URI HTTPS completas (nunca usar formato curto!)
+  const uriVariants = getFileUriVariants(fileUri);
+  console.log(`[pdf-visual-extractor] URI variants to try: ${uriVariants.join(', ')}`);
   
-  const hasFullUri = fileUri.startsWith('https://');
-  
-  // Configurações base de geração
+  // Configurações base de geração (alinhado com callGeminiVision que funciona)
   const generationConfig = {
     temperature: 0.1,
     topP: 0.95,
     maxOutputTokens: 65536,
+    responseMimeType: "application/json",
   };
 
-  // Definir as tentativas em ordem
+  // Definir as tentativas em ordem (SEM URIs curtas!)
   const attempts: Array<{
     name: string;
     payload: object;
-  }> = [
-    // Tentativa A: camelCase com URI completa (padrão callGeminiVision)
-    {
-      name: 'A-camelCase-fullUri',
+  }> = [];
+  
+  // Para cada variante de URI, tentar camelCase e snake_case
+  for (let i = 0; i < uriVariants.length; i++) {
+    const uri = uriVariants[i];
+    const variantLabel = i === 0 ? 'original' : `variant${i}`;
+    
+    // Tentativa com camelCase (fileData)
+    attempts.push({
+      name: `A${i + 1}-camelCase-${variantLabel}`,
       payload: {
         contents: [{
           parts: [
-            { fileData: { fileUri: fileUri, mimeType: 'application/pdf' } },
+            { fileData: { fileUri: uri, mimeType: 'application/pdf' } },
             { text: prompt }
           ]
         }],
         generationConfig
       }
-    },
-    // Tentativa B: camelCase com URI curta (files/abc)
-    ...(hasFullUri ? [{
-      name: 'B-camelCase-shortUri',
+    });
+    
+    // Tentativa com snake_case (file_data)
+    attempts.push({
+      name: `C${i + 1}-snake_case-${variantLabel}`,
       payload: {
         contents: [{
           parts: [
-            { fileData: { fileUri: shortFileUri, mimeType: 'application/pdf' } },
+            { file_data: { file_uri: uri, mime_type: 'application/pdf' } },
             { text: prompt }
           ]
         }],
         generationConfig
       }
-    }] : []),
-    // Tentativa C: snake_case com URI completa
-    {
-      name: 'C-snake_case-fullUri',
-      payload: {
-        contents: [{
-          parts: [
-            { file_data: { file_uri: fileUri, mime_type: 'application/pdf' } },
-            { text: prompt }
-          ]
-        }],
-        generationConfig
-      }
-    },
-    // Tentativa D: snake_case com URI curta
-    ...(hasFullUri ? [{
-      name: 'D-snake_case-shortUri',
-      payload: {
-        contents: [{
-          parts: [
-            { file_data: { file_uri: shortFileUri, mime_type: 'application/pdf' } },
-            { text: prompt }
-          ]
-        }],
-        generationConfig
-      }
-    }] : []),
-  ];
+    });
+  }
 
   let lastError = '';
   
@@ -177,14 +178,14 @@ async function callGeminiGenerateContentWithFile(
         }
       }
       
-      // Check if it's an INVALID_ARGUMENT error (retry-able)
+      // Check if it's an INVALID_ARGUMENT error (retry-able with next format)
       const isInvalidArgument = response.status === 400 && 
         (responseText.includes('INVALID_ARGUMENT') || responseText.toLowerCase().includes('invalid argument'));
       
       if (isInvalidArgument) {
         console.warn(`[pdf-visual-extractor] ${attempt.name} failed with INVALID_ARGUMENT (400), trying next format...`);
         console.warn(`[pdf-visual-extractor] Response: ${responseText.substring(0, 500)}`);
-        lastError = `${attempt.name}: ${responseText}`;
+        lastError = `${attempt.name}: ${responseText.substring(0, 300)}`;
         continue; // Try next format
       }
       
@@ -202,7 +203,7 @@ async function callGeminiGenerateContentWithFile(
   }
   
   // All attempts failed
-  console.error(`[pdf-visual-extractor] All payload attempts failed. Last error: ${lastError}`);
+  console.error(`[pdf-visual-extractor] All ${attempts.length} payload attempts failed. Last error: ${lastError}`);
   return { ok: false, error: `All attempts failed. Last: ${lastError}` };
 }
 
