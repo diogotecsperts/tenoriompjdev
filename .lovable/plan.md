@@ -1,82 +1,164 @@
 
-Contexto (o que esse erro significa)
-- O job falhou no `processar-autos` quando a extração “Gemini Vision (Streaming)” tentou chamar `generateContent` passando um arquivo enviado pela Files API.
-- A mensagem “Unsupported file URI type: files/o3jngpo0ttcu” indica que o endpoint **não aceita** o formato curto `files/<id>` (nem em camelCase nem snake_case). Ele quer **URI HTTPS completa** do arquivo (ex.: `https://generativelanguage.googleapis.com/.../files/<id>`).
 
-Diagnóstico no código atual (confirmado no arquivo)
-- Em `supabase/functions/_shared/pdf-visual-extractor.ts`, o helper `callGeminiGenerateContentWithFile()` deriva `shortFileUri` e tenta, em sequência:
-  - A: `fileData` + URI completa
-  - B: `fileData` + URI curta `files/<id>`  ❌
-  - C: `file_data` + URI completa
-  - D: `file_data` + URI curta `files/<id>`  ❌
-- O “Last: D-snake_case-shortUri” do seu erro mostra que chegamos justamente numa tentativa **que a API rejeita por definição**.
+## Correção: Adicionar Fallback Mistral com Divisão quando Gemini Streaming Falhar
 
-Objetivo
-- Parar de tentar `files/<id>` (curto) e garantir que sempre usamos um `fileUri` válido (HTTPS completo) no `generateContent`.
-- Aproveitar para alinhar o `generationConfig` ao padrão que já funciona no projeto (`callGeminiVision`): incluir `responseMimeType: "application/json"` e manter `topP`.
+### Problema Identificado
 
-Mudanças propostas (implementação)
+O código atual (linha 1459-1464) chama `extractVisualContent()` para PDFs grandes sem tratamento de erro:
 
-1) Corrigir o helper `callGeminiGenerateContentWithFile()` para nunca usar URI curta
-Arquivo: `supabase/functions/_shared/pdf-visual-extractor.ts`
+```typescript
+// ATUAL - SEM TRY/CATCH
+const extracted = await extractVisualContent(
+  { stream: pdfStream, size: pdfSizeBytes },
+  { model: 'gemini-2.5-flash' }
+);
+```
 
-1.1 Remover o caminho “shortFileUri”
-- Remover a derivação de `shortFileUri` e remover as tentativas:
-  - `B-camelCase-shortUri`
-  - `D-snake_case-shortUri`
-- Motivo: os próprios erros confirmam que esse formato é rejeitado.
+Quando Gemini retorna `INVALID_ARGUMENT` (limite de tokens excedido), o erro **mata o job inteiro**. Não há fallback.
 
-1.2 Normalizar URI completa (cobrir variação com/sem `/v1beta`)
-- Implementar uma função interna pequena, por exemplo `normalizeGeminiFileUriVariants(fileUri: string): string[]` que retorne uma lista de URIs HTTPS completas para tentar:
-  - `fileUri` como veio do upload (ex.: `https://generativelanguage.googleapis.com/v1beta/files/<id>`)
-  - variante sem `/v1beta` se aplicável (ex.: `https://generativelanguage.googleapis.com/files/<id>`)
-- Motivo: a própria mensagem de erro dá exemplo sem `/v1beta`. Mesmo que a variante com `/v1beta` seja correta, tentar ambas deixa o sistema à prova de inconsistências do backend do provedor.
+### Solução
 
-1.3 Tentar somente payloads “válidos” (sem URI curta), com logs melhores
-- Montar tentativas finitas, por exemplo:
-  - A1: `fileData` + fileUriVariant1
-  - A2: `fileData` + fileUriVariant2
-  - C1: `file_data` + fileUriVariant1
-  - C2: `file_data` + fileUriVariant2
-- Em cada tentativa, logar explicitamente:
-  - attempt name
-  - `apiModel`
-  - `fileUri` usado
-  - status e body (limitado) em caso de 400
+Envolver as chamadas de `extractVisualContent` para PDFs grandes em try/catch e, quando Gemini falhar, executar fallback:
 
-1.4 Alinhar `generationConfig` com o padrão “que já funciona”
-- No `generationConfig` usado para Files API/Streaming, incluir:
-  - `topP: 0.95`
-  - `maxOutputTokens: 65536` (já está)
-  - `responseMimeType: "application/json"`
-- Motivo: seu prompt explicitamente pede JSON; isso reduz chance de validação/retorno “fora do esperado”.
+1. Fazer download dos bytes do storage
+2. Dividir o PDF em partes de ~40MB
+3. Processar cada parte com Mistral OCR
+4. Combinar os resultados
 
-2) Garantir que os 3 caminhos (stream/bytes/base64 Files API) usem o helper corrigido
-Arquivo: `supabase/functions/_shared/pdf-visual-extractor.ts`
-- Verificar que:
-  - `extractWithFilesAPIStream`
-  - `extractWithFilesAPIBytes`
-  - `extractWithFilesAPI`
-  já chamam `callGeminiGenerateContentWithFile()` (chamam), então a correção do helper resolve todos os fluxos com arquivos grandes.
+### Mudanças Técnicas
 
-3) Atualização do backend function que empacota o shared module
-- Após alterar o shared `_shared/pdf-visual-extractor.ts`, atualizar/republicar a função `processar-autos` (é ela que inclui esse módulo no bundle) para garantir que a execução do job use a versão nova.
+#### `supabase/functions/processar-autos/index.ts`
 
-Validação (passo a passo)
-1) Repetir o caso de 68MB
-- Rodar importação do mesmo PDF ~68MB e acompanhar logs:
-  - Deve aparecer apenas tentativas com URI HTTPS completa
-  - Não deve mais aparecer “Unsupported file URI type: files/…”
-2) Regressão: PDF pequeno (<20MB)
-- Confirmar que continua funcionando (esse caminho não depende do extractor streaming do Files API no seu fluxo atual).
-3) Regressão: PDFs médios (20–45MB) se caírem no extractor
-- Confirmar que o fluxo também funciona (deve melhorar, não piorar).
+**Trecho a modificar (linhas 1458-1521):**
 
-Riscos / Mitigações
-- Risco: a API continuar respondendo “Request contains an invalid argument” mesmo com URI completa
-  - Mitigação: logs por tentativa + `responseMimeType` + variantes de URI com/sem `/v1beta`.
-  - Se persistir, o próximo passo seria ajustar o schema do payload para coincidir 100% com o formato REST oficial (manter só snake_case, por exemplo), mas isso só faremos se os logs mostrarem que camelCase é sempre rejeitado.
+Antes de chamar `extractVisualContent`, envolver em try/catch:
 
-Resultado esperado
-- O job não falha mais por causa de tentativas “shortUri”.
-- A chamada ao `generateContent` passa a usar apenas URIs aceitas e, com a normalização, deve parar o 400 nesses PDFs grandes.
+```typescript
+try {
+  // Tentar Gemini Streaming
+  if (pdfStream) {
+    const extracted = await extractVisualContent(...);
+    // ... processamento normal
+  }
+} catch (geminiError) {
+  const errorMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
+  
+  // Verificar se é erro de capacidade/limite do Gemini
+  if (errorMsg.includes('INVALID_ARGUMENT') || 
+      errorMsg.includes('exceeds') || 
+      errorMsg.includes('All attempts failed')) {
+    
+    console.log('[processar-autos] Gemini falhou por limite, usando fallback Mistral OCR com divisão...');
+    
+    // Verificar se tem chave Mistral
+    const mistralKey = getMistralAPIKey();
+    if (!mistralKey) {
+      throw new Error('PDF muito grande para Gemini. Mistral OCR não configurado. Divida o arquivo manualmente (<45MB).');
+    }
+    
+    // Fazer download dos bytes do storage
+    await supabaseAdmin.from('import_jobs').update({ 
+      current_step: 'Fallback: Baixando PDF para divisão...',
+      updated_at: new Date().toISOString()
+    }).eq('id', jobId);
+    
+    const { data: pdfData, error: dlError } = await supabaseAdmin.storage
+      .from('processos-pdf')
+      .download(storagePath);
+    
+    if (dlError || !pdfData) {
+      throw new Error('Falha ao baixar PDF para fallback Mistral');
+    }
+    
+    const pdfBytes = new Uint8Array(await pdfData.arrayBuffer());
+    
+    // Dividir em partes de 40MB
+    await supabaseAdmin.from('import_jobs').update({ 
+      current_step: 'Fallback: Dividindo PDF em partes...',
+      updated_at: new Date().toISOString()
+    }).eq('id', jobId);
+    
+    const { parts, pageRanges } = await splitPDF(pdfBytes, { maxSizeBytes: 40_000_000 });
+    console.log(`[processar-autos] Fallback: Dividido em ${parts.length} partes`);
+    
+    // Processar cada parte com Mistral
+    const partResults: string[] = [];
+    let totalPages = 0;
+    
+    for (let i = 0; i < parts.length; i++) {
+      await supabaseAdmin.from('import_jobs').update({ 
+        current_step: `Fallback: Mistral OCR parte ${i + 1}/${parts.length}...`,
+        progress: 15 + Math.floor((i / parts.length) * 30),
+        updated_at: new Date().toISOString()
+      }).eq('id', jobId);
+      
+      const partResult = await extractWithMistralOCR(parts[i], mistralKey);
+      partResults.push(partResult.text);
+      totalPages += partResult.pageCount;
+    }
+    
+    const combinedText = partResults.join('\n\n--- PARTE DIVIDIDA ---\n\n');
+    console.log(`[processar-autos] Fallback Mistral completo: ${totalPages} páginas`);
+    
+    // Estruturar dados
+    await supabaseAdmin.from('import_jobs').update({ 
+      current_step: 'Estruturando dados extraídos...',
+      progress: 50,
+      updated_at: new Date().toISOString()
+    }).eq('id', jobId);
+    
+    const fillResult = await callAI(
+      await getAIConfig(),
+      systemPrompt,
+      `Analise o texto extraído via Mistral OCR:\n\n${combinedText}`,
+      { promptType: 'fallback_mistral', userId, maxOutputTokens: 65536, jsonMode: true }
+    );
+    
+    visionResult = {
+      provider: 'mistral-ocr-fallback',
+      model: 'mistral-ocr-latest',
+      text: fillResult.text,
+      finishReason: 'STOP',
+      usedFallback: true
+    };
+    
+    modelUsed = 'mistral-ocr/fallback';
+    
+    const parsed = tryFixTruncatedJson(visionResult.text);
+    if (!parsed) throw new Error('Falha ao processar resposta do fallback Mistral');
+    extractedData = ensureValidStructure(parsed);
+    timings.pdfExtraction.end = Date.now();
+    
+  } else {
+    // Erro não relacionado a limite - propagar
+    throw geminiError;
+  }
+}
+```
+
+### Arquivos Modificados
+
+1. `supabase/functions/processar-autos/index.ts`
+   - Adicionar try/catch nas linhas ~1458-1521 (streaming path)
+   - Adicionar try/catch nas linhas ~1489-1518 (bytes path)
+   - Implementar lógica de fallback Mistral com divisão
+
+### Comportamento Esperado
+
+| PDF | Fluxo |
+|-----|-------|
+| <20MB | callPDFProvider (sem mudança) |
+| 20-45MB | extractVisualContent normal |
+| 45-68MB | Gemini Streaming → se falhar → Fallback Mistral + Split |
+| >68MB | Gemini Streaming → se falhar → Fallback Mistral + Split |
+
+### Validação
+
+1. Testar PDF de 68MB que está falhando
+   - Deve ver nos logs: "Gemini falhou por limite, usando fallback Mistral OCR"
+   - Deve ver: "Dividindo em X partes"
+   - Deve completar com sucesso via Mistral
+
+2. Testar PDF pequeno (<20MB)
+   - Deve continuar funcionando normalmente (fluxo não afetado)
+
