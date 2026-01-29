@@ -1,220 +1,161 @@
 
 
-## Plano: Adicionar Mistral OCR ao Modo Passagem Única
+## Plano: Indicador de Provider OCR + Ajuste de Cores do Alerta
 
 ---
 
-## Resumo
+## Resumo das Tarefas
 
-Adicionar Mistral OCR como opção selecionável no modo **"Passagem Única"**, permitindo que seja usado como:
-1. **Provider primário** para extração de PDF (substituindo Gemini)
-2. **Provider de fallback** quando o primário falhar
-
----
-
-## Arquitetura Atual vs Proposta
-
-### Atual
-```text
-Passagem Única:
-├── Provider Principal: [Gemini | Lovable | OpenRouter...]
-├── Provider Fallback: [Gemini | Lovable | OpenRouter...]
-└── Gemini Vision Direto (Legacy)
-```
-
-### Proposta
-```text
-Passagem Única:
-├── Provider Principal: [Gemini | Lovable | OpenRouter | MISTRAL OCR ✨]
-├── Provider Fallback: [Gemini | Lovable | OpenRouter | MISTRAL OCR ✨]
-└── Gemini Vision Direto (Legacy)
-```
+1. **Adicionar indicador visual de provider OCR** no modal de progresso mostrando qual provedor está sendo usado durante a extração (Gemini, Mistral OCR, etc.)
+2. **Ajustar cores da caixa "PDF Grande Detectado"** para seguir o design system médico (teal/slate) em vez de amarelo/âmbar que está destoante
 
 ---
 
-## Mudanças no Frontend
+## Tarefa 1: Indicador de Provider OCR no Modal de Progresso
 
-### 1. Adicionar Mistral OCR à lista AI_PROVIDERS
+### Problema Atual
+Durante o processamento, o modal mostra apenas o provider genérico configurado (`aiConfig`), mas não indica especificamente qual OCR está sendo usado (Gemini Vision vs Mistral OCR).
 
-**Arquivo:** `src/components/dev-panel/DevSettings.tsx`  
-**Linha:** ~79 (lista AI_PROVIDERS)
+### Solução
+1. **Backend**: Modificar o `check-import-status` para retornar informações do provider OCR durante o processamento
+2. **Frontend**: Adicionar um badge visual na seção de progresso mostrando o OCR ativo
 
-Adicionar novo provider na lista:
+### Mudanças no Backend
+
+**Arquivo:** `supabase/functions/check-import-status/index.ts`
+
+Adicionar campo `ocrProvider` na resposta, extraído do `current_step` ou de um novo campo:
+
 ```typescript
-{
-  id: "mistral-ocr",
-  name: "Mistral OCR",
-  description: "Precisão elite (~94.9%) para tabelas e documentos escaneados. OCR especializado.",
-  models: ["mistral-ocr-latest"],
-  requiresKey: true,
-  color: "hsl(25, 95%, 55%)", // Laranja Mistral
-  keyPlaceholder: "..."
+const response: any = {
+  status: job.status,
+  progress: job.progress,
+  currentStep: job.current_step,
+  stepId: job.step_id || null,
+  updatedAt: job.updated_at,
+  // Detectar provider OCR a partir do current_step
+  ocrProvider: job.current_step?.toLowerCase().includes('mistral') 
+    ? 'mistral-ocr' 
+    : job.current_step?.toLowerCase().includes('gemini') 
+      ? 'gemini' 
+      : null,
+  retryInfo: { ... }
+};
+```
+
+### Mudanças no Frontend
+
+**Arquivo:** `src/components/tools/ImportarAutosDialog.tsx`
+
+#### 1. Adicionar estado para OCR provider (linha ~215):
+```typescript
+const [currentOCRProvider, setCurrentOCRProvider] = useState<string | null>(null);
+```
+
+#### 2. Atualizar `checkJobStatus` (linha ~571):
+```typescript
+// Update OCR provider indicator
+if (data.ocrProvider) {
+  setCurrentOCRProvider(data.ocrProvider);
 }
 ```
 
-### 2. Modificar Seção "Extração de PDF" (Passagem Única)
+#### 3. Adicionar Badge de OCR no modal de progresso (após linha ~1506):
+Adicionar um badge visual que mostra o provider OCR quando está na etapa de extração:
 
-**Arquivo:** `src/components/dev-panel/DevSettings.tsx`  
-**Linhas:** ~1900-2096 e ~2098-2250
-
-**Mudança 1:** Na seleção de Provider Principal para PDF (linha ~1943), garantir que Mistral OCR apareça quando houver chave configurada.
-
-**Mudança 2:** Adicionar badge "Elite OCR" para Mistral na lista de providers:
 ```tsx
-<SelectItem key="mistral-ocr" value="mistral-ocr">
-  <div className="flex items-center gap-2">
-    <div className="w-2 h-2 rounded-full bg-orange-500" />
-    <span>Mistral OCR</span>
-    <Badge className="text-[9px] bg-purple-100 text-purple-700">Elite</Badge>
+{/* OCR Provider Indicator */}
+{currentOCRProvider && stepsStatus.find(s => s.id === 'extraction')?.status === 'processing' && (
+  <div className="flex items-center justify-center gap-2 mt-2">
+    <Badge 
+      variant="outline" 
+      className={cn(
+        "text-xs flex items-center gap-1.5",
+        currentOCRProvider === 'mistral-ocr' 
+          ? "border-orange-300 bg-orange-50 text-orange-700" 
+          : "border-blue-300 bg-blue-50 text-blue-700"
+      )}
+    >
+      <Eye className="h-3 w-3" />
+      {currentOCRProvider === 'mistral-ocr' ? 'Mistral OCR' : 'Gemini Vision'}
+    </Badge>
   </div>
-</SelectItem>
+)}
 ```
 
-**Mudança 3:** Na seção "Fallback para PDF" (linha ~2107), adicionar mesma lógica.
-
-### 3. Adicionar Indicador Visual quando Mistral estiver selecionado
-
-Quando `pdf_ai_provider === "mistral-ocr"` ou `pdf_fallback_provider === "mistral-ocr"`:
-```tsx
-<div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-950/30 border border-orange-200">
-  <div className="flex items-start gap-2">
-    <Crown className="h-4 w-4 text-orange-500" />
-    <div className="text-xs space-y-1">
-      <p className="font-medium text-orange-700">Mistral OCR Ativo</p>
-      <ul className="text-orange-600 space-y-0.5">
-        <li>• Precisão elite ~94.9%</li>
-        <li>• Custo: ~$1/1000 páginas</li>
-        <li>• Limite: 50MB por arquivo</li>
-      </ul>
-    </div>
-  </div>
-</div>
-```
-
----
-
-## Mudanças no Backend
-
-### 1. Modificar lógica Single-Pass para suportar Mistral
-
-**Arquivo:** `supabase/functions/processar-autos/index.ts`  
-**Linhas:** ~1200-1310 (bloco SINGLE PASS)
-
-**Mudança:** Antes de usar Gemini ou callPDFProvider, verificar se o provider configurado é `mistral-ocr`:
-
-```typescript
-// Buscar config de provider para PDF
-const { data: pdfConfig } = await supabaseAdmin
-  .from('system_config')
-  .select('value')
-  .in('id', ['pdf_ai_provider', 'pdf_fallback_provider'])
-  .returns<{ id: string; value: string }[]>();
-
-const pdfProvider = pdfConfig?.find(c => c.id === 'pdf_ai_provider')?.value || 'gemini';
-const fallbackProvider = pdfConfig?.find(c => c.id === 'pdf_fallback_provider')?.value || 'gemini';
-
-// Se Mistral OCR for o provider principal
-if (pdfProvider === 'mistral-ocr') {
-  console.log('[processar-autos] Using MISTRAL OCR for single-pass extraction...');
-  
-  const mistralKey = getMistralAPIKey();
-  if (!mistralKey) {
-    console.warn('[processar-autos] Mistral key not found, falling back to Gemini');
-    // Fallback para Gemini
-  } else {
-    // Converter stream para bytes se necessário
-    let bytesForMistral: Uint8Array;
-    if (pdfStream) {
-      const chunks: Uint8Array[] = [];
-      const reader = pdfStream.getReader();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-      }
-      pdfStream = null;
-      const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
-      bytesForMistral = new Uint8Array(totalLength);
-      let offset = 0;
-      for (const chunk of chunks) {
-        bytesForMistral.set(chunk, offset);
-        offset += chunk.length;
-      }
-    } else {
-      bytesForMistral = pdfBytes!;
-    }
-    
-    // Check for split if >50MB
-    if (needsSplit(bytesForMistral.byteLength)) {
-      // Split and process with Mistral
-      const { parts, pageRanges } = await splitPDF(bytesForMistral, { maxSizeBytes: 40_000_000 });
-      // ... process each part with Mistral
-    } else {
-      const mistralResult = await extractWithMistralOCR(bytesForMistral, mistralKey);
-      // ... continue with structured extraction
-    }
-  }
-}
-```
-
-### 2. Adicionar fallback para Mistral quando primário falhar
-
-Na lógica de erro/retry do single-pass, adicionar verificação:
-```typescript
-catch (primaryError) {
-  console.error('[processar-autos] Primary provider failed:', primaryError);
-  
-  // Check if fallback is Mistral OCR
-  if (fallbackProvider === 'mistral-ocr') {
-    console.log('[processar-autos] Attempting Mistral OCR fallback...');
-    const mistralKey = getMistralAPIKey();
-    if (mistralKey) {
-      // ... use Mistral OCR as fallback
-    }
-  }
-}
-```
-
-### 3. Atualizar config.toml se necessário
-
-Verificar se edge function precisa de mais tempo para processamento Mistral (já está com 600s, deve ser suficiente).
-
----
-
-## Estrutura Visual Final no DevPanel
-
+### Resultado Visual
 ```text
-┌─────────────────────────────────────────────────────────────────┐
-│  📄 Extração de PDF                                             │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  Provider Principal para PDF                                    │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │ Provider: [Mistral OCR ▼]                                   ││
-│  │           ● IA Integrada                                    ││
-│  │           ● Google Gemini                                   ││
-│  │           ● Mistral OCR  [Elite] ◄── NOVO                   ││
-│  │           ● OpenRouter                                      ││
-│  │           ● ...                                             ││
-│  └─────────────────────────────────────────────────────────────┘│
-│                                                                 │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │ 👑 Mistral OCR Ativo                                       │ │
-│  │ • Precisão elite ~94.9%                                    │ │
-│  │ • Especializado em tabelas e documentos escaneados         │ │
-│  │ • Custo: ~$1.00 por 1.000 páginas                          │ │
-│  │ • Limite: 50MB (dividido automaticamente se maior)         │ │
-│  └────────────────────────────────────────────────────────────┘ │
-│                                                                 │
-│  ─────────────────────────────────────────────────────────────  │
-│                                                                 │
-│  🛡️ Fallback para PDF                                           │
-│  Provider: [Google Gemini ▼]    Modelo: [gemini-2.5-flash]      │
-│            ● IA Integrada                                       │
-│            ● Google Gemini                                      │
-│            ● Mistral OCR  [Elite] ◄── NOVO                      │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│  ✨ Analisando documento com IA                        │
+│     Tempo decorrido: 45s                               │
+│     [🔧 Google Gemini • gemini-2.5-flash]              │
+│     [👁️ Mistral OCR]  ← NOVO badge de OCR              │
+├────────────────────────────────────────────────────────┤
+│  ✓ Upload do PDF                            2.1s       │
+│  ⟳ Extração de dados (Vision)                         │
+│  ○ Processando dados extraídos                         │
+│  ...                                                   │
+└────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Tarefa 2: Ajustar Cores da Caixa "PDF Grande Detectado"
+
+### Problema Atual
+A caixa usa cores `amber` (amarelo/âmbar) que o usuário considera de mau gosto e fora do tema:
+- `border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30`
+- `text-amber-700 dark:text-amber-400` e `text-amber-600 dark:text-amber-300`
+
+### Solução
+Mudar para o esquema de cores do design system médico (azul/slate) que é mais neutro e profissional:
+
+**Arquivo:** `src/components/tools/ImportarAutosDialog.tsx`  
+**Linhas:** ~1454-1465
+
+### Antes (cores amber):
+```tsx
+<Alert className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
+  <Layers className="h-4 w-4 text-amber-600" />
+  <AlertTitle className="text-amber-700 dark:text-amber-400 text-sm font-medium">
+    PDF Grande Detectado
+  </AlertTitle>
+  <AlertDescription className="text-amber-600 dark:text-amber-300 text-xs">
+    ...
+  </AlertDescription>
+</Alert>
+```
+
+### Depois (cores slate/muted):
+```tsx
+<Alert className="border-border bg-muted/50">
+  <Layers className="h-4 w-4 text-muted-foreground" />
+  <AlertTitle className="text-foreground text-sm font-medium">
+    PDF Grande Detectado
+  </AlertTitle>
+  <AlertDescription className="text-muted-foreground text-xs">
+    Este arquivo ({formatFileSize(selectedFile.size)}) será dividido automaticamente 
+    em partes menores para processamento. Isso é normal e não afeta a qualidade da extração.
+  </AlertDescription>
+</Alert>
+```
+
+### Comparativo Visual
+
+**Antes (amber - mau gosto):**
+```text
+┌──────────────────────────────────────────────┐
+│  🔶 PDF Grande Detectado                     │  ← Fundo amarelo
+│  Este arquivo (68.4 MB)...                   │  ← Texto amarelo
+└──────────────────────────────────────────────┘
+```
+
+**Depois (slate - neutro/profissional):**
+```text
+┌──────────────────────────────────────────────┐
+│  📄 PDF Grande Detectado                     │  ← Fundo cinza suave
+│  Este arquivo (68.4 MB)...                   │  ← Texto neutro
+└──────────────────────────────────────────────┘
 ```
 
 ---
@@ -223,71 +164,15 @@ Verificar se edge function precisa de mais tempo para processamento Mistral (já
 
 | Arquivo | Ação | Descrição |
 |---------|------|-----------|
-| `src/components/dev-panel/DevSettings.tsx` | MODIFICAR | Adicionar Mistral OCR à lista de providers e lógica condicional |
-| `supabase/functions/processar-autos/index.ts` | MODIFICAR | Adicionar suporte a Mistral OCR no modo single-pass |
+| `src/components/tools/ImportarAutosDialog.tsx` | MODIFICAR | Adicionar estado/badge de OCR provider + ajustar cores do alerta |
+| `supabase/functions/check-import-status/index.ts` | MODIFICAR | Retornar informação do OCR provider na resposta |
 
 ---
 
 ## Benefícios
 
-1. **Flexibilidade Total:** Usuário pode escolher Mistral OCR como provider principal OU fallback
-2. **Consistência:** Mesma opção disponível em ambos os modos (Passagem Única e Duas Fases)
-3. **Precisão Elite:** ~94.9% de precisão em tabelas, fórmulas e documentos escaneados
-4. **Custo-Benefício:** ~$1/1000 páginas é mais barato que Gemini Pro
-5. **Auto-Split:** PDFs >50MB são divididos automaticamente (mesma lógica já implementada)
-
----
-
-## Fluxo de Decisão Completo
-
-```text
-                          PDF Recebido
-                              │
-                ┌─────────────┴─────────────┐
-                │  Modo de Importação?      │
-                └─────────────┬─────────────┘
-                   PASSAGEM    │    DUAS
-                   ÚNICA       │    FASES
-                      │        │       │
-              ┌───────┴────┐   │   ┌───┴───┐
-              │ pdf_ai_    │   │   │ phase1│
-              │ provider?  │   │   │ _ocr_ │
-              └─────┬──────┘   │   │provider│
-                    │          │   └───┬───┘
-       ┌────────────┼────────────┐     │
-       │            │            │     │
-    gemini     mistral-ocr    outros   │
-       │            │            │     │
-       ▼            ▼            ▼     ▼
-   ┌────────┐  ┌──────────┐  ┌──────┐ ┌──────────┐
-   │Gemini  │  │Mistral   │  │Call  │ │Fase 1 OCR│
-   │Vision  │  │OCR API   │  │PDF   │ │(config)  │
-   └────┬───┘  └────┬─────┘  │Prov. │ └────┬─────┘
-        │           │        └──┬───┘      │
-        └───────────┴───────────┴──────────┘
-                         │
-                         ▼
-                ┌────────────────┐
-                │ Texto Extraído │
-                └───────┬────────┘
-                        │
-                        ▼
-              ┌──────────────────┐
-              │ Preenchimento    │
-              │ Estruturado JSON │
-              └──────────────────┘
-```
-
----
-
-## Próximos Passos de Implementação
-
-1. Adicionar `mistral-ocr` à lista `AI_PROVIDERS` no DevSettings
-2. Modificar seção "Extração de PDF" para mostrar Mistral como opção
-3. Modificar seção "Fallback para PDF" para mostrar Mistral como opção
-4. Adicionar indicador visual quando Mistral estiver selecionado
-5. Modificar lógica single-pass no `processar-autos` para suportar Mistral como provider
-6. Adicionar lógica de fallback para Mistral no single-pass
-7. Testar fluxo completo com Mistral como provider principal
-8. Testar fluxo de fallback Gemini → Mistral
+1. **Transparência**: Usuário sabe exatamente qual OCR está sendo usado durante o processamento
+2. **Design Consistente**: Cores neutras seguem o design system médico profissional
+3. **UX Melhorada**: Informação útil sem poluição visual
+4. **Acessibilidade**: Contraste adequado mantido com cores do tema
 
