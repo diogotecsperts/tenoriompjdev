@@ -84,6 +84,14 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   requiresKey: false,
   color: "hsl(168, 58%, 39%)"
 }, {
+  id: "mistral-ocr",
+  name: "Mistral OCR",
+  description: "Precisão elite (~94.9%) para tabelas e documentos escaneados. OCR especializado.",
+  models: ["mistral-ocr-latest"],
+  requiresKey: true,
+  color: "hsl(25, 95%, 55%)",
+  keyPlaceholder: "..."
+}, {
   id: "openai",
   name: "OpenAI",
   description: "Modelos GPT-4o e série o1.",
@@ -1929,6 +1937,8 @@ export function DevSettings() {
                 defaultModel = GEMINI_PDF_MODELS[0].id;
               } else if (value === "lovable") {
                 defaultModel = "google/gemini-2.5-flash";
+              } else if (value === "mistral-ocr") {
+                defaultModel = "mistral-ocr-latest";
               }
               setConfig({
                 ...config,
@@ -1945,7 +1955,12 @@ export function DevSettings() {
                         <div className="flex items-center gap-2">
                           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: provider.color }} />
                           <div className="flex flex-col">
-                            <span>{provider.name}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span>{provider.name}</span>
+                              {provider.id === "mistral-ocr" && (
+                                <Badge className="text-[9px] px-1 py-0 bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300">Elite</Badge>
+                              )}
+                            </div>
                             <span className="text-[10px] text-muted-foreground">{provider.description}</span>
                           </div>
                         </div>
@@ -2095,6 +2110,26 @@ export function DevSettings() {
             </div>
           </div>
 
+          {/* Mistral OCR Info Panel */}
+          {config.pdf_ai_provider === "mistral-ocr" && (
+            <div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800">
+              <div className="flex items-start gap-2">
+                <Crown className="h-4 w-4 text-orange-500 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <p className="font-medium text-orange-700 dark:text-orange-400">
+                    Mistral OCR Ativo - Precisão Elite
+                  </p>
+                  <ul className="text-orange-600 dark:text-orange-300 space-y-0.5">
+                    <li>• Precisão elite ~94.9% em tabelas e fórmulas</li>
+                    <li>• Custo: ~$1.00 por 1.000 páginas</li>
+                    <li>• Limite: 50MB por arquivo (dividido automaticamente)</li>
+                    <li>• Output: Markdown estruturado</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* PDF Fallback Provider */}
           <div className="space-y-4 pt-4 border-t">
             <h4 className="font-medium text-sm flex items-center gap-2">
@@ -2112,6 +2147,8 @@ export function DevSettings() {
                 defaultModel = GEMINI_PDF_MODELS[0].id;
               } else if (value === "lovable") {
                 defaultModel = "google/gemini-2.5-flash";
+              } else if (value === "mistral-ocr") {
+                defaultModel = "mistral-ocr-latest";
               }
               setConfig({
                 ...config,
@@ -2127,7 +2164,10 @@ export function DevSettings() {
                       <SelectItem key={provider.id} value={provider.id}>
                         <div className="flex items-center gap-2">
                           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: provider.color }} />
-                          {provider.name}
+                          <span>{provider.name}</span>
+                          {provider.id === "mistral-ocr" && (
+                            <Badge className="text-[9px] px-1 py-0 bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300">Elite</Badge>
+                          )}
                         </div>
                       </SelectItem>
                     ))}
