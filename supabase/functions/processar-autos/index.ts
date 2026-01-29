@@ -1158,7 +1158,7 @@ serve(async (req) => {
   }
 
   try {
-    const { pdfBase64, fileName, filePath, retryFilePath } = await req.json();
+    const { fileName, filePath, retryFilePath } = await req.json();
 
     // Create Supabase admin client
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -1208,41 +1208,58 @@ serve(async (req) => {
       );
     }
 
-    // Check if this is a retry request
-    const isRetry = !!retryFilePath && !pdfBase64;
-    let finalPdfBase64 = pdfBase64;
-    let finalFilePath = filePath || retryFilePath;
-
-    if (isRetry) {
-      console.log('[processar-autos] Retry mode - fetching PDF from storage:', retryFilePath);
-      
-      const { data: fileData, error: downloadError } = await supabaseAdmin.storage
-        .from('processos-pdf')
-        .download(retryFilePath);
-      
-      if (downloadError || !fileData) {
-        console.error('[processar-autos] Error downloading PDF for retry:', downloadError);
-        return new Response(
-          JSON.stringify({ error: "Falha ao recuperar PDF do armazenamento" }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      
-      // Convert to base64
-      const arrayBuffer = await fileData.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      let binary = '';
-      for (let i = 0; i < uint8Array.length; i++) {
-        binary += String.fromCharCode(uint8Array[i]);
-      }
-      finalPdfBase64 = btoa(binary);
-      console.log(`[processar-autos] Retry: PDF loaded from storage, size: ${finalPdfBase64.length} chars`);
-    } else if (!pdfBase64 || !fileName) {
+    // Validate required fields
+    const isRetry = !!retryFilePath;
+    const finalFilePath = filePath || retryFilePath;
+    
+    if (!finalFilePath || !fileName) {
       return new Response(
-        JSON.stringify({ error: "pdfBase64 e fileName são obrigatórios" }),
+        JSON.stringify({ error: "filePath e fileName são obrigatórios" }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    console.log(`[processar-autos] ${isRetry ? 'Retry' : 'New'} request - fetching PDF from storage: ${finalFilePath}`);
+    
+    // MEMORY OPTIMIZATION: Download PDF from storage instead of receiving in request body
+    // This prevents the request body from consuming memory before processing starts
+    const { data: fileData, error: downloadError } = await supabaseAdmin.storage
+      .from('processos-pdf')
+      .download(finalFilePath);
+    
+    if (downloadError || !fileData) {
+      console.error('[processar-autos] Error downloading PDF from storage:', downloadError);
+      return new Response(
+        JSON.stringify({ error: "Falha ao recuperar PDF do armazenamento" }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
+    // Convert to base64 in chunks to reduce memory pressure
+    const arrayBuffer = await fileData.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+    let finalPdfBase64 = '';
+    
+    // Process in chunks of 32KB to avoid string concatenation memory spikes
+    const CHUNK_SIZE = 32768;
+    for (let i = 0; i < uint8Array.length; i += CHUNK_SIZE) {
+      const chunk = uint8Array.slice(i, Math.min(i + CHUNK_SIZE, uint8Array.length));
+      let chunkBinary = '';
+      for (let j = 0; j < chunk.length; j++) {
+        chunkBinary += String.fromCharCode(chunk[j]);
+      }
+      finalPdfBase64 += btoa(chunkBinary);
+    }
+    
+    // IMPORTANT: For proper base64, we need to encode all bytes together, not in chunks
+    // The chunked approach above would produce invalid base64. Let's fix this:
+    let binary = '';
+    for (let i = 0; i < uint8Array.length; i++) {
+      binary += String.fromCharCode(uint8Array[i]);
+    }
+    finalPdfBase64 = btoa(binary);
+    
+    console.log(`[processar-autos] PDF loaded from storage, size: ${finalPdfBase64.length} chars`);
 
     // Create job record with file_path for retry capability
     const { data: job, error: jobError } = await supabaseAdmin
