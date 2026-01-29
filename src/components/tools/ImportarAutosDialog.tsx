@@ -29,7 +29,8 @@ import {
   ChevronDown,
   XCircle,
   Turtle,
-  Layers
+  Layers,
+  Scissors
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -37,6 +38,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { splitPDFClientSide, needsClientSplit } from "@/lib/pdf-splitter";
 
 interface ImportarAutosDialogProps {
   open: boolean;
@@ -242,6 +244,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const lastJobUpdateRef = useRef<string | null>(null);
   const staleCheckCountRef = useRef(0);
   const STALE_THRESHOLD_POLLS = 100; // 100 polls * 3s = 300 segundos (5 min) sem update = stale
+
+  // Client-side PDF splitting state (NEW for large PDFs)
+  const [isSplitting, setIsSplitting] = useState(false);
+  const [splitProgress, setSplitProgress] = useState(0);
+  const [splitMessage, setSplitMessage] = useState('');
 
   // Check if user is developer and fetch AI config
   useEffect(() => {
@@ -651,6 +658,137 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       processingStartTime.current = Date.now();
       setBackendLogs([]);
       
+      const fileSizeMB = selectedFile.size / (1024 * 1024);
+      
+      // === CHECK IF CLIENT-SIDE SPLIT IS NEEDED ===
+      if (needsClientSplit(fileSizeMB)) {
+        console.log(`[ImportarAutosDialog] Large PDF detected (${fileSizeMB.toFixed(2)}MB), starting client-side split...`);
+        
+        // === CHUNKED UPLOAD MODE ===
+        setIsSplitting(true);
+        setSplitProgress(0);
+        setSplitMessage('Preparando divisão do PDF...');
+        
+        try {
+          // Split PDF in browser
+          const { parts, pageRanges, totalPages } = await splitPDFClientSide(
+            selectedFile,
+            { maxSizeBytes: 20_000_000, maxPagesPerPart: 50 },
+            (progress, message) => {
+              setSplitProgress(progress);
+              setSplitMessage(message);
+            }
+          );
+          
+          console.log(`[ImportarAutosDialog] Split complete: ${parts.length} parts, ${totalPages} pages`);
+          
+          setIsSplitting(false);
+          setProcessingStep("uploading");
+          setUploadProgress(0);
+          
+          // Upload each part
+          const partPaths: string[] = [];
+          const baseName = selectedFile.name.replace('.pdf', '');
+          const timestamp = Date.now();
+          
+          for (let i = 0; i < parts.length; i++) {
+            const uploadPercent = Math.floor((i / parts.length) * 90);
+            setUploadProgress(uploadPercent);
+            
+            const partPath = `${user.id}/${timestamp}-${baseName}_part_${i + 1}.pdf`;
+            console.log(`[ImportarAutosDialog] Uploading part ${i + 1}/${parts.length}: ${partPath}`);
+            
+            const { error: uploadError } = await supabase.storage
+              .from('processos-pdf')
+              .upload(partPath, parts[i]);
+            
+            if (uploadError) {
+              console.error(`[ImportarAutosDialog] Upload failed for part ${i + 1}:`, uploadError);
+              throw new Error(`Falha no upload da parte ${i + 1}: ${uploadError.message}`);
+            }
+            
+            partPaths.push(partPath);
+          }
+          
+          setUploadProgress(100);
+          console.log(`[ImportarAutosDialog] All ${parts.length} parts uploaded`);
+          
+          // Store first part as file path for reference
+          setCurrentFilePath(partPaths[0]);
+          
+          // Mark upload step as completed
+          setStepsStatus(prev => prev.map(step => 
+            step.id === 'upload' ? { ...step, status: 'completed' as const } : step
+          ));
+          
+          // Call Edge Function with array of parts
+          setProcessingStep("analyzing");
+          setAnalysisStep("Processando partes do documento...");
+          setAnalysisProgress(0);
+          
+          // Reset steps for new processing (keep upload as completed)
+          setStepsStatus(PROCESSING_STEPS.map(step => ({ 
+            ...step, 
+            status: step.id === 'upload' ? 'completed' as const : 'pending' as const 
+          })));
+          lastStepIdRef.current = null;
+          
+          // Invoke Edge Function with chunked upload info
+          const { data: invokeData, error: invokeError } = await supabase.functions.invoke('processar-autos', {
+            body: { 
+              fileName: selectedFile.name,
+              fileParts: partPaths,
+              pageRanges,
+              totalPages,
+              isChunkedUpload: true
+            }
+          });
+          
+          if (invokeError) {
+            console.error('Function error:', invokeError);
+            throw new Error('Falha ao iniciar processamento');
+          }
+          
+          const jobId = invokeData.jobId;
+          console.log('[ImportarAutosDialog] Chunked job started:', jobId);
+          setCurrentJobId(jobId);
+          
+          // Start polling for status
+          setAnalysisStep("Processando partes com IA...");
+          
+          pollingRef.current = setInterval(async () => {
+            try {
+              const isDone = await checkJobStatus(jobId);
+              if (isDone && pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+              }
+            } catch (error) {
+              if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+              }
+              console.error('Processing error:', error);
+              toast({
+                variant: "destructive",
+                title: "Erro no processamento",
+                description: error instanceof Error ? error.message : "Erro desconhecido",
+              });
+              setProcessingStep("idle");
+              setAnalysisStep("");
+            }
+          }, 3000);
+          
+        } catch (splitError) {
+          console.error('[ImportarAutosDialog] Split error:', splitError);
+          setIsSplitting(false);
+          throw splitError;
+        }
+        
+        return; // Exit after chunked processing started
+      }
+      
+      // === NORMAL UPLOAD MODE (small files) ===
       // Step 1: Upload to storage
       setProcessingStep("uploading");
       setUploadProgress(0);
@@ -741,6 +879,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
     } catch (error) {
       console.error('Processing error:', error);
+      setIsSplitting(false);
       toast({
         variant: "destructive",
         title: "Erro no processamento",
@@ -948,6 +1087,10 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     // Reset network error tracking
     networkErrorCountRef.current = 0;
     setIsReconnecting(false);
+    // Reset client-side splitting state
+    setIsSplitting(false);
+    setSplitProgress(0);
+    setSplitMessage('');
     onOpenChange(false);
   };
 
@@ -1496,16 +1639,16 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                     </div>
                   )}
                   
-                  {/* Large PDF Auto-Split Indicator */}
-                  {selectedFile.size > 45 * 1024 * 1024 && (
+                  {/* Large PDF Client-Side Split Indicator */}
+                  {needsClientSplit(selectedFile.size / (1024 * 1024)) && (
                     <Alert className="border-border bg-muted/50">
-                      <Layers className="h-4 w-4 text-muted-foreground" />
+                      <Scissors className="h-4 w-4 text-muted-foreground" />
                       <AlertTitle className="text-foreground text-sm font-medium">
-                        PDF Grande Detectado
+                        PDF Grande - Divisão Automática
                       </AlertTitle>
                       <AlertDescription className="text-muted-foreground text-xs">
-                        Este arquivo ({formatFileSize(selectedFile.size)}) será dividido automaticamente em partes menores para processamento. 
-                        Isso é normal e não afeta a qualidade da extração.
+                        Este arquivo ({formatFileSize(selectedFile.size)}) será dividido no seu navegador antes do upload.
+                        Isso evita erros de memória e garante processamento confiável.
                       </AlertDescription>
                     </Alert>
                   )}
@@ -1519,7 +1662,24 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             </>
           )}
 
-          {processingStep === "uploading" && (
+          {/* Client-Side Splitting UI */}
+          {isSplitting && (
+            <div className="space-y-4 py-8">
+              <div className="flex items-center justify-center">
+                <Scissors className="h-8 w-8 animate-pulse text-primary" />
+              </div>
+              <div className="text-center">
+                <p className="font-medium">Dividindo PDF no navegador...</p>
+                <p className="text-sm text-muted-foreground mt-1">{splitMessage}</p>
+              </div>
+              <Progress value={splitProgress} />
+              <p className="text-xs text-center text-muted-foreground">
+                Isso acontece localmente no seu computador para evitar erros de memória no servidor.
+              </p>
+            </div>
+          )}
+
+          {processingStep === "uploading" && !isSplitting && (
             <div className="space-y-4 py-8">
               <div className="flex items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />

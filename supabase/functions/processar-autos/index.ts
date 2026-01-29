@@ -1947,7 +1947,7 @@ serve(async (req) => {
   }
 
   try {
-    const { fileName, filePath, retryFilePath } = await req.json();
+    const { fileName, filePath, retryFilePath, fileParts, pageRanges, totalPages, isChunkedUpload } = await req.json();
 
     // Create Supabase admin client
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -1999,7 +1999,8 @@ serve(async (req) => {
 
     // Validate required fields
     const isRetry = !!retryFilePath;
-    const finalFilePath = filePath || retryFilePath;
+    const isChunked = isChunkedUpload && fileParts?.length > 0;
+    const finalFilePath = filePath || retryFilePath || (isChunked ? fileParts[0] : null);
     
     if (!finalFilePath || !fileName) {
       return new Response(
@@ -2008,7 +2009,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[processar-autos] ${isRetry ? 'Retry' : 'New'} request - scheduling background processing for: ${finalFilePath}`);
+    console.log(`[processar-autos] ${isRetry ? 'Retry' : isChunked ? 'Chunked' : 'New'} request - scheduling background processing for: ${finalFilePath}${isChunked ? ` (${fileParts.length} parts)` : ''}`);
 
     // Create job record with file_path for retry capability
     const { data: job, error: jobError } = await supabaseAdmin
@@ -2017,7 +2018,7 @@ serve(async (req) => {
         user_id: userId,
         status: 'processing',
         progress: 0,
-        current_step: isRetry ? 'Reprocessando documento...' : 'Iniciando processamento...',
+        current_step: isRetry ? 'Reprocessando documento...' : isChunked ? `Processando ${fileParts.length} partes...` : 'Iniciando processamento...',
         file_path: finalFilePath || null
       })
       .select('id')
@@ -2032,11 +2033,17 @@ serve(async (req) => {
     }
 
     const jobId = job.id;
-    console.log(`[processar-autos] Created job ${jobId} for user ${userId}${isRetry ? ' (RETRY)' : ''}`);
+    console.log(`[processar-autos] Created job ${jobId} for user ${userId}${isRetry ? ' (RETRY)' : isChunked ? ' (CHUNKED)' : ''}`);
 
     // Start background processing using EdgeRuntime.waitUntil
-    // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
-    EdgeRuntime.waitUntil(processarPDFBackground(jobId, finalFilePath, fileName, supabaseAdmin, isRetry, userId));
+    if (isChunked) {
+      // For chunked uploads, pass the parts info to background processor
+      // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
+      EdgeRuntime.waitUntil(processarChunkedPDFBackground(jobId, fileParts, pageRanges, totalPages, fileName, supabaseAdmin, userId));
+    } else {
+      // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
+      EdgeRuntime.waitUntil(processarPDFBackground(jobId, finalFilePath, fileName, supabaseAdmin, isRetry, userId));
+    }
 
     // Return immediately with jobId
     return new Response(
