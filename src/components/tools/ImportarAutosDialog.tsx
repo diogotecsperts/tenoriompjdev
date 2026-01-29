@@ -239,7 +239,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const [isJobStale, setIsJobStale] = useState(false);
   const lastJobUpdateRef = useRef<string | null>(null);
   const staleCheckCountRef = useRef(0);
-  const STALE_THRESHOLD_POLLS = 20; // 20 polls * 3s = 60 segundos sem update = stale
+  const STALE_THRESHOLD_POLLS = 60; // 60 polls * 3s = 180 segundos (3 min) sem update = stale
 
   // Check if user is developer and fetch AI config
   useEffect(() => {
