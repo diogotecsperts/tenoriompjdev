@@ -81,6 +81,13 @@ interface ExtractedData {
     tratamentos_realizados: string;
     afastamentos: string;
   };
+  posto_trabalho: {
+    cargo_funcao: string;
+    data_admissao: string;
+    data_afastamento: string;
+    descricao_ambiente: string;
+    descricao_atividades: string;
+  };
   exame_clinico: {
     laudos_medicos: string;
     exames_complementares: string;
@@ -90,6 +97,7 @@ interface ExtractedData {
     cids_mencionados: string[];
     incapacidade_alegada: string;
     nexo_sugerido: string;
+    tipo_incapacidade: string;
   };
   quesitos: {
     juizo: string;
@@ -969,12 +977,21 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         tratamentos: extractedData.historico.tratamentos_realizados || '',
         afastamentos: extractedData.historico.afastamentos || '',
         
+        // Dados do Posto de Trabalho (NOVOS)
+        dados_funcionais_cargo: extractedData.posto_trabalho?.cargo_funcao || '',
+        dados_funcionais_admissao: extractedData.posto_trabalho?.data_admissao || null,
+        dados_funcionais_afastamento: extractedData.posto_trabalho?.data_afastamento || null,
+        descricao_posto_trabalho: extractedData.posto_trabalho?.descricao_ambiente || '',
+        descricao_atividades_laborais: extractedData.posto_trabalho?.descricao_atividades || '',
+        
         laudos_medicos: extractedData.exame_clinico.laudos_medicos || '',
         exames_complementares: extractedData.exame_clinico.exames_complementares || '',
         
         conclusao_cid: extractedData.informacoes_medicas.cids_mencionados?.join(', ') || '',
         conclusao_incapacidade: extractedData.informacoes_medicas.incapacidade_alegada || '',
         nexo_causal_tipo: extractedData.informacoes_medicas.nexo_sugerido || '',
+        // Mapear tipo_incapacidade para conclusao_status (marcação de checkbox)
+        conclusao_status: extractedData.informacoes_medicas.tipo_incapacidade || '',
         
         quesitos_juizo: extractedData.quesitos.juizo || '',
         quesitos_reclamante: extractedData.quesitos.reclamante || '',

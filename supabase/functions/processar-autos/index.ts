@@ -74,6 +74,13 @@ ESTRUTURA JSON A RETORNAR:
     "tratamentos_realizados": "",
     "afastamentos": ""
   },
+  "posto_trabalho": {
+    "cargo_funcao": "",
+    "data_admissao": "",
+    "data_afastamento": "",
+    "descricao_ambiente": "",
+    "descricao_atividades": ""
+  },
   "exame_clinico": {
     "laudos_medicos": "",
     "exames_complementares": "",
@@ -82,7 +89,8 @@ ESTRUTURA JSON A RETORNAR:
   "informacoes_medicas": {
     "cids_mencionados": [],
     "incapacidade_alegada": "",
-    "nexo_sugerido": ""
+    "nexo_sugerido": "",
+    "tipo_incapacidade": ""
   },
   "quesitos": {
     "juizo": "",
@@ -111,16 +119,25 @@ INSTRUÇÕES ESPECÍFICAS:
    - laudos_medicos: resumo dos laudos médicos apresentados
    - exames_complementares: resultados de exames (imagem, laboratoriais)
    - lesoes_descritas: lesões mencionadas nos documentos
-7. INFORMAÇÕES MÉDICAS:
-   - cids_mencionados: lista de códigos CID encontrados
-   - incapacidade_alegada: tipo de incapacidade mencionada
+7. INFORMAÇÕES MÉDICAS - PRIORIDADE MÁXIMA:
+   - cids_mencionados: EXTRAIA TODOS os códigos CID-10 do documento (ex: M54.2, G56.0, J15.9). Procure em laudos, atestados, receitas, CAT. NÃO deixe vazio se houver qualquer CID.
+   - incapacidade_alegada: tipo de incapacidade mencionada (total/parcial, temporária/permanente)
    - nexo_sugerido: "direto", "concausa", "agravamento" ou "" se não mencionado
+   - tipo_incapacidade: "total_temporaria", "parcial_permanente", "parcial_temporaria", "total_permanente", "ausencia" ou ""
 8. QUESITOS: Se houver quesitos no documento, copie-os integralmente separados por categoria
 9. TEXTOS BRUTOS - MUITO IMPORTANTE:
    - peticao_inicial: Copie o TEXTO COMPLETO da petição inicial (a íntegra ou o máximo possível)
    - contestacao: Copie o TEXTO COMPLETO da contestação (a íntegra ou o máximo possível)
    - Esses textos serão usados para gerar resumos técnicos posteriormente
 10. RESUMO: Síntese breve do caso (máximo 300 caracteres)
+11. POSTO DE TRABALHO - MUITO IMPORTANTE:
+   - cargo_funcao: cargo ou função exercida pelo reclamante (ex: Operador de Máquinas, Auxiliar de Produção)
+   - data_admissao: data de admissão na empresa (YYYY-MM-DD)
+   - data_afastamento: data de afastamento ou desligamento (YYYY-MM-DD)
+   - descricao_ambiente: ambiente físico de trabalho, equipamentos utilizados, condições ergonômicas, exposição a riscos ocupacionais (ruído, poeira, produtos químicos, etc.)
+   - descricao_atividades: tarefas diárias, movimentos repetitivos, esforços físicos, posturas adotadas, jornada de trabalho, pausas
+   
+   ATENÇÃO: Estes campos são CRÍTICOS para o laudo pericial. Extraia DETALHADAMENTE tudo que encontrar sobre o posto de trabalho, atividades laborais, cargo e datas funcionais. Busque estas informações na petição inicial, CTPS, PPP, PPRA, PCMSO, laudos ergonômicos e depoimentos.
 
 FORMATO DE RESPOSTA OBRIGATÓRIO:
 - Retorne APENAS o objeto JSON, sem markdown, sem \`\`\`, sem explicações.
@@ -310,8 +327,9 @@ function ensureValidStructure(data: any): object {
     acidente: { data: "", descricao: "", local: "" },
     documentos_checklist: { cat: false, prontuario: false, receitas: false, exames: false, laudos_anteriores: false, atestados: false, outros: [] },
     historico: { historia_atual: "", historico_ocupacional: "", antecedentes_patologicos: "", tratamentos_realizados: "", afastamentos: "" },
+    posto_trabalho: { cargo_funcao: "", data_admissao: "", data_afastamento: "", descricao_ambiente: "", descricao_atividades: "" },
     exame_clinico: { laudos_medicos: "", exames_complementares: "", lesoes_descritas: "" },
-    informacoes_medicas: { cids_mencionados: [], incapacidade_alegada: "", nexo_sugerido: "" },
+    informacoes_medicas: { cids_mencionados: [], incapacidade_alegada: "", nexo_sugerido: "", tipo_incapacidade: "" },
     quesitos: { juizo: "", reclamante: "", reclamada: "" },
     textos_brutos: { peticao_inicial: "", contestacao: "" },
     resumo: ""
@@ -327,6 +345,7 @@ function ensureValidStructure(data: any): object {
     acidente: { ...defaultStructure.acidente, ...(data.acidente || {}) },
     documentos_checklist: { ...defaultStructure.documentos_checklist, ...(data.documentos_checklist || {}) },
     historico: { ...defaultStructure.historico, ...(data.historico || {}) },
+    posto_trabalho: { ...defaultStructure.posto_trabalho, ...(data.posto_trabalho || {}) },
     exame_clinico: { ...defaultStructure.exame_clinico, ...(data.exame_clinico || {}) },
     informacoes_medicas: { ...defaultStructure.informacoes_medicas, ...(data.informacoes_medicas || {}) },
     quesitos: { ...defaultStructure.quesitos, ...(data.quesitos || {}) },
@@ -617,8 +636,9 @@ const results = {
     cids: Array.isArray(extractedData.informacoes_medicas?.cids_mencionados) && extractedData.informacoes_medicas.cids_mencionados.length > 0
       ? extractedData.informacoes_medicas.cids_mencionados.join(', ') 
       : '',
-    postoTrabalho: '',
-    atividadesLaborais: '',
+    postoTrabalho: extractedData.posto_trabalho?.descricao_ambiente || '',
+    atividadesLaborais: extractedData.posto_trabalho?.descricao_atividades || '',
+    cargoFuncao: extractedData.posto_trabalho?.cargo_funcao || '',
     historicoOcupacional: extractedData.historico?.historico_ocupacional || '',
     exameFisico: '',
     examesComplementares: extractedData.exame_clinico?.exames_complementares || '',
