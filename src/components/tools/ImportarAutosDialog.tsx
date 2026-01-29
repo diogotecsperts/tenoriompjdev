@@ -530,35 +530,33 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     }));
   };
 
+  // Consecutive network errors counter for resilient polling
+  const networkErrorCountRef = useRef(0);
+  const MAX_CONSECUTIVE_NETWORK_ERRORS = 10; // ~30s of failures before giving up
+  const [isReconnecting, setIsReconnecting] = useState(false);
+
   const checkJobStatus = async (jobId: string): Promise<boolean> => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/check-import-status`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-            'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: JSON.stringify({ jobId }),
-        }
-      );
+      // Use supabase.functions.invoke instead of raw fetch for better auth handling
+      const { data, error } = await supabase.functions.invoke('check-import-status', {
+        body: { jobId }
+      });
 
-      if (!response.ok) {
-        throw new Error('Falha ao verificar status');
+      // Handle invocation error (e.g., network issues)
+      if (error) {
+        throw error;
       }
-
-      const data = await response.json();
+      
+      // Reset network error counter on success
+      networkErrorCountRef.current = 0;
+      setIsReconnecting(false);
       
       // NEW: Detect stale job (updated_at não muda)
       if (lastJobUpdateRef.current === data.updatedAt) {
         staleCheckCountRef.current++;
         
         if (staleCheckCountRef.current >= STALE_THRESHOLD_POLLS && !isJobStale) {
-          console.warn('[ImportarAutosDialog] Job appears stale - no updates for 60+ seconds');
+          console.warn('[ImportarAutosDialog] Job appears stale - no updates for 5+ minutes');
           setIsJobStale(true);
         }
       } else {
@@ -610,6 +608,37 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       return false; // Continue polling
     } catch (error) {
       console.error('Polling error:', error);
+      
+      // Check if this is a network error (Failed to fetch)
+      const isNetworkError = error instanceof TypeError && 
+        (error.message.includes('Failed to fetch') || error.message.includes('NetworkError'));
+      
+      // Also check for FunctionsHttpError with network-like issues
+      const isInvokeNetworkError = error && 
+        typeof error === 'object' && 
+        'name' in error && 
+        (error.name === 'FunctionsRelayError' || error.name === 'FunctionsFetchError');
+      
+      if (isNetworkError || isInvokeNetworkError) {
+        networkErrorCountRef.current++;
+        console.warn(`[ImportarAutosDialog] Network error ${networkErrorCountRef.current}/${MAX_CONSECUTIVE_NETWORK_ERRORS}`);
+        
+        if (networkErrorCountRef.current < MAX_CONSECUTIVE_NETWORK_ERRORS) {
+          // Show reconnecting indicator but don't fail yet
+          setIsReconnecting(true);
+          setAnalysisStep('Conexão instável, reconectando...');
+          return false; // Continue polling
+        }
+        
+        // Too many failures, give up
+        console.error('[ImportarAutosDialog] Too many consecutive network errors, stopping polling');
+        toast({
+          variant: "destructive",
+          title: "Conexão perdida",
+          description: "Não foi possível reconectar após várias tentativas. O processamento pode ainda estar rodando no servidor.",
+        });
+      }
+      
       throw error;
     }
   };
@@ -667,31 +696,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       // Get session for auth token
       const { data: { session } } = await supabase.auth.getSession();
       
-      // Send only file path - Edge Function will download from storage
-      // This avoids memory issues from sending large base64 in request body
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/processar-autos`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-            'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: JSON.stringify({ 
-            fileName: selectedFile.name,
-            filePath: filePathToUpload
-          }),
+      // Use supabase.functions.invoke for better reliability
+      const { data: invokeData, error: invokeError } = await supabase.functions.invoke('processar-autos', {
+        body: { 
+          fileName: selectedFile.name,
+          filePath: filePathToUpload
         }
-      );
+      });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Function error:', errorText);
+      if (invokeError) {
+        console.error('Function error:', invokeError);
         throw new Error('Falha ao iniciar processamento');
       }
 
-      const { jobId } = await response.json();
+      const jobId = invokeData.jobId;
       console.log('Job started:', jobId);
       setCurrentJobId(jobId);
 
@@ -927,6 +945,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setIsJobStale(false);
     lastJobUpdateRef.current = null;
     staleCheckCountRef.current = 0;
+    // Reset network error tracking
+    networkErrorCountRef.current = 0;
+    setIsReconnecting(false);
     onOpenChange(false);
   };
 
@@ -954,31 +975,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     lastStepIdRef.current = null;
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/processar-autos`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-            'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-          body: JSON.stringify({ 
-            retryFilePath: currentFilePath,
-            fileName: selectedFile.name
-          }),
+      // Use supabase.functions.invoke for retry as well
+      const { data: invokeData, error: invokeError } = await supabase.functions.invoke('processar-autos', {
+        body: { 
+          retryFilePath: currentFilePath,
+          fileName: selectedFile.name
         }
-      );
+      });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Retry function error:', errorText);
+      if (invokeError) {
+        console.error('Retry function error:', invokeError);
         throw new Error('Falha ao iniciar reprocessamento');
       }
 
-      const { jobId } = await response.json();
+      const jobId = invokeData.jobId;
       console.log('Retry job started:', jobId);
       setCurrentJobId(jobId); // Update to new jobId for fetching attempts
 
