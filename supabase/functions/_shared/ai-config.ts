@@ -395,9 +395,9 @@ export async function callAI(
   config: AIConfig, 
   systemPrompt: string, 
   userPrompt: string,
-  options?: { userId?: string; promptType?: string }
+  options?: { userId?: string; promptType?: string; maxOutputTokens?: number }
 ): Promise<{ text: string; provider: string; model: string; usedFallback: boolean }> {
-  console.log(`[AI Call] Provider: ${config.provider}, Model: ${config.model}`);
+  console.log(`[AI Call] Provider: ${config.provider}, Model: ${config.model}${options?.maxOutputTokens ? `, maxOutputTokens: ${options.maxOutputTokens}` : ''}`);
   const startTime = Date.now();
 
   if (!config.apiKey) {
@@ -405,7 +405,7 @@ export async function callAI(
   }
 
   try {
-    const result = await callProvider(config, systemPrompt, userPrompt);
+    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens);
     const latencyMs = Date.now() - startTime;
 
     // Log successful call
@@ -454,7 +454,7 @@ export async function callAI(
           displayModel: config.fallback.displayModel
         };
 
-        const result = await callProvider(fallbackConfig, systemPrompt, userPrompt);
+        const result = await callProvider(fallbackConfig, systemPrompt, userPrompt, options?.maxOutputTokens);
         const fallbackLatency = Date.now() - fallbackStartTime;
 
         // Log successful fallback
@@ -501,40 +501,48 @@ export async function callAI(
 async function callProvider(
   config: AIConfig, 
   systemPrompt: string, 
-  userPrompt: string
+  userPrompt: string,
+  maxOutputTokens?: number
 ): Promise<{ text: string; provider: string; model: string }> {
   switch (config.provider) {
     case 'lovable':
-      return await callLovableAI(config, systemPrompt, userPrompt);
+      return await callLovableAI(config, systemPrompt, userPrompt, maxOutputTokens);
     case 'gemini':
-      return await callGeminiDirect(config, systemPrompt, userPrompt);
+      return await callGeminiDirect(config, systemPrompt, userPrompt, maxOutputTokens);
     case 'openai':
     case 'groq':
     case 'deepseek':
     case 'openrouter':
-      return await callOpenAICompatible(config, systemPrompt, userPrompt);
+      return await callOpenAICompatible(config, systemPrompt, userPrompt, maxOutputTokens);
     case 'claude':
-      return await callClaude(config, systemPrompt, userPrompt);
+      return await callClaude(config, systemPrompt, userPrompt, maxOutputTokens);
     default:
       console.warn(`[AI Call] Unknown provider ${config.provider}, falling back to Lovable`);
-      return await callLovableAI(config, systemPrompt, userPrompt);
+      return await callLovableAI(config, systemPrompt, userPrompt, maxOutputTokens);
   }
 }
 
-async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string) {
+async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number) {
+  const body: any = {
+    model: config.model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ],
+  };
+  
+  // Add max_tokens if specified (OpenAI-compatible parameter)
+  if (maxOutputTokens) {
+    body.max_tokens = maxOutputTokens;
+  }
+  
   const response = await fetchWithRetry(config.endpoint, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${config.apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: config.model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -550,7 +558,7 @@ async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt:
   };
 }
 
-async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string) {
+async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number) {
   const url = `${config.endpoint}/${config.model}:generateContent?key=${config.apiKey}`;
   
   const response = await fetchWithRetry(url, {
@@ -563,7 +571,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
       generationConfig: {
         temperature: 0.7,
         topP: 0.95,
-        maxOutputTokens: 8192,
+        maxOutputTokens: maxOutputTokens || 8192,
       }
     })
   });
@@ -581,20 +589,27 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
   };
 }
 
-async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string) {
+async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number) {
+  const body: any = {
+    model: config.model,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ],
+  };
+  
+  // Add max_tokens if specified
+  if (maxOutputTokens) {
+    body.max_tokens = maxOutputTokens;
+  }
+  
   const response = await fetchWithRetry(config.endpoint, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${config.apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: config.model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -610,7 +625,7 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
   };
 }
 
-async function callClaude(config: AIConfig, systemPrompt: string, userPrompt: string) {
+async function callClaude(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number) {
   const response = await fetchWithRetry(config.endpoint, {
     method: 'POST',
     headers: {
@@ -620,7 +635,7 @@ async function callClaude(config: AIConfig, systemPrompt: string, userPrompt: st
     },
     body: JSON.stringify({
       model: config.model,
-      max_tokens: 8192,
+      max_tokens: maxOutputTokens || 8192,
       system: systemPrompt,
       messages: [
         { role: 'user', content: userPrompt }
