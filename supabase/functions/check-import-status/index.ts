@@ -22,54 +22,33 @@ serve(async (req) => {
       );
     }
 
-    // Get user from auth token using getClaims (more reliable than getUser for long-running processes)
+    // IMPORTANT: don't call auth.getUser()/getClaims here.
+    // During long-running imports, auth session lookups can return "Session not found".
+    // Instead, rely on DB JWT verification + RLS on import_jobs to ensure the caller can only
+    // read their own job.
     const authHeader = req.headers.get('Authorization');
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    
-    let userId: string | null = null;
 
-    if (authHeader?.startsWith('Bearer ')) {
-      const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: authHeader } }
-      });
-      
-      // Use getClaims for JWT validation - more reliable than getUser during long processes
-      const token = authHeader.replace('Bearer ', '');
-      const { data, error: claimsError } = await supabaseClient.auth.getClaims(token);
-      
-      if (!claimsError && data?.claims?.sub) {
-        userId = data.claims.sub as string;
-        console.log("[check-import-status] User authenticated via getClaims:", userId);
-      } else {
-        // Fallback to getUser if getClaims fails
-        console.log("[check-import-status] getClaims failed, trying getUser...");
-        const { data: { user } } = await supabaseClient.auth.getUser();
-        userId = user?.id || null;
-        if (userId) {
-          console.log("[check-import-status] User authenticated via getUser:", userId);
-        }
-      }
-    }
-
-    if (!userId) {
-      console.log("[check-import-status] No valid auth found");
+    if (!authHeader?.startsWith('Bearer ')) {
+      console.log("[check-import-status] Missing/invalid Authorization header");
       return new Response(
         JSON.stringify({ error: "Usuário não autenticado" }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Use service role to query (RLS would also work but this is more reliable)
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+    // Query using anon key + caller JWT so PostgREST verifies the JWT signature,
+    // and RLS ensures the caller can only read their own job row.
+    const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
 
     // Get job status
-    const { data: job, error } = await supabaseAdmin
+    const { data: job, error } = await supabaseClient
       .from('import_jobs')
       .select('*')
       .eq('id', jobId)
-      .eq('user_id', userId)
       .single();
 
     if (error || !job) {
