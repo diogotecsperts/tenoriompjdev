@@ -664,14 +664,19 @@ const results = {
 }
 
 // Background processing function
+// MEMORY OPTIMIZATION: Using object wrapper to allow early cleanup of large PDF string
 async function processarPDFBackground(
   jobId: string,
-  pdfBase64: string,
+  pdfBase64Input: string,
   fileName: string,
   supabaseAdmin: any,
   isRetry: boolean = false,
   userId: string
 ) {
+  // Wrap in object to allow nullifying after use (helps GC reclaim memory faster)
+  const pdfHolder: { data: string | null } = { data: pdfBase64Input };
+  const pdfSizeChars = pdfBase64Input.length;
+  
   let modelUsed = 'unknown';
   let attemptId: string | null = null;
   
@@ -686,7 +691,7 @@ async function processarPDFBackground(
     // Log job start
     await logInfo('processar-autos', `Iniciando processamento de PDF: ${fileName}`, jobId, {
       isRetry,
-      pdfSizeChars: pdfBase64.length
+      pdfSizeChars
     });
 
     // Get current retry_count from job
@@ -737,7 +742,7 @@ async function processarPDFBackground(
       })
       .eq('id', jobId);
 
-    console.log(`[processar-autos] Processing PDF: ${fileName}, size: ${pdfBase64.length} chars`);
+    console.log(`[processar-autos] Processing PDF: ${fileName}, size: ${pdfSizeChars} chars`);
 
     // Fetch import strategy configuration
     const { data: strategyData } = await supabaseAdmin
@@ -770,7 +775,7 @@ async function processarPDFBackground(
       timings.pdfExtraction.start = Date.now();
 
       // Determine if we need Files API for large PDFs (> 50MB)
-      const pdfSizeBytes = Math.ceil(pdfBase64.length * 3 / 4);
+      const pdfSizeBytes = Math.ceil(pdfSizeChars * 3 / 4);
       const useFilesAPI = pdfSizeBytes > 50_000_000;
       console.log(`[processar-autos] PDF size: ${(pdfSizeBytes / (1024 * 1024)).toFixed(2)}MB, useFilesAPI: ${useFilesAPI}`);
 
@@ -779,10 +784,20 @@ async function processarPDFBackground(
       console.log(`[processar-autos] Phase 1 using model: ${phase1Model}`);
 
       try {
-        const extracted = await extractVisualContent(pdfBase64, { 
+        // Validate PDF data is still available
+        if (!pdfHolder.data) {
+          throw new Error('PDF data was unexpectedly cleared');
+        }
+        
+        const extracted = await extractVisualContent(pdfHolder.data, { 
           useFilesAPI,
           model: phase1Model 
         });
+        
+        // MEMORY OPTIMIZATION: Clear PDF from memory after Phase 1 extraction
+        // In two-phase mode, we only need the extracted text from here on
+        pdfHolder.data = null;
+        console.log('[processar-autos] MEMORY: Cleared PDF base64 after Phase 1 extraction');
         
         timings.pdfExtraction.end = Date.now();
         modelUsed = `${extracted.provider}/${extracted.model}`;
@@ -904,10 +919,17 @@ async function processarPDFBackground(
           updated_at: new Date().toISOString()
         }).eq('id', jobId);
         
-        visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
+        if (!pdfHolder.data) {
+          throw new Error('PDF data was unexpectedly cleared during fallback');
+        }
+        
+        visionResult = await callPDFProvider(pdfHolder.data, systemPrompt, {
           promptType: 'pdf_extraction',
           userId: userId
         });
+        
+        // Clear PDF after use
+        pdfHolder.data = null;
         
         timings.pdfExtraction.end = Date.now();
         modelUsed = `${visionResult.provider}/${visionResult.model}`;
@@ -935,10 +957,18 @@ async function processarPDFBackground(
 
       timings.pdfExtraction.start = Date.now();
       
-      visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
+      if (!pdfHolder.data) {
+        throw new Error('PDF data not available');
+      }
+      
+      visionResult = await callPDFProvider(pdfHolder.data, systemPrompt, {
         promptType: 'pdf_extraction',
         userId: userId
       });
+      
+      // MEMORY OPTIMIZATION: Clear PDF after extraction in single-pass mode
+      pdfHolder.data = null;
+      console.log('[processar-autos] MEMORY: Cleared PDF base64 after single-pass extraction');
       
       timings.pdfExtraction.end = Date.now();
       modelUsed = `${visionResult.provider}/${visionResult.model}`;
