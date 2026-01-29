@@ -54,11 +54,13 @@ interface Stats {
 
 const PROMPT_TYPE_LABELS: Record<string, string> = {
   pdf_extraction: 'Extração PDF',
+  chunked_import: 'Import. Chunked',
   resumo_peticao: 'Resumo Petição',
   resumo_contestacao: 'Resumo Contestação',
   descricao_doencas: 'Descrição Doenças',
   nexo_causal: 'Nexo Causal',
-  incapacidade: 'Incapacidade'
+  incapacidade: 'Incapacidade',
+  referencias_bibliograficas: 'Referências Bibliográficas'
 };
 
 const PROVIDER_NAMES: Record<string, string> = {
@@ -381,11 +383,13 @@ export function DevAIUsageLogs() {
             <SelectContent>
               <SelectItem value="all">Todos os tipos</SelectItem>
               <SelectItem value="pdf_extraction">Extração PDF</SelectItem>
+              <SelectItem value="chunked_import">Import. Chunked</SelectItem>
               <SelectItem value="resumo_peticao">Resumo Petição</SelectItem>
               <SelectItem value="resumo_contestacao">Resumo Contestação</SelectItem>
               <SelectItem value="descricao_doencas">Descrição Doenças</SelectItem>
               <SelectItem value="nexo_causal">Nexo Causal</SelectItem>
               <SelectItem value="incapacidade">Incapacidade</SelectItem>
+              <SelectItem value="referencias_bibliograficas">Referências Bibliográficas</SelectItem>
             </SelectContent>
           </Select>
 

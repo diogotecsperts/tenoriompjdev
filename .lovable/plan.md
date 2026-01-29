@@ -1,250 +1,80 @@
+# Client-Side PDF Splitting - Implementação Completa
 
-## Plano: Melhorias de UX e Logs para Client-Side PDF Splitting
+## Status: ✅ IMPLEMENTADO
 
-### Descobertas da Análise
+### Resumo
 
-#### 1. Status do Client-Side Splitting
-O Client-Side PDF Splitting já está implementado e funciona **independente da estratégia de importação** (Passagem Única ou Duas Fases):
+Implementação completa das melhorias de UX e logs para o sistema de Client-Side PDF Splitting, incluindo UI detalhada durante splitting/upload e filtros no DevPanel.
+
+### O que foi implementado
+
+#### 1. `src/lib/pdf-splitter.ts` - Callback para partes criadas
+- ✅ Interface `PartCreatedInfo` com partNumber, pageRange e sizeMB
+- ✅ Callback `onPartCreated` chamado após cada parte ser criada
+- ✅ Atualização em tempo real da UI durante o split
+
+#### 2. `src/components/tools/ImportarAutosDialog.tsx` - UI aprimorada
+- ✅ Estado `splitParts` (array de partes criadas)
+- ✅ Estado `currentUploadingPart` (índice da parte em upload)
+- ✅ **UI de Splitting melhorada**:
+  - Badge mostrando quantidade de partes
+  - Grid com cada parte: número, intervalo de páginas, tamanho em MB
+  - CheckCircle verde para partes já criadas
+- ✅ **UI de Upload melhorada**:
+  - Indicador mostrando qual parte está sendo enviada (X/Y)
+  - Lista de partes com status individual (enviada/enviando/pendente)
+  - Loader animado na parte em upload
+
+#### 3. `src/components/dev-panel/DevAIUsageLogs.tsx` - Filtro chunked
+- ✅ `chunked_import` adicionado ao mapeamento de labels
+- ✅ Item no select de filtro por tipo
+- ✅ `referencias_bibliograficas` também adicionado
+
+#### 4. `src/components/dev-panel/DevBackendLogs.tsx` - Badge visual
+- ✅ Ícone `Layers` importado
+- ✅ Badge roxo "Chunked" aparece quando:
+  - Mensagem contém "chunked" ou "partes"
+  - Metadata contém `partsProcessed`
+
+### Arquitetura do Fluxo
 
 ```text
-Frontend (PDF > 20MB):
-  └── splitPDFClientSide() 
-  └── Upload das partes
-  └── Chama processar-autos com isChunkedUpload: true
-
-Backend:
-  └── Se isChunkedUpload === true:
-      └── processarChunkedPDFBackground()  ← SEMPRE Mistral OCR + AI Config para estruturação
-  └── Senão:
-      └── processarPDFBackground()
-          └── Verifica import_strategy → single_pass ou two_phase
+1. Usuário seleciona PDF > 20MB
+2. Sistema mostra alerta sobre divisão automática
+3. Usuário clica "Processar com IA"
+4. Fase de Split (local no browser):
+   - Cada parte criada aparece no grid em tempo real
+   - Mostra páginas e tamanho de cada parte
+5. Fase de Upload:
+   - Lista de partes com status individual
+   - Indicador de qual parte está sendo enviada
+6. Fase de Processamento:
+   - Backend processa cada parte com Mistral OCR
+   - Combina resultados e usa AI para estruturar
+7. Preview mostra dados extraídos
 ```
 
-**Conclusão**: O chunked upload é uma camada de **ingestão** que transforma arquivos grandes em menores. Depois da ingestão, a lógica de IA configurada no DevPanel é respeitada para a estruturação dos dados.
+### Sincronização com DevPanel
 
-#### 2. Gaps Identificados
-- UI de splitting mostra apenas progresso geral, não mostra quantas partes foram criadas nem tamanho de cada uma
-- DevPanel não tem filtro específico para logs de processamento chunked
-- `ai_usage_logs` não tem coluna para identificar se veio de processamento chunked
+| Componente | Integração |
+|------------|------------|
+| DevAIUsageLogs | Filtra logs por `chunked_import` |
+| DevBackendLogs | Badge visual roxo para logs chunked |
+| DevSettings | Modelo configurável respeitado na estruturação |
 
----
+### Aplicação da Estratégia
 
-### Mudanças Propostas
+O Client-Side PDF Splitting é **independente** da estratégia de importação (Passagem Única ou Duas Fases):
 
-#### A. Melhorias no Modal de Importação (`ImportarAutosDialog.tsx`)
+| Etapa | Configuração |
+|-------|--------------|
+| OCR das partes | `mistral-ocr-latest` (hardcoded - Gemini não suporta > 20MB) |
+| Estruturação | `getAIConfig()` → Respeita provider/model do DevPanel |
+| Geração de resumos | `gerarResumosIA()` → Usa configuração global |
 
-**1. Indicador Visual Detalhado durante Splitting**
+### Arquivos Modificados
 
-Adicionar estado para armazenar detalhes das partes criadas:
-```typescript
-interface PartInfo {
-  partNumber: number;
-  pageRange: { start: number; end: number };
-  sizeMB: number;
-}
-
-const [splitParts, setSplitParts] = useState<PartInfo[]>([]);
-```
-
-Modificar a chamada de `splitPDFClientSide` para popular esse estado.
-
-**2. UI de Splitting Melhorada**
-
-Substituir o indicador simples por um card com:
-- Total de partes sendo criadas
-- Lista das partes com páginas e tamanho
-- Barra de progresso por parte
-- Estimativa de tempo restante
-
-```tsx
-{isSplitting && (
-  <div className="space-y-4 py-4">
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <Scissors className="h-5 w-5 animate-pulse text-primary" />
-        <span className="font-medium">Dividindo PDF grande...</span>
-      </div>
-      <Badge variant="outline">{splitParts.length} partes</Badge>
-    </div>
-    
-    <Progress value={splitProgress} />
-    <p className="text-sm text-muted-foreground">{splitMessage}</p>
-    
-    {/* Detalhes das partes */}
-    {splitParts.length > 0 && (
-      <div className="grid grid-cols-2 gap-2 mt-3">
-        {splitParts.map((part) => (
-          <div key={part.partNumber} className="flex items-center gap-2 p-2 rounded bg-muted/50 text-xs">
-            <CheckCircle2 className="h-3 w-3 text-green-500" />
-            <span>Parte {part.partNumber}</span>
-            <span className="text-muted-foreground">
-              págs {part.pageRange.start}-{part.pageRange.end}
-            </span>
-            <Badge variant="secondary" className="ml-auto text-[10px]">
-              {part.sizeMB.toFixed(1)}MB
-            </Badge>
-          </div>
-        ))}
-      </div>
-    )}
-  </div>
-)}
-```
-
-**3. Indicador no Preview de Resultado**
-
-Quando o processamento chunked concluir, mostrar informações sobre:
-- Quantas partes foram processadas
-- Total de páginas
-- Que usou Mistral OCR + estratégia client-side split
-
-Já existe parcialmente em `aiUsage.pdfExtraction.strategy === 'client_side_split'`, expandir para UI.
-
----
-
-#### B. Melhorias no DevPanel (Logs Backend)
-
-**1. Novo filtro "chunked_import" em `DevAIUsageLogs.tsx`**
-
-Adicionar opção de filtro por `prompt_type`:
-```tsx
-<SelectItem value="chunked_import">Importação Chunked</SelectItem>
-```
-
-**2. Badge visual para logs chunked em `DevBackendLogs.tsx`**
-
-Quando a mensagem contiver "chunked" ou job_id de um import chunked, destacar visualmente:
-```tsx
-{log.message.toLowerCase().includes('chunked') && (
-  <Badge variant="outline" className="text-xs bg-purple-500/10 text-purple-600 border-purple-500/30">
-    <Layers className="h-3 w-3 mr-1" />
-    Chunked
-  </Badge>
-)}
-```
-
-**3. Adicionar coluna metadata nos logs para mostrar partsCount**
-
-Quando o backend logar info chunked, já inclui `partsProcessed`. Garantir que o DevBackendLogs exiba essa informação expandida.
-
----
-
-#### C. Sincronização com Configurações do DevPanel
-
-O processamento chunked já está sincronizado corretamente:
-
-| Etapa | Configuração Usada |
-|-------|-------------------|
-| OCR das partes | `mistral-ocr-latest` (hardcoded - necessário pois Gemini não suporta uploads > 20MB individuais) |
-| Estruturação (callAI) | `getAIConfig()` → Respeita provider/model do DevPanel |
-| Geração de resumos | `gerarResumosIA()` → Usa `getAIConfig()` do DevPanel |
-
-**Não há inconsistência** - o chunked mode usa Mistral apenas para OCR (extração de texto), e depois usa as configurações globais de IA para o preenchimento e resumos.
-
----
-
-### Arquivos a Modificar
-
-| Arquivo | Ação | Descrição |
-|---------|------|-----------|
-| `src/lib/pdf-splitter.ts` | Modificar | Retornar info de cada parte (sizeMB) no callback |
-| `src/components/tools/ImportarAutosDialog.tsx` | Modificar | Adicionar estado e UI para mostrar partes durante split e no preview |
-| `src/components/dev-panel/DevAIUsageLogs.tsx` | Modificar | Adicionar filtro `chunked_import` |
-| `src/components/dev-panel/DevBackendLogs.tsx` | Modificar | Adicionar badge visual para logs chunked |
-
----
-
-### Detalhes Técnicos
-
-#### Modificação em `src/lib/pdf-splitter.ts`
-
-Adicionar interface para callback com informações de partes:
-```typescript
-export interface PartCreatedInfo {
-  partNumber: number;
-  pageRange: { start: number; end: number };
-  sizeMB: number;
-}
-
-export async function splitPDFClientSide(
-  file: File,
-  options: SplitOptions = {},
-  onProgress?: (progress: number, message: string) => void,
-  onPartCreated?: (info: PartCreatedInfo) => void  // NOVO
-): Promise<ClientSplitResult> {
-  // ... ao criar cada parte:
-  onPartCreated?.({
-    partNumber: parts.length,
-    pageRange: { start: startPage + 1, end: endPage },
-    sizeMB: partBytes.byteLength / 1024 / 1024
-  });
-}
-```
-
-#### Modificação em `ImportarAutosDialog.tsx`
-
-```typescript
-// Novo estado
-const [splitParts, setSplitParts] = useState<Array<{
-  partNumber: number;
-  pageRange: { start: number; end: number };
-  sizeMB: number;
-}>>([]);
-
-// Na chamada de splitPDFClientSide:
-const { parts, pageRanges, totalPages } = await splitPDFClientSide(
-  selectedFile,
-  { maxSizeBytes: 20_000_000, maxPagesPerPart: 50 },
-  (progress, message) => {
-    setSplitProgress(progress);
-    setSplitMessage(message);
-  },
-  (partInfo) => {
-    setSplitParts(prev => [...prev, partInfo]);
-  }
-);
-
-// Resetar ao iniciar novo split
-setSplitParts([]);
-```
-
-#### UI de Upload com Indicador de Partes
-
-Durante o upload das partes, mostrar qual parte está sendo enviada:
-```tsx
-{processingStep === "uploading" && splitParts.length > 0 && (
-  <div className="space-y-2 mt-3">
-    <p className="text-xs text-muted-foreground">
-      Enviando partes para o servidor...
-    </p>
-    {splitParts.map((part, idx) => (
-      <div key={idx} className="flex items-center gap-2 text-xs">
-        {idx < currentUploadingPart ? (
-          <CheckCircle2 className="h-3 w-3 text-green-500" />
-        ) : idx === currentUploadingPart ? (
-          <Loader2 className="h-3 w-3 animate-spin text-primary" />
-        ) : (
-          <div className="h-3 w-3 rounded-full border border-muted-foreground/30" />
-        )}
-        <span>Parte {part.partNumber}: {part.sizeMB.toFixed(1)}MB</span>
-      </div>
-    ))}
-  </div>
-)}
-```
-
----
-
-### Resultado Esperado
-
-1. **Durante o Split**: Usuário vê cada parte sendo criada com páginas e tamanho
-2. **Durante o Upload**: Usuário vê progresso por parte
-3. **No Preview**: Mostra que usou processamento chunked, quantas partes, provider de OCR
-4. **No DevPanel**: Logs de chunked destacados visualmente, filtráveis
-
-### Benefícios
-
-- Transparência total sobre o processo de divisão
-- UX moderna e informativa sem sobrecarregar
-- DevPanel alinhado com novo tipo de processamento
-- Manutenção do padrão visual existente
+- `src/lib/pdf-splitter.ts`
+- `src/components/tools/ImportarAutosDialog.tsx`
+- `src/components/dev-panel/DevAIUsageLogs.tsx`
+- `src/components/dev-panel/DevBackendLogs.tsx`
