@@ -696,11 +696,12 @@ async function processarPDFBackground(
         }
         
         // Call AI with the extracted raw text (no binary PDF!)
+        // Use high maxOutputTokens to prevent JSON truncation
         const fillResult = await callAI(
           { ...aiConfig, provider: fillProvider, model: fillModel },
           systemPrompt,
           `Analise o seguinte texto extraído de um documento de processo trabalhista e retorne o JSON estruturado:\n\n${textForFilling}`,
-          { promptType: 'two_phase_fill', userId }
+          { promptType: 'two_phase_fill', userId, maxOutputTokens: 65536 }
         );
 
         modelUsed = `${fillProvider}/${fillModel}`;
