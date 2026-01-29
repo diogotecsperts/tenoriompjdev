@@ -92,6 +92,7 @@ interface ExtractedData {
     laudos_medicos: string;
     exames_complementares: string;
     lesoes_descritas: string;
+    exame_fisico: string;
   };
   informacoes_medicas: {
     cids_mencionados: string[];
@@ -986,6 +987,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         
         laudos_medicos: extractedData.exame_clinico.laudos_medicos || '',
         exames_complementares: extractedData.exame_clinico.exames_complementares || '',
+        // Exame Físico - NOVO campo mapeado
+        exame_fisico: extractedData.exame_clinico?.exame_fisico || '',
         
         conclusao_cid: extractedData.informacoes_medicas.cids_mencionados?.join(', ') || '',
         conclusao_incapacidade: extractedData.informacoes_medicas.incapacidade_alegada || '',
@@ -1003,6 +1006,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         // IMPORTANT: Justificativas should NOT be auto-filled - left empty for manual input
         nexo_causal_justificativa: '',
         analise_incapacidade_laboral: '',
+        // Análise Conclusiva - mapear do resumo de incapacidade gerado pela IA
+        conclusao_analise: extractedData.resumos_ia?.incapacidade || '',
         referencias_bibliograficas: extractedData.resumos_ia?.referencias_bibliograficas || '',
         
         anotacoes: extractedData.resumo ? `[Resumo extraído automaticamente]\n${extractedData.resumo}` : '',
