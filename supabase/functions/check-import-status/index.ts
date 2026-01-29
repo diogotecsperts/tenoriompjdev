@@ -71,6 +71,7 @@ serve(async (req) => {
       progress: job.progress,
       currentStep: job.current_step,
       stepId: job.step_id || null,
+      updatedAt: job.updated_at,  // Para detecção de stale job no frontend
       // Add retry info for UI indicator
       retryInfo: {
         isRetrying: (job.current_step?.toLowerCase().includes('retry') || 
