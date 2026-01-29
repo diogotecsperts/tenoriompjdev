@@ -1,134 +1,163 @@
 
 
-## Plano: Corrigir "Falha ao criar laudo" - Erro de Rede/Token
+## Plano: Corrigir Memory Limit Exceeded para PDFs Grandes em Single-Pass
 
 ---
 
-## Diagnóstico Confirmado
+## Diagnóstico Confirmado (Logs)
 
-Os logs mostram claramente:
-
-```
-Error creating laudo: {
-  "message": "TypeError: Failed to fetch",
-  ...
-  "at createLaudo (ImportarAutosDialog.tsx:655:47)"
-}
+```text
+[processar-autos] Downloaded PDF: ME IMPORTE 4.pdf, size: 68.44MB
+[processar-autos] Using SINGLE-PASS extraction...
+Memory limit exceeded
 ```
 
-**O job processou com sucesso!** O banco mostra:
-- `progress: 100`
-- `status: completed`
-- Dados extraídos corretamente (vitima, processo, quesitos, resumos IA)
-
-**O problema é na criação do laudo** - quando você clica em "Criar Laudo", a inserção no banco falha por erro de rede.
-
----
-
-## Causa Raiz Provável
-
-1. **Token de sessão expirado** - O processamento levou ~96 segundos. Durante esse tempo, o token JWT pode ter se tornado inválido ou estar próximo do limite
-2. **Conexão de rede instável** - Perda momentânea durante o insert
-
----
-
-## Solução Proposta
-
-Adicionar **retry automático com refresh de sessão** na função `createLaudo`:
+**Causa Raiz:** O modo SINGLE-PASS converte o PDF inteiro para base64 na memória antes de enviar para a API:
 
 ```typescript
-const createLaudo = async () => {
-  if (!extractedData || !user) return;
-
-  try {
-    setProcessingStep("creating");
-
-    // NOVO: Refresh session before inserting to ensure valid token
-    const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
-    if (sessionError) {
-      console.error('Session refresh failed:', sessionError);
-      // Continue anyway, the current token might still be valid
-    }
-
-    // ... preparar laudoData ...
-
-    // NOVO: Retry logic para insert
-    let retryCount = 0;
-    const maxRetries = 3;
-    let lastError: Error | null = null;
-
-    while (retryCount < maxRetries) {
-      try {
-        const { data: newLaudo, error } = await supabase
-          .from('laudos')
-          .insert(laudoData)
-          .select()
-          .single();
-
-        if (error) {
-          throw error;
-        }
-
-        // Sucesso!
-        toast({ title: "Laudo criado com sucesso!", ... });
-        handleClose();
-        navigate(`/laudo/${newLaudo.id}`);
-        return;
-
-      } catch (insertError) {
-        lastError = insertError instanceof Error ? insertError : new Error(String(insertError));
-        retryCount++;
-        console.warn(`[createLaudo] Attempt ${retryCount} failed:`, lastError.message);
-        
-        if (retryCount < maxRetries) {
-          // Wait before retry (exponential backoff)
-          await new Promise(r => setTimeout(r, 1000 * retryCount));
-          
-          // Refresh session before retry
-          await supabase.auth.refreshSession();
-        }
-      }
-    }
-
-    // All retries failed
-    throw lastError || new Error('Falha ao criar laudo');
-
-  } catch (error) {
-    console.error('Error creating laudo:', error);
-    toast({
-      variant: "destructive",
-      title: "Erro ao criar laudo",
-      description: error instanceof Error ? error.message : "Erro desconhecido",
-    });
-    setProcessingStep("preview");
-  }
-};
+// Linha 974 - PROBLEMA
+const pdfBase64 = base64FromBytes();  // 68MB → ~91MB string
+visionResult = await callPDFProvider(pdfBase64, systemPrompt, ...);
 ```
+
+**Resultado:** 68MB (Uint8Array) + 91MB (base64 string) = ~160MB em memória simultânea → WORKER_LIMIT
 
 ---
 
-## Resumo das Alterações
+## Solução: Usar Files API para PDFs Grandes em Single-Pass
 
-| Arquivo | Mudança |
-|---------|---------|
-| `src/components/tools/ImportarAutosDialog.tsx` | Adicionar `refreshSession()` antes do insert |
-| `src/components/tools/ImportarAutosDialog.tsx` | Adicionar retry com backoff exponencial (3 tentativas) |
+A solução é reutilizar a lógica já existente no modo TWO-PHASE (linha 796-811) que usa a Gemini Files API para PDFs grandes, evitando a conversão base64 em memória.
+
+### Alterações no `processar-autos/index.ts`
+
+**SINGLE-PASS (linha 957-1011):**
+
+```text
+ANTES:
+1. Baixa PDF como bytes ✅
+2. Converte TUDO para base64 ❌ (estoura memória)
+3. Envia base64 para callPDFProvider ❌
+
+DEPOIS:
+1. Baixa PDF como bytes ✅
+2. Se PDF > 20MB → usar Files API (upload bytes direto) ✅
+3. Se PDF ≤ 20MB → usar base64 inline (rápido) ✅
+4. Libera bytes imediatamente após upload ✅
+```
+
+### Código Atualizado (Single-Pass)
+
+```typescript
+// === SINGLE PASS EXTRACTION (linha ~957) ===
+console.log('[processar-autos] Using SINGLE-PASS extraction...');
+
+// ... update progress ...
+
+timings.pdfExtraction.start = Date.now();
+
+// NOVO: Decidir estratégia baseado no tamanho
+const LARGE_PDF_THRESHOLD = 20_000_000; // 20MB
+const isLargePDF = pdfSizeBytes > LARGE_PDF_THRESHOLD;
+
+if (isLargePDF) {
+  console.log(`[processar-autos] Large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), using Files API...`);
+  
+  // Usar extractVisualContent que já suporta Files API com bytes
+  const extracted = await extractVisualContent(pdfBytes!, { 
+    useFilesAPI: true,
+    model: 'gemini-2.5-flash'  // ou buscar da config
+  });
+  
+  // Limpar bytes imediatamente
+  pdfBytes = null;
+  console.log('[processar-autos] MEMORY: Cleared PDF bytes after Files API upload');
+  
+  // O texto extraído serve como entrada para o parsing
+  const fillResult = await callAI(
+    await getAIConfig(),
+    systemPrompt,
+    `Analise o seguinte texto extraído e retorne JSON estruturado:\n\n${extracted.rawText}`,
+    { promptType: 'single_pass_large', userId, maxOutputTokens: 65536, jsonMode: true }
+  );
+  
+  visionResult = {
+    provider: 'gemini-files-api',
+    model: extracted.model,
+    text: fillResult.text,
+    finishReason: 'STOP',
+    usedFallback: false
+  };
+
+} else {
+  // PDFs pequenos: usar base64 inline (original)
+  const pdfBase64 = base64FromBytes();
+  pdfBytes = null; // Limpar bytes após conversão
+  
+  visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
+    promptType: 'pdf_extraction',
+    userId: userId
+  });
+}
+
+timings.pdfExtraction.end = Date.now();
+```
 
 ---
 
 ## Por Que Isso Vai Funcionar
 
-1. **`refreshSession()`** garante token válido após o longo processamento
-2. **Retry com backoff** protege contra falhas de rede temporárias
-3. **Mantém UX** - O usuário só vê erro após 3 tentativas falharem
+| Cenário | Antes | Depois |
+|---------|-------|--------|
+| PDF 68MB (grande) | ❌ base64 = 91MB extra → crash | ✅ Files API = upload direto, sem base64 |
+| PDF 5MB (pequeno) | ✅ base64 inline rápido | ✅ base64 inline rápido (sem mudança) |
+| Memória máxima | ~160MB (bytes + base64) | ~68MB (apenas bytes durante upload) |
+
+---
+
+## Fluxo Atualizado (Single-Pass)
+
+```text
+┌─────────────────────────────────────────────────┐
+│            PDF RECEBIDO                         │
+└─────────────────────────────────────────────────┘
+                    │
+                    ▼
+       ┌────────────────────────┐
+       │   Tamanho > 20MB?      │
+       └────────────────────────┘
+              │            │
+         SIM  │            │  NÃO
+              ▼            ▼
+   ┌──────────────┐  ┌──────────────┐
+   │ Files API    │  │ Base64       │
+   │ (bytes)      │  │ (inline)     │
+   └──────────────┘  └──────────────┘
+              │            │
+              └─────┬──────┘
+                    ▼
+       ┌────────────────────────┐
+       │  Limpar bytes IMEDIATO │
+       └────────────────────────┘
+                    │
+                    ▼
+       ┌────────────────────────┐
+       │  Parse JSON + Resumos  │
+       └────────────────────────┘
+```
+
+---
+
+## Arquivos a Modificar
+
+| Arquivo | Mudança |
+|---------|---------|
+| `supabase/functions/processar-autos/index.ts` | Adicionar detecção de tamanho e uso de Files API no modo single-pass |
 
 ---
 
 ## Resultado Esperado
 
-| Situação | Antes | Depois |
-|----------|-------|--------|
-| Token expirado | ❌ Falha | ✅ Refresh automático |
-| Rede instável | ❌ Falha | ✅ Retry automático |
-| Falha permanente | ❌ Erro genérico | ✅ Erro após 3 tentativas |
+- **PDF 68MB:** Processa via Files API sem crash
+- **PDF 5MB:** Continua usando base64 inline (rápido)
+- **Memória:** Nunca excede ~70MB para qualquer tamanho de PDF
 
