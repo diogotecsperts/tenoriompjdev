@@ -1,98 +1,119 @@
 
 
-## Plano: Padronizar Cores dos Painéis "Mistral OCR Ativo"
+## Plano: Padronizar Cores Mistral OCR com Design System
 
 ---
 
 ## Problema
 
-Os dois painéis de informação do Mistral OCR usam cores laranja (`orange-50`, `orange-700`, etc.) que estão com baixo contraste e difícil leitura, especialmente no modo escuro.
+Várias instâncias de cores laranja (`orange-*`) para Mistral OCR estão destoando do design system médico (Teal/Emerald). As cores estão de mau gosto e quase ilegíveis.
 
 ---
 
-## Solução
+## Paleta do Site (src/index.css)
 
-Padronizar com o design system neutro/profissional, usando cores `muted`, `foreground` e `border` que são consistentes em toda a aplicação.
+| Token | HSL | Uso |
+|-------|-----|-----|
+| `primary` | 168 58% 39% | Cor principal (Teal) |
+| `muted` | 210 20% 94% | Fundos suaves |
+| `muted-foreground` | 215 15% 45% | Textos secundários |
+| `border` | 210 20% 90% | Bordas neutras |
+
+---
+
+## Arquivos e Mudanças
+
+### 1. ImportarAutosDialog.tsx (linhas 1515-1528)
+
+**Badge OCR no modal de progresso**
+
+**Antes:**
+```tsx
+currentOCRProvider === 'mistral-ocr' 
+  ? "border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-700..."
+  : "border-blue-300 bg-blue-50 text-blue-700..."
+```
+
+**Depois:**
+Remover cores por provider, usar estilo único neutro:
+```tsx
+<Badge 
+  variant="outline" 
+  className="mt-2 text-xs flex items-center gap-1.5 border-border bg-muted/50 text-foreground"
+>
+  <Eye className="h-3 w-3 text-primary" />
+  {currentOCRProvider === 'mistral-ocr' ? 'Mistral OCR' : 'Gemini Vision'}
+</Badge>
+```
+
+---
+
+### 2. DevSettings.tsx - Provider Definition (linha 92)
+
+**Cor do provider na lista AI_PROVIDERS**
+
+**Antes:**
+```typescript
+color: "hsl(25, 95%, 55%)" // Laranja
+```
+
+**Depois:**
+```typescript
+color: "hsl(168, 58%, 39%)" // Primary (Teal)
+```
+
+---
+
+### 3. DevSettings.tsx - Fase 1 OCR Selector (linha 2410)
+
+**Bolinha de cor no dropdown**
+
+**Antes:**
+```tsx
+<div className="w-2 h-2 rounded-full bg-orange-500" />
+```
+
+**Depois:**
+```tsx
+<div className="w-2 h-2 rounded-full bg-primary" />
+```
+
+---
+
+## Resultado Visual
+
+**Antes (cores aleatórias):**
+```text
+┌────────────────────────────────────────┐
+│  [👁️ Mistral OCR]  ← Fundo laranja    │
+│  [👁️ Gemini Vision] ← Fundo azul      │
+└────────────────────────────────────────┘
+```
+
+**Depois (uniforme e profissional):**
+```text
+┌────────────────────────────────────────┐
+│  [👁️ Mistral OCR]  ← Fundo cinza neutro │
+│  [👁️ Gemini Vision] ← Fundo cinza neutro │
+└────────────────────────────────────────┘
+```
 
 ---
 
 ## Arquivos a Modificar
 
-| Arquivo | Linhas | Descrição |
-|---------|--------|-----------|
-| `src/components/dev-panel/DevSettings.tsx` | 2115-2130 | Painel Mistral OCR (Passagem Única) |
-| `src/components/dev-panel/DevSettings.tsx` | 2507-2525 | Painel Mistral OCR (Duas Fases) |
-
----
-
-## Mudanças
-
-### Instância 1: Passagem Única (linhas 2115-2130)
-
-**Antes:**
-```tsx
-<div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800">
-  <Crown className="h-4 w-4 text-orange-500 mt-0.5" />
-  <p className="font-medium text-orange-700 dark:text-orange-400">
-  <ul className="text-orange-600 dark:text-orange-300 space-y-0.5">
-```
-
-**Depois:**
-```tsx
-<div className="p-3 rounded-lg border-border bg-muted/50">
-  <Crown className="h-4 w-4 text-primary mt-0.5" />
-  <p className="font-medium text-foreground">
-  <ul className="text-muted-foreground space-y-0.5">
-```
-
----
-
-### Instância 2: Duas Fases (linhas 2507-2525)
-
-Mesma padronização aplicada, incluindo o aviso de API key faltando:
-
-**Antes:**
-```tsx
-<p className="text-orange-500 font-medium mt-2">
-  ⚠️ Requer MISTRAL_API_KEY configurada nas secrets
-</p>
-```
-
-**Depois:**
-```tsx
-<p className="text-destructive font-medium mt-2">
-  ⚠️ Requer MISTRAL_API_KEY configurada nas secrets
-</p>
-```
-
----
-
-## Comparativo Visual
-
-**Antes (laranja - difícil leitura):**
-```text
-┌──────────────────────────────────────────────┐
-│  👑 Mistral OCR Ativo - Precisão Elite       │  ← Texto laranja
-│  • Precisão elite ~94.9%...                  │  ← Fundo laranja claro
-│  • Custo: ~$1.00 por 1.000 páginas           │  ← Baixo contraste
-└──────────────────────────────────────────────┘
-```
-
-**Depois (neutro - profissional):**
-```text
-┌──────────────────────────────────────────────┐
-│  👑 Mistral OCR Ativo - Precisão Elite       │  ← Texto preto/branco
-│  • Precisão elite ~94.9%...                  │  ← Fundo cinza suave
-│  • Custo: ~$1.00 por 1.000 páginas           │  ← Alto contraste
-└──────────────────────────────────────────────┘
-```
+| Arquivo | Linha | Descrição |
+|---------|-------|-----------|
+| `src/components/tools/ImportarAutosDialog.tsx` | 1516-1527 | Badge OCR - remover cores condicionais |
+| `src/components/dev-panel/DevSettings.tsx` | 92 | Cor do provider Mistral OCR |
+| `src/components/dev-panel/DevSettings.tsx` | 2410 | Bolinha do dropdown Mistral OCR |
 
 ---
 
 ## Benefícios
 
-1. **Legibilidade:** Alto contraste entre texto e fundo
-2. **Consistência:** Mesmo padrão visual do alerta "PDF Grande Detectado"
-3. **Profissional:** Cores neutras do design system médico
-4. **Acessibilidade:** Funciona bem em light e dark mode
+1. **Consistência:** Todas as cores seguem o design system médico
+2. **Legibilidade:** Alto contraste com cores neutras
+3. **Profissionalismo:** Visual limpo e uniforme
+4. **Manutenibilidade:** Menos código condicional
 
