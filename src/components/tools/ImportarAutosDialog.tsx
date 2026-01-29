@@ -1349,9 +1349,39 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     );
   };
 
+  // Check if processing is active (should block closing)
+  const isProcessingActive = processingStep === 'uploading' || processingStep === 'analyzing';
+  
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[600px]">
+    <Dialog 
+      open={open} 
+      onOpenChange={(isOpen) => {
+        // Block closing during active processing
+        if (!isOpen && isProcessingActive) {
+          toast({
+            title: "Processamento em andamento",
+            description: "Aguarde a conclusão ou use 'Cancelar' para interromper.",
+          });
+          return;
+        }
+        handleClose();
+      }}
+    >
+      <DialogContent 
+        className="sm:max-w-[600px]"
+        onInteractOutside={(e) => {
+          // Block clicking outside during processing
+          if (isProcessingActive) {
+            e.preventDefault();
+          }
+        }}
+        onEscapeKeyDown={(e) => {
+          // Block ESC key during processing
+          if (isProcessingActive) {
+            e.preventDefault();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="h-5 w-5" />
