@@ -65,6 +65,15 @@ serve(async (req) => {
       );
     }
 
+    // Detect OCR provider from current_step
+    const detectOCRProvider = (step: string | null): string | null => {
+      if (!step) return null;
+      const lowerStep = step.toLowerCase();
+      if (lowerStep.includes('mistral')) return 'mistral-ocr';
+      if (lowerStep.includes('gemini') || lowerStep.includes('vision')) return 'gemini';
+      return null;
+    };
+
     // Build response based on status
     const response: any = {
       status: job.status,
@@ -72,6 +81,8 @@ serve(async (req) => {
       currentStep: job.current_step,
       stepId: job.step_id || null,
       updatedAt: job.updated_at,  // Para detecção de stale job no frontend
+      // OCR Provider indicator for frontend
+      ocrProvider: detectOCRProvider(job.current_step),
       // Add retry info for UI indicator
       retryInfo: {
         isRetrying: (job.current_step?.toLowerCase().includes('retry') || 
