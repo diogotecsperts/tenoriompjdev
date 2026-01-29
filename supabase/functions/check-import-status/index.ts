@@ -3,13 +3,13 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
+    return new Response('ok', { headers: corsHeaders });
   }
 
   try {
@@ -22,23 +22,38 @@ serve(async (req) => {
       );
     }
 
-    // Get user from auth token
+    // Get user from auth token using getClaims (more reliable than getUser for long-running processes)
     const authHeader = req.headers.get('Authorization');
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     
     let userId: string | null = null;
 
-    if (authHeader) {
+    if (authHeader?.startsWith('Bearer ')) {
       const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
         global: { headers: { Authorization: authHeader } }
       });
       
-      const { data: { user } } = await supabaseClient.auth.getUser();
-      userId = user?.id || null;
+      // Use getClaims for JWT validation - more reliable than getUser during long processes
+      const token = authHeader.replace('Bearer ', '');
+      const { data, error: claimsError } = await supabaseClient.auth.getClaims(token);
+      
+      if (!claimsError && data?.claims?.sub) {
+        userId = data.claims.sub as string;
+        console.log("[check-import-status] User authenticated via getClaims:", userId);
+      } else {
+        // Fallback to getUser if getClaims fails
+        console.log("[check-import-status] getClaims failed, trying getUser...");
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        userId = user?.id || null;
+        if (userId) {
+          console.log("[check-import-status] User authenticated via getUser:", userId);
+        }
+      }
     }
 
     if (!userId) {
+      console.log("[check-import-status] No valid auth found");
       return new Response(
         JSON.stringify({ error: "Usuário não autenticado" }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -58,7 +73,7 @@ serve(async (req) => {
       .single();
 
     if (error || !job) {
-      console.error("Error fetching job:", error);
+      console.error("[check-import-status] Error fetching job:", error);
       return new Response(
         JSON.stringify({ error: "Job não encontrado" }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -107,7 +122,7 @@ serve(async (req) => {
     );
 
   } catch (error: unknown) {
-    console.error("Error in check-import-status:", error);
+    console.error("[check-import-status] Error:", error);
     const errorMessage = error instanceof Error ? error.message : 'Erro interno';
     return new Response(
       JSON.stringify({ error: errorMessage }),
