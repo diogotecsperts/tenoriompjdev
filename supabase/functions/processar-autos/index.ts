@@ -709,7 +709,19 @@ async function processarPDFBackground(
         // Parse the structured response
         let parsedResult = tryFixTruncatedJson(fillResult.text);
         if (!parsedResult) {
-          console.error('[processar-autos] Phase 2 failed to parse, falling back to single pass');
+          // LOG DETALHADO para diagnóstico
+          console.error('[processar-autos] Phase 2 JSON parsing failed');
+          console.error('[processar-autos] Raw text length:', fillResult.text?.length);
+          console.error('[processar-autos] Raw text preview (first 500):', fillResult.text?.substring(0, 500));
+          console.error('[processar-autos] Raw text ending (last 500):', fillResult.text?.slice(-500));
+          
+          // Salvar texto bruto para análise posterior no backend_logs
+          await logError('processar-autos', 'Phase 2 JSON parse failed', jobId, {
+            textLength: fillResult.text?.length,
+            textPreview: fillResult.text?.substring(0, 1000),
+            textEnding: fillResult.text?.slice(-500)
+          });
+          
           throw new Error('Fase 2 falhou na estruturação');
         }
 

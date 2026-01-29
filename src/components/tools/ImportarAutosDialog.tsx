@@ -239,7 +239,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const [isJobStale, setIsJobStale] = useState(false);
   const lastJobUpdateRef = useRef<string | null>(null);
   const staleCheckCountRef = useRef(0);
-  const STALE_THRESHOLD_POLLS = 60; // 60 polls * 3s = 180 segundos (3 min) sem update = stale
+  const STALE_THRESHOLD_POLLS = 100; // 100 polls * 3s = 300 segundos (5 min) sem update = stale
 
   // Check if user is developer and fetch AI config
   useEffect(() => {
@@ -1549,7 +1549,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                     Processamento lento
                   </AlertTitle>
                   <AlertDescription className="text-orange-600/80 dark:text-orange-400/80">
-                    <p>O processamento não teve atualizações nos últimos 60 segundos.</p>
+                    <p>O processamento não teve atualizações nos últimos 5 minutos.</p>
                     <p className="text-sm mt-1">
                       Isso pode indicar que o servidor está sobrecarregado ou o modelo de IA está lento.
                     </p>
