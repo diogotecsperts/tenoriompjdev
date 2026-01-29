@@ -1,79 +1,67 @@
 
 
-## Plano: Correção de Performance e Timeout da Importação de PDF
+## Plano: Corrigir Detecção de Job Stale
 
-### Problemas Identificados nos Logs
+### Problema Raiz Identificado
 
-1. **`maxOutputTokens` NÃO está sendo passado na Fase 2**
-   - O plano anterior especificava adicionar `maxOutputTokens: 65536` mas a implementação atual não tem esse parâmetro
-   - Linha 703-704 atual: `{ promptType: 'two_phase_fill', userId }`
-   - **Falta:** `maxOutputTokens: 65536`
-
-2. **Fase 1 (OCR) levou 234 segundos para apenas 6 páginas**
-   - Isso é anormal - deveria levar ~30-60 segundos
-   - Pode ser sobrecarga temporária do Gemini
-
-3. **Timeout de 300s é insuficiente**
-   - Com Fase 1 lenta + Fase 2 + resumos, ultrapassa facilmente 300s
-
----
-
-### Correção 1: Adicionar maxOutputTokens na Fase 2
-
-**Arquivo:** `supabase/functions/processar-autos/index.ts`
-**Linha:** 703-704
+A lógica de detecção de "stale job" no frontend compara `data.updatedAt`, mas a API `check-import-status` **não retorna esse campo**. Como resultado:
 
 ```typescript
-// ANTES (atual)
-const fillResult = await callAI(
-  { ...aiConfig, provider: fillProvider, model: fillModel },
-  systemPrompt,
-  `Analise o seguinte texto extraído de um documento de processo trabalhista e retorne o JSON estruturado:\n\n${textForFilling}`,
-  { promptType: 'two_phase_fill', userId }
-);
+// Frontend espera:
+if (lastJobUpdateRef.current === data.updatedAt) { // undefined === undefined = true
+  staleCheckCountRef.current++; // Incrementa SEMPRE
+}
+```
 
-// DEPOIS (corrigido)
-const fillResult = await callAI(
-  { ...aiConfig, provider: fillProvider, model: fillModel },
-  systemPrompt,
-  `Analise o seguinte texto extraído de um documento de processo trabalhista e retorne o JSON estruturado:\n\n${textForFilling}`,
-  { promptType: 'two_phase_fill', userId, maxOutputTokens: 65536 }
-);
+O contador incrementa a cada poll (3s), disparando o alerta muito antes dos 3 minutos esperados.
+
+### Solução
+
+Adicionar o campo `updatedAt` na resposta da API `check-import-status`.
+
+---
+
+### Correção no Backend
+
+**Arquivo:** `supabase/functions/check-import-status/index.ts`
+
+Adicionar `updatedAt: job.updated_at` na resposta:
+
+```typescript
+const response: any = {
+  status: job.status,
+  progress: job.progress,
+  currentStep: job.current_step,
+  stepId: job.step_id || null,
+  updatedAt: job.updated_at,  // ADICIONAR ESTE CAMPO
+  retryInfo: {
+    isRetrying: (...),
+    retryCount: job.retry_count || 0,
+    lastError: job.error || null
+  }
+};
 ```
 
 ---
 
-### Correção 2: Aumentar Timeout da Edge Function
+### Verificação Adicional
 
-**Arquivo:** `supabase/config.toml`
-
-```toml
-[functions.processar-autos]
-verify_jwt = true
-wall_clock_limit = 600  # 10 minutos ao invés de 5
-```
-
-**Nota:** O Supabase Edge Functions tem limite máximo de 150 segundos em planos gratuitos e 400 segundos em planos Pro. Se o projeto estiver no plano gratuito, o timeout máximo é 150s. Vou verificar se existe configuração de timeout no projeto.
+Preciso confirmar que a tabela `import_jobs` tem o campo `updated_at`. Se não tiver, a lógica de stale detection não funcionará corretamente e precisaremos usar uma alternativa (como comparar `currentStep` + `progress`).
 
 ---
 
-### Correção 3: Verificar se callAI respeita maxOutputTokens
+### Impacto da Correção
 
-Preciso verificar se a função `callAI` em `ai-config.ts` está recebendo e usando o parâmetro `maxOutputTokens`.
+| Antes | Depois |
+|-------|--------|
+| `data.updatedAt` sempre undefined | `data.updatedAt` reflete o timestamp real do último update |
+| Alerta dispara em ~20 polls (60s) | Alerta só dispara se job não atualizar por 60 polls (180s) |
 
 ---
 
-### Resumo de Mudanças
+### Passos de Implementação
 
-| Arquivo | Mudança | Impacto |
-|---------|---------|---------|
-| `supabase/functions/processar-autos/index.ts` | Adicionar `maxOutputTokens: 65536` na chamada da Fase 2 (linha 703) | Previne truncamento de JSON |
-| `supabase/config.toml` | Adicionar `wall_clock_limit = 600` (se suportado) | Permite processamento mais longo |
-
-### Próximos Passos
-
-1. Verificar o arquivo `ai-config.ts` para confirmar que `maxOutputTokens` é passado para a API
-2. Implementar as correções
-3. Redespachar a Edge Function
-4. Testar novamente com o mesmo PDF
+1. Atualizar `supabase/functions/check-import-status/index.ts` para incluir `updatedAt`
+2. Redespachar a Edge Function `check-import-status`
+3. Testar importação do PDF para verificar se o alerta não dispara antes dos 3 minutos
 
