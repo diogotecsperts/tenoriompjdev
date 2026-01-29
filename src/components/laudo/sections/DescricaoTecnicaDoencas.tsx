@@ -113,9 +113,9 @@ export function DescricaoTecnicaDoencas() {
         {/* SID Input Section */}
         <div className="flex items-end gap-2 p-3 bg-muted/50 rounded-lg border">
           <div className="flex-1 space-y-1.5">
-            <Label htmlFor="sidInput" className="text-sm font-medium">
-              Inserir SID
-            </Label>
+          <Label htmlFor="sidInput" className="text-sm font-medium">
+            Inserir CID
+          </Label>
             <Input
               id="sidInput"
               value={sidValue}
