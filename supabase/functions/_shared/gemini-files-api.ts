@@ -191,7 +191,7 @@ export async function deleteGeminiFile(
     console.warn(`[gemini-files-api] Delete failed (${response.status}): ${error}`);
     // Don't throw - file will expire automatically
   } else {
-    console.log(`[gemini-files-api] Deleted file: ${fileName}`);
+  console.log(`[gemini-files-api] Deleted file: ${fileName}`);
   }
 }
 
@@ -211,4 +211,78 @@ export async function listGeminiFiles(apiKey: string): Promise<GeminiFileMetadat
   
   const data = await response.json();
   return data.files || [];
+}
+
+/**
+ * Upload a PDF via STREAMING to Gemini Files API
+ * This avoids loading the entire file into memory, crucial for large PDFs (50MB+)
+ * Returns the file URI to use in generateContent
+ */
+export async function uploadToGeminiFilesAPIStream(
+  stream: ReadableStream<Uint8Array>,
+  fileSize: number,
+  apiKey: string
+): Promise<string> {
+  console.log(`[gemini-files-api] Starting STREAMING upload, size: ${(fileSize / (1024 * 1024)).toFixed(2)}MB`);
+
+  // Step 1: Initialize resumable upload
+  const initResponse = await fetch(
+    `${FILES_API_BASE}/upload/v1beta/files?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: {
+        'X-Goog-Upload-Protocol': 'resumable',
+        'X-Goog-Upload-Command': 'start',
+        'X-Goog-Upload-Header-Content-Length': fileSize.toString(),
+        'X-Goog-Upload-Header-Content-Type': 'application/pdf',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        file: {
+          displayName: `import_${Date.now()}.pdf`
+        }
+      })
+    }
+  );
+
+  if (!initResponse.ok) {
+    const error = await initResponse.text();
+    throw new Error(`Files API init failed (${initResponse.status}): ${error}`);
+  }
+
+  // Get upload URL from header
+  const uploadUrl = initResponse.headers.get('X-Goog-Upload-URL');
+  if (!uploadUrl) {
+    throw new Error('Files API did not return upload URL');
+  }
+
+  console.log('[gemini-files-api] Got upload URL, streaming file...');
+
+  // Step 2: Stream upload (Deno passes the stream directly, no buffering)
+  const uploadResponse = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Length': fileSize.toString(),
+      'X-Goog-Upload-Offset': '0',
+      'X-Goog-Upload-Command': 'upload, finalize',
+    },
+    body: stream  // Deno/Edge runtime streams this without buffering
+  });
+
+  if (!uploadResponse.ok) {
+    const error = await uploadResponse.text();
+    throw new Error(`Files API streaming upload failed (${uploadResponse.status}): ${error}`);
+  }
+
+  const fileData = await uploadResponse.json();
+  const fileMetadata = fileData.file as GeminiFileMetadata;
+
+  console.log(`[gemini-files-api] Streaming upload complete. File: ${fileMetadata.name}, State: ${fileMetadata.state}`);
+
+  // Step 3: Wait for processing if needed
+  if (fileMetadata.state === 'PROCESSING') {
+    await waitForFileProcessing(fileMetadata.name, apiKey);
+  }
+
+  return fileMetadata.uri;
 }

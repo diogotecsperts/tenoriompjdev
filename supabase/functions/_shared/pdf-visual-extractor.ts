@@ -60,12 +60,23 @@ Retorne um JSON com a estrutura:
 
 IMPORTANTE: estimatedSections deve listar as seções principais detectadas no documento para facilitar navegação posterior.`;
 
+// Stream input type for memory-efficient processing
+export interface StreamInput {
+  stream: ReadableStream<Uint8Array>;
+  size: number;
+}
+
 /**
  * Extrai texto visual de um PDF usando Gemini Vision
  * Esta função é usada na Fase 1 do processamento em duas fases
+ * 
+ * Supports three input types:
+ * - string: base64 encoded PDF
+ * - Uint8Array: raw bytes (will be converted to base64 for small files, or uploaded via Files API for large files)
+ * - StreamInput: stream + size for memory-efficient processing of large files (67MB+)
  */
 export async function extractVisualContent(
-  pdfInput: string | Uint8Array,
+  pdfInput: string | Uint8Array | StreamInput,
   options: {
     useFilesAPI?: boolean;
     model?: string;
@@ -79,17 +90,29 @@ export async function extractVisualContent(
     throw new Error('GEMINI_API_KEY não configurada para extração visual');
   }
 
+  // Determine input type
+  const isStream = typeof pdfInput === 'object' && 'stream' in pdfInput && 'size' in pdfInput;
   const isBytes = pdfInput instanceof Uint8Array;
-  const approxSizeBytes = isBytes
-    ? pdfInput.byteLength
-    : Math.ceil((pdfInput as string).length * 3 / 4);
+  
+  let approxSizeBytes: number;
+  if (isStream) {
+    approxSizeBytes = (pdfInput as StreamInput).size;
+  } else if (isBytes) {
+    approxSizeBytes = (pdfInput as Uint8Array).byteLength;
+  } else {
+    approxSizeBytes = Math.ceil((pdfInput as string).length * 3 / 4);
+  }
 
-  console.log(`[pdf-visual-extractor] Starting extraction with model: ${model}, useFilesAPI: ${options.useFilesAPI}, inputType: ${isBytes ? 'bytes' : 'base64'}, approxSizeMB: ${(approxSizeBytes / (1024 * 1024)).toFixed(2)}`);
+  console.log(`[pdf-visual-extractor] Starting extraction with model: ${model}, useFilesAPI: ${options.useFilesAPI}, inputType: ${isStream ? 'stream' : isBytes ? 'bytes' : 'base64'}, approxSizeMB: ${(approxSizeBytes / (1024 * 1024)).toFixed(2)}`);
   
   const startTime = Date.now();
   let result: ExtractedContent;
 
-  if (options.useFilesAPI) {
+  if (isStream) {
+    // STREAMING MODE: For large files (67MB+), stream directly to Files API
+    console.log('[pdf-visual-extractor] Using STREAMING mode for large PDF...');
+    result = await extractWithFilesAPIStream(pdfInput as StreamInput, model, apiKey);
+  } else if (options.useFilesAPI) {
     // Para PDFs > 50MB, usar Files API
     result = isBytes
       ? await extractWithFilesAPIBytes(pdfInput as Uint8Array, model, apiKey)
@@ -163,6 +186,68 @@ async function extractWithFilesAPIBytes(
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     return parseExtractionResult(text, model, 'gemini-files-api');
+  } finally {
+    // Clean up uploaded file
+    try {
+      await deleteGeminiFile(fileUri, apiKey);
+      console.log('[pdf-visual-extractor] Temporary file deleted from Files API');
+    } catch (cleanupError) {
+      console.warn('[pdf-visual-extractor] Failed to delete temporary file:', cleanupError);
+    }
+  }
+}
+
+/**
+ * Extração via STREAMING para PDFs muito grandes (67MB+)
+ * Evita carregar o arquivo inteiro na memória do Edge Function
+ */
+async function extractWithFilesAPIStream(
+  input: StreamInput,
+  model: string,
+  apiKey: string
+): Promise<ExtractedContent> {
+  // Import the files API module
+  const { uploadToGeminiFilesAPIStream, deleteGeminiFile } = await import('./gemini-files-api.ts');
+
+  // Upload via streaming
+  console.log(`[pdf-visual-extractor] Uploading large PDF via STREAMING (${(input.size / (1024 * 1024)).toFixed(2)}MB)...`);
+  const fileUri = await uploadToGeminiFilesAPIStream(input.stream, input.size, apiKey);
+  console.log(`[pdf-visual-extractor] Streaming upload complete: ${fileUri}`);
+
+  try {
+    // Resolver nome do modelo para API Gemini
+    const apiModel = resolveGeminiModelName(model);
+    console.log(`[pdf-visual-extractor] Calling Gemini Files API with model: ${apiModel} (original: ${model})`);
+
+    // Call generateContent with file URI
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: EXTRACTION_PROMPT },
+            { file_data: { file_uri: fileUri, mime_type: 'application/pdf' } }
+          ]
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 1048576,
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Gemini Vision (Streaming) error (${response.status}): ${error}`);
+    }
+
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    return parseExtractionResult(text, model, 'gemini-streaming');
   } finally {
     // Clean up uploaded file
     try {
