@@ -17,7 +17,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
-import { RefreshCw, Trash2, ChevronDown, AlertTriangle, AlertCircle, Info, Bug, Server } from "lucide-react";
+import { RefreshCw, Trash2, ChevronDown, AlertTriangle, AlertCircle, Info, Bug, Server, Layers } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -306,6 +306,14 @@ export default function DevBackendLogs() {
                       <Badge variant="outline" className="font-mono text-xs">
                         {log.function_name}
                       </Badge>
+                      {(log.message.toLowerCase().includes('chunked') || 
+                        log.message.toLowerCase().includes('partes') ||
+                        (log.metadata && typeof log.metadata === 'object' && 'partsProcessed' in log.metadata)) && (
+                        <Badge variant="secondary" className="text-[10px] bg-purple-500/10 text-purple-600 border-purple-500/30 dark:text-purple-400">
+                          <Layers className="h-3 w-3 mr-1" />
+                          Chunked
+                        </Badge>
+                      )}
                       <span className="flex-1 text-sm truncate">
                         {log.message}
                       </span>

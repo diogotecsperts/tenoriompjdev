@@ -22,6 +22,12 @@ export interface SplitOptions {
   maxPagesPerPart?: number;   // Max 50 páginas por parte
 }
 
+export interface PartCreatedInfo {
+  partNumber: number;
+  pageRange: { start: number; end: number };
+  sizeMB: number;
+}
+
 const DEFAULT_OPTIONS: Required<SplitOptions> = {
   maxSizeBytes: 20_000_000,   // 20MB
   maxPagesPerPart: 50,        // 50 páginas
@@ -38,7 +44,8 @@ const DEFAULT_OPTIONS: Required<SplitOptions> = {
 export async function splitPDFClientSide(
   file: File,
   options: SplitOptions = {},
-  onProgress?: (progress: number, message: string) => void
+  onProgress?: (progress: number, message: string) => void,
+  onPartCreated?: (info: PartCreatedInfo) => void
 ): Promise<ClientSplitResult> {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const originalSizeMB = file.size / 1024 / 1024;
@@ -103,8 +110,15 @@ export async function splitPDFClientSide(
     parts.push(partBlob);
     pageRanges.push({ start: startPage + 1, end: endPage }); // 1-indexed para display
     
-    const partSizeMB = (partBytes.byteLength / 1024 / 1024).toFixed(2);
-    console.log(`[pdf-splitter] Part ${partNumber} created: ${partSizeMB}MB (${pageCount} pages)`);
+    const partSizeMB = partBytes.byteLength / 1024 / 1024;
+    console.log(`[pdf-splitter] Part ${partNumber} created: ${partSizeMB.toFixed(2)}MB (${pageCount} pages)`);
+    
+    // Notify callback about the created part
+    onPartCreated?.({
+      partNumber,
+      pageRange: { start: startPage + 1, end: endPage },
+      sizeMB: partSizeMB
+    });
   }
   
   onProgress?.(90, `Divisão completa: ${parts.length} partes`);

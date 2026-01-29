@@ -249,6 +249,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const [isSplitting, setIsSplitting] = useState(false);
   const [splitProgress, setSplitProgress] = useState(0);
   const [splitMessage, setSplitMessage] = useState('');
+  const [splitParts, setSplitParts] = useState<Array<{
+    partNumber: number;
+    pageRange: { start: number; end: number };
+    sizeMB: number;
+  }>>([]);
+  const [currentUploadingPart, setCurrentUploadingPart] = useState(0);
 
   // Check if user is developer and fetch AI config
   useEffect(() => {
@@ -668,6 +674,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         setIsSplitting(true);
         setSplitProgress(0);
         setSplitMessage('Preparando divisão do PDF...');
+        setSplitParts([]); // Reset parts
+        setCurrentUploadingPart(0);
         
         try {
           // Split PDF in browser
@@ -677,6 +685,10 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             (progress, message) => {
               setSplitProgress(progress);
               setSplitMessage(message);
+            },
+            (partInfo) => {
+              // Add each part as it's created
+              setSplitParts(prev => [...prev, partInfo]);
             }
           );
           
@@ -692,6 +704,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           const timestamp = Date.now();
           
           for (let i = 0; i < parts.length; i++) {
+            setCurrentUploadingPart(i);
             const uploadPercent = Math.floor((i / parts.length) * 90);
             setUploadProgress(uploadPercent);
             
@@ -710,6 +723,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             partPaths.push(partPath);
           }
           
+          setCurrentUploadingPart(parts.length); // Mark all as done
           setUploadProgress(100);
           console.log(`[ImportarAutosDialog] All ${parts.length} parts uploaded`);
           
@@ -1662,33 +1676,92 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             </>
           )}
 
-          {/* Client-Side Splitting UI */}
+          {/* Client-Side Splitting UI - Enhanced with parts details */}
           {isSplitting && (
-            <div className="space-y-4 py-8">
-              <div className="flex items-center justify-center">
-                <Scissors className="h-8 w-8 animate-pulse text-primary" />
+            <div className="space-y-4 py-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Scissors className="h-5 w-5 animate-pulse text-primary" />
+                  <span className="font-medium">Dividindo PDF no navegador...</span>
+                </div>
+                {splitParts.length > 0 && (
+                  <Badge variant="outline" className="text-xs">
+                    {splitParts.length} parte{splitParts.length > 1 ? 's' : ''}
+                  </Badge>
+                )}
               </div>
-              <div className="text-center">
-                <p className="font-medium">Dividindo PDF no navegador...</p>
-                <p className="text-sm text-muted-foreground mt-1">{splitMessage}</p>
-              </div>
+              
               <Progress value={splitProgress} />
+              <p className="text-sm text-muted-foreground text-center">{splitMessage}</p>
+              
+              {/* Parts grid - shows each part as it's created */}
+              {splitParts.length > 0 && (
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  {splitParts.map((part) => (
+                    <div key={part.partNumber} className="flex items-center gap-2 p-2 rounded-lg bg-muted/50 text-xs border border-border/50">
+                      <CheckCircle2 className="h-3 w-3 text-green-500 flex-shrink-0" />
+                      <span className="font-medium">Parte {part.partNumber}</span>
+                      <span className="text-muted-foreground">
+                        p.{part.pageRange.start}-{part.pageRange.end}
+                      </span>
+                      <Badge variant="secondary" className="ml-auto text-[10px] py-0">
+                        {part.sizeMB.toFixed(1)}MB
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
               <p className="text-xs text-center text-muted-foreground">
-                Isso acontece localmente no seu computador para evitar erros de memória no servidor.
+                Processamento local para evitar erros de memória no servidor.
               </p>
             </div>
           )}
 
+          {/* Uploading Parts UI - Enhanced with individual part tracking */}
           {processingStep === "uploading" && !isSplitting && (
-            <div className="space-y-4 py-8">
-              <div className="flex items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <div className="space-y-4 py-6">
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <span className="font-medium">
+                  {splitParts.length > 0 
+                    ? `Enviando partes (${Math.min(currentUploadingPart + 1, splitParts.length)}/${splitParts.length})...`
+                    : 'Enviando arquivo...'
+                  }
+                </span>
               </div>
-              <div className="text-center">
-                <p className="font-medium">Enviando arquivo...</p>
-                <p className="text-sm text-muted-foreground">{uploadProgress}%</p>
-              </div>
+              
               <Progress value={uploadProgress} />
+              <p className="text-sm text-muted-foreground text-center">{uploadProgress}%</p>
+              
+              {/* Per-part upload status */}
+              {splitParts.length > 0 && (
+                <div className="space-y-1.5 mt-3">
+                  {splitParts.map((part, idx) => (
+                    <div key={idx} className="flex items-center gap-2 text-xs px-2">
+                      {idx < currentUploadingPart ? (
+                        <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                      ) : idx === currentUploadingPart ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                      ) : (
+                        <div className="h-3.5 w-3.5 rounded-full border border-muted-foreground/30" />
+                      )}
+                      <span className={idx < currentUploadingPart ? "text-muted-foreground" : ""}>
+                        Parte {part.partNumber}
+                      </span>
+                      <span className="text-muted-foreground">
+                        ({part.sizeMB.toFixed(1)}MB)
+                      </span>
+                      {idx < currentUploadingPart && (
+                        <span className="text-green-500 ml-auto">Enviada</span>
+                      )}
+                      {idx === currentUploadingPart && (
+                        <span className="text-primary ml-auto">Enviando...</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
