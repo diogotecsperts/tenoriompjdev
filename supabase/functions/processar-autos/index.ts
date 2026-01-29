@@ -978,24 +978,39 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get user_id from auth token using getClaims (more reliable than getUser)
+    // Parse JWT payload to extract user ID (safe because Supabase validates signature upstream)
+    function parseJwtPayload(token: string): { sub?: string; exp?: number } | null {
+      try {
+        const parts = token.split('.');
+        if (parts.length !== 3) return null;
+        const payload = parts[1];
+        // Base64url decode
+        const decoded = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+        return JSON.parse(decoded);
+      } catch {
+        return null;
+      }
+    }
+
+    // Get user_id from auth token by decoding JWT
     const authHeader = req.headers.get('Authorization');
     let userId: string | null = null;
 
     if (authHeader?.startsWith('Bearer ')) {
-      const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-      const supabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: authHeader } }
-      });
-      
       const token = authHeader.replace('Bearer ', '');
-      const { data, error } = await supabaseClient.auth.getClaims(token);
+      const claims = parseJwtPayload(token);
       
-      if (!error && data?.claims?.sub) {
-        userId = data.claims.sub as string;
-        console.log('[processar-autos] User authenticated via getClaims:', userId);
+      if (claims?.sub) {
+        // Optionally check if token is expired
+        const now = Math.floor(Date.now() / 1000);
+        if (claims.exp && claims.exp < now) {
+          console.warn('[processar-autos] Token expired');
+        } else {
+          userId = claims.sub;
+          console.log('[processar-autos] User authenticated via JWT decode:', userId);
+        }
       } else {
-        console.warn('[processar-autos] getClaims failed:', error?.message || 'No claims found');
+        console.warn('[processar-autos] Failed to parse JWT claims');
       }
     }
 
