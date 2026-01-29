@@ -8,7 +8,6 @@ import {
   TrendingUp,
   Calendar,
   AlertCircle,
-  DollarSign,
   RefreshCw
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,8 +30,6 @@ interface DashboardStats {
   totalAIRequests: number;
   laudosThisMonth: number;
   aiRequestsToday: number;
-  monthlyAICost: number;
-  pdfImportsMonth: number;
   retryCount: number;
   successAfterRetry: number;
 }
@@ -158,35 +155,17 @@ export function DevDashboard() {
         );
       }
 
-      // Fetch AI cost for the month (PDF imports)
-      let monthlyAICost = 0;
-      let pdfImportsMonth = 0;
+      // Fetch retry stats from AI logs this month
+      let retryCount = 0;
+      let successAfterRetry = 0;
       
       const { data: aiLogsMonth } = await supabase
         .from("ai_usage_logs")
-        .select("tokens_input, tokens_output, model, retry_count, success")
-        .eq("prompt_type", "pdf_extraction")
+        .select("retry_count, success")
         .gte("created_at", startOfMonth.toISOString());
 
-      const { data: pricingData } = await supabase
-        .from("model_pricing")
-        .select("id, input_price_per_million, output_price_per_million");
-
-      // Calculate retry stats
-      let retryCount = 0;
-      let successAfterRetry = 0;
-
-      if (aiLogsMonth && pricingData) {
-        const pricingMap = new Map(pricingData.map(p => [p.id, p]));
-        pdfImportsMonth = aiLogsMonth.length;
-        
+      if (aiLogsMonth) {
         aiLogsMonth.forEach(log => {
-          const price = pricingMap.get(log.model);
-          if (price && log.tokens_input && log.tokens_output) {
-            monthlyAICost += (log.tokens_input * price.input_price_per_million / 1000000);
-            monthlyAICost += (log.tokens_output * price.output_price_per_million / 1000000);
-          }
-          // Count retries
           if ((log.retry_count || 0) > 0) {
             retryCount += log.retry_count || 0;
             if (log.success) successAfterRetry++;
@@ -200,8 +179,6 @@ export function DevDashboard() {
         totalAIRequests: aiCount || 0,
         laudosThisMonth: laudosMonthCount || 0,
         aiRequestsToday: aiTodayCount || 0,
-        monthlyAICost,
-        pdfImportsMonth,
         retryCount,
         successAfterRetry,
       });
@@ -250,7 +227,7 @@ export function DevDashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
@@ -308,23 +285,6 @@ export function DevDashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats?.aiRequestsToday || 0}</div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-primary/20 bg-primary/5">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Custo IA (Mês)
-            </CardTitle>
-            <DollarSign className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-primary">
-              ${(stats?.monthlyAICost || 0).toFixed(4)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {stats?.pdfImportsMonth || 0} imports PDF
-            </p>
           </CardContent>
         </Card>
 
