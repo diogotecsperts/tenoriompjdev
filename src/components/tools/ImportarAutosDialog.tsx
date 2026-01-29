@@ -754,6 +754,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     try {
       setProcessingStep("creating");
 
+      // Refresh session before inserting to ensure valid token after long processing
+      const { error: sessionError } = await supabase.auth.refreshSession();
+      if (sessionError) {
+        console.warn('[createLaudo] Session refresh failed:', sessionError.message);
+        // Continue anyway, the current token might still be valid
+      }
+
       const documentosArray = buildDocumentosArray(extractedData.documentos_checklist);
 
       const laudoData = {
@@ -840,24 +847,48 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         } : null
       };
 
-      const { data: newLaudo, error } = await supabase
-        .from('laudos')
-        .insert(laudoData)
-        .select()
-        .single();
+      // Retry logic with exponential backoff for network resilience
+      const maxRetries = 3;
+      let lastError: Error | null = null;
 
-      if (error) {
-        console.error('Error creating laudo:', error);
-        throw new Error('Falha ao criar laudo');
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const { data: newLaudo, error } = await supabase
+            .from('laudos')
+            .insert(laudoData)
+            .select()
+            .single();
+
+          if (error) {
+            throw error;
+          }
+
+          // Success!
+          toast({
+            title: "Laudo criado com sucesso!",
+            description: "Os dados foram importados automaticamente.",
+          });
+
+          handleClose();
+          navigate(`/laudo/${newLaudo.id}`);
+          return;
+
+        } catch (insertError) {
+          lastError = insertError instanceof Error ? insertError : new Error(String(insertError));
+          console.warn(`[createLaudo] Attempt ${attempt}/${maxRetries} failed:`, lastError.message);
+
+          if (attempt < maxRetries) {
+            // Wait before retry (exponential backoff: 1s, 2s, 3s)
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            
+            // Refresh session before retry
+            await supabase.auth.refreshSession();
+          }
+        }
       }
 
-      toast({
-        title: "Laudo criado com sucesso!",
-        description: "Os dados foram importados automaticamente.",
-      });
-
-      handleClose();
-      navigate(`/laudo/${newLaudo.id}`);
+      // All retries failed
+      throw lastError || new Error('Falha ao criar laudo após múltiplas tentativas');
 
     } catch (error) {
       console.error('Error creating laudo:', error);
