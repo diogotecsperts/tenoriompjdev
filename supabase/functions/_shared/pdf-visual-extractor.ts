@@ -160,6 +160,8 @@ async function extractWithFilesAPIBytes(
     // Call generateContent with file URI
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
 
+    // IMPORTANT: Use camelCase for API fields (fileData, fileUri, mimeType)
+    // and maxOutputTokens within model limits (65536)
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -167,12 +169,12 @@ async function extractWithFilesAPIBytes(
         contents: [{
           parts: [
             { text: EXTRACTION_PROMPT },
-            { file_data: { file_uri: fileUri, mime_type: 'application/pdf' } }
+            { fileData: { fileUri: fileUri, mimeType: 'application/pdf' } }
           ]
         }],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 1048576,
+          maxOutputTokens: 65536,
         }
       })
     });
@@ -222,6 +224,8 @@ async function extractWithFilesAPIStream(
     // Call generateContent with file URI
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
 
+    // IMPORTANT: maxOutputTokens must be within model limits (65536 for most Gemini models)
+    // Using 65536 instead of 1048576 which causes INVALID_ARGUMENT error
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -229,12 +233,12 @@ async function extractWithFilesAPIStream(
         contents: [{
           parts: [
             { text: EXTRACTION_PROMPT },
-            { file_data: { file_uri: fileUri, mime_type: 'application/pdf' } }
+            { fileData: { fileUri: fileUri, mimeType: 'application/pdf' } }
           ]
         }],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 1048576,
+          maxOutputTokens: 65536,
         }
       })
     });
@@ -330,6 +334,8 @@ async function extractWithFilesAPI(
     // Call generateContent with file URI
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
     
+    // IMPORTANT: Use camelCase for API fields (fileData, fileUri, mimeType)
+    // and maxOutputTokens within model limits (65536)
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -337,12 +343,12 @@ async function extractWithFilesAPI(
         contents: [{
           parts: [
             { text: EXTRACTION_PROMPT },
-            { file_data: { file_uri: fileUri, mime_type: 'application/pdf' } }
+            { fileData: { fileUri: fileUri, mimeType: 'application/pdf' } }
           ]
         }],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 1048576,
+          maxOutputTokens: 65536,
         }
       })
     });
