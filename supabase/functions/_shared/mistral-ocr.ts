@@ -93,7 +93,7 @@ export async function extractWithMistralOCR(
     const ocrPayload: Record<string, unknown> = {
       model: 'mistral-ocr-latest',
       document: {
-        type: 'file_id',
+        type: 'file',
         file_id: fileId,
       },
       include_image_base64: options.includeImageBase64 ?? false,
