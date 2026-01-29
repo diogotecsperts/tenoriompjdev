@@ -5,6 +5,8 @@ import { getAIConfig, callAI, callPDFProvider } from "../_shared/ai-config.ts";
 import { logToBackend, logError, logWarn, logInfo } from "../_shared/backend-logger.ts";
 import { extractVisualContent, storeExtractedContent } from "../_shared/pdf-visual-extractor.ts";
 import { getRelevantChunk, getFieldPrompt } from "../_shared/smart-chunker.ts";
+import { splitPDF, needsSplit } from "../_shared/pdf-splitter.ts";
+import { extractWithMistralOCR, getMistralAPIKey } from "../_shared/mistral-ocr.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,6 +15,11 @@ const corsHeaders = {
 
 // Timeout for individual summary generation (2 minutes)
 const SUMMARY_TIMEOUT_MS = 120000;
+
+// Constants for PDF processing limits
+const GEMINI_PROCESSING_LIMIT = 45_000_000; // 45MB - max size for single Gemini call
+const MAX_SPLIT_PARTS = 4; // Maximum parts for split PDFs (~180MB total)
+const SPLIT_TARGET_SIZE = 40_000_000; // 40MB per part target
 
 const systemPrompt = `Você é um assistente especializado em análise de processos trabalhistas para médicos peritos. Analise os autos do processo e extraia TODAS as informações disponíveis para preencher um laudo pericial completo.
 
@@ -466,6 +473,99 @@ Forneça referências que realmente embasem tecnicamente o laudo para este caso 
 }
 
 const summarySystemPrompt = 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.';
+
+/**
+ * Process a large PDF (>45MB) by splitting into smaller parts and extracting each
+ * Uses pdf-lib for safe splitting that preserves all PDF references
+ * Falls back to Mistral OCR if Gemini fails
+ */
+async function processLargePDFWithSplit(
+  pdfBytes: Uint8Array,
+  model: string,
+  jobId: string,
+  supabaseAdmin: any,
+  userId: string
+): Promise<{ rawText: string; pageCount: number; provider: string; partsCount: number }> {
+  const sizeMB = (pdfBytes.byteLength / 1024 / 1024).toFixed(2);
+  console.log(`[processar-autos] PDF exceeds limit (${sizeMB}MB), starting split process...`);
+  
+  // Update job status
+  await supabaseAdmin.from('import_jobs').update({ 
+    current_step: 'Dividindo PDF grande em partes...',
+    progress: 8,
+    updated_at: new Date().toISOString()
+  }).eq('id', jobId);
+  
+  // Split PDF into parts
+  const { parts, pageRanges, totalPages } = await splitPDF(pdfBytes, {
+    maxSizeBytes: SPLIT_TARGET_SIZE,
+    maxParts: MAX_SPLIT_PARTS
+  });
+  
+  console.log(`[processar-autos] Split into ${parts.length} parts, ${totalPages} total pages`);
+  
+  const extractedTexts: string[] = [];
+  let totalPageCount = 0;
+  let lastError: Error | null = null;
+  
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const range = pageRanges[i];
+    
+    await supabaseAdmin.from('import_jobs').update({ 
+      current_step: `Processando parte ${i + 1}/${parts.length} (págs ${range.start}-${range.end})...`,
+      progress: Math.round(10 + (i / parts.length) * 30),
+      updated_at: new Date().toISOString()
+    }).eq('id', jobId);
+    
+    console.log(`[processar-autos] Processing part ${i + 1}/${parts.length} (${(part.byteLength / 1024 / 1024).toFixed(2)}MB)...`);
+    
+    try {
+      // Try Gemini Vision first
+      const extracted = await extractVisualContent(part, { 
+        useFilesAPI: true, 
+        model
+      });
+      
+      extractedTexts.push(`\n=== PARTE ${i + 1} (Páginas ${range.start}-${range.end}) ===\n${extracted.rawText}`);
+      totalPageCount += extracted.pageCount;
+      
+      console.log(`[processar-autos] Part ${i + 1} complete (Gemini): ${extracted.rawText.length} chars`);
+    } catch (geminiError) {
+      console.warn(`[processar-autos] Gemini failed for part ${i + 1}, trying Mistral OCR fallback...`, geminiError);
+      lastError = geminiError instanceof Error ? geminiError : new Error(String(geminiError));
+      
+      // Try Mistral OCR as fallback
+      const mistralKey = getMistralAPIKey();
+      if (mistralKey) {
+        try {
+          const mistralResult = await extractWithMistralOCR(part, mistralKey);
+          extractedTexts.push(`\n=== PARTE ${i + 1} (Páginas ${range.start}-${range.end}) [Mistral OCR] ===\n${mistralResult.text}`);
+          totalPageCount += mistralResult.pageCount;
+          console.log(`[processar-autos] Part ${i + 1} complete (Mistral OCR): ${mistralResult.text.length} chars`);
+        } catch (mistralError) {
+          console.error(`[processar-autos] Both Gemini and Mistral failed for part ${i + 1}:`, mistralError);
+          throw new Error(`Falha ao processar parte ${i + 1}: ambos Gemini e Mistral falharam`);
+        }
+      } else {
+        console.error(`[processar-autos] Gemini failed and Mistral API key not configured`);
+        throw new Error(`Falha ao processar parte ${i + 1}: Gemini falhou e Mistral não está configurado`);
+      }
+    }
+    
+    // Free memory for this part
+    parts[i] = null as any;
+  }
+  
+  await logInfo('processar-autos', `PDF split processing completed: ${parts.length} parts, ${totalPageCount} pages`, jobId);
+  
+  return {
+    rawText: extractedTexts.join('\n\n'),
+    pageCount: totalPageCount,
+    provider: `gemini-split-${parts.length}`,
+    partsCount: parts.length
+  };
+}
 
 // Generate AI summaries using configured AI provider
 async function gerarResumosIA(
@@ -1002,10 +1102,74 @@ async function processarPDFBackground(
 
       timings.pdfExtraction.start = Date.now();
       
-      // HYBRID STRATEGY: Use streaming > Files API > base64 inline based on PDF size
-      if (pdfStream) {
-        // STREAMING MODE: For large files (>20MB), stream directly to Files API
-        console.log(`[processar-autos] Large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), using STREAMING for single-pass...`);
+      // Check if file is too large and needs splitting (>45MB)
+      if (pdfSizeBytes > GEMINI_PROCESSING_LIMIT) {
+        console.log(`[processar-autos] PDF (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB) exceeds Gemini limit (${GEMINI_PROCESSING_LIMIT / 1024 / 1024}MB), will split...`);
+        
+        // Need to download stream to bytes for splitting
+        if (pdfStream) {
+          console.log('[processar-autos] Downloading stream for split processing...');
+          const chunks: Uint8Array[] = [];
+          const reader = pdfStream.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+          }
+          pdfStream = null;
+          
+          const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+          pdfBytes = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const chunk of chunks) {
+            pdfBytes.set(chunk, offset);
+            offset += chunk.length;
+          }
+          console.log(`[processar-autos] Stream downloaded: ${pdfBytes.byteLength} bytes`);
+        }
+        
+        if (!pdfBytes) {
+          throw new Error('No PDF bytes available for split processing');
+        }
+        
+        // Process with split
+        const splitResult = await processLargePDFWithSplit(
+          pdfBytes,
+          'gemini-2.5-flash',
+          jobId,
+          supabaseAdmin,
+          userId
+        );
+        pdfBytes = null; // Free memory
+        
+        console.log(`[processar-autos] Split processing complete: ${splitResult.partsCount} parts, ${splitResult.pageCount} pages`);
+        
+        // Continue with structured extraction using the combined text
+        await supabaseAdmin.from('import_jobs').update({ 
+          current_step: 'Estruturando dados extraídos...',
+          progress: 45,
+          updated_at: new Date().toISOString()
+        }).eq('id', jobId);
+        
+        const fillResult = await callAI(
+          await getAIConfig(),
+          systemPrompt,
+          `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${splitResult.rawText}`,
+          { promptType: 'single_pass_large_split', userId, maxOutputTokens: 65536, jsonMode: true }
+        );
+        
+        visionResult = {
+          provider: splitResult.provider,
+          model: 'gemini-2.5-flash',
+          text: fillResult.text,
+          finishReason: 'STOP',
+          usedFallback: false,
+          splitParts: splitResult.partsCount
+        };
+        
+      } else if (pdfStream) {
+        // STREAMING MODE: For medium-large files (20-45MB), stream directly to Files API
+        console.log(`[processar-autos] Medium-large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), using STREAMING for single-pass...`);
         
         // Use extractVisualContent with stream input
         const extracted = await extractVisualContent(
@@ -1031,7 +1195,7 @@ async function processarPDFBackground(
           usedFallback: false
         };
       } else if (pdfBytes) {
-        // Small PDFs: use base64 inline (original flow)
+        // Small PDFs (<20MB): use base64 inline (original flow)
         const pdfBase64 = base64FromBytes();
         
         // Clear bytes after conversion
