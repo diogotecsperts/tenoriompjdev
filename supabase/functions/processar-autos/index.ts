@@ -1200,140 +1200,294 @@ async function processarPDFBackground(
 
       timings.pdfExtraction.start = Date.now();
       
-      // Check if file is too large and needs splitting (>45MB)
-      if (pdfSizeBytes > GEMINI_PROCESSING_LIMIT) {
-        console.log(`[processar-autos] PDF (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB) exceeds Gemini limit (${GEMINI_PROCESSING_LIMIT / 1024 / 1024}MB), will split...`);
+      // Fetch PDF provider configuration for single-pass
+      const { data: pdfProviderConfig } = await supabaseAdmin
+        .from('system_config')
+        .select('id, value')
+        .in('id', ['pdf_ai_provider', 'pdf_fallback_provider']);
+      
+      const pdfProviderMap: Record<string, string> = {};
+      pdfProviderConfig?.forEach((item: { id: string; value: unknown }) => {
+        pdfProviderMap[item.id] = typeof item.value === 'string' ? item.value : String(item.value);
+      });
+      
+      const pdfProvider = pdfProviderMap['pdf_ai_provider'] || 'gemini';
+      const pdfFallbackProvider = pdfProviderMap['pdf_fallback_provider'] || 'gemini';
+      
+      console.log(`[processar-autos] Single-pass config - Primary: ${pdfProvider}, Fallback: ${pdfFallbackProvider}`);
+      
+      // Check if Mistral OCR is configured as primary provider
+      if (pdfProvider === 'mistral-ocr') {
+        console.log('[processar-autos] Using MISTRAL OCR for single-pass extraction...');
         
-        // Need to download stream to bytes for splitting
-        if (pdfStream) {
-          console.log('[processar-autos] Downloading stream for split processing...');
-          const chunks: Uint8Array[] = [];
-          const reader = pdfStream.getReader();
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunks.push(value);
+        const mistralKey = getMistralAPIKey();
+        if (!mistralKey) {
+          console.warn('[processar-autos] Mistral key not found, falling back to Gemini');
+          await logWarn('processar-autos', 'MISTRAL_API_KEY não configurada, usando Gemini como fallback', jobId);
+        } else {
+          try {
+            await supabaseAdmin.from('import_jobs').update({ 
+              current_step: 'Extraindo texto com Mistral OCR (Elite)...',
+              updated_at: new Date().toISOString()
+            }).eq('id', jobId);
+            
+            // Ensure we have bytes for Mistral processing
+            let bytesForMistral: Uint8Array;
+            if (pdfStream) {
+              console.log('[processar-autos] Converting stream to bytes for Mistral OCR...');
+              const chunks: Uint8Array[] = [];
+              const reader = pdfStream.getReader();
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+              }
+              pdfStream = null;
+              
+              const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
+              bytesForMistral = new Uint8Array(totalLength);
+              let offset = 0;
+              for (const chunk of chunks) {
+                bytesForMistral.set(chunk, offset);
+                offset += chunk.length;
+              }
+            } else if (pdfBytes) {
+              bytesForMistral = pdfBytes;
+            } else {
+              throw new Error('No PDF input available for Mistral OCR');
+            }
+            
+            let mistralRawText = '';
+            let mistralPageCount = 0;
+            
+            // Check if file exceeds Mistral limit (50MB)
+            const MISTRAL_SIZE_LIMIT = 50_000_000;
+            if (bytesForMistral.byteLength > MISTRAL_SIZE_LIMIT) {
+              console.log(`[processar-autos] PDF (${(bytesForMistral.byteLength / 1024 / 1024).toFixed(2)}MB) exceeds Mistral limit, splitting...`);
+              
+              await supabaseAdmin.from('import_jobs').update({ 
+                current_step: 'Dividindo PDF grande para Mistral OCR...',
+                updated_at: new Date().toISOString()
+              }).eq('id', jobId);
+              
+              const { parts, pageRanges } = await splitPDF(bytesForMistral, { maxSizeBytes: 40_000_000 });
+              
+              console.log(`[processar-autos] Split into ${parts.length} parts for Mistral OCR`);
+              
+              const partResults: string[] = [];
+              for (let i = 0; i < parts.length; i++) {
+                await supabaseAdmin.from('import_jobs').update({ 
+                  current_step: `Processando parte ${i + 1}/${parts.length} com Mistral OCR...`,
+                  progress: 10 + Math.floor((i / parts.length) * 25),
+                  updated_at: new Date().toISOString()
+                }).eq('id', jobId);
+                
+                const partResult = await extractWithMistralOCR(parts[i], mistralKey);
+                partResults.push(partResult.text);
+                mistralPageCount += partResult.pageCount;
+              }
+              
+              mistralRawText = partResults.join('\n\n--- PARTE DIVIDIDA ---\n\n');
+            } else {
+              // Process directly with Mistral OCR
+              const mistralResult = await extractWithMistralOCR(bytesForMistral, mistralKey);
+              mistralRawText = mistralResult.text;
+              mistralPageCount = mistralResult.pageCount;
+            }
+            
+            // Clear bytes after Mistral processing
+            pdfBytes = null;
+            console.log(`[processar-autos] Mistral OCR complete: ${mistralPageCount} pages, ${mistralRawText.length} chars`);
+            
+            // Now use AI to structure the extracted text
+            await supabaseAdmin.from('import_jobs').update({ 
+              current_step: 'Estruturando dados extraídos...',
+              progress: 40,
+              updated_at: new Date().toISOString()
+            }).eq('id', jobId);
+            
+            const fillResult = await callAI(
+              await getAIConfig(),
+              systemPrompt,
+              `Analise o seguinte texto extraído de um PDF de processo trabalhista (via Mistral OCR) e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${mistralRawText}`,
+              { promptType: 'single_pass_mistral_ocr', userId, maxOutputTokens: 65536, jsonMode: true }
+            );
+            
+            visionResult = {
+              provider: 'mistral-ocr',
+              model: 'mistral-ocr-latest',
+              text: fillResult.text,
+              finishReason: 'STOP',
+              usedFallback: false
+            };
+            
+            timings.pdfExtraction.end = Date.now();
+            modelUsed = 'mistral-ocr/mistral-ocr-latest';
+            
+            const parsed = tryFixTruncatedJson(visionResult.text);
+            if (!parsed) {
+              console.error("[processar-autos] Failed to parse Mistral OCR response as JSON");
+              throw new Error("Mistral OCR: Não foi possível processar a resposta da IA");
+            }
+            
+            extractedData = ensureValidStructure(parsed);
+            
+            // Skip the rest of the single-pass flow since we're done
+            console.log('[processar-autos] Mistral OCR single-pass completed successfully');
+            
+          } catch (mistralError) {
+            console.error('[processar-autos] Mistral OCR failed:', mistralError);
+            await logWarn('processar-autos', `Mistral OCR falhou: ${mistralError instanceof Error ? mistralError.message : 'Erro'}`, jobId);
+            
+            // Check if fallback is also Mistral - if so, fall through to Gemini
+            if (pdfFallbackProvider === 'mistral-ocr') {
+              console.log('[processar-autos] Fallback is also Mistral OCR, using Gemini as final fallback...');
+            } else if (pdfFallbackProvider === 'mistral-ocr') {
+              // Retry with Mistral but this shouldn't happen
+              throw mistralError;
+            }
+            // Fall through to original flow
           }
-          pdfStream = null;
+        }
+      }
+      
+      // Original flow (for non-Mistral providers or as fallback)
+      if (!extractedData) {
+        // Check if file is too large and needs splitting (>45MB)
+        if (pdfSizeBytes > GEMINI_PROCESSING_LIMIT) {
+          console.log(`[processar-autos] PDF (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB) exceeds Gemini limit (${GEMINI_PROCESSING_LIMIT / 1024 / 1024}MB), will split...`);
           
-          const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-          pdfBytes = new Uint8Array(totalLength);
-          let offset = 0;
-          for (const chunk of chunks) {
-            pdfBytes.set(chunk, offset);
-            offset += chunk.length;
+          // Need to download stream to bytes for splitting
+          if (pdfStream) {
+            console.log('[processar-autos] Downloading stream for split processing...');
+            const chunks: Uint8Array[] = [];
+            const reader = pdfStream.getReader();
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              chunks.push(value);
+            }
+            pdfStream = null;
+            
+            const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+            pdfBytes = new Uint8Array(totalLength);
+            let offset = 0;
+            for (const chunk of chunks) {
+              pdfBytes.set(chunk, offset);
+              offset += chunk.length;
+            }
+            console.log(`[processar-autos] Stream downloaded: ${pdfBytes.byteLength} bytes`);
           }
-          console.log(`[processar-autos] Stream downloaded: ${pdfBytes.byteLength} bytes`);
+          
+          if (!pdfBytes) {
+            throw new Error('No PDF bytes available for split processing');
+          }
+          
+          // Process with split
+          const splitResult = await processLargePDFWithSplit(
+            pdfBytes,
+            'gemini-2.5-flash',
+            jobId,
+            supabaseAdmin,
+            userId
+          );
+          pdfBytes = null; // Free memory
+          
+          console.log(`[processar-autos] Split processing complete: ${splitResult.partsCount} parts, ${splitResult.pageCount} pages`);
+          
+          // Continue with structured extraction using the combined text
+          await supabaseAdmin.from('import_jobs').update({ 
+            current_step: 'Estruturando dados extraídos...',
+            progress: 45,
+            updated_at: new Date().toISOString()
+          }).eq('id', jobId);
+          
+          const fillResult = await callAI(
+            await getAIConfig(),
+            systemPrompt,
+            `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${splitResult.rawText}`,
+            { promptType: 'single_pass_large_split', userId, maxOutputTokens: 65536, jsonMode: true }
+          );
+          
+          visionResult = {
+            provider: splitResult.provider,
+            model: 'gemini-2.5-flash',
+            text: fillResult.text,
+            finishReason: 'STOP',
+            usedFallback: false,
+            splitParts: splitResult.partsCount
+          };
+          
+        } else if (pdfStream) {
+          // STREAMING MODE: For medium-large files (20-45MB), stream directly to Files API
+          console.log(`[processar-autos] Medium-large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), using STREAMING for single-pass...`);
+          
+          // Use extractVisualContent with stream input
+          const extracted = await extractVisualContent(
+            { stream: pdfStream, size: pdfSizeBytes }, 
+            { model: 'gemini-2.0-flash' }
+          );
+          pdfStream = null; // Stream is consumed
+          console.log('[processar-autos] MEMORY: Stream consumed, no bytes in memory');
+          
+          // The extracted text serves as input for structured parsing
+          const fillResult = await callAI(
+            await getAIConfig(),
+            systemPrompt,
+            `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${extracted.rawText}`,
+            { promptType: 'single_pass_large', userId, maxOutputTokens: 65536, jsonMode: true }
+          );
+          
+          visionResult = {
+            provider: 'gemini-streaming',
+            model: extracted.model,
+            text: fillResult.text,
+            finishReason: 'STOP',
+            usedFallback: false
+          };
+        } else if (pdfBytes) {
+          // Small PDFs (<20MB): use base64 inline (original flow)
+          const pdfBase64 = base64FromBytes();
+          
+          // Clear bytes after conversion
+          pdfBytes = null;
+          console.log('[processar-autos] MEMORY: Cleared PDF bytes after base64 conversion');
+
+          visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
+            promptType: 'pdf_extraction',
+            userId: userId
+          });
+        } else {
+          throw new Error('No PDF input available (bytes or stream)');
         }
         
-        if (!pdfBytes) {
-          throw new Error('No PDF bytes available for split processing');
+        timings.pdfExtraction.end = Date.now();
+        modelUsed = `${visionResult.provider}/${visionResult.model}`;
+        
+        console.log(`[processar-autos] PDF provider response - Provider: ${visionResult.provider}, Model: ${visionResult.model}`);
+
+        if (!visionResult.text) {
+          throw new Error("Resposta inválida da IA - nenhum conteúdo extraído");
         }
-        
-        // Process with split
-        const splitResult = await processLargePDFWithSplit(
-          pdfBytes,
-          'gemini-2.5-flash',
-          jobId,
-          supabaseAdmin,
-          userId
-        );
-        pdfBytes = null; // Free memory
-        
-        console.log(`[processar-autos] Split processing complete: ${splitResult.partsCount} parts, ${splitResult.pageCount} pages`);
-        
-        // Continue with structured extraction using the combined text
-        await supabaseAdmin.from('import_jobs').update({ 
-          current_step: 'Estruturando dados extraídos...',
-          progress: 45,
-          updated_at: new Date().toISOString()
-        }).eq('id', jobId);
-        
-        const fillResult = await callAI(
-          await getAIConfig(),
-          systemPrompt,
-          `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${splitResult.rawText}`,
-          { promptType: 'single_pass_large_split', userId, maxOutputTokens: 65536, jsonMode: true }
-        );
-        
-        visionResult = {
-          provider: splitResult.provider,
-          model: 'gemini-2.5-flash',
-          text: fillResult.text,
-          finishReason: 'STOP',
-          usedFallback: false,
-          splitParts: splitResult.partsCount
-        };
-        
-      } else if (pdfStream) {
-        // STREAMING MODE: For medium-large files (20-45MB), stream directly to Files API
-        console.log(`[processar-autos] Medium-large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), using STREAMING for single-pass...`);
-        
-        // Use extractVisualContent with stream input
-        const extracted = await extractVisualContent(
-          { stream: pdfStream, size: pdfSizeBytes }, 
-          { model: 'gemini-2.0-flash' }
-        );
-        pdfStream = null; // Stream is consumed
-        console.log('[processar-autos] MEMORY: Stream consumed, no bytes in memory');
-        
-        // The extracted text serves as input for structured parsing
-        const fillResult = await callAI(
-          await getAIConfig(),
-          systemPrompt,
-          `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${extracted.rawText}`,
-          { promptType: 'single_pass_large', userId, maxOutputTokens: 65536, jsonMode: true }
-        );
-        
-        visionResult = {
-          provider: 'gemini-streaming',
-          model: extracted.model,
-          text: fillResult.text,
-          finishReason: 'STOP',
-          usedFallback: false
-        };
-      } else if (pdfBytes) {
-        // Small PDFs (<20MB): use base64 inline (original flow)
-        const pdfBase64 = base64FromBytes();
-        
-        // Clear bytes after conversion
-        pdfBytes = null;
-        console.log('[processar-autos] MEMORY: Cleared PDF bytes after base64 conversion');
 
-        visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
-          promptType: 'pdf_extraction',
-          userId: userId
-        });
-      } else {
-        throw new Error('No PDF input available (bytes or stream)');
+        await supabaseAdmin
+          .from('import_jobs')
+          .update({ 
+            progress: 40, 
+            current_step: 'Processando dados extraídos...',
+            step_id: 'processing',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', jobId);
+
+        const parsed = tryFixTruncatedJson(visionResult.text);
+        if (!parsed) {
+          console.error("[processar-autos] Failed to parse response as JSON:", visionResult.text.substring(0, 500));
+          throw new Error("Não foi possível processar a resposta da IA");
+        }
+
+        extractedData = ensureValidStructure(parsed);
       }
-      
-      timings.pdfExtraction.end = Date.now();
-      modelUsed = `${visionResult.provider}/${visionResult.model}`;
-      
-      console.log(`[processar-autos] PDF provider response - Provider: ${visionResult.provider}, Model: ${visionResult.model}`);
-
-      if (!visionResult.text) {
-        throw new Error("Resposta inválida da IA - nenhum conteúdo extraído");
-      }
-
-      await supabaseAdmin
-        .from('import_jobs')
-        .update({ 
-          progress: 40, 
-          current_step: 'Processando dados extraídos...',
-          step_id: 'processing',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', jobId);
-
-      const parsed = tryFixTruncatedJson(visionResult.text);
-      if (!parsed) {
-        console.error("[processar-autos] Failed to parse response as JSON:", visionResult.text.substring(0, 500));
-        throw new Error("Não foi possível processar a resposta da IA");
-      }
-
-      extractedData = ensureValidStructure(parsed);
     }
 
     if (visionResult?.finishReason === "MAX_TOKENS") {
