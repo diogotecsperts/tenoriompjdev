@@ -140,6 +140,59 @@ function tryFixTruncatedJson(jsonStr: string): object | null {
     }
   }
   
+  // PASSO 2.5: Extrair primeiro objeto JSON completo (ignora lixo no final)
+  const firstBrace = cleaned.indexOf('{');
+  if (firstBrace !== -1) {
+    let braceCount = 0;
+    let inString = false;
+    let escaped = false;
+    let endPos = -1;
+    
+    for (let i = firstBrace; i < cleaned.length; i++) {
+      const char = cleaned[i];
+      
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      
+      if (!inString) {
+        if (char === '{') braceCount++;
+        else if (char === '}') {
+          braceCount--;
+          if (braceCount === 0) {
+            endPos = i + 1;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (endPos > firstBrace) {
+      const extracted = cleaned.substring(firstBrace, endPos);
+      console.log(`[tryFixTruncatedJson] Extracted first JSON object: ${firstBrace} to ${endPos} (${endPos - firstBrace} chars)`);
+      
+      // Tentar parsear o objeto extraído
+      try {
+        return JSON.parse(extracted);
+      } catch {
+        // Continuar com o fluxo normal para limpeza adicional
+        cleaned = extracted;
+        console.log('[tryFixTruncatedJson] Extracted JSON still invalid, continuing with repairs...');
+      }
+    }
+  }
+  
   // PASSO 3: Tentar parse direto primeiro
   try {
     return JSON.parse(cleaned);
