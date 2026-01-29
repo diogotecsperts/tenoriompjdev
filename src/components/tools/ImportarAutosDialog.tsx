@@ -645,9 +645,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         step.id === 'upload' ? { ...step, status: 'completed' as const } : step
       ));
 
-      // Step 2: Convert to base64 and start async processing
+      // Step 2: Start async processing (PDF is already in storage, no need to send base64)
       setProcessingStep("analyzing");
-      setAnalysisStep("Convertendo documento...");
+      setAnalysisStep("Iniciando análise com IA...");
       setAnalysisProgress(0);
       
       // Reset steps for new processing (keep upload as completed)
@@ -657,20 +657,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       })));
       lastStepIdRef.current = null;
 
-      const arrayBuffer = await selectedFile.arrayBuffer();
-      const base64 = btoa(
-        new Uint8Array(arrayBuffer).reduce(
-          (data, byte) => data + String.fromCharCode(byte),
-          ''
-        )
-      );
-
-      setAnalysisStep("Iniciando análise com IA...");
-
       // Get session for auth token
       const { data: { session } } = await supabase.auth.getSession();
       
-      // Send to edge function (now returns immediately with jobId)
+      // Send only file path - Edge Function will download from storage
+      // This avoids memory issues from sending large base64 in request body
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/processar-autos`,
         {
@@ -681,7 +672,6 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
           body: JSON.stringify({ 
-            pdfBase64: base64,
             fileName: selectedFile.name,
             filePath: filePathToUpload
           }),
