@@ -786,6 +786,30 @@ async function processarPDFBackground(
   let modelUsed = 'unknown';
   let attemptId: string | null = null;
   
+  // Heartbeat interval for long-running operations
+  let heartbeatInterval: number | null = null;
+  
+  const startHeartbeat = async (stepDescription: string) => {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    heartbeatInterval = setInterval(async () => {
+      try {
+        await supabaseAdmin.from('import_jobs').update({ 
+          updated_at: new Date().toISOString()
+        }).eq('id', jobId);
+        console.log(`[processar-autos] Heartbeat: ${stepDescription}`);
+      } catch (e) {
+        console.warn('[processar-autos] Heartbeat update failed:', e);
+      }
+    }, 12000) as unknown as number; // Every 12 seconds
+  };
+  
+  const stopHeartbeat = () => {
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
+  };
+  
   // Timing tracking
   const timings = {
     total: { start: Date.now(), end: 0 },
@@ -866,8 +890,7 @@ async function processarPDFBackground(
     const STREAMING_THRESHOLD = 20_000_000; // 20MB
     const useStreaming = pdfSizeBytes > STREAMING_THRESHOLD;
     
-    // Only load bytes for small files
-    let pdfStream: ReadableStream<Uint8Array> | null = null;
+    // Only load bytes for small files (FIX: removed duplicate let declaration)
     if (useStreaming) {
       console.log(`[processar-autos] Large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), using STREAMING mode`);
       pdfStream = fileData.stream();
@@ -1217,7 +1240,24 @@ async function processarPDFBackground(
       console.log(`[processar-autos] Single-pass config - Primary: ${pdfProvider}, Fallback: ${pdfFallbackProvider}`);
       
       // Check if Mistral OCR is configured as primary provider
-      if (pdfProvider === 'mistral-ocr') {
+      // NEW: Skip Mistral for large PDFs (>45MB) - converting stream to bytes would cause OOM
+      const SAFE_MEMORY_MISTRAL_LIMIT = 45_000_000; // 45MB
+      const shouldSkipMistral = pdfProvider === 'mistral-ocr' && pdfSizeBytes > SAFE_MEMORY_MISTRAL_LIMIT;
+      
+      if (shouldSkipMistral) {
+        console.log(`[processar-autos] PDF (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB) too large for Mistral OCR (limit: 45MB), using Gemini streaming...`);
+        await logInfo('processar-autos', `Mistral OCR pulado - PDF muito grande (${(pdfSizeBytes / 1024 / 1024).toFixed(0)}MB), usando Gemini streaming`, jobId);
+        
+        await supabaseAdmin.from('import_jobs').update({ 
+          current_step: 'PDF grande detectado, usando Gemini streaming...',
+          updated_at: new Date().toISOString()
+        }).eq('id', jobId);
+        
+        // Start heartbeat for long operation
+        startHeartbeat('Gemini streaming upload');
+        
+        // Fall through to original flow which handles streaming correctly
+      } else if (pdfProvider === 'mistral-ocr') {
         console.log('[processar-autos] Using MISTRAL OCR for single-pass extraction...');
         
         const mistralKey = getMistralAPIKey();
@@ -1777,6 +1817,9 @@ async function processarPDFBackground(
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
+  } finally {
+    // Always stop heartbeat when done
+    stopHeartbeat();
   }
 }
 
