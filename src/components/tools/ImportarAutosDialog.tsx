@@ -100,6 +100,11 @@ interface ExtractedData {
     nexo_sugerido: string;
     tipo_incapacidade: string;
   };
+  avaliacao_sequelas: {
+    tabela_susep: string;
+    dano_estetico: string;
+    auxilio_terceiros: string;
+  };
   quesitos: {
     juizo: string;
     reclamante: string;
@@ -989,6 +994,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         exames_complementares: extractedData.exame_clinico.exames_complementares || '',
         // Exame Físico - NOVO campo mapeado
         exame_fisico: extractedData.exame_clinico?.exame_fisico || '',
+        
+        // Avaliação de Sequelas (NOVOS)
+        tabela_susep: extractedData.avaliacao_sequelas?.tabela_susep || '',
+        dano_estetico: extractedData.avaliacao_sequelas?.dano_estetico || '',
+        auxilio_terceiros: extractedData.avaliacao_sequelas?.auxilio_terceiros || '',
         
         conclusao_cid: extractedData.informacoes_medicas.cids_mencionados?.join(', ') || '',
         conclusao_incapacidade: extractedData.informacoes_medicas.incapacidade_alegada || '',
