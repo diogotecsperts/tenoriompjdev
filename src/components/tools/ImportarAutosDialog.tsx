@@ -214,6 +214,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [attempts, setAttempts] = useState<ImportAttempt[]>([]);
   const [retryInfo, setRetryInfo] = useState<{ isRetrying: boolean; retryCount: number; lastError: string | null } | null>(null);
+  const [currentOCRProvider, setCurrentOCRProvider] = useState<string | null>(null);
   
   // Timing state
   const processingStartTime = useRef<number>(0);
@@ -577,6 +578,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       // Update retry info for visual indicator
       if (data.retryInfo) {
         setRetryInfo(data.retryInfo);
+      }
+      
+      // Update OCR provider indicator
+      if (data.ocrProvider) {
+        setCurrentOCRProvider(data.ocrProvider);
       }
 
       if (data.status === 'completed' && data.result) {
@@ -1452,12 +1458,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   
                   {/* Large PDF Auto-Split Indicator */}
                   {selectedFile.size > 45 * 1024 * 1024 && (
-                    <Alert className="border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30">
-                      <Layers className="h-4 w-4 text-amber-600" />
-                      <AlertTitle className="text-amber-700 dark:text-amber-400 text-sm font-medium">
+                    <Alert className="border-border bg-muted/50">
+                      <Layers className="h-4 w-4 text-muted-foreground" />
+                      <AlertTitle className="text-foreground text-sm font-medium">
                         PDF Grande Detectado
                       </AlertTitle>
-                      <AlertDescription className="text-amber-600 dark:text-amber-300 text-xs">
+                      <AlertDescription className="text-muted-foreground text-xs">
                         Este arquivo ({formatFileSize(selectedFile.size)}) será dividido automaticamente em partes menores para processamento. 
                         Isso é normal e não afeta a qualidade da extração.
                       </AlertDescription>
@@ -1502,6 +1508,22 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   <Badge variant="outline" className="mt-2 text-xs">
                     <Cpu className="h-3 w-3 mr-1" />
                     {formatProviderName(aiConfig.provider)} • {formatModelName(aiConfig.model)}
+                  </Badge>
+                )}
+                
+                {/* OCR Provider Indicator */}
+                {currentOCRProvider && stepsStatus.find(s => s.id === 'extraction')?.status === 'processing' && (
+                  <Badge 
+                    variant="outline" 
+                    className={cn(
+                      "mt-2 text-xs flex items-center gap-1.5",
+                      currentOCRProvider === 'mistral-ocr' 
+                        ? "border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-700 dark:bg-orange-950/30 dark:text-orange-400" 
+                        : "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/30 dark:text-blue-400"
+                    )}
+                  >
+                    <Eye className="h-3 w-3" />
+                    {currentOCRProvider === 'mistral-ocr' ? 'Mistral OCR' : 'Gemini Vision'}
                   </Badge>
                 )}
               </div>
