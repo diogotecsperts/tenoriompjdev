@@ -7,6 +7,7 @@
  * - Referência: https://ai.google.dev/gemini-api/docs/vision?lang=rest#large-files
  */
 
+
 const FILES_API_BASE = 'https://generativelanguage.googleapis.com';
 
 export interface GeminiFileMetadata {
@@ -23,26 +24,25 @@ export interface GeminiFileMetadata {
 }
 
 /**
- * Upload a PDF to Gemini Files API
+ * Upload a PDF (bytes) to Gemini Files API
  * Returns the file URI to use in generateContent
  */
-export async function uploadToGeminiFilesAPI(
-  pdfBase64: string,
+export async function uploadToGeminiFilesAPIBytes(
+  pdfBytes: Uint8Array,
   apiKey: string
 ): Promise<string> {
-  console.log('[gemini-files-api] Starting upload to Files API...');
-  
-  // Convert base64 to binary
-  const binaryString = atob(pdfBase64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  const pdfBuffer = bytes.buffer;
-  
-  const fileSizeMB = (pdfBuffer.byteLength / (1024 * 1024)).toFixed(2);
+  console.log('[gemini-files-api] Starting upload (bytes) to Files API...');
+
+  // Ensure we upload only the relevant slice (in case of non-zero byteOffset)
+  // Cast to ArrayBuffer to satisfy the edge-runtime fetch typings.
+  const pdfBuffer = pdfBytes.buffer.slice(
+    pdfBytes.byteOffset,
+    pdfBytes.byteOffset + pdfBytes.byteLength
+  ) as ArrayBuffer;
+
+  const fileSizeMB = (pdfBytes.byteLength / (1024 * 1024)).toFixed(2);
   console.log(`[gemini-files-api] PDF size: ${fileSizeMB}MB`);
-  
+
   // Step 1: Initialize resumable upload
   const initResponse = await fetch(
     `${FILES_API_BASE}/upload/v1beta/files?key=${apiKey}`,
@@ -51,7 +51,7 @@ export async function uploadToGeminiFilesAPI(
       headers: {
         'X-Goog-Upload-Protocol': 'resumable',
         'X-Goog-Upload-Command': 'start',
-        'X-Goog-Upload-Header-Content-Length': pdfBuffer.byteLength.toString(),
+        'X-Goog-Upload-Header-Content-Length': pdfBytes.byteLength.toString(),
         'X-Goog-Upload-Header-Content-Type': 'application/pdf',
         'Content-Type': 'application/json',
       },
@@ -62,47 +62,64 @@ export async function uploadToGeminiFilesAPI(
       })
     }
   );
-  
+
   if (!initResponse.ok) {
     const error = await initResponse.text();
     throw new Error(`Files API init failed (${initResponse.status}): ${error}`);
   }
-  
+
   // Get upload URL from header
   const uploadUrl = initResponse.headers.get('X-Goog-Upload-URL');
   if (!uploadUrl) {
     throw new Error('Files API did not return upload URL');
   }
-  
+
   console.log('[gemini-files-api] Got upload URL, uploading file...');
-  
+
   // Step 2: Upload the actual file
   const uploadResponse = await fetch(uploadUrl, {
     method: 'POST',
     headers: {
-      'Content-Length': pdfBuffer.byteLength.toString(),
+      'Content-Length': pdfBytes.byteLength.toString(),
       'X-Goog-Upload-Offset': '0',
       'X-Goog-Upload-Command': 'upload, finalize',
     },
     body: pdfBuffer
   });
-  
+
   if (!uploadResponse.ok) {
     const error = await uploadResponse.text();
     throw new Error(`Files API upload failed (${uploadResponse.status}): ${error}`);
   }
-  
+
   const fileData = await uploadResponse.json();
   const fileMetadata = fileData.file as GeminiFileMetadata;
-  
+
   console.log(`[gemini-files-api] Upload complete. File: ${fileMetadata.name}, State: ${fileMetadata.state}`);
-  
+
   // Step 3: Wait for processing if needed
   if (fileMetadata.state === 'PROCESSING') {
     await waitForFileProcessing(fileMetadata.name, apiKey);
   }
-  
+
   return fileMetadata.uri;
+}
+
+/**
+ * Upload a PDF to Gemini Files API
+ * Returns the file URI to use in generateContent
+ */
+export async function uploadToGeminiFilesAPI(
+  pdfBase64: string,
+  apiKey: string
+): Promise<string> {
+  // Convert base64 to bytes (legacy path). Prefer uploadToGeminiFilesAPIBytes where possible.
+  const binaryString = atob(pdfBase64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return uploadToGeminiFilesAPIBytes(bytes, apiKey);
 }
 
 /**
