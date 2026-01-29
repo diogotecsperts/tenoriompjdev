@@ -1,190 +1,91 @@
 
 
-## Plano: Resolver Crash de Memória e Fechamento Silencioso do Modal
+## Plano: Remover Card "Custo IA (Mês)" do Dashboard e Ajustar Layout
 
 ---
 
-## Diagnóstico Completo
+## Situação Atual
 
-### 1. Causa Raiz: Memory Limit Exceeded
+O grid de cards do dashboard tem 7 colunas em telas XL com os seguintes cards:
 
-Os logs mostram claramente:
-```text
-[pdf-splitter] Loading PDF (68.44MB)...
-[pdf-splitter] Total pages: 796, bytesPerPage: 88KB, pagesPerPart: 443
-[pdf-splitter] Creating part 1: pages 1-443 (443 pages)
-Memory limit exceeded → shutdown
-```
+| # | Card | Linhas |
+|---|------|--------|
+| 1 | Total de Usuários | 254-264 |
+| 2 | Total de Laudos | 266-276 |
+| 3 | Laudos este Mês | 278-288 |
+| 4 | Requisições IA | 290-300 |
+| 5 | IA Hoje | 302-312 |
+| 6 | **Custo IA (Mês)** | 314-329 |
+| 7 | Rate Limits | 331-346 |
 
-O problema ocorre no `pdf-splitter.ts` ao tentar:
-1. Carregar 68MB do PDF na memória (`PDFDocument.load()`)
-2. Criar um novo documento para a primeira parte (`PDFDocument.create()`)
-3. Copiar 443 páginas (`copyPages()`)
-
-Cada operação multiplica o uso de memória. Com ~150MB de limite do Worker, não é possível processar PDFs >50MB com splitting.
-
-### 2. Problema Secundário: Modal Fecha Silenciosamente
-
-O `Dialog` está configurado com `onOpenChange={handleClose}`, que:
-- Permite fechamento via ESC ou clique fora
-- Limpa TODO o estado interno sem feedback
-- Não há bloqueio durante processamento ativo
+O card "Custo IA (Mês)" (linhas 314-329) será removido. A funcionalidade de custo já existe na página "Custos PDF" (`DevPDFCosts.tsx`).
 
 ---
 
-## Solução Proposta (2 Partes)
+## Mudanças
 
----
+### 1. Remover o Card "Custo IA (Mês)" (linhas 314-329)
 
-### PARTE 1: Evitar Splitting para PDFs Grandes
+Deletar completamente o card que exibe `monthlyAICost` e `pdfImportsMonth`.
 
-Em vez de tentar dividir PDFs muito grandes na Edge Function, **rejeitar imediatamente** e pedir ao usuário para usar o Mistral OCR diretamente (que aceita até 50MB) ou dividir manualmente.
+### 2. Ajustar Grid para 6 Colunas
 
-**Arquivo:** `supabase/functions/processar-autos/index.ts`
-
-**Mudança:** Antes de tentar split, verificar se o PDF excede um limite seguro (~45MB) e usar fallback para Gemini direto via upload de bytes (que já está implementado) em vez de split.
-
-```typescript
-// ANTES (tenta split que causa OOM):
-if (needsSplit(pdfBytes.length, MISTRAL_LIMIT)) {
-  const splitResult = await splitPDF(pdfBytes, {...}); // 💥 OOM aqui
-}
-
-// DEPOIS (usar Gemini Files API para PDFs gigantes):
-if (pdfBytes.length > MISTRAL_LIMIT && pdfBytes.length <= GEMINI_MAX_FILE_SIZE) {
-  // Enviar direto para Gemini Files API (suporta até 2GB)
-  // NÃO tentar split - consome muita memória
-  console.log('[processar-autos] PDF muito grande para Mistral, usando Gemini Files API...');
-  // ... usar extractVisualContent com bytes diretos
-}
-```
-
-**Novo Fluxo para PDFs >50MB:**
-
-| Tamanho | Ação |
-|---------|------|
-| < 50MB | Mistral OCR ou Gemini Vision (baseado em config) |
-| 50-200MB | Gemini Files API direto (sem split) |
-| > 200MB | Rejeitar com mensagem clara |
-
----
-
-### PARTE 2: Bloquear Fechamento do Modal Durante Processamento
-
-**Arquivo:** `src/components/tools/ImportarAutosDialog.tsx`
-
-**Mudança:** Modificar o `onOpenChange` para bloquear fechamento acidental durante processamento ativo.
-
+**Antes:**
 ```tsx
-// ANTES:
-<Dialog open={open} onOpenChange={handleClose}>
-
-// DEPOIS:
-<Dialog 
-  open={open} 
-  onOpenChange={(isOpen) => {
-    // Bloquear fechamento durante processamento
-    if (!isOpen && (processingStep === 'uploading' || processingStep === 'analyzing')) {
-      // Não fechar - mostrar toast de aviso
-      toast({
-        title: "Processamento em andamento",
-        description: "Aguarde a conclusão ou use 'Cancelar' para interromper.",
-      });
-      return;
-    }
-    handleClose();
-  }}
->
+<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
 ```
 
-E adicionar `modal` prop para evitar interação com background:
-
+**Depois:**
 ```tsx
-<DialogContent 
-  className="sm:max-w-[600px]"
-  onInteractOutside={(e) => {
-    // Bloquear clique fora durante processamento
-    if (processingStep === 'uploading' || processingStep === 'analyzing') {
-      e.preventDefault();
-    }
-  }}
-  onEscapeKeyDown={(e) => {
-    // Bloquear ESC durante processamento
-    if (processingStep === 'uploading' || processingStep === 'analyzing') {
-      e.preventDefault();
-    }
-  }}
->
+<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
 ```
+
+Isso distribui os 6 cards restantes uniformemente:
+- **md:** 2 colunas (3 linhas)
+- **lg:** 3 colunas (2 linhas)
+- **xl:** 6 colunas (1 linha)
+
+### 3. Limpar Dados Não Utilizados
+
+Remover do interface e state os campos que não serão mais usados no dashboard:
+- `monthlyAICost`
+- `pdfImportsMonth`
+
+E remover a lógica de cálculo de custo (linhas 161-195 parcialmente), mantendo apenas `retryCount` e `successAfterRetry`.
+
+### 4. Remover Import Não Utilizado
+
+Remover `DollarSign` dos imports (linha 11) já que não será mais usado.
 
 ---
 
-### PARTE 3: Melhorar Feedback de Erro para Memory Limit
-
-**Arquivo:** `src/components/tools/ImportarAutosDialog.tsx`
-
-Melhorar a detecção de "stale job" para mostrar mensagem mais clara quando o backend não responde:
-
-```tsx
-// Quando job fica stale (sem updates por 5 min):
-if (isJobStale) {
-  // Verificar se o job ainda está como "processing" no banco
-  // Se sim, provavelmente crashou - mostrar mensagem específica
-  <Alert variant="destructive">
-    <AlertTriangle className="h-4 w-4" />
-    <AlertTitle>Processamento interrompido</AlertTitle>
-    <AlertDescription>
-      O servidor parou de responder. Isso pode ocorrer com arquivos muito grandes.
-      <br />
-      <strong>Sugestão:</strong> Divida o PDF em partes menores (máx. 50MB cada) e tente novamente.
-    </AlertDescription>
-  </Alert>
-}
-```
-
----
-
-## Arquivos a Modificar
+## Arquivo a Modificar
 
 | Arquivo | Mudança |
 |---------|---------|
-| `supabase/functions/processar-autos/index.ts` | Não tentar split para PDFs >50MB, usar Gemini Files API direto ou rejeitar |
-| `src/components/tools/ImportarAutosDialog.tsx` | Bloquear fechamento do modal durante processamento ativo |
-| `src/components/tools/ImportarAutosDialog.tsx` | Melhorar mensagem quando job fica stale |
+| `src/components/dev-panel/DevDashboard.tsx` | Remover card, ajustar grid, limpar código |
 
 ---
 
-## Fluxo Corrigido
+## Resultado Visual
 
+**Antes (7 cards):**
 ```text
-┌─────────────────────────────────────────────────────────────────────┐
-│                         PDF RECEBIDO                                 │
-└─────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-                    ┌───────────────────────┐
-                    │  Tamanho do arquivo?  │
-                    └───────────────────────┘
-                                │
-          ┌─────────────────────┼─────────────────────┐
-          │                     │                     │
-          ▼                     ▼                     ▼
-     < 50MB               50-200MB               > 200MB
-          │                     │                     │
-          ▼                     ▼                     ▼
-   ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-   │ Mistral OCR │      │ Gemini Files│      │   REJEITAR  │
-   │  ou Gemini  │      │ API (direto)│      │  com aviso  │
-   │   Vision    │      │  sem split  │      │             │
-   └─────────────┘      └─────────────┘      └─────────────┘
+┌────────┬────────┬────────┬────────┬────────┬────────┬────────┐
+│Usuários│ Laudos │  Mês   │Req. IA │IA Hoje │Custo IA│ Rate   │
+└────────┴────────┴────────┴────────┴────────┴────────┴────────┘
+```
+
+**Depois (6 cards uniformes):**
+```text
+┌──────────┬──────────┬──────────┬──────────┬──────────┬──────────┐
+│ Usuários │  Laudos  │   Mês    │ Req. IA  │ IA Hoje  │  Rate    │
+└──────────┴──────────┴──────────┴──────────┴──────────┴──────────┘
 ```
 
 ---
 
-## Benefícios
+## Funcionalidade Preservada
 
-1. **Estabilidade:** Elimina crashes de memória evitando operações caras
-2. **UX:** Modal não fecha acidentalmente durante processamento
-3. **Feedback:** Usuário entende claramente quando algo falha e por quê
-4. **Graceful Degradation:** PDFs gigantes usam Gemini Files API que suporta até 2GB
+O custo de IA continua disponível na aba "Custos PDF" do DevPanel, onde `DevPDFCosts.tsx` já exibe informações detalhadas de custo por modelo e por período.
 
