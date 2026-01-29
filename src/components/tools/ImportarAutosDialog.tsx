@@ -125,6 +125,9 @@ interface AIUsageInfo {
     usedFallback?: boolean;
     originalProvider?: string;
     fallbackReason?: string;
+    strategy?: 'single_pass' | 'two_phase' | 'client_side_split';
+    partsProcessed?: number;
+    totalPages?: number;
   };
   summaries: {
     provider: string;
@@ -1366,6 +1369,28 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                 )}
               </div>
             </div>
+            
+            {/* Chunked Processing Indicator */}
+            {aiUsage.pdfExtraction.strategy === 'client_side_split' && aiUsage.pdfExtraction.partsProcessed && (
+              <div className="col-span-2 pt-3 border-t border-border">
+                <div className="flex items-center gap-2 text-sm">
+                  <div className="flex items-center gap-2 p-2 rounded-lg bg-purple-500/10 border border-purple-500/20">
+                    <Layers className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+                    <span className="font-medium text-purple-700 dark:text-purple-400">
+                      Processamento Chunked
+                    </span>
+                    <Badge variant="secondary" className="bg-purple-500/20 text-purple-700 dark:text-purple-300 border-0">
+                      {aiUsage.pdfExtraction.partsProcessed} partes
+                    </Badge>
+                    {aiUsage.pdfExtraction.totalPages && (
+                      <span className="text-xs text-muted-foreground">
+                        ({aiUsage.pdfExtraction.totalPages} páginas totais)
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             
             {/* Total Duration */}
             {aiUsage.totalDurationMs && (

@@ -1014,7 +1014,8 @@ async function processarChunkedPDFBackground(
           durationMs: pdfExtractionDuration,
           usedFallback: false,
           strategy: 'client_side_split',
-          partsProcessed: fileParts.length
+          partsProcessed: fileParts.length,
+          totalPages: totalPages
         },
         summaries: {
           provider: resumosResult.aiInfo.provider,
