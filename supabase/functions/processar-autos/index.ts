@@ -675,6 +675,7 @@ async function processarPDFBackground(
   userId: string
 ) {
   let pdfBytes: Uint8Array | null = null;
+  let pdfStream: ReadableStream<Uint8Array> | null = null;
   let pdfSizeBytes = 0;
   const base64FromBytes = (): string => {
     if (!pdfBytes) throw new Error('PDF bytes not available');
@@ -747,7 +748,8 @@ async function processarPDFBackground(
       })
       .eq('id', jobId);
 
-    // Download PDF bytes from storage INSIDE background task (so the HTTP request can return quickly)
+    // Download PDF from storage
+    // For large files (>20MB), we'll use streaming to avoid memory issues
     const { data: fileData, error: downloadError } = await supabaseAdmin.storage
       .from('processos-pdf')
       .download(filePath);
@@ -756,11 +758,24 @@ async function processarPDFBackground(
       throw new Error('Falha ao recuperar PDF do armazenamento');
     }
 
-    const arrayBuffer = await fileData.arrayBuffer();
-    pdfBytes = new Uint8Array(arrayBuffer);
-    pdfSizeBytes = pdfBytes.byteLength;
-
+    // Get file size without loading into memory
+    pdfSizeBytes = fileData.size;
     console.log(`[processar-autos] Downloaded PDF: ${fileName}, size: ${(pdfSizeBytes / (1024 * 1024)).toFixed(2)}MB`);
+
+    // STREAMING THRESHOLD: Use streaming for files > 20MB to avoid WORKER_LIMIT errors
+    const STREAMING_THRESHOLD = 20_000_000; // 20MB
+    const useStreaming = pdfSizeBytes > STREAMING_THRESHOLD;
+    
+    // Only load bytes for small files
+    let pdfStream: ReadableStream<Uint8Array> | null = null;
+    if (useStreaming) {
+      console.log(`[processar-autos] Large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), using STREAMING mode`);
+      pdfStream = fileData.stream();
+    } else {
+      const arrayBuffer = await fileData.arrayBuffer();
+      pdfBytes = new Uint8Array(arrayBuffer);
+      console.log(`[processar-autos] Small PDF, loaded ${pdfBytes.byteLength} bytes into memory`);
+    }
 
     // Fetch import strategy configuration
     const { data: strategyData } = await supabaseAdmin
@@ -792,27 +807,38 @@ async function processarPDFBackground(
 
       timings.pdfExtraction.start = Date.now();
 
-      // Determine if we need Files API for large PDFs (> 50MB)
+      // Determine extraction method: streaming > bytes with Files API > bytes inline
       const useFilesAPI = pdfSizeBytes > 50_000_000;
-      console.log(`[processar-autos] PDF size: ${(pdfSizeBytes / (1024 * 1024)).toFixed(2)}MB, useFilesAPI: ${useFilesAPI}`);
+      console.log(`[processar-autos] PDF size: ${(pdfSizeBytes / (1024 * 1024)).toFixed(2)}MB, useFilesAPI: ${useFilesAPI}, streaming: ${!!pdfStream}`);
 
       // Get Phase 1 model from config (synchronized with Provider Inventory)
       const phase1Model = strategyMap.phase1_gemini_model || 'gemini-2.5-flash';
       console.log(`[processar-autos] Phase 1 using model: ${phase1Model}`);
 
       try {
-        if (!pdfBytes) {
-          throw new Error('PDF bytes not available');
-        }
-
-        const extracted = await extractVisualContent(pdfBytes, { 
-          useFilesAPI,
-          model: phase1Model 
-        });
+        let extracted;
         
-        // MEMORY OPTIMIZATION: Clear PDF bytes after Phase 1 extraction
-        pdfBytes = null;
-        console.log('[processar-autos] MEMORY: Cleared PDF bytes after Phase 1 extraction');
+        if (pdfStream) {
+          // STREAMING MODE: For large files, stream directly to Files API
+          console.log('[processar-autos] Using STREAMING mode for Phase 1...');
+          extracted = await extractVisualContent(
+            { stream: pdfStream, size: pdfSizeBytes }, 
+            { model: phase1Model }
+          );
+          pdfStream = null; // Stream is consumed
+        } else if (pdfBytes) {
+          // BYTES MODE: Use existing logic
+          extracted = await extractVisualContent(pdfBytes, { 
+            useFilesAPI,
+            model: phase1Model 
+          });
+          // MEMORY OPTIMIZATION: Clear PDF bytes after Phase 1 extraction
+          pdfBytes = null;
+        } else {
+          throw new Error('No PDF input available (bytes or stream)');
+        }
+        
+        console.log('[processar-autos] MEMORY: Cleared PDF input after Phase 1 extraction');
         
         timings.pdfExtraction.end = Date.now();
         modelUsed = `${extracted.provider}/${extracted.model}`;
@@ -924,6 +950,12 @@ async function processarPDFBackground(
         
         await logWarn('processar-autos', `Duas fases falhou, usando passagem única: ${twoPhaseError instanceof Error ? twoPhaseError.message : 'Erro'}`, jobId);
         
+        // If we were in streaming mode, we can't fallback (stream is consumed)
+        if (!pdfBytes && !pdfStream) {
+          console.error('[processar-autos] Cannot fallback - PDF input already consumed (streaming mode)');
+          throw new Error('Fase 1 falhou e fallback não disponível (modo streaming)');
+        }
+        
         // Reset timing
         timings.pdfExtraction.start = Date.now();
         
@@ -934,7 +966,7 @@ async function processarPDFBackground(
           updated_at: new Date().toISOString()
         }).eq('id', jobId);
         
-        // Fallback requires base64
+        // Fallback requires base64 (only works if we still have bytes)
         const pdfBase64 = base64FromBytes();
 
         visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
@@ -970,22 +1002,18 @@ async function processarPDFBackground(
 
       timings.pdfExtraction.start = Date.now();
       
-      // HYBRID STRATEGY: Use Files API for large PDFs to avoid memory overflow
-      const LARGE_PDF_THRESHOLD = 20_000_000; // 20MB
-      const isLargePDF = pdfSizeBytes > LARGE_PDF_THRESHOLD;
-
-      if (isLargePDF) {
-        console.log(`[processar-autos] Large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), using Files API for single-pass...`);
+      // HYBRID STRATEGY: Use streaming > Files API > base64 inline based on PDF size
+      if (pdfStream) {
+        // STREAMING MODE: For large files (>20MB), stream directly to Files API
+        console.log(`[processar-autos] Large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), using STREAMING for single-pass...`);
         
-        // Use extractVisualContent which supports Files API with bytes
-        const extracted = await extractVisualContent(pdfBytes!, { 
-          useFilesAPI: true,
-          model: 'gemini-2.0-flash'
-        });
-        
-        // Clear bytes immediately after upload
-        pdfBytes = null;
-        console.log('[processar-autos] MEMORY: Cleared PDF bytes after Files API upload');
+        // Use extractVisualContent with stream input
+        const extracted = await extractVisualContent(
+          { stream: pdfStream, size: pdfSizeBytes }, 
+          { model: 'gemini-2.0-flash' }
+        );
+        pdfStream = null; // Stream is consumed
+        console.log('[processar-autos] MEMORY: Stream consumed, no bytes in memory');
         
         // The extracted text serves as input for structured parsing
         const fillResult = await callAI(
@@ -996,13 +1024,13 @@ async function processarPDFBackground(
         );
         
         visionResult = {
-          provider: 'gemini-files-api',
+          provider: 'gemini-streaming',
           model: extracted.model,
           text: fillResult.text,
           finishReason: 'STOP',
           usedFallback: false
         };
-      } else {
+      } else if (pdfBytes) {
         // Small PDFs: use base64 inline (original flow)
         const pdfBase64 = base64FromBytes();
         
@@ -1014,6 +1042,8 @@ async function processarPDFBackground(
           promptType: 'pdf_extraction',
           userId: userId
         });
+      } else {
+        throw new Error('No PDF input available (bytes or stream)');
       }
       
       timings.pdfExtraction.end = Date.now();
