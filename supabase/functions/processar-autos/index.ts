@@ -112,39 +112,131 @@ INSTRUÇÕES ESPECÍFICAS:
    - peticao_inicial: Copie o TEXTO COMPLETO da petição inicial (a íntegra ou o máximo possível)
    - contestacao: Copie o TEXTO COMPLETO da contestação (a íntegra ou o máximo possível)
    - Esses textos serão usados para gerar resumos técnicos posteriormente
-10. RESUMO: Síntese breve do caso (máximo 300 caracteres)`;
+10. RESUMO: Síntese breve do caso (máximo 300 caracteres)
 
-// Helper to try to fix truncated JSON
+FORMATO DE RESPOSTA OBRIGATÓRIO:
+- Retorne APENAS o objeto JSON, sem markdown, sem \`\`\`, sem explicações.
+- Comece diretamente com { e termine com }
+- NÃO use blocos de código. Apenas JSON puro.`;
+
+// Helper to try to fix truncated JSON - ROBUST VERSION
 function tryFixTruncatedJson(jsonStr: string): object | null {
-  try {
-    return JSON.parse(jsonStr);
-  } catch {
-    // Try to fix common truncation issues
-  }
-
-  let fixed = jsonStr.trim();
-  fixed = fixed.replace(/^```json\s*/i, '').replace(/```\s*$/, '');
+  if (!jsonStr || typeof jsonStr !== 'string') return null;
   
-  const openBraces = (fixed.match(/{/g) || []).length;
-  const closeBraces = (fixed.match(/}/g) || []).length;
-  const openBrackets = (fixed.match(/\[/g) || []).length;
-  const closeBrackets = (fixed.match(/]/g) || []).length;
-
-  if (fixed.match(/"[^"]*$/)) {
-    fixed += '"';
+  // PASSO 1: Limpar entrada
+  let cleaned = jsonStr.trim();
+  
+  // PASSO 2: Extrair JSON de blocos Markdown (```json ... ``` ou ``` ... ```)
+  const jsonBlockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (jsonBlockMatch) {
+    cleaned = jsonBlockMatch[1].trim();
+    console.log('[tryFixTruncatedJson] Extracted JSON from Markdown block');
+  } else {
+    // Remover marcadores soltos no início/fim
+    const hadMarkdown = cleaned.startsWith('```') || cleaned.endsWith('```');
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+    if (hadMarkdown) {
+      console.log('[tryFixTruncatedJson] Removed loose Markdown markers');
+    }
   }
-
-  for (let i = 0; i < openBrackets - closeBrackets; i++) {
-    fixed += ']';
-  }
-  for (let i = 0; i < openBraces - closeBraces; i++) {
-    fixed += '}';
-  }
-
+  
+  // PASSO 3: Tentar parse direto primeiro
   try {
-    return JSON.parse(fixed);
-  } catch {
-    console.error('Could not fix truncated JSON');
+    return JSON.parse(cleaned);
+  } catch { /* continue */ }
+  
+  // PASSO 4: Escapar caracteres de controle dentro de strings JSON
+  // Isso corrige newlines literais (\n real) dentro de valores de string
+  // Usar abordagem mais segura sem lookbehind (compatibilidade com alguns runtimes)
+  try {
+    // Encontrar strings JSON e escapar caracteres de controle
+    let inString = false;
+    let escaped = false;
+    let result = '';
+    
+    for (let i = 0; i < cleaned.length; i++) {
+      const char = cleaned[i];
+      
+      if (escaped) {
+        result += char;
+        escaped = false;
+        continue;
+      }
+      
+      if (char === '\\') {
+        result += char;
+        escaped = true;
+        continue;
+      }
+      
+      if (char === '"') {
+        inString = !inString;
+        result += char;
+        continue;
+      }
+      
+      if (inString) {
+        // Escapar caracteres de controle dentro de strings
+        if (char === '\n') {
+          result += '\\n';
+        } else if (char === '\r') {
+          result += '\\r';
+        } else if (char === '\t') {
+          result += '\\t';
+        } else {
+          result += char;
+        }
+      } else {
+        result += char;
+      }
+    }
+    cleaned = result;
+  } catch (escapeError) {
+    console.warn('[tryFixTruncatedJson] Control char escape failed:', escapeError);
+  }
+  
+  // PASSO 5: Remover trailing commas antes de } ou ]
+  cleaned = cleaned.replace(/,(\s*[}\]])/g, '$1');
+  
+  // PASSO 6: Tentar parse após limpeza
+  try {
+    return JSON.parse(cleaned);
+  } catch { /* continue */ }
+  
+  // PASSO 7: Fechar estruturas truncadas
+  const openBraces = (cleaned.match(/{/g) || []).length;
+  const closeBraces = (cleaned.match(/}/g) || []).length;
+  const openBrackets = (cleaned.match(/\[/g) || []).length;
+  const closeBrackets = (cleaned.match(/]/g) || []).length;
+  
+  // Fechar string aberta (procurar aspas não balanceadas)
+  const quoteCount = (cleaned.match(/"/g) || []).length;
+  if (quoteCount % 2 !== 0) {
+    cleaned += '"';
+    console.log('[tryFixTruncatedJson] Closed unclosed string');
+  }
+  
+  // Fechar arrays
+  for (let i = 0; i < openBrackets - closeBrackets; i++) {
+    cleaned += ']';
+  }
+  
+  // Fechar objetos
+  for (let i = 0; i < openBraces - closeBraces; i++) {
+    cleaned += '}';
+  }
+  
+  if (openBrackets !== closeBrackets || openBraces !== closeBraces) {
+    console.log(`[tryFixTruncatedJson] Auto-closed structures: added ${openBrackets - closeBrackets} ] and ${openBraces - closeBraces} }`);
+  }
+  
+  // PASSO 8: Parse final
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error('[tryFixTruncatedJson] Could not fix JSON:', e);
+    console.error('[tryFixTruncatedJson] First 300 chars:', cleaned.substring(0, 300));
+    console.error('[tryFixTruncatedJson] Last 300 chars:', cleaned.slice(-300));
     return null;
   }
 }
@@ -701,7 +793,7 @@ async function processarPDFBackground(
           { ...aiConfig, provider: fillProvider, model: fillModel },
           systemPrompt,
           `Analise o seguinte texto extraído de um documento de processo trabalhista e retorne o JSON estruturado:\n\n${textForFilling}`,
-          { promptType: 'two_phase_fill', userId, maxOutputTokens: 65536 }
+          { promptType: 'two_phase_fill', userId, maxOutputTokens: 65536, jsonMode: true }
         );
 
         modelUsed = `${fillProvider}/${fillModel}`;

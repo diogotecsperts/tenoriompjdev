@@ -395,9 +395,9 @@ export async function callAI(
   config: AIConfig, 
   systemPrompt: string, 
   userPrompt: string,
-  options?: { userId?: string; promptType?: string; maxOutputTokens?: number }
+  options?: { userId?: string; promptType?: string; maxOutputTokens?: number; jsonMode?: boolean }
 ): Promise<{ text: string; provider: string; model: string; usedFallback: boolean }> {
-  console.log(`[AI Call] Provider: ${config.provider}, Model: ${config.model}${options?.maxOutputTokens ? `, maxOutputTokens: ${options.maxOutputTokens}` : ''}`);
+  console.log(`[AI Call] Provider: ${config.provider}, Model: ${config.model}${options?.maxOutputTokens ? `, maxOutputTokens: ${options.maxOutputTokens}` : ''}${options?.jsonMode ? ', jsonMode: true' : ''}`);
   const startTime = Date.now();
 
   if (!config.apiKey) {
@@ -405,7 +405,7 @@ export async function callAI(
   }
 
   try {
-    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens);
+    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode });
     const latencyMs = Date.now() - startTime;
 
     // Log successful call
@@ -454,7 +454,7 @@ export async function callAI(
           displayModel: config.fallback.displayModel
         };
 
-        const result = await callProvider(fallbackConfig, systemPrompt, userPrompt, options?.maxOutputTokens);
+        const result = await callProvider(fallbackConfig, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode });
         const fallbackLatency = Date.now() - fallbackStartTime;
 
         // Log successful fallback
@@ -502,27 +502,28 @@ async function callProvider(
   config: AIConfig, 
   systemPrompt: string, 
   userPrompt: string,
-  maxOutputTokens?: number
+  maxOutputTokens?: number,
+  options?: { jsonMode?: boolean }
 ): Promise<{ text: string; provider: string; model: string }> {
   switch (config.provider) {
     case 'lovable':
-      return await callLovableAI(config, systemPrompt, userPrompt, maxOutputTokens);
+      return await callLovableAI(config, systemPrompt, userPrompt, maxOutputTokens, options);
     case 'gemini':
-      return await callGeminiDirect(config, systemPrompt, userPrompt, maxOutputTokens);
+      return await callGeminiDirect(config, systemPrompt, userPrompt, maxOutputTokens, options);
     case 'openai':
     case 'groq':
     case 'deepseek':
     case 'openrouter':
-      return await callOpenAICompatible(config, systemPrompt, userPrompt, maxOutputTokens);
+      return await callOpenAICompatible(config, systemPrompt, userPrompt, maxOutputTokens, options);
     case 'claude':
       return await callClaude(config, systemPrompt, userPrompt, maxOutputTokens);
     default:
       console.warn(`[AI Call] Unknown provider ${config.provider}, falling back to Lovable`);
-      return await callLovableAI(config, systemPrompt, userPrompt, maxOutputTokens);
+      return await callLovableAI(config, systemPrompt, userPrompt, maxOutputTokens, options);
   }
 }
 
-async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number) {
+async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean }) {
   const body: any = {
     model: config.model,
     messages: [
@@ -534,6 +535,12 @@ async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt:
   // Add max_tokens if specified (OpenAI-compatible parameter)
   if (maxOutputTokens) {
     body.max_tokens = maxOutputTokens;
+  }
+  
+  // JSON mode for OpenAI-compatible APIs (Lovable AI gateway)
+  if (options?.jsonMode) {
+    body.response_format = { type: 'json_object' };
+    console.log('[callLovableAI] JSON mode enabled');
   }
   
   const response = await fetchWithRetry(config.endpoint, {
@@ -558,8 +565,20 @@ async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt:
   };
 }
 
-async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number) {
+async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean }) {
   const url = `${config.endpoint}/${config.model}:generateContent?key=${config.apiKey}`;
+  
+  const generationConfig: any = {
+    temperature: 0.7,
+    topP: 0.95,
+    maxOutputTokens: maxOutputTokens || 8192,
+  };
+  
+  // JSON mode for Gemini
+  if (options?.jsonMode) {
+    generationConfig.responseMimeType = 'application/json';
+    console.log('[callGeminiDirect] JSON mode enabled (responseMimeType: application/json)');
+  }
   
   const response = await fetchWithRetry(url, {
     method: 'POST',
@@ -568,11 +587,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
       contents: [{
         parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }]
       }],
-      generationConfig: {
-        temperature: 0.7,
-        topP: 0.95,
-        maxOutputTokens: maxOutputTokens || 8192,
-      }
+      generationConfig
     })
   });
 
@@ -589,7 +604,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
   };
 }
 
-async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number) {
+async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean }) {
   const body: any = {
     model: config.model,
     messages: [
@@ -601,6 +616,12 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
   // Add max_tokens if specified
   if (maxOutputTokens) {
     body.max_tokens = maxOutputTokens;
+  }
+  
+  // JSON mode for OpenAI-compatible APIs
+  if (options?.jsonMode) {
+    body.response_format = { type: 'json_object' };
+    console.log(`[callOpenAICompatible] JSON mode enabled for ${config.provider}`);
   }
   
   const response = await fetchWithRetry(config.endpoint, {
