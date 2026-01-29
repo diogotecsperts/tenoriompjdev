@@ -1,80 +1,145 @@
-# Client-Side PDF Splitting - Implementação Completa
 
-## Status: ✅ IMPLEMENTADO
 
-### Resumo
+## Plano: Adicionar Indicador de Partes Processadas no Preview
 
-Implementação completa das melhorias de UX e logs para o sistema de Client-Side PDF Splitting, incluindo UI detalhada durante splitting/upload e filtros no DevPanel.
+### Status Atual
 
-### O que foi implementado
+| Funcionalidade | Status |
+|---------------|--------|
+| Filtro `chunked_import` na aba Logs de IA | Implementado |
+| Badge `Chunked` na aba Logs de Backend | Implementado |
+| Indicador de partes processadas no Preview | **Falta implementar** |
 
-#### 1. `src/lib/pdf-splitter.ts` - Callback para partes criadas
-- ✅ Interface `PartCreatedInfo` com partNumber, pageRange e sizeMB
-- ✅ Callback `onPartCreated` chamado após cada parte ser criada
-- ✅ Atualização em tempo real da UI durante o split
+### O que Falta
 
-#### 2. `src/components/tools/ImportarAutosDialog.tsx` - UI aprimorada
-- ✅ Estado `splitParts` (array de partes criadas)
-- ✅ Estado `currentUploadingPart` (índice da parte em upload)
-- ✅ **UI de Splitting melhorada**:
-  - Badge mostrando quantidade de partes
-  - Grid com cada parte: número, intervalo de páginas, tamanho em MB
-  - CheckCircle verde para partes já criadas
-- ✅ **UI de Upload melhorada**:
-  - Indicador mostrando qual parte está sendo enviada (X/Y)
-  - Lista de partes com status individual (enviada/enviando/pendente)
-  - Loader animado na parte em upload
+O preview de resultado após a importação de um PDF grande (que foi dividido em partes) não mostra:
+1. Que o processamento foi feito em modo "Chunked"
+2. Quantas partes foram processadas
+3. O provider de OCR usado em cada parte
 
-#### 3. `src/components/dev-panel/DevAIUsageLogs.tsx` - Filtro chunked
-- ✅ `chunked_import` adicionado ao mapeamento de labels
-- ✅ Item no select de filtro por tipo
-- ✅ `referencias_bibliograficas` também adicionado
+### Mudanças Necessárias
 
-#### 4. `src/components/dev-panel/DevBackendLogs.tsx` - Badge visual
-- ✅ Ícone `Layers` importado
-- ✅ Badge roxo "Chunked" aparece quando:
-  - Mensagem contém "chunked" ou "partes"
-  - Metadata contém `partsProcessed`
+#### 1. Expandir Interface `AIUsageInfo`
 
-### Arquitetura do Fluxo
+**Arquivo:** `src/components/tools/ImportarAutosDialog.tsx`
 
-```text
-1. Usuário seleciona PDF > 20MB
-2. Sistema mostra alerta sobre divisão automática
-3. Usuário clica "Processar com IA"
-4. Fase de Split (local no browser):
-   - Cada parte criada aparece no grid em tempo real
-   - Mostra páginas e tamanho de cada parte
-5. Fase de Upload:
-   - Lista de partes com status individual
-   - Indicador de qual parte está sendo enviada
-6. Fase de Processamento:
-   - Backend processa cada parte com Mistral OCR
-   - Combina resultados e usa AI para estruturar
-7. Preview mostra dados extraídos
+Adicionar campos para informações de processamento chunked:
+
+```typescript
+interface AIUsageInfo {
+  pdfExtraction: {
+    provider: string;
+    model: string;
+    note?: string;
+    durationMs?: number;
+    usedFallback?: boolean;
+    originalProvider?: string;
+    fallbackReason?: string;
+    // NOVOS CAMPOS:
+    strategy?: 'single_pass' | 'two_phase' | 'client_side_split';
+    partsProcessed?: number;
+    totalPages?: number;
+  };
+  summaries: {
+    provider: string;
+    model: string;
+    count: number;
+    durationMs?: number;
+  };
+  totalDurationMs?: number;
+}
 ```
 
-### Sincronização com DevPanel
+#### 2. Adicionar Indicador Visual no Preview
 
-| Componente | Integração |
-|------------|------------|
-| DevAIUsageLogs | Filtra logs por `chunked_import` |
-| DevBackendLogs | Badge visual roxo para logs chunked |
-| DevSettings | Modelo configurável respeitado na estruturação |
+**Arquivo:** `src/components/tools/ImportarAutosDialog.tsx` (na função `renderPreview`)
 
-### Aplicação da Estratégia
+Na seção "Inteligências Artificiais Utilizadas", adicionar um indicador para processamento chunked:
 
-O Client-Side PDF Splitting é **independente** da estratégia de importação (Passagem Única ou Duas Fases):
+```tsx
+{/* Chunked Processing Indicator */}
+{aiUsage.pdfExtraction.strategy === 'client_side_split' && aiUsage.pdfExtraction.partsProcessed && (
+  <div className="col-span-2 pt-3 border-t border-border">
+    <div className="flex items-center gap-2 text-sm">
+      <div className="flex items-center gap-2 p-2 rounded-lg bg-purple-500/10 border border-purple-500/20">
+        <Layers className="h-4 w-4 text-purple-600" />
+        <span className="font-medium text-purple-700 dark:text-purple-400">
+          Processamento Chunked
+        </span>
+        <Badge variant="secondary" className="bg-purple-500/20 text-purple-700 dark:text-purple-300">
+          {aiUsage.pdfExtraction.partsProcessed} partes
+        </Badge>
+        {aiUsage.pdfExtraction.totalPages && (
+          <span className="text-xs text-muted-foreground">
+            ({aiUsage.pdfExtraction.totalPages} páginas totais)
+          </span>
+        )}
+      </div>
+    </div>
+  </div>
+)}
+```
 
-| Etapa | Configuração |
-|-------|--------------|
-| OCR das partes | `mistral-ocr-latest` (hardcoded - Gemini não suporta > 20MB) |
-| Estruturação | `getAIConfig()` → Respeita provider/model do DevPanel |
-| Geração de resumos | `gerarResumosIA()` → Usa configuração global |
+#### 3. Garantir que o Backend Envie os Dados
 
-### Arquivos Modificados
+**Arquivo:** `supabase/functions/processar-autos/index.ts`
 
-- `src/lib/pdf-splitter.ts`
-- `src/components/tools/ImportarAutosDialog.tsx`
-- `src/components/dev-panel/DevAIUsageLogs.tsx`
-- `src/components/dev-panel/DevBackendLogs.tsx`
+Verificar que a função `processarChunkedPDFBackground` inclui os campos no objeto `aiUsage`:
+
+```typescript
+const aiUsage = {
+  pdfExtraction: {
+    provider: 'mistral-ocr',
+    model: 'mistral-ocr-latest',
+    durationMs: extractionDurationMs,
+    strategy: 'client_side_split',
+    partsProcessed: fileParts.length,
+    totalPages: totalPages
+  },
+  summaries: {
+    provider: aiConfig.provider,
+    model: aiConfig.model,
+    count: successCount,
+    durationMs: summariesDurationMs
+  },
+  totalDurationMs: totalDurationMs
+};
+```
+
+---
+
+### Arquivos a Modificar
+
+| Arquivo | Ação | Descrição |
+|---------|------|-----------|
+| `src/components/tools/ImportarAutosDialog.tsx` | Modificar | Expandir interface `AIUsageInfo` + adicionar UI de chunked no preview |
+| `supabase/functions/processar-autos/index.ts` | Verificar | Garantir que `aiUsage` inclui `strategy`, `partsProcessed` e `totalPages` |
+
+---
+
+### Resultado Esperado
+
+Após processamento de um PDF grande (>20MB), o preview mostrará:
+
+```text
+┌────────────────────────────────────────────────────────────────┐
+│ 🖥️ Inteligências Artificiais Utilizadas                       │
+├────────────────────────────────────────────────────────────────┤
+│  📄 Extração do PDF          │  ✨ Geração dos Resumos        │
+│  mistral-ocr-latest          │  gemini-2.5-flash              │
+│  Mistral OCR                 │  IA Integrada                  │
+│  ⏱️ 45.2s                    │  ⏱️ 68.3s                      │
+│                              │  ✓ 5 de 5 textos gerados       │
+├────────────────────────────────────────────────────────────────┤
+│  🧩 Processamento Chunked    [4 partes]  (800 páginas totais)  │
+└────────────────────────────────────────────────────────────────┘
+│  ⏱️ Tempo total: 1m 53s                                       │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### Benefícios
+
+1. **Transparência total**: Usuário sabe que seu PDF foi dividido e processado em partes
+2. **Rastreabilidade**: Informação visível tanto no preview quanto nos logs do DevPanel
+3. **Consistência visual**: Usa o mesmo estilo roxo/purple do badge "Chunked" nos logs
+
