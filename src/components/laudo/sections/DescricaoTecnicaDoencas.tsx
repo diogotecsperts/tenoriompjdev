@@ -41,8 +41,8 @@ export function DescricaoTecnicaDoencas() {
     if (!sidValue.trim()) {
       toast({
         variant: "destructive",
-        title: "SID não informado",
-        description: "Digite o código SID antes de aplicar.",
+        title: "CID não informado",
+        description: "Digite o código CID antes de aplicar.",
       });
       return;
     }
@@ -80,21 +80,21 @@ export function DescricaoTecnicaDoencas() {
       if (Object.keys(updates).length > 0) {
         updateLaudo(updates);
         toast({
-          title: "SID aplicado",
-          description: `${replacementsCount} ocorrência(s) de "SID" substituída(s) por "${sidValue.trim()}".`,
+          title: "CID aplicado",
+          description: `${replacementsCount} ocorrência(s) de "CID" substituída(s) por "${sidValue.trim()}".`,
         });
       } else {
         toast({
           title: "Nenhuma ocorrência encontrada",
-          description: "Não foi encontrado 'SID' nos campos do laudo.",
+          description: "Não foi encontrado 'CID' nos campos do laudo.",
         });
       }
     } catch (error) {
       console.error("Erro ao aplicar SID:", error);
       toast({
         variant: "destructive",
-        title: "Erro ao aplicar SID",
-        description: "Ocorreu um erro ao substituir o SID.",
+        title: "Erro ao aplicar CID",
+        description: "Ocorreu um erro ao substituir o CID.",
       });
     } finally {
       setIsApplying(false);
