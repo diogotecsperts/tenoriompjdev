@@ -1456,78 +1456,195 @@ async function processarPDFBackground(
           }).eq('id', jobId);
           
           // Use stream if available, otherwise use bytes
-          if (pdfStream) {
-            const extracted = await extractVisualContent(
-              { stream: pdfStream, size: pdfSizeBytes },
-              { model: 'gemini-2.5-flash' }
-            );
-            pdfStream = null; // Stream consumed
+          // WRAPPED IN TRY/CATCH: If Gemini fails for large PDFs (token limit/INVALID_ARGUMENT),
+          // fallback to Mistral OCR with PDF splitting
+          let geminiExtractionSucceeded = false;
+          
+          try {
+            if (pdfStream) {
+              const extracted = await extractVisualContent(
+                { stream: pdfStream, size: pdfSizeBytes },
+                { model: 'gemini-2.5-flash' }
+              );
+              pdfStream = null; // Stream consumed
+              
+              console.log(`[processar-autos] Streaming extraction complete: ${extracted.rawText.length} chars`);
+              
+              // Continue with structured extraction
+              await supabaseAdmin.from('import_jobs').update({ 
+                current_step: 'Estruturando dados extraídos...',
+                progress: 45,
+                updated_at: new Date().toISOString()
+              }).eq('id', jobId);
+              
+              const fillResult = await callAI(
+                await getAIConfig(),
+                systemPrompt,
+                `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${extracted.rawText}`,
+                { promptType: 'single_pass_large_streaming', userId, maxOutputTokens: 65536, jsonMode: true }
+              );
+              
+              visionResult = {
+                provider: 'gemini-streaming',
+                model: extracted.model,
+                text: fillResult.text,
+                finishReason: 'STOP',
+                usedFallback: false
+              };
+              
+              geminiExtractionSucceeded = true;
+              
+            } else if (pdfBytes) {
+              // We have bytes - use Files API upload directly (no splitting)
+              const extracted = await extractVisualContent(pdfBytes, { 
+                useFilesAPI: true, 
+                model: 'gemini-2.5-flash'
+              });
+              pdfBytes = null; // Free memory
+              
+              console.log(`[processar-autos] Bytes extraction complete: ${extracted.rawText.length} chars`);
+              
+              await supabaseAdmin.from('import_jobs').update({ 
+                current_step: 'Estruturando dados extraídos...',
+                progress: 45,
+                updated_at: new Date().toISOString()
+              }).eq('id', jobId);
+              
+              const fillResult = await callAI(
+                await getAIConfig(),
+                systemPrompt,
+                `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${extracted.rawText}`,
+                { promptType: 'single_pass_large_bytes', userId, maxOutputTokens: 65536, jsonMode: true }
+              );
+              
+              visionResult = {
+                provider: 'gemini-files-api',
+                model: extracted.model,
+                text: fillResult.text,
+                finishReason: 'STOP',
+                usedFallback: false
+              };
+              
+              geminiExtractionSucceeded = true;
+              
+            } else {
+              throw new Error('No PDF input available for large file processing');
+            }
+          } catch (geminiError) {
+            const errorMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
             
-            console.log(`[processar-autos] Streaming extraction complete: ${extracted.rawText.length} chars`);
+            // Check if this is a capacity/limit error that can be recovered with Mistral fallback
+            const isCapacityError = 
+              errorMsg.includes('INVALID_ARGUMENT') || 
+              errorMsg.includes('exceeds') || 
+              errorMsg.includes('All attempts failed') ||
+              errorMsg.includes('token') ||
+              errorMsg.includes('maximum');
             
-            // Continue with structured extraction
-            await supabaseAdmin.from('import_jobs').update({ 
-              current_step: 'Estruturando dados extraídos...',
-              progress: 45,
-              updated_at: new Date().toISOString()
-            }).eq('id', jobId);
-            
-            const fillResult = await callAI(
-              await getAIConfig(),
-              systemPrompt,
-              `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${extracted.rawText}`,
-              { promptType: 'single_pass_large_streaming', userId, maxOutputTokens: 65536, jsonMode: true }
-            );
-            
-            visionResult = {
-              provider: 'gemini-streaming',
-              model: extracted.model,
-              text: fillResult.text,
-              finishReason: 'STOP',
-              usedFallback: false
-            };
-          } else if (pdfBytes) {
-            // We have bytes - use Files API upload directly (no splitting)
-            const extracted = await extractVisualContent(pdfBytes, { 
-              useFilesAPI: true, 
-              model: 'gemini-2.5-flash'
-            });
-            pdfBytes = null; // Free memory
-            
-            console.log(`[processar-autos] Bytes extraction complete: ${extracted.rawText.length} chars`);
-            
-            await supabaseAdmin.from('import_jobs').update({ 
-              current_step: 'Estruturando dados extraídos...',
-              progress: 45,
-              updated_at: new Date().toISOString()
-            }).eq('id', jobId);
-            
-            const fillResult = await callAI(
-              await getAIConfig(),
-              systemPrompt,
-              `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${extracted.rawText}`,
-              { promptType: 'single_pass_large_bytes', userId, maxOutputTokens: 65536, jsonMode: true }
-            );
-            
-            visionResult = {
-              provider: 'gemini-files-api',
-              model: extracted.model,
-              text: fillResult.text,
-              finishReason: 'STOP',
-              usedFallback: false
-            };
-          } else {
-            throw new Error('No PDF input available for large file processing');
+            if (isCapacityError) {
+              console.log(`[processar-autos] Gemini failed with capacity error, falling back to Mistral OCR with splitting...`);
+              await logWarn('processar-autos', `Gemini falhou por limite, iniciando fallback Mistral OCR`, jobId, { errorMsg });
+              
+              // Check if Mistral key is available
+              const mistralKey = getMistralAPIKey();
+              if (!mistralKey) {
+                throw new Error('PDF muito grande para Gemini e Mistral OCR não disponível. Divida o arquivo manualmente (<45MB).');
+              }
+              
+              // Download PDF bytes from storage for splitting
+              await supabaseAdmin.from('import_jobs').update({ 
+                current_step: 'Fallback: Baixando PDF para divisão...',
+                progress: 15,
+                updated_at: new Date().toISOString()
+              }).eq('id', jobId);
+              
+              const { data: pdfData, error: dlError } = await supabaseAdmin.storage
+                .from('processos-pdf')
+                .download(filePath);
+              
+              if (dlError || !pdfData) {
+                throw new Error(`Falha ao baixar PDF para fallback Mistral: ${dlError?.message || 'Dados não disponíveis'}`);
+              }
+              
+              const fallbackPdfBytes = new Uint8Array(await pdfData.arrayBuffer());
+              console.log(`[processar-autos] Fallback: PDF downloaded, ${(fallbackPdfBytes.byteLength / 1024 / 1024).toFixed(2)}MB`);
+              
+              // Split PDF into ~40MB parts
+              await supabaseAdmin.from('import_jobs').update({ 
+                current_step: 'Fallback: Dividindo PDF em partes...',
+                progress: 20,
+                updated_at: new Date().toISOString()
+              }).eq('id', jobId);
+              
+              const { parts, pageRanges, totalPages } = await splitPDF(fallbackPdfBytes, { maxSizeBytes: 40_000_000 });
+              console.log(`[processar-autos] Fallback: Split into ${parts.length} parts (${totalPages} total pages)`);
+              
+              // Process each part with Mistral OCR
+              const partResults: string[] = [];
+              let processedPages = 0;
+              
+              for (let i = 0; i < parts.length; i++) {
+                await supabaseAdmin.from('import_jobs').update({ 
+                  current_step: `Fallback: Mistral OCR parte ${i + 1}/${parts.length}...`,
+                  progress: 25 + Math.floor((i / parts.length) * 20),
+                  updated_at: new Date().toISOString()
+                }).eq('id', jobId);
+                
+                const partResult = await extractWithMistralOCR(parts[i], mistralKey);
+                partResults.push(partResult.text);
+                processedPages += partResult.pageCount;
+                
+                console.log(`[processar-autos] Fallback: Part ${i + 1}/${parts.length} complete, ${partResult.pageCount} pages`);
+              }
+              
+              const combinedText = partResults.join('\n\n--- PARTE DIVIDIDA ---\n\n');
+              console.log(`[processar-autos] Fallback Mistral OCR complete: ${processedPages} pages, ${combinedText.length} chars`);
+              
+              // Structure the extracted data
+              await supabaseAdmin.from('import_jobs').update({ 
+                current_step: 'Fallback: Estruturando dados extraídos...',
+                progress: 50,
+                updated_at: new Date().toISOString()
+              }).eq('id', jobId);
+              
+              const fillResult = await callAI(
+                await getAIConfig(),
+                systemPrompt,
+                `Analise o seguinte texto extraído de um PDF de processo trabalhista (via fallback Mistral OCR após falha do Gemini) e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${combinedText}`,
+                { promptType: 'fallback_mistral_split', userId, maxOutputTokens: 65536, jsonMode: true }
+              );
+              
+              visionResult = {
+                provider: 'mistral-ocr-fallback',
+                model: 'mistral-ocr-latest',
+                text: fillResult.text,
+                finishReason: 'STOP',
+                usedFallback: true,
+                splitParts: parts.length
+              };
+              
+              modelUsed = 'mistral-ocr/fallback-split';
+              
+              await logInfo('processar-autos', `Fallback Mistral OCR completo: ${processedPages} páginas em ${parts.length} partes`, jobId);
+              
+              geminiExtractionSucceeded = true; // Mark as succeeded (via fallback)
+              
+            } else {
+              // Not a capacity error - rethrow
+              throw geminiError;
+            }
           }
           
-          timings.pdfExtraction.end = Date.now();
-          modelUsed = `${visionResult.provider}/${visionResult.model}`;
-          
-          const parsed = tryFixTruncatedJson(visionResult.text);
-          if (!parsed) {
-            throw new Error("Não foi possível processar a resposta da IA");
+          if (geminiExtractionSucceeded) {
+            timings.pdfExtraction.end = Date.now();
+            modelUsed = modelUsed || `${visionResult.provider}/${visionResult.model}`;
+            
+            const parsed = tryFixTruncatedJson(visionResult.text);
+            if (!parsed) {
+              throw new Error("Não foi possível processar a resposta da IA");
+            }
+            extractedData = ensureValidStructure(parsed);
           }
-          extractedData = ensureValidStructure(parsed);
           
         } else if (pdfSizeBytes > GEMINI_PROCESSING_LIMIT) {
           // Legacy path for files between 45MB limit and GEMINI_PROCESSING_LIMIT
