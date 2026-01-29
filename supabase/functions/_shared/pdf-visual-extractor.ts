@@ -219,7 +219,7 @@ async function extractWithFilesAPIStream(
   try {
     // Resolver nome do modelo para API Gemini
     const apiModel = resolveGeminiModelName(model);
-    console.log(`[pdf-visual-extractor] Calling Gemini Files API with model: ${apiModel} (original: ${model})`);
+    console.log(`[pdf-visual-extractor] Calling Gemini generateContent with model: ${apiModel}, fileUri: ${fileUri}`);
 
     // Call generateContent with file URI
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
