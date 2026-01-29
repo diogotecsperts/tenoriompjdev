@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 export interface ExtractedContent {
   rawText: string;
@@ -64,7 +65,7 @@ IMPORTANTE: estimatedSections deve listar as seções principais detectadas no d
  * Esta função é usada na Fase 1 do processamento em duas fases
  */
 export async function extractVisualContent(
-  pdfBase64: string,
+  pdfInput: string | Uint8Array,
   options: {
     useFilesAPI?: boolean;
     model?: string;
@@ -78,23 +79,99 @@ export async function extractVisualContent(
     throw new Error('GEMINI_API_KEY não configurada para extração visual');
   }
 
-  console.log(`[pdf-visual-extractor] Starting extraction with model: ${model}, useFilesAPI: ${options.useFilesAPI}`);
+  const isBytes = pdfInput instanceof Uint8Array;
+  const approxSizeBytes = isBytes
+    ? pdfInput.byteLength
+    : Math.ceil((pdfInput as string).length * 3 / 4);
+
+  console.log(`[pdf-visual-extractor] Starting extraction with model: ${model}, useFilesAPI: ${options.useFilesAPI}, inputType: ${isBytes ? 'bytes' : 'base64'}, approxSizeMB: ${(approxSizeBytes / (1024 * 1024)).toFixed(2)}`);
   
   const startTime = Date.now();
   let result: ExtractedContent;
 
   if (options.useFilesAPI) {
     // Para PDFs > 50MB, usar Files API
-    result = await extractWithFilesAPI(pdfBase64, model, apiKey);
+    result = isBytes
+      ? await extractWithFilesAPIBytes(pdfInput as Uint8Array, model, apiKey)
+      : await extractWithFilesAPI(pdfInput as string, model, apiKey);
   } else {
     // Para PDFs menores, usar inline base64
-    result = await extractWithInlineBase64(pdfBase64, model, apiKey);
+    const base64 = isBytes
+      ? encode(
+          (pdfInput as Uint8Array).buffer.slice(
+            (pdfInput as Uint8Array).byteOffset,
+            (pdfInput as Uint8Array).byteOffset + (pdfInput as Uint8Array).byteLength
+          ) as ArrayBuffer
+        )
+      : (pdfInput as string);
+    result = await extractWithInlineBase64(base64, model, apiKey);
   }
 
   const duration = Date.now() - startTime;
   console.log(`[pdf-visual-extractor] Extraction completed in ${duration}ms, rawText length: ${result.rawText.length}`);
   
   return result;
+}
+
+/**
+ * Extração usando Files API a partir de bytes (evita base64 gigante em memória)
+ */
+async function extractWithFilesAPIBytes(
+  pdfBytes: Uint8Array,
+  model: string,
+  apiKey: string
+): Promise<ExtractedContent> {
+  // Import the files API module
+  const { uploadToGeminiFilesAPIBytes, deleteGeminiFile } = await import('./gemini-files-api.ts');
+
+  // Upload to Files API
+  console.log('[pdf-visual-extractor] Uploading large PDF bytes to Gemini Files API...');
+  const fileUri = await uploadToGeminiFilesAPIBytes(pdfBytes, apiKey);
+  console.log(`[pdf-visual-extractor] File uploaded: ${fileUri}`);
+
+  try {
+    // Resolver nome do modelo para API Gemini
+    const apiModel = resolveGeminiModelName(model);
+    console.log(`[pdf-visual-extractor] Calling Gemini Files API with model: ${apiModel} (original: ${model})`);
+
+    // Call generateContent with file URI
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { text: EXTRACTION_PROMPT },
+            { file_data: { file_uri: fileUri, mime_type: 'application/pdf' } }
+          ]
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 1048576,
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Gemini Vision (Files API) error (${response.status}): ${error}`);
+    }
+
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    return parseExtractionResult(text, model, 'gemini-files-api');
+  } finally {
+    // Clean up uploaded file
+    try {
+      await deleteGeminiFile(fileUri, apiKey);
+      console.log('[pdf-visual-extractor] Temporary file deleted from Files API');
+    } catch (cleanupError) {
+      console.warn('[pdf-visual-extractor] Failed to delete temporary file:', cleanupError);
+    }
+  }
 }
 
 /**

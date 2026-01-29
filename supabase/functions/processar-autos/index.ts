@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { getAIConfig, callAI, callPDFProvider } from "../_shared/ai-config.ts";
 import { logToBackend, logError, logWarn, logInfo } from "../_shared/backend-logger.ts";
 import { extractVisualContent, storeExtractedContent } from "../_shared/pdf-visual-extractor.ts";
@@ -664,18 +665,22 @@ const results = {
 }
 
 // Background processing function
-// MEMORY OPTIMIZATION: Using object wrapper to allow early cleanup of large PDF string
+// MEMORY OPTIMIZATION: Download in background + prefer bytes/Files API to avoid base64 duplication
 async function processarPDFBackground(
   jobId: string,
-  pdfBase64Input: string,
+  filePath: string,
   fileName: string,
   supabaseAdmin: any,
   isRetry: boolean = false,
   userId: string
 ) {
-  // Wrap in object to allow nullifying after use (helps GC reclaim memory faster)
-  const pdfHolder: { data: string | null } = { data: pdfBase64Input };
-  const pdfSizeChars = pdfBase64Input.length;
+  let pdfBytes: Uint8Array | null = null;
+  let pdfSizeBytes = 0;
+  const base64FromBytes = (): string => {
+    if (!pdfBytes) throw new Error('PDF bytes not available');
+    const buf = pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength) as ArrayBuffer;
+    return encode(buf);
+  };
   
   let modelUsed = 'unknown';
   let attemptId: string | null = null;
@@ -691,7 +696,7 @@ async function processarPDFBackground(
     // Log job start
     await logInfo('processar-autos', `Iniciando processamento de PDF: ${fileName}`, jobId, {
       isRetry,
-      pdfSizeChars
+      filePath
     });
 
     // Get current retry_count from job
@@ -736,13 +741,26 @@ async function processarPDFBackground(
       .from('import_jobs')
       .update({ 
         progress: 5, 
-        current_step: isRetry ? 'Reprocessando PDF...' : 'Enviando PDF para análise...',
+        current_step: isRetry ? 'Reprocessando: baixando PDF...' : 'Baixando PDF...',
         step_id: 'upload',
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
 
-    console.log(`[processar-autos] Processing PDF: ${fileName}, size: ${pdfSizeChars} chars`);
+    // Download PDF bytes from storage INSIDE background task (so the HTTP request can return quickly)
+    const { data: fileData, error: downloadError } = await supabaseAdmin.storage
+      .from('processos-pdf')
+      .download(filePath);
+
+    if (downloadError || !fileData) {
+      throw new Error('Falha ao recuperar PDF do armazenamento');
+    }
+
+    const arrayBuffer = await fileData.arrayBuffer();
+    pdfBytes = new Uint8Array(arrayBuffer);
+    pdfSizeBytes = pdfBytes.byteLength;
+
+    console.log(`[processar-autos] Downloaded PDF: ${fileName}, size: ${(pdfSizeBytes / (1024 * 1024)).toFixed(2)}MB`);
 
     // Fetch import strategy configuration
     const { data: strategyData } = await supabaseAdmin
@@ -775,7 +793,6 @@ async function processarPDFBackground(
       timings.pdfExtraction.start = Date.now();
 
       // Determine if we need Files API for large PDFs (> 50MB)
-      const pdfSizeBytes = Math.ceil(pdfSizeChars * 3 / 4);
       const useFilesAPI = pdfSizeBytes > 50_000_000;
       console.log(`[processar-autos] PDF size: ${(pdfSizeBytes / (1024 * 1024)).toFixed(2)}MB, useFilesAPI: ${useFilesAPI}`);
 
@@ -784,20 +801,18 @@ async function processarPDFBackground(
       console.log(`[processar-autos] Phase 1 using model: ${phase1Model}`);
 
       try {
-        // Validate PDF data is still available
-        if (!pdfHolder.data) {
-          throw new Error('PDF data was unexpectedly cleared');
+        if (!pdfBytes) {
+          throw new Error('PDF bytes not available');
         }
-        
-        const extracted = await extractVisualContent(pdfHolder.data, { 
+
+        const extracted = await extractVisualContent(pdfBytes, { 
           useFilesAPI,
           model: phase1Model 
         });
         
-        // MEMORY OPTIMIZATION: Clear PDF from memory after Phase 1 extraction
-        // In two-phase mode, we only need the extracted text from here on
-        pdfHolder.data = null;
-        console.log('[processar-autos] MEMORY: Cleared PDF base64 after Phase 1 extraction');
+        // MEMORY OPTIMIZATION: Clear PDF bytes after Phase 1 extraction
+        pdfBytes = null;
+        console.log('[processar-autos] MEMORY: Cleared PDF bytes after Phase 1 extraction');
         
         timings.pdfExtraction.end = Date.now();
         modelUsed = `${extracted.provider}/${extracted.model}`;
@@ -919,17 +934,15 @@ async function processarPDFBackground(
           updated_at: new Date().toISOString()
         }).eq('id', jobId);
         
-        if (!pdfHolder.data) {
-          throw new Error('PDF data was unexpectedly cleared during fallback');
-        }
-        
-        visionResult = await callPDFProvider(pdfHolder.data, systemPrompt, {
+        // Fallback requires base64
+        const pdfBase64 = base64FromBytes();
+
+        visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
           promptType: 'pdf_extraction',
           userId: userId
         });
-        
         // Clear PDF after use
-        pdfHolder.data = null;
+        pdfBytes = null;
         
         timings.pdfExtraction.end = Date.now();
         modelUsed = `${visionResult.provider}/${visionResult.model}`;
@@ -957,18 +970,17 @@ async function processarPDFBackground(
 
       timings.pdfExtraction.start = Date.now();
       
-      if (!pdfHolder.data) {
-        throw new Error('PDF data not available');
-      }
-      
-      visionResult = await callPDFProvider(pdfHolder.data, systemPrompt, {
+      // Single-pass requires base64
+      const pdfBase64 = base64FromBytes();
+
+      visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
         promptType: 'pdf_extraction',
         userId: userId
       });
       
       // MEMORY OPTIMIZATION: Clear PDF after extraction in single-pass mode
-      pdfHolder.data = null;
-      console.log('[processar-autos] MEMORY: Cleared PDF base64 after single-pass extraction');
+      pdfBytes = null;
+      console.log('[processar-autos] MEMORY: Cleared PDF bytes after single-pass extraction');
       
       timings.pdfExtraction.end = Date.now();
       modelUsed = `${visionResult.provider}/${visionResult.model}`;
@@ -1219,47 +1231,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[processar-autos] ${isRetry ? 'Retry' : 'New'} request - fetching PDF from storage: ${finalFilePath}`);
-    
-    // MEMORY OPTIMIZATION: Download PDF from storage instead of receiving in request body
-    // This prevents the request body from consuming memory before processing starts
-    const { data: fileData, error: downloadError } = await supabaseAdmin.storage
-      .from('processos-pdf')
-      .download(finalFilePath);
-    
-    if (downloadError || !fileData) {
-      console.error('[processar-autos] Error downloading PDF from storage:', downloadError);
-      return new Response(
-        JSON.stringify({ error: "Falha ao recuperar PDF do armazenamento" }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    // Convert to base64 in chunks to reduce memory pressure
-    const arrayBuffer = await fileData.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-    let finalPdfBase64 = '';
-    
-    // Process in chunks of 32KB to avoid string concatenation memory spikes
-    const CHUNK_SIZE = 32768;
-    for (let i = 0; i < uint8Array.length; i += CHUNK_SIZE) {
-      const chunk = uint8Array.slice(i, Math.min(i + CHUNK_SIZE, uint8Array.length));
-      let chunkBinary = '';
-      for (let j = 0; j < chunk.length; j++) {
-        chunkBinary += String.fromCharCode(chunk[j]);
-      }
-      finalPdfBase64 += btoa(chunkBinary);
-    }
-    
-    // IMPORTANT: For proper base64, we need to encode all bytes together, not in chunks
-    // The chunked approach above would produce invalid base64. Let's fix this:
-    let binary = '';
-    for (let i = 0; i < uint8Array.length; i++) {
-      binary += String.fromCharCode(uint8Array[i]);
-    }
-    finalPdfBase64 = btoa(binary);
-    
-    console.log(`[processar-autos] PDF loaded from storage, size: ${finalPdfBase64.length} chars`);
+    console.log(`[processar-autos] ${isRetry ? 'Retry' : 'New'} request - scheduling background processing for: ${finalFilePath}`);
 
     // Create job record with file_path for retry capability
     const { data: job, error: jobError } = await supabaseAdmin
@@ -1287,7 +1259,7 @@ serve(async (req) => {
 
     // Start background processing using EdgeRuntime.waitUntil
     // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
-    EdgeRuntime.waitUntil(processarPDFBackground(jobId, finalPdfBase64, fileName, supabaseAdmin, isRetry, userId));
+    EdgeRuntime.waitUntil(processarPDFBackground(jobId, finalFilePath, fileName, supabaseAdmin, isRetry, userId));
 
     // Return immediately with jobId
     return new Response(
