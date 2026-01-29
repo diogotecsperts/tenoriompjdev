@@ -2112,14 +2112,14 @@ export function DevSettings() {
 
           {/* Mistral OCR Info Panel */}
           {config.pdf_ai_provider === "mistral-ocr" && (
-            <div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800">
+            <div className="p-3 rounded-lg border border-border bg-muted/50">
               <div className="flex items-start gap-2">
-                <Crown className="h-4 w-4 text-orange-500 mt-0.5" />
+                <Crown className="h-4 w-4 text-primary mt-0.5" />
                 <div className="text-xs space-y-1">
-                  <p className="font-medium text-orange-700 dark:text-orange-400">
+                  <p className="font-medium text-foreground">
                     Mistral OCR Ativo - Precisão Elite
                   </p>
-                  <ul className="text-orange-600 dark:text-orange-300 space-y-0.5">
+                  <ul className="text-muted-foreground space-y-0.5">
                     <li>• Precisão elite ~94.9% em tabelas e fórmulas</li>
                     <li>• Custo: ~$1.00 por 1.000 páginas</li>
                     <li>• Limite: 50MB por arquivo (dividido automaticamente)</li>
@@ -2504,21 +2504,21 @@ export function DevSettings() {
                 
                 {/* Mistral OCR Info (only if Mistral selected) */}
                 {config.phase1_ocr_provider === "mistral" && (
-                  <div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800">
+                  <div className="p-3 rounded-lg border border-border bg-muted/50">
                     <div className="flex items-start gap-2">
-                      <Crown className="h-4 w-4 text-orange-500 mt-0.5" />
+                      <Crown className="h-4 w-4 text-primary mt-0.5" />
                       <div className="text-xs space-y-1">
-                        <p className="font-medium text-orange-700 dark:text-orange-400">
+                        <p className="font-medium text-foreground">
                           Mistral OCR - Precisão Elite
                         </p>
-                        <ul className="text-orange-600 dark:text-orange-300 space-y-0.5">
+                        <ul className="text-muted-foreground space-y-0.5">
                           <li>• Precisão ~94.9% em tabelas e fórmulas</li>
                           <li>• Output: Markdown estruturado</li>
                           <li>• Custo: ~$1.00 por 1.000 páginas</li>
                           <li>• Limite: 50MB por arquivo (usa split automático)</li>
                         </ul>
                         {!savedApiKeys['mistral'] && (
-                          <p className="text-orange-500 font-medium mt-2">
+                          <p className="text-destructive font-medium mt-2">
                             ⚠️ Requer MISTRAL_API_KEY configurada nas secrets
                           </p>
                         )}
