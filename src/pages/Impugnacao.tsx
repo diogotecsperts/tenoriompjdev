@@ -1,16 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import { 
   Scale, 
-  FileText, 
-  Send, 
   Save,
   Copy,
   Sparkles,
@@ -18,9 +14,15 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  Plus
+  Plus,
+  Loader2,
+  Trash2
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { LaudoSelector } from "@/components/impugnacao/LaudoSelector";
+import { ImpugnacaoHistorico } from "@/components/impugnacao/ImpugnacaoHistorico";
 
 interface Quesito {
   id: string;
@@ -28,86 +30,337 @@ interface Quesito {
   texto: string;
   resposta: string;
   status: "pendente" | "respondido";
+  gerado_por_ia?: boolean;
+}
+
+interface Laudo {
+  id: string;
+  title: string;
+  vitima_nome: string | null;
+  processo_numero: string | null;
+  status: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  conclusao_analise: string | null;
+}
+
+interface Impugnacao {
+  id: string;
+  laudo_id: string | null;
+  processo_numero: string | null;
+  quesitos: Quesito[] | null;
+  status: string | null;
+  created_at: string;
+  updated_at: string;
+  laudos?: {
+    vitima_nome: string | null;
+    title: string;
+  } | null;
 }
 
 export default function Impugnacao() {
-  const [processoNumero, setProcessoNumero] = useState("");
-  const [impugnacaoTexto, setImpugnacaoTexto] = useState("");
+  const { user } = useAuth();
+  const [impugnacaoId, setImpugnacaoId] = useState<string | null>(null);
+  const [selectedLaudo, setSelectedLaudo] = useState<Laudo | null>(null);
   const [quesitos, setQuesitos] = useState<Quesito[]>([
     {
       id: "1",
       numero: 1,
-      texto: "O reclamante apresenta sequelas decorrentes do acidente de trabalho noticiado nos autos?",
+      texto: "",
       resposta: "",
       status: "pendente"
-    },
-    {
-      id: "2",
-      numero: 2,
-      texto: "Caso positivo, qual o grau de incapacidade funcional apresentado?",
-      resposta: "",
-      status: "pendente"
-    },
-    {
-      id: "3",
-      numero: 3,
-      texto: "Há nexo causal entre o acidente e as lesões apresentadas?",
-      resposta: "",
-      status: "pendente"
-    },
+    }
   ]);
   const [selectedQuesito, setSelectedQuesito] = useState<string>("1");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  const handleQuesitoChange = (id: string, resposta: string) => {
+  // Auto-save debounce
+  const debouncedSave = useCallback(
+    debounce(() => {
+      if (hasUnsavedChanges && user) {
+        handleSave(true);
+      }
+    }, 3000),
+    [hasUnsavedChanges, user, selectedLaudo, quesitos, impugnacaoId]
+  );
+
+  useEffect(() => {
+    if (hasUnsavedChanges) {
+      debouncedSave();
+    }
+  }, [hasUnsavedChanges, debouncedSave]);
+
+  const handleLaudoSelect = (laudo: Laudo | null) => {
+    setSelectedLaudo(laudo);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleQuesitoChange = (id: string, field: "texto" | "resposta", value: string) => {
     setQuesitos(prev => prev.map(q => 
       q.id === id 
-        ? { ...q, resposta, status: resposta.trim() ? "respondido" : "pendente" }
+        ? { 
+            ...q, 
+            [field]: value, 
+            status: field === "resposta" && value.trim() ? "respondido" : q.status 
+          }
         : q
     ));
+    setHasUnsavedChanges(true);
   };
 
   const handleAddQuesito = () => {
-    const newId = (quesitos.length + 1).toString();
+    const newId = Date.now().toString();
+    const newNumero = quesitos.length + 1;
     setQuesitos([...quesitos, {
       id: newId,
-      numero: quesitos.length + 1,
+      numero: newNumero,
       texto: "",
       resposta: "",
       status: "pendente"
     }]);
     setSelectedQuesito(newId);
+    setHasUnsavedChanges(true);
+  };
+
+  const handleRemoveQuesito = (id: string) => {
+    if (quesitos.length <= 1) {
+      toast({
+        title: "Ação não permitida",
+        description: "Deve haver pelo menos um quesito.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const index = quesitos.findIndex(q => q.id === id);
+    const newQuesitos = quesitos
+      .filter(q => q.id !== id)
+      .map((q, i) => ({ ...q, numero: i + 1 }));
+    
+    setQuesitos(newQuesitos);
+    
+    // Se removeu o selecionado, selecionar o anterior ou primeiro
+    if (selectedQuesito === id) {
+      const newIndex = Math.max(0, index - 1);
+      setSelectedQuesito(newQuesitos[newIndex]?.id || newQuesitos[0]?.id);
+    }
+    
+    setHasUnsavedChanges(true);
   };
 
   const handleGenerateResponse = async () => {
-    setIsGenerating(true);
-    // Simulate AI generation
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
     const currentQuesito = quesitos.find(q => q.id === selectedQuesito);
-    if (currentQuesito) {
-      const mockResponse = `Com base na análise técnica realizada e nos documentos constantes dos autos, em resposta ao quesito formulado, esclareço que:\n\nA perícia médica realizada constatou que o periciando apresenta condição clínica compatível com os fatos narrados na inicial, conforme detalhadamente exposto no laudo pericial.\n\nDesta forma, mantenho integralmente as conclusões apresentadas no laudo pericial, por estarem fundamentadas em critérios técnicos e científicos adequados.`;
-      
-      handleQuesitoChange(selectedQuesito, mockResponse);
-    }
     
-    setIsGenerating(false);
-    toast({
-      title: "Resposta gerada",
-      description: "A resposta foi gerada com base no laudo pericial.",
-    });
+    if (!currentQuesito?.texto.trim()) {
+      toast({
+        title: "Quesito vazio",
+        description: "Digite o texto do quesito antes de gerar a resposta.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (!selectedLaudo) {
+      toast({
+        title: "Laudo não selecionado",
+        description: "Selecione o laudo vinculado à impugnação.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+    
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+
+      if (!token) {
+        throw new Error("Sessão expirada. Faça login novamente.");
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gerar-resposta-impugnacao`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            laudo_id: selectedLaudo.id,
+            quesito_texto: currentQuesito.texto,
+            quesito_numero: currentQuesito.numero
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao gerar resposta");
+      }
+
+      const data = await response.json();
+      
+      setQuesitos(prev => prev.map(q => 
+        q.id === selectedQuesito 
+          ? { ...q, resposta: data.resposta, status: "respondido", gerado_por_ia: true }
+          : q
+      ));
+      
+      setHasUnsavedChanges(true);
+      
+      toast({
+        title: "Resposta gerada",
+        description: `Resposta fundamentada no laudo de ${data.laudo_info?.vitima_nome || "N/A"}.`,
+      });
+    } catch (error) {
+      console.error("Erro ao gerar resposta:", error);
+      toast({
+        title: "Erro ao gerar resposta",
+        description: error instanceof Error ? error.message : "Tente novamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  const handleSave = () => {
-    toast({
-      title: "Rascunho salvo",
-      description: "Suas respostas foram salvas com sucesso.",
-    });
+  const handleSave = async (silent = false) => {
+    if (!user) {
+      toast({
+        title: "Não autenticado",
+        description: "Faça login para salvar.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsSaving(true);
+    
+    try {
+      const respondidos = quesitos.filter(q => q.status === "respondido").length;
+      const status = respondidos === quesitos.length && quesitos.length > 0 ? "respondido" : "pendente";
+
+      // Cast quesitos to JSON-compatible type for Supabase
+      const quesitosJson = quesitos.map(q => ({
+        id: q.id,
+        numero: q.numero,
+        texto: q.texto,
+        resposta: q.resposta,
+        status: q.status,
+        gerado_por_ia: q.gerado_por_ia || false
+      }));
+
+      if (impugnacaoId) {
+        // Update existing
+        const { error } = await supabase
+          .from("impugnacoes")
+          .update({
+            laudo_id: selectedLaudo?.id || null,
+            processo_numero: selectedLaudo?.processo_numero || null,
+            quesitos: quesitosJson,
+            status
+          })
+          .eq("id", impugnacaoId);
+
+        if (error) throw error;
+      } else {
+        // Create new
+        const { data, error } = await supabase
+          .from("impugnacoes")
+          .insert({
+            user_id: user.id,
+            laudo_id: selectedLaudo?.id || null,
+            processo_numero: selectedLaudo?.processo_numero || null,
+            quesitos: quesitosJson,
+            status
+          })
+          .select("id")
+          .single();
+
+        if (error) throw error;
+        setImpugnacaoId(data.id);
+      }
+
+      setHasUnsavedChanges(false);
+      
+      if (!silent) {
+        toast({
+          title: "Salvo com sucesso",
+          description: "Suas respostas foram salvas na nuvem.",
+        });
+      }
+    } catch (error) {
+      console.error("Erro ao salvar:", error);
+      if (!silent) {
+        toast({
+          title: "Erro ao salvar",
+          description: error instanceof Error ? error.message : "Tente novamente.",
+          variant: "destructive"
+        });
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleLoadImpugnacao = (imp: Impugnacao) => {
+    setImpugnacaoId(imp.id);
+    
+    // Load laudo if exists
+    if (imp.laudo_id && imp.laudos) {
+      setSelectedLaudo({
+        id: imp.laudo_id,
+        title: imp.laudos.title,
+        vitima_nome: imp.laudos.vitima_nome,
+        processo_numero: imp.processo_numero,
+        status: null,
+        created_at: null,
+        updated_at: null,
+        conclusao_analise: null
+      });
+    } else {
+      setSelectedLaudo(null);
+    }
+
+    // Load quesitos
+    if (imp.quesitos && Array.isArray(imp.quesitos) && imp.quesitos.length > 0) {
+      setQuesitos(imp.quesitos);
+      setSelectedQuesito(imp.quesitos[0].id);
+    } else {
+      setQuesitos([{
+        id: "1",
+        numero: 1,
+        texto: "",
+        resposta: "",
+        status: "pendente"
+      }]);
+      setSelectedQuesito("1");
+    }
+
+    setHasUnsavedChanges(false);
+  };
+
+  const handleNewImpugnacao = () => {
+    setImpugnacaoId(null);
+    setSelectedLaudo(null);
+    setQuesitos([{
+      id: "1",
+      numero: 1,
+      texto: "",
+      resposta: "",
+      status: "pendente"
+    }]);
+    setSelectedQuesito("1");
+    setHasUnsavedChanges(false);
   };
 
   const handleCopyAll = () => {
     const allResponses = quesitos
-      .map(q => `Quesito ${q.numero}: ${q.texto}\n\nResposta: ${q.resposta || "(Não respondido)"}\n`)
+      .map(q => `QUESITO ${q.numero}:\n${q.texto || "(Sem texto)"}\n\nRESPOSTA:\n${q.resposta || "(Não respondido)"}\n`)
       .join("\n" + "—".repeat(50) + "\n\n");
     
     navigator.clipboard.writeText(allResponses);
@@ -119,6 +372,7 @@ export default function Impugnacao() {
 
   const respondidos = quesitos.filter(q => q.status === "respondido").length;
   const total = quesitos.length;
+  const currentQuesito = quesitos.find(q => q.id === selectedQuesito);
 
   return (
     <div className="h-[calc(100vh-3.5rem)] lg:h-screen flex flex-col">
@@ -132,7 +386,7 @@ export default function Impugnacao() {
             <div>
               <h1 className="text-xl lg:text-2xl font-bold text-foreground">Responder Impugnação</h1>
               <p className="text-sm text-muted-foreground">
-                Elabore respostas técnicas aos quesitos impugnados
+                Elabore respostas técnicas fundamentadas no laudo original
               </p>
             </div>
           </div>
@@ -141,13 +395,22 @@ export default function Impugnacao() {
               <Clock className="h-3 w-3" />
               {respondidos}/{total} respondidos
             </Badge>
+            <ImpugnacaoHistorico 
+              onSelect={handleLoadImpugnacao}
+              onNew={handleNewImpugnacao}
+              currentImpugnacaoId={impugnacaoId}
+            />
             <Button variant="outline" size="sm" onClick={handleCopyAll}>
               <Copy className="mr-2 h-4 w-4" />
               Copiar Tudo
             </Button>
-            <Button size="sm" onClick={handleSave}>
-              <Save className="mr-2 h-4 w-4" />
-              Salvar
+            <Button size="sm" onClick={() => handleSave(false)} disabled={isSaving}>
+              {isSaving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              {hasUnsavedChanges ? "Salvar*" : "Salvar"}
             </Button>
           </div>
         </div>
@@ -155,16 +418,13 @@ export default function Impugnacao() {
 
       {/* Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Panel - Quesitos List */}
+        {/* Left Panel - Laudo + Quesitos List */}
         <div className="w-80 border-r border-border bg-muted/30 flex flex-col">
+          {/* Laudo Selector */}
           <div className="p-4 border-b border-border">
-            <Label htmlFor="processo">Nº do Processo</Label>
-            <Input
-              id="processo"
-              value={processoNumero}
-              onChange={(e) => setProcessoNumero(e.target.value)}
-              placeholder="0000000-00.0000.0.00.0000"
-              className="mt-1.5"
+            <LaudoSelector 
+              selectedLaudo={selectedLaudo}
+              onSelect={handleLaudoSelect}
             />
           </div>
           
@@ -220,6 +480,13 @@ export default function Impugnacao() {
                         }`}>
                           {quesito.status === "respondido" ? "Respondido" : "Pendente"}
                         </span>
+                        {quesito.gerado_por_ia && (
+                          <Sparkles className={`h-3 w-3 ml-1 ${
+                            selectedQuesito === quesito.id 
+                              ? "text-primary-foreground/70" 
+                              : "text-blue-500"
+                          }`} />
+                        )}
                       </div>
                     </div>
                     <ChevronRight className={`h-4 w-4 flex-shrink-0 ${
@@ -236,23 +503,31 @@ export default function Impugnacao() {
 
         {/* Right Panel - Response Editor */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {quesitos.find(q => q.id === selectedQuesito) && (
+          {currentQuesito && (
             <>
               {/* Quesito Header */}
               <div className="p-4 lg:p-6 border-b border-border bg-card">
                 <div className="flex items-start gap-3">
-                  <Badge variant="outline" className="mt-0.5">
-                    Quesito {quesitos.find(q => q.id === selectedQuesito)?.numero}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="mt-0.5">
+                      Quesito {currentQuesito.numero}
+                    </Badge>
+                    {quesitos.length > 1 && (
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                        onClick={() => handleRemoveQuesito(currentQuesito.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
                   <div className="flex-1">
                     <Textarea
-                      value={quesitos.find(q => q.id === selectedQuesito)?.texto || ""}
-                      onChange={(e) => {
-                        setQuesitos(prev => prev.map(q =>
-                          q.id === selectedQuesito ? { ...q, texto: e.target.value } : q
-                        ));
-                      }}
-                      placeholder="Digite o texto do quesito..."
+                      value={currentQuesito.texto}
+                      onChange={(e) => handleQuesitoChange(currentQuesito.id, "texto", e.target.value)}
+                      placeholder="Digite o texto do quesito da impugnação..."
                       className="min-h-[80px] resize-none bg-transparent border-0 p-0 focus-visible:ring-0 text-base"
                     />
                   </div>
@@ -268,16 +543,27 @@ export default function Impugnacao() {
                       variant="outline" 
                       size="sm" 
                       onClick={handleGenerateResponse}
-                      disabled={isGenerating}
+                      disabled={isGenerating || !selectedLaudo}
                     >
-                      <Sparkles className="mr-2 h-4 w-4" />
+                      {isGenerating ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="mr-2 h-4 w-4" />
+                      )}
                       {isGenerating ? "Gerando..." : "Gerar com IA"}
                     </Button>
                   </div>
+                  
+                  {!selectedLaudo && (
+                    <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-sm text-amber-600 dark:text-amber-400">
+                      Selecione o laudo vinculado para habilitar a geração automática de respostas.
+                    </div>
+                  )}
+                  
                   <Textarea
-                    value={quesitos.find(q => q.id === selectedQuesito)?.resposta || ""}
-                    onChange={(e) => handleQuesitoChange(selectedQuesito, e.target.value)}
-                    placeholder="Digite sua resposta técnica ao quesito..."
+                    value={currentQuesito.resposta}
+                    onChange={(e) => handleQuesitoChange(currentQuesito.id, "resposta", e.target.value)}
+                    placeholder="Digite sua resposta técnica ao quesito ou clique em 'Gerar com IA'..."
                     className="min-h-[300px] resize-none"
                   />
                 </div>
@@ -285,16 +571,26 @@ export default function Impugnacao() {
 
               {/* Action Footer */}
               <div className="p-4 border-t border-border bg-card flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">
-                  {quesitos.find(q => q.id === selectedQuesito)?.resposta?.length || 0} caracteres
-                </p>
+                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                  <span>{currentQuesito.resposta?.length || 0} caracteres</span>
+                  {currentQuesito.gerado_por_ia && (
+                    <Badge variant="secondary" className="gap-1">
+                      <Sparkles className="h-3 w-3" />
+                      Gerado por IA
+                    </Badge>
+                  )}
+                </div>
                 <div className="flex gap-2">
-                  <Button variant="outline" onClick={() => {
-                    const current = quesitos.findIndex(q => q.id === selectedQuesito);
-                    if (current < quesitos.length - 1) {
-                      setSelectedQuesito(quesitos[current + 1].id);
-                    }
-                  }}>
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      const currentIndex = quesitos.findIndex(q => q.id === selectedQuesito);
+                      if (currentIndex < quesitos.length - 1) {
+                        setSelectedQuesito(quesitos[currentIndex + 1].id);
+                      }
+                    }}
+                    disabled={quesitos.findIndex(q => q.id === selectedQuesito) >= quesitos.length - 1}
+                  >
                     Próximo Quesito
                     <ChevronRight className="ml-2 h-4 w-4" />
                   </Button>
@@ -306,4 +602,13 @@ export default function Impugnacao() {
       </div>
     </div>
   );
+}
+
+// Utility function for debouncing
+function debounce<T extends (...args: any[]) => any>(fn: T, delay: number): T {
+  let timeoutId: ReturnType<typeof setTimeout>;
+  return ((...args: Parameters<T>) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), delay);
+  }) as T;
 }
