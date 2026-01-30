@@ -11,19 +11,22 @@ import {
   Copy,
   Sparkles,
   ChevronRight,
+  ChevronLeft,
   AlertTriangle,
   CheckCircle2,
   Clock,
   Plus,
   Loader2,
   Trash2,
-  FileUp
+  FileUp,
+  FileText
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { LaudoSelector } from "@/components/impugnacao/LaudoSelector";
 import { ImpugnacaoHistorico } from "@/components/impugnacao/ImpugnacaoHistorico";
+import { generateImpugnacaoPDF } from "@/utils/generateImpugnacaoPDF";
 
 interface Quesito {
   id: string;
@@ -77,6 +80,7 @@ export default function Impugnacao() {
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isImportingPDF, setIsImportingPDF] = useState(false);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-save debounce
@@ -491,9 +495,88 @@ export default function Impugnacao() {
     });
   };
 
+  const handleGeneratePDF = async () => {
+    if (!selectedLaudo) {
+      toast({
+        title: "Selecione um laudo",
+        description: "Vincule o laudo original antes de gerar o PDF.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const respondidos = quesitos.filter(q => q.status === "respondido" && q.resposta.trim());
+    
+    if (respondidos.length === 0) {
+      toast({
+        title: "Nenhum quesito respondido",
+        description: "Responda pelo menos um quesito antes de gerar o PDF.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsGeneratingPDF(true);
+
+    try {
+      // Buscar dados completos do laudo
+      const { data: laudoCompleto, error: laudoError } = await supabase
+        .from("laudos")
+        .select("*")
+        .eq("id", selectedLaudo.id)
+        .single();
+
+      if (laudoError) throw laudoError;
+
+      // Buscar dados do perfil do perito
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("nome, crm, especialidade, endereco")
+        .eq("id", user?.id)
+        .single();
+
+      if (profileError) throw profileError;
+
+      // Gerar PDF
+      await generateImpugnacaoPDF({
+        processoNumero: laudoCompleto.processo_numero || "",
+        processoVara: laudoCompleto.processo_vara || "",
+        reclamante: laudoCompleto.vitima_nome || laudoCompleto.reclamante || "",
+        reclamada: laudoCompleto.reclamada || "",
+        laudoData: laudoCompleto.created_at || "",
+        laudoVitima: laudoCompleto.vitima_nome || "",
+        laudoConclusao: laudoCompleto.conclusao_analise || "",
+        quesitos: respondidos.map((q, i) => ({
+          numero: i + 1,
+          texto: q.texto,
+          resposta: q.resposta
+        })),
+        peritoNome: profile?.nome || "",
+        peritoCRM: profile?.crm || "",
+        peritoEspecialidade: profile?.especialidade || "",
+        peritoEndereco: profile?.endereco || ""
+      });
+
+      toast({
+        title: "PDF gerado com sucesso!",
+        description: "O documento foi baixado automaticamente."
+      });
+    } catch (error) {
+      console.error("Erro ao gerar PDF:", error);
+      toast({
+        title: "Erro ao gerar PDF",
+        description: error instanceof Error ? error.message : "Tente novamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
+
   const respondidos = quesitos.filter(q => q.status === "respondido").length;
   const total = quesitos.length;
   const currentQuesito = quesitos.find(q => q.id === selectedQuesito);
+  const hasRespondedQuesitos = quesitos.some(q => q.status === "respondido" && q.resposta.trim());
 
   return (
     <div className="h-[calc(100vh-3.5rem)] lg:h-screen flex flex-col">
@@ -524,6 +607,19 @@ export default function Impugnacao() {
             <Button variant="outline" size="sm" onClick={handleCopyAll}>
               <Copy className="mr-2 h-4 w-4" />
               Copiar Tudo
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleGeneratePDF}
+              disabled={!hasRespondedQuesitos || isGeneratingPDF}
+            >
+              {isGeneratingPDF ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FileText className="mr-2 h-4 w-4" />
+              )}
+              {isGeneratingPDF ? "Gerando..." : "Gerar PDF"}
             </Button>
             <Button size="sm" onClick={() => handleSave(false)} disabled={isSaving}>
               {isSaving ? (
@@ -741,6 +837,19 @@ export default function Impugnacao() {
                   )}
                 </div>
                 <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => {
+                      const currentIndex = quesitos.findIndex(q => q.id === selectedQuesito);
+                      if (currentIndex > 0) {
+                        setSelectedQuesito(quesitos[currentIndex - 1].id);
+                      }
+                    }}
+                    disabled={quesitos.findIndex(q => q.id === selectedQuesito) === 0}
+                  >
+                    <ChevronLeft className="mr-2 h-4 w-4" />
+                    Quesito Anterior
+                  </Button>
                   <Button 
                     variant="outline" 
                     onClick={() => {
