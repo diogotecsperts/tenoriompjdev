@@ -23,3 +23,6 @@ verify_jwt = false
 
 [functions.gerar-resposta-impugnacao]
 verify_jwt = false
+
+[functions.extrair-texto-pdf]
+verify_jwt = true
