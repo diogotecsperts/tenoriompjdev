@@ -189,7 +189,7 @@ export function ImpugnacaoHistorico({ onSelect, onNew, currentImpugnacaoId }: Im
             Histórico
           </Button>
         </SheetTrigger>
-        <SheetContent className="w-[500px] sm:w-[640px]">
+        <SheetContent className="w-[560px] sm:w-[720px]">
           <SheetHeader>
             <SheetTitle>Histórico de Impugnações</SheetTitle>
             <SheetDescription>
@@ -197,7 +197,7 @@ export function ImpugnacaoHistorico({ onSelect, onNew, currentImpugnacaoId }: Im
             </SheetDescription>
           </SheetHeader>
 
-          <div className="mt-4 space-y-4">
+          <div className="mt-4 space-y-4 px-2">
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -230,7 +230,7 @@ export function ImpugnacaoHistorico({ onSelect, onNew, currentImpugnacaoId }: Im
                   </Button>
                 </div>
               ) : (
-                <div className="space-y-2 pr-2">
+                <div className="space-y-2 px-1">
                   {filteredImpugnacoes.map((imp) => {
                     const { respondidos, total } = getRespondidos(imp.quesitos);
                     const isComplete = total > 0 && respondidos === total;
