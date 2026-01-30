@@ -87,7 +87,12 @@ export async function extractWithMistralOCR(
     
     console.log(`[mistral-ocr] File uploaded successfully: ${fileId}`);
     
-    // STEP 2: Chamar endpoint OCR
+    // STEP 2: Aguardar file ficar disponível (race condition fix)
+    // Mistral Files API pode retornar sucesso antes do arquivo estar pronto para OCR
+    console.log('[mistral-ocr] Waiting for file to be ready...');
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    // STEP 3: Chamar endpoint OCR com retry
     console.log('[mistral-ocr] Calling OCR endpoint...');
     
     const ocrPayload: Record<string, unknown> = {
@@ -104,18 +109,41 @@ export async function extractWithMistralOCR(
       ocrPayload.pages = Array.from({ length: options.pageLimit }, (_, i) => i);
     }
     
-    const ocrResponse = await fetch(MISTRAL_OCR_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(ocrPayload),
-    });
+    // Retry logic for "file not ready" errors
+    let ocrResponse: Response | null = null;
+    let lastError = '';
+    const maxRetries = 3;
     
-    if (!ocrResponse.ok) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      ocrResponse = await fetch(MISTRAL_OCR_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(ocrPayload),
+      });
+      
+      if (ocrResponse.ok) {
+        break; // Success, exit retry loop
+      }
+      
       const errorText = await ocrResponse.text();
+      lastError = errorText;
+      
+      // Check if it's a "file not found" error (code 3001) - worth retrying
+      if (ocrResponse.status === 404 && errorText.includes('3001') && attempt < maxRetries) {
+        console.log(`[mistral-ocr] File not ready yet, retry ${attempt}/${maxRetries}...`);
+        await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
+        continue;
+      }
+      
+      // Other errors - don't retry
       throw new Error(`Mistral OCR failed (${ocrResponse.status}): ${errorText}`);
+    }
+    
+    if (!ocrResponse || !ocrResponse.ok) {
+      throw new Error(`Mistral OCR failed after ${maxRetries} retries: ${lastError}`);
     }
     
     const ocrResult = await ocrResponse.json();
