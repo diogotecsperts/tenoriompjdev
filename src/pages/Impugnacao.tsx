@@ -153,6 +153,14 @@ export default function Impugnacao() {
     setHasUnsavedChanges(true);
   };
 
+  // Sanitize filename for Supabase Storage (remove accents and special characters)
+  const sanitizeFileName = (name: string): string => {
+    return name
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // Remove accents
+      .replace(/[^a-zA-Z0-9._-]/g, "_"); // Replace invalid chars with underscores
+  };
+
   // PDF Import handler
   const handleImportPDF = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -198,7 +206,8 @@ export default function Impugnacao() {
 
       // Upload to storage (isolated path for impugnações)
       const timestamp = Date.now();
-      const filePath = `${userId}/impugnacoes/${timestamp}-${file.name}`;
+      const safeFileName = sanitizeFileName(file.name);
+      const filePath = `${userId}/impugnacoes/${timestamp}-${safeFileName}`;
 
       toast({
         title: "Enviando PDF...",
