@@ -651,7 +651,7 @@ export default function Impugnacao() {
                           value={currentQuesito.texto}
                           onChange={(e) => handleQuesitoChange(currentQuesito.id, "texto", e.target.value)}
                           placeholder="Digite o texto do quesito da impugnação ou importe um PDF..."
-                          className="min-h-[80px] resize-none"
+                          className="min-h-[80px] resize-y"
                           disabled={isImportingPDF}
                         />
                       </div>
