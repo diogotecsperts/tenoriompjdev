@@ -1,166 +1,190 @@
 
+# Sistema de Resposta a Impugnações Vinculado aos Laudos
 
-# Análise de Segurança: Sincronização Global das Configurações do DevPanel
+## Resumo do Pedido
 
-## Resumo Executivo
+O cliente quer que, quando receber uma reclamação/impugnação de um laudo que ele já fez:
+1. Ele possa **selecionar o laudo original** que está sendo questionado
+2. **Cole os quesitos da impugnação** no sistema
+3. A **IA gere respostas fundamentadas** no conteúdo do laudo original
+4. Tudo fique **salvo na nuvem** para consultas futuras
 
-Você identificou uma falha crítica de design que causou os erros de autenticação (401) na conta do médico. A boa notícia é que **todas as correções já foram aplicadas** e o sistema agora está sincronizado corretamente.
-
----
-
-## O Que Estava Acontecendo
-
-### Problema 1: Configurações Não Eram Lidas por Usuários Normais
-
-**Causa Raiz:** A tabela `system_config` tinha políticas de segurança (RLS) que só permitiam leitura para desenvolvedores e admins.
+## Arquitetura da Solução
 
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                   ANTES (Problema)                          │
-├─────────────────────────────────────────────────────────────┤
-│  Você (developer)                                           │
-│    ↓                                                        │
-│  DevPanel → Salva em system_config                          │
-│    ↓                                                        │
-│  RLS: "Só is_developer() pode SELECT"                       │
-│    ↓                                                        │
-│  Dr. Bruno (user) → ❌ Bloqueado → Usa fallback 50MB        │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                     Fluxo de Impugnação                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. Usuário acessa /impugnacao                                  │
+│              ↓                                                  │
+│  2. Seleciona laudo que está sendo impugnado                    │
+│     (lista de laudos finalizados)                               │
+│              ↓                                                  │
+│  3. Sistema carrega dados do laudo original                     │
+│     (conclusões, nexo, exames, etc.)                            │
+│              ↓                                                  │
+│  4. Usuário cola os quesitos da impugnação                      │
+│              ↓                                                  │
+│  5. Clica em "Gerar com IA" para cada quesito                   │
+│              ↓                                                  │
+│  6. Edge function recebe:                                       │
+│     - Texto do quesito                                          │
+│     - Conteúdo completo do laudo                                │
+│              ↓                                                  │
+│  7. IA gera resposta técnica fundamentada                       │
+│     "Conforme laudo pericial, o nexo causal foi..."             │
+│              ↓                                                  │
+│  8. Tudo é salvo na tabela 'impugnacoes'                        │
+│              ↓                                                  │
+│  9. Pode ser consultado/editado posteriormente                  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-**Correção Aplicada:** Migration que adiciona policy de leitura para todos os usuários autenticados.
+## Alterações Necessárias
 
+### 1. Frontend - Página de Impugnação Reformulada
+
+**Arquivo**: `src/pages/Impugnacao.tsx`
+
+**Mudanças**:
+- Adicionar seletor de laudo (dropdown com laudos do usuário)
+- Ao selecionar um laudo, carregar seus dados para contexto da IA
+- Conectar o botão "Gerar com IA" à edge function real
+- Implementar salvamento real no banco de dados
+- Adicionar histórico de impugnações já criadas
+- Permitir criar nova impugnação ou continuar uma existente
+
+**Interface atualizada**:
 ```text
-┌─────────────────────────────────────────────────────────────┐
-│                    AGORA (Corrigido)                        │
-├─────────────────────────────────────────────────────────────┤
-│  Você (developer)                                           │
-│    ↓                                                        │
-│  DevPanel → Salva em system_config                          │
-│    ↓                                                        │
-│  RLS: "Authenticated pode SELECT" ✅                        │
-│    ↓                                                        │
-│  Dr. Bruno (user) → ✅ Lê configs → 100MB, AI correto       │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│  Responder Impugnação                    [Histórico] [Salvar]  │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  Laudo Vinculado: [Selecionar laudo ▼]                         │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ Laudo - VANILDO CABOCLO                                  │  │
+│  │ Processo: 0001114-35.2025.5.19.0004                      │  │
+│  │ Status: Finalizado | Data: 29/01/2026                    │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                │
+├────────────────────────────────────────────────────────────────┤
+│ ┌──────────────┐  ┌────────────────────────────────────────┐   │
+│ │ Quesitos     │  │ Quesito 1                              │   │
+│ │              │  │                                        │   │
+│ │ [1] ✓        │  │ "O reclamante apresenta sequelas..."   │   │
+│ │ [2] ○        │  │                                        │   │
+│ │ [3] ○        │  │ Resposta Técnica    [Gerar com IA ✨]  │   │
+│ │              │  │ ┌────────────────────────────────────┐ │   │
+│ │ [+ Adicionar]│  │ │ Conforme análise técnica realizada │ │   │
+│ │              │  │ │ e documentada no laudo pericial,   │ │   │
+│ │              │  │ │ o periciando apresenta...          │ │   │
+│ │              │  │ └────────────────────────────────────┘ │   │
+│ └──────────────┘  └────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────┘
 ```
 
-### Problema 2: Autenticação Falhava em Imports Longos (401)
+### 2. Nova Edge Function - Gerar Resposta de Impugnação
 
-**Causa Raiz:** O edge function `check-import-status` usava `auth.getUser()` que falha quando a sessão fica "stale" durante processos longos (10+ minutos).
+**Arquivo**: `supabase/functions/gerar-resposta-impugnacao/index.ts`
 
-**Correção Aplicada:** O edge function agora usa o token JWT diretamente com RLS, sem fazer lookup de sessão:
+**Funcionamento**:
+- Recebe: `laudo_id` + `quesito_texto`
+- Busca o laudo completo no banco de dados
+- Monta prompt com contexto do laudo
+- Chama o modelo de IA configurado no DevPanel
+- Retorna resposta técnica fundamentada
 
+**Prompt para a IA**:
 ```text
-ANTES: Polling → getUser() → "Session not found" → 401 ❌
-AGORA: Polling → RLS verifica JWT → Query funciona ✅
+Você é um perito médico respondendo a uma impugnação de laudo pericial.
+
+LAUDO ORIGINAL:
+- Vítima: {vitima_nome}
+- Processo: {processo_numero}
+- Conclusão: {conclusao_analise}
+- Nexo Causal: {nexo_causal_tipo} - {nexo_causal_justificativa}
+- Exame Físico: {exame_fisico}
+- Diagnósticos CIDs: {diagnostico_cids}
+- Incapacidade: {conclusao_incapacidade}
+
+QUESITO DA IMPUGNAÇÃO:
+"{quesito_texto}"
+
+Elabore uma resposta técnica fundamentada no laudo original, 
+mantendo as conclusões periciais e citando os elementos técnicos 
+que sustentam o posicionamento.
 ```
 
----
+### 3. Banco de Dados - Já Existe!
 
-## Status Atual: O Que Está Sincronizado
+A tabela `impugnacoes` já tem a estrutura correta:
+- `id`, `user_id` - identificadores
+- `laudo_id` - vínculo com o laudo original
+- `processo_numero` - referência do processo
+- `quesitos` (JSONB) - lista de quesitos com textos e respostas
+- `status` - pendente/respondido
 
-### Configurações Globais (✅ Funcionando para todos)
+**Nenhuma migração necessária!**
 
-| Configuração | Valor no DevPanel | Aplica para Todos |
-|--------------|-------------------|-------------------|
-| `max_pdf_size_mb` | 100 | ✅ Sim |
-| `default_ai_provider` | openrouter | ✅ Sim |
-| `default_ai_model` | google/gemini-3-flash-preview | ✅ Sim |
-| `fallback_ai_provider` | openrouter | ✅ Sim |
-| `fallback_ai_model` | google/gemini-3-flash-preview | ✅ Sim |
-| `favorite_models_*` | Modelos favoritados | ✅ Sim |
+### 4. Histórico de Impugnações
 
-### Prompts de IA (✅ Idênticos para todos)
+**Novo componente**: Lista de impugnações anteriores
 
-Os prompts são **hardcoded nos edge functions**, não são configuráveis por usuário. Isso significa que:
+- Mostra todas as impugnações do usuário
+- Filtro por status (pendente/respondido)
+- Busca por número de processo ou nome da vítima
+- Permite continuar editando ou visualizar respostas anteriores
 
-- O prompt de extração de PDF (`processar-autos`) é **idêntico** para você e para o Dr. Bruno
-- O prompt de regeneração de campos (`regerar-campo-pdf`) é **idêntico** para todos
-- O prompt de geração de resumos (`gerar-resumos`) é **idêntico** para todos
+## Benefícios para o Cliente
 
-**Não há diferença de qualidade de extração entre usuários.**
+| Antes | Depois |
+|-------|--------|
+| Escreve respostas manualmente | IA gera respostas baseadas no laudo |
+| Precisa abrir o laudo para consultar | Sistema já tem todo o contexto |
+| Não salva as impugnações | Tudo fica salvo para consultas futuras |
+| Interface desconectada | Fluxo integrado laudo → impugnação |
 
----
+## Cronograma de Implementação
 
-## Arquitetura de Segurança Atual
+1. **Reformular página de Impugnação** (interface completa)
+2. **Criar edge function** para geração de respostas
+3. **Integrar salvamento** no banco de dados
+4. **Adicionar histórico** de impugnações
+5. **Testes** com laudos reais
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                    DevPanel (/dev)                          │
-│         Acesso: APENAS is_developer() ✅                    │
-├─────────────────────────────────────────────────────────────┤
-│  DevProtectedRoute.tsx                                      │
-│    → Verifica supabase.rpc("is_developer")                  │
-│    → Redireciona se não for developer                       │
-├─────────────────────────────────────────────────────────────┤
-│  system_config (tabela)                                     │
-│    → SELECT: authenticated (todos podem LER)                │
-│    → INSERT/UPDATE/DELETE: apenas is_developer()            │
-├─────────────────────────────────────────────────────────────┤
-│  global_api_keys (tabela)                                   │
-│    → Todas operações: apenas is_developer()                 │
-│    → Chaves de API ficam protegidas                         │
-└─────────────────────────────────────────────────────────────┘
+## Seção Técnica
+
+### Arquivos a Criar/Modificar
+
+| Arquivo | Ação | Descrição |
+|---------|------|-----------|
+| `src/pages/Impugnacao.tsx` | Modificar | Reformular completamente com seletor de laudo e integração real |
+| `supabase/functions/gerar-resposta-impugnacao/index.ts` | Criar | Edge function para gerar respostas com IA |
+| `src/components/impugnacao/ImpugnacaoHistorico.tsx` | Criar | Componente de listagem de impugnações anteriores |
+| `src/components/impugnacao/LaudoSelector.tsx` | Criar | Seletor de laudo com busca e preview |
+
+### Estrutura do JSONB de Quesitos
+
+```json
+{
+  "quesitos": [
+    {
+      "id": "1",
+      "numero": 1,
+      "texto": "O reclamante apresenta sequelas...",
+      "resposta": "Conforme laudo pericial...",
+      "status": "respondido",
+      "gerado_por_ia": true,
+      "editado_manualmente": false
+    }
+  ]
+}
 ```
 
----
+### Segurança
 
-## Pontos de Atenção para Futuras Alterações
-
-### O Que Continuará Funcionando Automaticamente
-
-Qualquer alteração que você fizer no DevPanel nas seguintes áreas será aplicada **imediatamente** para todos os usuários:
-
-1. **Limite de PDF** - Mudar de 100MB para 200MB? Aplica para todos
-2. **Modelo de IA padrão** - Trocar para GPT-5? Aplica para todos
-3. **Provider de IA** - Mudar de OpenRouter para Lovable? Aplica para todos
-4. **Configurações de retry** - Habilitar/desabilitar retries? Aplica para todos
-5. **Modelos favoritos** - Adicionar novos modelos? Aplica para todos
-
-### O Que Requer Atenção
-
-1. **Novas Edge Functions** - Se eu criar novas edge functions, preciso garantir que:
-   - Usem `getAIConfig()` de `_shared/ai-config.ts` (já lê global)
-   - Não façam `auth.getUser()` em processos longos
-   - Usem RLS quando possível para autenticação
-
-2. **Novas Configurações** - Se adicionar novas configs ao DevPanel:
-   - Já serão lidas por todos (RLS já permite)
-   - Frontend precisa buscar de `system_config`
-
----
-
-## Garantia de Estabilidade
-
-A arquitetura agora segue um padrão sólido:
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│  1. DevPanel salva em system_config                         │
-│              ↓                                              │
-│  2. RLS permite leitura para todos autenticados             │
-│              ↓                                              │
-│  3. Frontend/Backend leem de system_config                  │
-│              ↓                                              │
-│  4. Configuração aplicada uniformemente                     │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Não haverá mais casos onde um usuário usa fallback enquanto outro usa a configuração correta.**
-
----
-
-## Recomendação de Teste
-
-Para confirmar que tudo está funcionando:
-
-1. **Faça login como Dr. Bruno**
-2. **Acesse a ferramenta Importar Autos**
-3. **Verifique no diálogo:**
-   - O limite exibido é 100MB (não 50MB)
-   - O modelo de IA mostrado é gemini-3-flash-preview
-4. **Importe um PDF e acompanhe o polling até o fim**
-   - Não deve aparecer erro 401
-
-Se esses 4 pontos funcionarem, o sistema está 100% sincronizado.
-
+- A edge function verifica se o `laudo_id` pertence ao usuário autenticado
+- RLS na tabela `impugnacoes` já está configurado corretamente
+- Usuário só vê suas próprias impugnações
