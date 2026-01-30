@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -16,7 +16,8 @@ import {
   Clock,
   Plus,
   Loader2,
-  Trash2
+  Trash2,
+  FileUp
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
@@ -75,6 +76,8 @@ export default function Impugnacao() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isImportingPDF, setIsImportingPDF] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-save debounce
   const debouncedSave = useCallback(
@@ -148,6 +151,115 @@ export default function Impugnacao() {
     }
     
     setHasUnsavedChanges(true);
+  };
+
+  // PDF Import handler
+  const handleImportPDF = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Reset input so same file can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+
+    // Validate file type
+    if (file.type !== "application/pdf") {
+      toast({
+        title: "Tipo de arquivo inválido",
+        description: "Selecione um arquivo PDF.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Check size (50MB limit for Mistral OCR)
+    const sizeMB = file.size / 1024 / 1024;
+    if (sizeMB > 50) {
+      toast({
+        title: "Arquivo muito grande",
+        description: `O PDF tem ${sizeMB.toFixed(1)}MB. Limite: 50MB.`,
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsImportingPDF(true);
+    const startTime = Date.now();
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      const userId = sessionData?.session?.user?.id;
+
+      if (!token || !userId) {
+        throw new Error("Sessão expirada. Faça login novamente.");
+      }
+
+      // Upload to storage (isolated path for impugnações)
+      const timestamp = Date.now();
+      const filePath = `${userId}/impugnacoes/${timestamp}-${file.name}`;
+
+      toast({
+        title: "Enviando PDF...",
+        description: `${file.name} (${sizeMB.toFixed(1)}MB)`,
+      });
+
+      const { error: uploadError } = await supabase.storage
+        .from("processos-pdf")
+        .upload(filePath, file, {
+          contentType: "application/pdf",
+          upsert: false
+        });
+
+      if (uploadError) {
+        throw new Error(`Erro no upload: ${uploadError.message}`);
+      }
+
+      // Call extraction edge function
+      toast({
+        title: "Extraindo texto do PDF...",
+        description: "Isso pode levar alguns segundos.",
+      });
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/extrair-texto-pdf`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({ filePath })
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Erro ao extrair texto do PDF");
+      }
+
+      const data = await response.json();
+      const durationSec = ((Date.now() - startTime) / 1000).toFixed(1);
+
+      // Insert extracted text into current quesito
+      handleQuesitoChange(selectedQuesito, "texto", data.texto);
+
+      toast({
+        title: "PDF importado com sucesso!",
+        description: `${data.pageCount} páginas extraídas em ${durationSec}s via ${data.provider}.`,
+      });
+
+    } catch (error) {
+      console.error("[ImportPDF] Error:", error);
+      toast({
+        title: "Erro ao importar PDF",
+        description: error instanceof Error ? error.message : "Tente novamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsImportingPDF(false);
+    }
   };
 
   const handleGenerateResponse = async () => {
@@ -524,12 +636,51 @@ export default function Impugnacao() {
                     )}
                   </div>
                   <div className="flex-1">
-                    <Textarea
-                      value={currentQuesito.texto}
-                      onChange={(e) => handleQuesitoChange(currentQuesito.id, "texto", e.target.value)}
-                      placeholder="Digite o texto do quesito da impugnação..."
-                      className="min-h-[80px] resize-none bg-transparent border-0 p-0 focus-visible:ring-0 text-base"
-                    />
+                    <div className="flex items-start gap-2 mb-2">
+                      <div className="flex-1">
+                        <Textarea
+                          value={currentQuesito.texto}
+                          onChange={(e) => handleQuesitoChange(currentQuesito.id, "texto", e.target.value)}
+                          placeholder="Digite o texto do quesito da impugnação ou importe um PDF..."
+                          className="min-h-[80px] resize-none"
+                          disabled={isImportingPDF}
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isImportingPDF}
+                          className="gap-1.5"
+                        >
+                          {isImportingPDF ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Importando...
+                            </>
+                          ) : (
+                            <>
+                              <FileUp className="h-4 w-4" />
+                              Importar PDF
+                            </>
+                          )}
+                        </Button>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept=".pdf,application/pdf"
+                          onChange={handleImportPDF}
+                          className="hidden"
+                        />
+                      </div>
+                    </div>
+                    {isImportingPDF && (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Extraindo texto via OCR... Isso pode levar alguns segundos.
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
