@@ -227,6 +227,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const [maxPdfSizeMb, setMaxPdfSizeMb] = useState<number>(50); // Dynamic from system_config
   const [isDeveloper, setIsDeveloper] = useState(false);
   const [aiConfig, setAiConfig] = useState<AIConfigDisplay | null>(null);
+  const [ocrConfig, setOcrConfig] = useState<{ provider: string; model: string } | null>(null);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
   const [isRetrying, setIsRetrying] = useState(false);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
@@ -287,7 +288,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         const { data: configData } = await supabase
           .from('system_config')
           .select('id, value')
-          .in('id', ['default_ai_provider', 'default_ai_model', 'max_pdf_size_mb']);
+          .in('id', ['default_ai_provider', 'default_ai_model', 'max_pdf_size_mb', 'phase1_ocr_provider', 'phase1_gemini_model']);
 
         if (configData && configData.length > 0) {
           const config: Record<string, any> = {};
@@ -300,6 +301,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           const maxSize = config.max_pdf_size_mb;
           
           setAiConfig({ provider, model });
+          
+          // OCR config (GLOBAL - for all users)
+          const ocrProvider = config.phase1_ocr_provider || 'gemini';
+          const ocrModel = config.phase1_gemini_model || 'gemini-2.0-flash';
+          setOcrConfig({ provider: ocrProvider, model: ocrModel });
           
           // Set max PDF size if configured (handle both string and number values)
           if (maxSize !== undefined && maxSize !== null) {
@@ -1683,15 +1689,27 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                       Máximo {maxPdfSizeMb}MB • Apenas PDF
                     </p>
                     
-                    {/* Developer-only AI Config Badge */}
-                    {isDeveloper && aiConfig && (
-                      <div className="flex items-center justify-center gap-2 mt-4">
-                        <Badge variant="outline" className="flex items-center gap-1.5 text-xs">
-                          <Cpu className="h-3 w-3" />
-                          <span className="font-medium">{formatProviderName(aiConfig.provider)}</span>
-                          <span className="text-muted-foreground">•</span>
-                          <span>{formatModelName(aiConfig.model)}</span>
-                        </Badge>
+                    {/* AI Models Badge - GLOBAL for ALL users */}
+                    {(aiConfig || ocrConfig) && (
+                      <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+                        {ocrConfig && (
+                          <Badge variant="outline" className="flex items-center gap-1.5 text-xs">
+                            <Eye className="h-3 w-3" />
+                            <span className="text-muted-foreground">OCR:</span>
+                            <span className="font-medium">
+                              {ocrConfig.provider === 'mistral-ocr' ? 'Mistral OCR' : `Gemini ${formatModelName(ocrConfig.model)}`}
+                            </span>
+                          </Badge>
+                        )}
+                        {aiConfig && (
+                          <Badge variant="outline" className="flex items-center gap-1.5 text-xs">
+                            <Cpu className="h-3 w-3" />
+                            <span className="text-muted-foreground">IA:</span>
+                            <span className="font-medium">{formatProviderName(aiConfig.provider)}</span>
+                            <span className="text-muted-foreground">•</span>
+                            <span>{formatModelName(aiConfig.model)}</span>
+                          </Badge>
+                        )}
                       </div>
                     )}
                   </>
@@ -1700,8 +1718,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
               {selectedFile && (
                 <div className="space-y-3">
-                  {/* Developer-only AI Config Badge when file is selected */}
-                  {isDeveloper && aiConfig && (
+                  {/* AI Config Badge - GLOBAL for ALL users */}
+                  {aiConfig && (
                     <div className="flex items-center justify-center">
                       <Badge variant="secondary" className="flex items-center gap-1.5 text-xs">
                         <Cpu className="h-3 w-3" />
@@ -1834,14 +1852,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   <Clock className="h-3 w-3" />
                   Tempo decorrido: {formatDuration(elapsedTime)}
                 </p>
-                {isDeveloper && aiConfig && (
-                  <Badge variant="outline" className="mt-2 text-xs">
-                    <Cpu className="h-3 w-3 mr-1" />
-                    {formatProviderName(aiConfig.provider)} • {formatModelName(aiConfig.model)}
-                  </Badge>
-                )}
-                
-                {/* OCR Provider Indicator */}
+                {/* OCR Provider Indicator - GLOBAL for ALL users during extraction */}
                 {currentOCRProvider && stepsStatus.find(s => s.id === 'extraction')?.status === 'processing' && (
                   <Badge 
                     variant="outline" 
@@ -1849,6 +1860,19 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   >
                     <Eye className="h-3 w-3 text-primary" />
                     {currentOCRProvider === 'mistral-ocr' ? 'Mistral OCR' : 'Gemini Vision'}
+                  </Badge>
+                )}
+                
+                {/* Main AI Indicator - GLOBAL for ALL users after OCR completes */}
+                {stepsStatus.find(s => s.id === 'extraction')?.status === 'completed' && 
+                 stepsStatus.some(s => s.status === 'processing') &&
+                 aiConfig && (
+                  <Badge 
+                    variant="outline" 
+                    className="mt-2 text-xs flex items-center gap-1.5 border-border bg-muted/50 text-foreground"
+                  >
+                    <Cpu className="h-3 w-3 text-primary" />
+                    {formatProviderName(aiConfig.provider)} • {formatModelName(aiConfig.model)}
                   </Badge>
                 )}
               </div>
