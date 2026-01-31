@@ -2,6 +2,7 @@ project_id = "tpiaceyooekujzsvsyid"
 
 [functions.processar-autos]
 verify_jwt = true
+wall_clock_limit = 600
 
 [functions.gerar-resumos]
 verify_jwt = true
