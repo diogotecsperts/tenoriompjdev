@@ -1,80 +1,102 @@
 
 
-# Correção do Layout do Modal de Histórico
+# Melhorias GLOBAIS no Modal de Importação de Autos
 
-## Problemas Identificados
+## ✅ CONFIRMAÇÃO GLOBAL
 
-1. **Modal preso na borda direita**: O Sheet usa `sm:max-w-sm` no componente base que limita a largura
-2. **Cards não centralizados**: O padding interno não está balanceado
-3. **Campo de busca cortado**: O placeholder "processo" aparece como "proce"
+**TODAS as alterações abaixo são aplicáveis a TODOS os usuários, sem exceção:**
+- ❌ Removendo TODAS as condições `isDeveloper`
+- ✅ Badges de IA visíveis para TODOS
+- ✅ CSS global afeta TODOS
+- ✅ Nenhuma verificação de role/permissão
 
-## Solução
+---
 
-### Alteração 1: Remover limitação de largura no Sheet base
+## Alterações
 
-**Arquivo**: `src/components/ui/sheet.tsx`
+### 1. Mostrar ambos modelos de IA na tela inicial (GLOBAL - TODOS os usuários)
 
-**Linha 40-41** - O `sm:max-w-sm` está limitando a largura customizada. Precisamos removê-lo para permitir larguras maiores:
+**Arquivo**: `src/components/tools/ImportarAutosDialog.tsx`
 
+**Estado atual (linha 1687-1696)**: Restrito a desenvolvedores
 ```tsx
-// De:
-right: "inset-y-0 right-0 h-full w-3/4 border-l ... sm:max-w-sm",
-
-// Para:
-right: "inset-y-0 right-0 h-full w-3/4 border-l ...",
+{isDeveloper && aiConfig && (  // ❌ REMOVER isDeveloper
 ```
 
-### Alteração 2: Aumentar largura e adicionar padding balanceado
+**Novo comportamento**: Visível para TODOS + adicionar OCR
 
-**Arquivo**: `src/components/impugnacao/ImpugnacaoHistorico.tsx`
+Também precisamos:
+- Adicionar estado `ocrConfig` para armazenar configuração do OCR
+- Buscar configs de OCR (`phase1_ocr_provider`, `phase1_gemini_model`) do banco
+- Exibir ambos os badges (OCR + IA Principal) para todos
 
-**Linha 192** - Aumentar a largura do modal:
+### 2. Escurecer botão "Selecionar arquivo" (GLOBAL - CSS)
 
-```tsx
-// De:
-<SheetContent className="w-[500px] sm:w-[640px]">
+**Arquivo**: `src/index.css`
 
-// Para:
-<SheetContent className="w-[560px] sm:w-[720px]">
+**Linha 27**: Alterar luminosidade de 96% para 90%
+```css
+--secondary: 210 20% 90%;
 ```
 
-### Alteração 3: Balancear padding interno
+Isso afeta GLOBALMENTE todos os elementos que usam a cor `secondary`.
 
-**Arquivo**: `src/components/impugnacao/ImpugnacaoHistorico.tsx`
+### 3. Mostrar IA principal após OCR terminar (GLOBAL - TODOS os usuários)
 
-**Linha 200** - Adicionar padding lateral simétrico ao container principal:
+**Arquivo**: `src/components/tools/ImportarAutosDialog.tsx`
 
+**Estado atual (linha 1837-1842)**: Badge restrito a desenvolvedores
 ```tsx
-// De:
-<div className="mt-4 space-y-4">
-
-// Para:
-<div className="mt-4 space-y-4 px-2">
+{isDeveloper && aiConfig && (  // ❌ REMOVER isDeveloper
 ```
 
-**Linha 233** - Ajustar o padding do container dos cards para ser simétrico:
+**Novo comportamento**:
+- Durante extração: mostrar badge do OCR (👁 Gemini Vision) - já funciona
+- Após extração: mostrar badge da IA principal (🔧 Lovable • modelo)
+- AMBOS visíveis para TODOS os usuários
 
+### 4. Remover restrição quando arquivo selecionado (GLOBAL)
+
+**Linha 1704**: Remover condição `isDeveloper`:
 ```tsx
-// De:
-<div className="space-y-2 pr-2">
-
-// Para:
-<div className="space-y-2 px-1">
+{isDeveloper && aiConfig && (  // ❌ REMOVER isDeveloper
 ```
 
-## Resultado Esperado
+---
 
-| Aspecto | Antes | Depois |
-|---------|-------|--------|
-| Largura do modal | 500px / 640px (limitada) | 560px / 720px (efetiva) |
-| Posicionamento | Grudado na direita | Mais espaço interno |
-| Campo de busca | "Buscar por nome ou proce..." | "Buscar por nome ou processo..." |
-| Cards | Desalinhados | Centralizados com padding igual |
+## Resumo das Remoções de Restrição
+
+| Local | Linha | Antes | Depois |
+|-------|-------|-------|--------|
+| Tela inicial | 1687 | `isDeveloper && aiConfig` | `aiConfig` (+ ocrConfig) |
+| Arquivo selecionado | 1704 | `isDeveloper && aiConfig` | `aiConfig` |
+| Durante processamento | 1837 | `isDeveloper && aiConfig` | Lógica de etapa (OCR vs IA) |
+
+---
 
 ## Arquivos Modificados
 
-| Arquivo | Alteracao |
-|---------|-----------|
-| `src/components/ui/sheet.tsx` | Remover `sm:max-w-sm` da variante right |
-| `src/components/impugnacao/ImpugnacaoHistorico.tsx` | Aumentar largura e balancear padding |
+| Arquivo | Alteração | Escopo |
+|---------|-----------|--------|
+| `src/components/tools/ImportarAutosDialog.tsx` | Remover todas as condições `isDeveloper`, adicionar estado ocrConfig, buscar configs OCR, exibir badges para todos | **GLOBAL** |
+| `src/index.css` | Escurecer `--secondary` de 96% para 90% | **GLOBAL** |
+
+---
+
+## Resultado Visual (PARA TODOS OS USUÁRIOS)
+
+### Tela Inicial
+```
+[👁 OCR: Gemini Flash] [🔧 IA: Lovable • gemini-3-flash]
+```
+
+### Durante OCR
+```
+[👁 Gemini Vision]  ← Olho visível para TODOS
+```
+
+### Após OCR (IA assumindo)
+```
+[🔧 Lovable • gemini-3-flash]  ← CPU visível para TODOS
+```
 
