@@ -23,10 +23,16 @@ import {
   Filter,
   ChevronRight,
   ChevronDown,
-  Sparkles
+  Sparkles,
+  User,
+  Stethoscope,
+  ClipboardCheck,
+  BookOpen,
+  Briefcase
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PromptEditor } from "./PromptEditor";
+import { LAUDO_CARDS_STRUCTURE, PROMPT_ONLY_CARDS } from "@/lib/laudo-structure";
 
 // ============================================
 // TIPOS
@@ -45,97 +51,27 @@ interface PromptConfig {
   updatedAt?: string;
 }
 
-interface PromptRow {
-  id: string;
-  value: PromptConfig;
-  description: string | null;
-  updated_at: string | null;
-}
+// Map card IDs to icons
+const cardIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+  preliminares: User,
+  "resumo-autos": FileText,
+  periciando: MessageSquare,
+  "posto-trabalho": Briefcase,
+  exame: Stethoscope,
+  "analise-tecnica": ClipboardCheck,
+  conclusao: CheckCircle2,
+  referencias: BookOpen,
+  _system: RefreshCw,
+  _global: Sparkles,
+};
 
-// Estrutura de cards/seções do LaudoEditor para organizar os prompts
-const LAUDO_STRUCTURE = [
-  {
-    id: "resumo-autos",
-    title: "Resumo dos Autos",
-    icon: FileText,
-    sections: [
-      { id: "resumo", label: "Resumo Petição/Contestação" }
-    ]
-  },
-  {
-    id: "periciando",
-    title: "Dados do Periciando",
-    icon: MessageSquare,
-    sections: [
-      { id: "anamnese", label: "Anamnese" },
-      { id: "acidente", label: "História do Acidente" },
-      { id: "antecedentes", label: "Antecedentes" }
-    ]
-  },
-  {
-    id: "exame",
-    title: "Exame Clínico",
-    icon: Sparkles,
-    sections: [
-      { id: "laudos", label: "Laudos Médicos" },
-      { id: "exames", label: "Exames Complementares" },
-      { id: "exame-fisico", label: "Exame Físico" }
-    ]
-  },
-  {
-    id: "posto-trabalho",
-    title: "Posto de Trabalho",
-    icon: Folder,
-    sections: [
-      { id: "dados-posto", label: "Descrição do Posto" }
-    ]
-  },
-  {
-    id: "analise-tecnica",
-    title: "Análise Técnica",
-    icon: FileText,
-    sections: [
-      { id: "descricao-doencas", label: "Descrição Técnica das Doenças" },
-      { id: "nexo", label: "Nexo Causal" },
-      { id: "analise-incapacidade", label: "Análise de Incapacidade" }
-    ]
-  },
-  {
-    id: "conclusao",
-    title: "Conclusão",
-    icon: CheckCircle2,
-    sections: [
-      { id: "conclusao", label: "Conclusão" },
-      { id: "sequelas", label: "Sequelas e Danos" },
-      { id: "quesitos", label: "Quesitos" }
-    ]
-  },
-  {
-    id: "referencias",
-    title: "Referências",
-    icon: Tag,
-    sections: [
-      { id: "referencias", label: "Referências Bibliográficas" }
-    ]
-  },
-  {
-    id: "_system",
-    title: "Sistema",
-    icon: RefreshCw,
-    sections: [
-      { id: "_gerar_resumos", label: "System Prompt - Geração" },
-      { id: "_import", label: "System Prompt - Importação" }
-    ]
-  },
-  {
-    id: "_global",
-    title: "Globais",
-    icon: Sparkles,
-    sections: [
-      { id: "_aprimorar", label: "Aprimorar Texto" }
-    ]
-  }
-];
+// Build LAUDO_STRUCTURE from shared module
+const LAUDO_STRUCTURE = [...LAUDO_CARDS_STRUCTURE, ...PROMPT_ONLY_CARDS].map(card => ({
+  id: card.id,
+  title: card.label,
+  icon: cardIcons[card.id] || FileText,
+  sections: card.sections.map(s => ({ id: s.id, label: s.label })),
+}));
 
 // ============================================
 // COMPONENTE PRINCIPAL

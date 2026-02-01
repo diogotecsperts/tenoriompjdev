@@ -24,7 +24,9 @@ import {
   RefreshCw,
   ClipboardCopy,
   CheckCircle,
-  RotateCcw
+  RotateCcw,
+  BookOpen,
+  Briefcase
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
@@ -55,6 +57,7 @@ import { AIInfoModal } from "@/components/laudo/AIInfoModal";
 import { supabase } from "@/integrations/supabase/client";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { LAUDO_CARDS_STRUCTURE } from "@/lib/laudo-structure";
 
 // Import section components
 import { DadosProcesso } from "@/components/laudo/sections/DadosProcesso";
@@ -63,7 +66,6 @@ import { DadosVitima } from "@/components/laudo/sections/DadosVitima";
 import { DadosAcidente } from "@/components/laudo/sections/DadosAcidente";
 import { Anamnese } from "@/components/laudo/sections/Anamnese";
 import { AntecedentesPatologicos } from "@/components/laudo/sections/AntecedentesPatologicos";
-// Removed: Planejamento - no longer used in workflow
 import { LaudosMedicos } from "@/components/laudo/sections/LaudosMedicos";
 import { ExamesComplementares } from "@/components/laudo/sections/ExamesComplementares";
 import { ExameFisico } from "@/components/laudo/sections/ExameFisico";
@@ -71,7 +73,6 @@ import { NexoCausal } from "@/components/laudo/sections/NexoCausal";
 import { Conclusao } from "@/components/laudo/sections/Conclusao";
 import { AvaliacaoSequelas } from "@/components/laudo/sections/AvaliacaoSequelas";
 import { Quesitos } from "@/components/laudo/sections/Quesitos";
-// Novas seções
 import { ObjetivoPericia } from "@/components/laudo/sections/ObjetivoPericia";
 import { ResumoAutos } from "@/components/laudo/sections/ResumoAutos";
 import { MetodologiaPericial } from "@/components/laudo/sections/MetodologiaPericial";
@@ -80,96 +81,53 @@ import { DescricaoTecnicaDoencas } from "@/components/laudo/sections/DescricaoTe
 import { AnaliseIncapacidade } from "@/components/laudo/sections/AnaliseIncapacidade";
 import { ReferenciasBibliograficas } from "@/components/laudo/sections/ReferenciasBibliograficas";
 import { DadosPerito } from "@/components/laudo/sections/DadosPerito";
-import { BookOpen, Briefcase } from "lucide-react";
 
-// Consolidated cards structure - Reorganizado conforme modelo profissional
-const consolidatedCards = [
-  {
-    id: "preliminares",
-    label: "Dados Preliminares",
-    description: "Dados do processo, objetivo e documentos avaliados",
-    icon: User,
-    sections: [
-      { id: "perito", label: "Dados do Perito", component: DadosPerito },
-      { id: "processo", label: "Dados do Processo", component: DadosProcesso },
-      { id: "objetivo", label: "Objetivo da Perícia", component: ObjetivoPericia },
-      { id: "documentos", label: "Documentos Avaliados", component: DocumentosAvaliacao },
-    ],
-  },
-  {
-    id: "resumo-autos",
-    label: "Resumo dos Autos",
-    description: "Resumo da petição inicial e contestação",
-    icon: FileText,
-    sections: [
-      { id: "resumo", label: "Resumo dos Autos", component: ResumoAutos },
-      { id: "metodologia", label: "Metodologia Pericial", component: MetodologiaPericial },
-    ],
-  },
-  {
-    id: "periciando",
-    label: "Dados do Periciando",
-    description: "Dados da vítima, acidente e histórico clínico",
-    icon: FileCheck,
-    sections: [
-      { id: "vitima", label: "Dados da Vítima", component: DadosVitima },
-      { id: "acidente", label: "Dados do Acidente", component: DadosAcidente },
-      { id: "anamnese", label: "Anamnese", component: Anamnese },
-      { id: "antecedentes", label: "Antecedentes Patológicos", component: AntecedentesPatologicos },
-    ],
-  },
-  {
-    id: "posto-trabalho",
-    label: "Posto de Trabalho",
-    description: "Dados funcionais e descrição das atividades",
-    icon: Briefcase,
-    sections: [
-      { id: "dados-posto", label: "Dados do Posto de Trabalho", component: DadosPostoTrabalho },
-    ],
-  },
-  {
-    id: "exame",
-    label: "Exame Clínico",
-    description: "Laudos médicos, exames e exame físico",
-    icon: Stethoscope,
-    sections: [
-      { id: "laudos", label: "Laudos Médicos", component: LaudosMedicos },
-      { id: "exames", label: "Exames Complementares", component: ExamesComplementares },
-      { id: "exame-fisico", label: "Exame Físico", component: ExameFisico },
-    ],
-  },
-  {
-    id: "analise-tecnica",
-    label: "Análise Técnica",
-    description: "Descrição das doenças, nexo causal e incapacidade",
-    icon: ClipboardCheck,
-    sections: [
-      { id: "descricao-doencas", label: "Descrição Técnica das Doenças", component: DescricaoTecnicaDoencas },
-      { id: "nexo", label: "Nexo Causal", component: NexoCausal },
-      { id: "analise-incapacidade", label: "Análise da Incapacidade", component: AnaliseIncapacidade },
-    ],
-  },
-  {
-    id: "conclusao",
-    label: "Conclusão",
-    description: "Conclusão, sequelas e quesitos",
-    icon: CheckCircle2,
-    sections: [
-      { id: "conclusao", label: "Conclusão", component: Conclusao },
-      { id: "sequelas", label: "Avaliação de Sequelas", component: AvaliacaoSequelas },
-      { id: "quesitos", label: "Quesitos", component: Quesitos },
-    ],
-  },
-  {
-    id: "referencias",
-    label: "Referências",
-    description: "Referências bibliográficas utilizadas",
-    icon: BookOpen,
-    sections: [
-      { id: "referencias", label: "Referências Bibliográficas", component: ReferenciasBibliograficas },
-    ],
-  },
-];
+// Map section IDs to components
+const sectionComponents: Record<string, React.ComponentType<any>> = {
+  perito: DadosPerito,
+  processo: DadosProcesso,
+  objetivo: ObjetivoPericia,
+  documentos: DocumentosAvaliacao,
+  resumo: ResumoAutos,
+  metodologia: MetodologiaPericial,
+  vitima: DadosVitima,
+  acidente: DadosAcidente,
+  anamnese: Anamnese,
+  antecedentes: AntecedentesPatologicos,
+  "dados-posto": DadosPostoTrabalho,
+  laudos: LaudosMedicos,
+  exames: ExamesComplementares,
+  "exame-fisico": ExameFisico,
+  "descricao-doencas": DescricaoTecnicaDoencas,
+  nexo: NexoCausal,
+  "analise-incapacidade": AnaliseIncapacidade,
+  conclusao: Conclusao,
+  sequelas: AvaliacaoSequelas,
+  quesitos: Quesitos,
+  referencias: ReferenciasBibliograficas,
+};
+
+// Map card IDs to icons
+const cardIcons: Record<string, React.ComponentType<{ className?: string }>> = {
+  preliminares: User,
+  "resumo-autos": FileText,
+  periciando: FileCheck,
+  "posto-trabalho": Briefcase,
+  exame: Stethoscope,
+  "analise-tecnica": ClipboardCheck,
+  conclusao: CheckCircle2,
+  referencias: BookOpen,
+};
+
+// Build consolidatedCards from shared structure + components
+const consolidatedCards = LAUDO_CARDS_STRUCTURE.map(card => ({
+  ...card,
+  icon: cardIcons[card.id] || FileText,
+  sections: card.sections.map(section => ({
+    ...section,
+    component: sectionComponents[section.id],
+  })),
+}));
 
 type ViewMode = "paginated" | "infinite";
 
