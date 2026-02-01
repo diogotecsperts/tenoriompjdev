@@ -14,7 +14,8 @@ import {
   DollarSign,
   RefreshCw,
   Server,
-  Gauge
+  Gauge,
+  MessageSquare
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -31,8 +32,9 @@ import { DevAIUsageLogs } from "@/components/dev-panel/DevAIUsageLogs";
 import { DevPDFCosts } from "@/components/dev-panel/DevPDFCosts";
 import { DevRetryStats } from "@/components/dev-panel/DevRetryStats";
 import { DevAIEfficiency } from "@/components/dev-panel/DevAIEfficiency";
+import { DevPrompts } from "@/components/dev-panel/DevPrompts";
 
-type DevTab = "dashboard" | "users" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "settings";
+type DevTab = "dashboard" | "users" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -48,6 +50,7 @@ const navItems: NavItem[] = [
   { id: "errors", label: "Erros Frontend", icon: AlertTriangle },
   { id: "ai", label: "Inteligência Artificial", icon: Cpu },
   { id: "ai-efficiency", label: "Eficiência de IAs", icon: Gauge },
+  { id: "prompts", label: "Prompts IA", icon: MessageSquare },
   { id: "retries", label: "Retries & Rate Limits", icon: RefreshCw },
   { id: "pdf-costs", label: "Custos PDF", icon: DollarSign },
   { id: "settings", label: "Configurações", icon: Settings },
@@ -85,6 +88,8 @@ export default function DevPanel() {
         );
       case "ai-efficiency":
         return <DevAIEfficiency />;
+      case "prompts":
+        return <DevPrompts />;
       case "retries":
         return <DevRetryStats />;
       case "pdf-costs":
