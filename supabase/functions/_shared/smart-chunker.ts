@@ -5,6 +5,8 @@
  * reducing token usage and improving extraction precision.
  */
 
+import { getPrompt } from "./prompt-manager.ts";
+
 export interface FieldRegion {
   start: number;  // Start position (0-1 as percentage)
   end: number;    // End position (0-1 as percentage)
@@ -141,67 +143,89 @@ export function getRelevantChunk(
   return chunk;
 }
 
+// Prompts padrão (fallback) para extração de campos
+const defaultFieldPrompts: Record<string, string> = {
+  // Vítima
+  'vitima.nome': 'Extraia o NOME COMPLETO do reclamante/periciando. Retorne apenas o nome.',
+  'vitima.cpf': 'Extraia o CPF do reclamante. Formato: XXX.XXX.XXX-XX',
+  'vitima.data_nascimento': 'Extraia a data de nascimento. Formato: YYYY-MM-DD',
+  'vitima.profissao': 'Extraia a profissão ou cargo do reclamante.',
+  'vitima.escolaridade': 'Extraia o nível de escolaridade (fundamental, médio, superior, etc).',
+  'vitima.dominancia': 'Extraia a dominância (mão dominante): destro, canhoto ou ambidestro.',
+  
+  // Processo
+  'processo.numero': 'Extraia o número completo do processo.',
+  'processo.vara': 'Extraia a vara (ex: 1ª Vara do Trabalho de São Paulo).',
+  'processo.reclamante': 'Extraia o nome do reclamante (autor da ação).',
+  'processo.reclamada': 'Extraia o nome da reclamada (empresa ré).',
+  
+  // Acidente
+  'acidente.data': 'Extraia a data do acidente de trabalho. Formato: YYYY-MM-DD',
+  'acidente.descricao': 'Descreva detalhadamente o acidente ou evento que causou a lesão/doença.',
+  'acidente.local': 'Extraia o local onde ocorreu o acidente.',
+  
+  // Histórico
+  'historico.historia_atual': 'Extraia as queixas atuais, sintomas relatados, impacto nas atividades.',
+  'historico.historico_ocupacional': 'Extraia o histórico de empregos, funções, tempo de serviço.',
+  'historico.antecedentes_patologicos': 'Extraia doenças prévias, cirurgias anteriores, condições de saúde.',
+  'historico.tratamentos_realizados': 'Extraia tratamentos feitos: medicações, fisioterapia, cirurgias.',
+  'historico.afastamentos': 'Extraia períodos de afastamento, motivos, benefícios recebidos.',
+  
+  // Exames
+  'exame_clinico.laudos_medicos': 'Resuma os laudos médicos apresentados: diagnósticos, conclusões.',
+  'exame_clinico.exames_complementares': 'Liste exames de imagem/laboratoriais: tipo, data, resultado.',
+  'exame_clinico.lesoes_descritas': 'Descreva as lesões mencionadas nos documentos médicos.',
+  
+  // Informações Médicas
+  'informacoes_medicas.cids_mencionados': 'Liste TODOS os códigos CID mencionados. Formato: ["J15.9", "M54.2"]',
+  'informacoes_medicas.incapacidade_alegada': 'Extraia o tipo de incapacidade alegada (parcial/total, temporária/permanente).',
+  'informacoes_medicas.nexo_sugerido': 'Retorne apenas: "direto", "concausa", "agravamento" ou "" (vazio) se não houver.',
+  
+  // Quesitos
+  'quesitos.juizo': 'Extraia TODOS os quesitos do juízo, numerados, exatamente como no documento.',
+  'quesitos.reclamante': 'Extraia TODOS os quesitos do reclamante, numerados, exatamente como no documento.',
+  'quesitos.reclamada': 'Extraia TODOS os quesitos da reclamada, numerados, exatamente como no documento.',
+  
+  // Textos brutos
+  'textos_brutos.peticao_inicial': 'Transcreva o texto completo da petição inicial.',
+  'textos_brutos.contestacao': 'Transcreva o texto completo da contestação.',
+  
+  // Descrições técnicas
+  'descricao_tecnica_doencas': 'Para cada CID, forneça: definição, etiologia, sintomas, fatores ocupacionais.',
+  'nexo_causal': 'Analise o nexo causal usando critérios de Bradford-Hill. Classifique como: direto, concausa, agravamento ou sem nexo.',
+  'incapacidade': 'Analise a capacidade laboral: tipo de incapacidade, limitações, possibilidade de reabilitação.',
+  
+  // Posto de trabalho
+  'descricao_posto_trabalho': 'Descreva o posto de trabalho: ambiente, equipamentos, condições ergonômicas.',
+  'descricao_atividades_laborais': 'Descreva as atividades: tarefas, movimentos, esforços, jornada.',
+};
+
 /**
- * Get field-specific extraction prompt
+ * Get field-specific extraction prompt (via prompt-manager)
+ */
+export async function getFieldPromptAsync(fieldKey: string): Promise<string> {
+  const promptId = `prompt_chunk_${fieldKey.replace(/\./g, '_')}`;
+  const defaultPrompt = defaultFieldPrompts[fieldKey] || `Extraia o campo "${fieldKey}" do documento de forma objetiva.`;
+  
+  return await getPrompt(
+    promptId,
+    defaultPrompt,
+    {},
+    {
+      autoRegister: true,
+      description: `Prompt de extração para campo: ${fieldKey}`,
+      cardId: '_chunk',
+      sectionId: fieldKey.split('.')[0] || '_chunk'
+    }
+  );
+}
+
+/**
+ * Get field-specific extraction prompt (sync version - uses fallback only)
+ * @deprecated Use getFieldPromptAsync for dynamic prompts
  */
 export function getFieldPrompt(fieldKey: string): string {
-  const prompts: Record<string, string> = {
-    // Vítima
-    'vitima.nome': 'Extraia o NOME COMPLETO do reclamante/periciando. Retorne apenas o nome.',
-    'vitima.cpf': 'Extraia o CPF do reclamante. Formato: XXX.XXX.XXX-XX',
-    'vitima.data_nascimento': 'Extraia a data de nascimento. Formato: YYYY-MM-DD',
-    'vitima.profissao': 'Extraia a profissão ou cargo do reclamante.',
-    'vitima.escolaridade': 'Extraia o nível de escolaridade (fundamental, médio, superior, etc).',
-    'vitima.dominancia': 'Extraia a dominância (mão dominante): destro, canhoto ou ambidestro.',
-    
-    // Processo
-    'processo.numero': 'Extraia o número completo do processo.',
-    'processo.vara': 'Extraia a vara (ex: 1ª Vara do Trabalho de São Paulo).',
-    'processo.reclamante': 'Extraia o nome do reclamante (autor da ação).',
-    'processo.reclamada': 'Extraia o nome da reclamada (empresa ré).',
-    
-    // Acidente
-    'acidente.data': 'Extraia a data do acidente de trabalho. Formato: YYYY-MM-DD',
-    'acidente.descricao': 'Descreva detalhadamente o acidente ou evento que causou a lesão/doença.',
-    'acidente.local': 'Extraia o local onde ocorreu o acidente.',
-    
-    // Histórico
-    'historico.historia_atual': 'Extraia as queixas atuais, sintomas relatados, impacto nas atividades.',
-    'historico.historico_ocupacional': 'Extraia o histórico de empregos, funções, tempo de serviço.',
-    'historico.antecedentes_patologicos': 'Extraia doenças prévias, cirurgias anteriores, condições de saúde.',
-    'historico.tratamentos_realizados': 'Extraia tratamentos feitos: medicações, fisioterapia, cirurgias.',
-    'historico.afastamentos': 'Extraia períodos de afastamento, motivos, benefícios recebidos.',
-    
-    // Exames
-    'exame_clinico.laudos_medicos': 'Resuma os laudos médicos apresentados: diagnósticos, conclusões.',
-    'exame_clinico.exames_complementares': 'Liste exames de imagem/laboratoriais: tipo, data, resultado.',
-    'exame_clinico.lesoes_descritas': 'Descreva as lesões mencionadas nos documentos médicos.',
-    
-    // Informações Médicas
-    'informacoes_medicas.cids_mencionados': 'Liste TODOS os códigos CID mencionados. Formato: ["J15.9", "M54.2"]',
-    'informacoes_medicas.incapacidade_alegada': 'Extraia o tipo de incapacidade alegada (parcial/total, temporária/permanente).',
-    'informacoes_medicas.nexo_sugerido': 'Retorne apenas: "direto", "concausa", "agravamento" ou "" (vazio) se não houver.',
-    
-    // Quesitos
-    'quesitos.juizo': 'Extraia TODOS os quesitos do juízo, numerados, exatamente como no documento.',
-    'quesitos.reclamante': 'Extraia TODOS os quesitos do reclamante, numerados, exatamente como no documento.',
-    'quesitos.reclamada': 'Extraia TODOS os quesitos da reclamada, numerados, exatamente como no documento.',
-    
-    // Textos brutos
-    'textos_brutos.peticao_inicial': 'Transcreva o texto completo da petição inicial.',
-    'textos_brutos.contestacao': 'Transcreva o texto completo da contestação.',
-    
-    // Descrições técnicas
-    'descricao_tecnica_doencas': 'Para cada CID, forneça: definição, etiologia, sintomas, fatores ocupacionais.',
-    'nexo_causal': 'Analise o nexo causal usando critérios de Bradford-Hill. Classifique como: direto, concausa, agravamento ou sem nexo.',
-    'incapacidade': 'Analise a capacidade laboral: tipo de incapacidade, limitações, possibilidade de reabilitação.',
-    
-    // Posto de trabalho
-    'descricao_posto_trabalho': 'Descreva o posto de trabalho: ambiente, equipamentos, condições ergonômicas.',
-    'descricao_atividades_laborais': 'Descreva as atividades: tarefas, movimentos, esforços, jornada.',
-  };
-  
-  return prompts[fieldKey] || `Extraia o campo "${fieldKey}" do documento de forma objetiva.`;
+  return defaultFieldPrompts[fieldKey] || `Extraia o campo "${fieldKey}" do documento de forma objetiva.`;
 }
 
 /**
