@@ -415,10 +415,32 @@ serve(async (req) => {
       );
     }
 
-    // Fetch laudo and verify ownership
+    // Fetch laudo with ALL fields for cross-field context (dependências cruzadas)
     const { data: laudo, error: laudoError } = await supabase
       .from('laudos')
-      .select('id, user_id, ai_metadata')
+      .select(`
+        id, user_id, ai_metadata,
+        diagnostico_cids,
+        descricao_posto_trabalho,
+        descricao_atividades_laborais,
+        historico_ocupacional,
+        historia_acidente,
+        historia_atual,
+        exame_fisico,
+        exames_complementares,
+        antecedentes,
+        tratamentos,
+        afastamentos,
+        nexo_causal_justificativa,
+        nexo_causal_tipo,
+        conclusao_analise,
+        conclusao_incapacidade,
+        laudos_medicos,
+        tabela_susep,
+        dano_estetico,
+        auxilio_terceiros,
+        analise_incapacidade_laboral
+      `)
       .eq('id', laudoId)
       .single();
 
@@ -435,6 +457,30 @@ serve(async (req) => {
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Build context from laudo fields for variable interpolation
+    const laudoContext = {
+      cids: JSON.stringify(laudo.diagnostico_cids || []),
+      postoTrabalho: laudo.descricao_posto_trabalho || '',
+      atividadesLaborais: laudo.descricao_atividades_laborais || '',
+      historicoOcupacional: laudo.historico_ocupacional || '',
+      historiaAcidente: laudo.historia_acidente || '',
+      historiaAtual: laudo.historia_atual || '',
+      exameFisico: laudo.exame_fisico || '',
+      examesComplementares: laudo.exames_complementares || '',
+      antecedentes: laudo.antecedentes || '',
+      tratamentos: laudo.tratamentos || '',
+      afastamentos: laudo.afastamentos || '',
+      nexoCausal: laudo.nexo_causal_justificativa || '',
+      nexoCausalTipo: laudo.nexo_causal_tipo || '',
+      conclusao: laudo.conclusao_analise || '',
+      conclusaoIncapacidade: laudo.conclusao_incapacidade || '',
+      laudosMedicos: laudo.laudos_medicos || '',
+      tabelaSUSEP: laudo.tabela_susep || '',
+      danoEstetico: laudo.dano_estetico || '',
+      auxilioTerceiros: laudo.auxilio_terceiros || '',
+      analiseIncapacidade: laudo.analise_incapacidade_laboral || ''
+    };
 
     // Get PDF path from ai_metadata
     const aiMetadata = laudo.ai_metadata as any;
@@ -469,7 +515,7 @@ serve(async (req) => {
           const specificPrompt = await getPrompt(
             mapping?.promptId || `prompt_regen_${fieldKey}`,
             defaultPrompt,
-            {},
+            laudoContext,
             {
               autoRegister: true,
               description: mapping?.description || `Regenerar campo ${fieldKey} via PDF`,
@@ -609,7 +655,7 @@ serve(async (req) => {
     const fieldPrompt = await getPrompt(
       mapping?.promptId || `prompt_regen_${fieldKey}`,
       defaultPrompt,
-      {},
+      laudoContext,
       {
         autoRegister: true,
         description: mapping?.description || `Regenerar campo ${fieldKey} via PDF`,
