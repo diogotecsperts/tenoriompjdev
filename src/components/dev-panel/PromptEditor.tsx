@@ -27,7 +27,9 @@ import {
   History,
   Copy,
   RotateCcw,
-  Sparkles
+  Sparkles,
+  Info,
+  HelpCircle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -61,6 +63,58 @@ interface PromptEditorProps {
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
   laudoStructure: LaudoCard[];
+}
+
+// Mapeamento de variáveis disponíveis por tipo de prompt
+const AVAILABLE_VARIABLES: Record<string, string[]> = {
+  // Prompts de regeneração (regerar-campo-pdf) - recebem contexto do laudo
+  'prompt_regen_descricaoTecnicaDoencas': ['cids'],
+  'prompt_regen_conclusaoAnalise': ['cids', 'nexoCausal', 'exameFisico', 'examesComplementares', 'historicoOcupacional'],
+  'prompt_regen_tabelaSUSEP': ['cids', 'exameFisico', 'conclusao', 'analiseIncapacidade'],
+  'prompt_regen_danoEstetico': ['cids', 'exameFisico', 'conclusao'],
+  'prompt_regen_auxilioTerceiros': ['cids', 'exameFisico', 'conclusao', 'analiseIncapacidade'],
+  'prompt_regen_analiseIncapacidade': ['cids', 'nexoCausal', 'exameFisico', 'examesComplementares', 'postoTrabalho', 'atividadesLaborais'],
+  // Prompts de geração (gerar-resumos) - já possuem contexto completo
+  'prompt_gen_nexoCausal': ['cids', 'postoTrabalho', 'atividadesLaborais', 'historicoOcupacional', 'exameFisico', 'examesComplementares'],
+  'prompt_gen_incapacidade': ['cids', 'nexoCausal', 'exameFisico', 'examesComplementares', 'postoTrabalho', 'atividadesLaborais'],
+  'prompt_gen_conclusao': ['cids', 'nexoCausal', 'analiseIncapacidade', 'exameFisico', 'historicoOcupacional'],
+};
+
+// Todas as variáveis disponíveis no sistema
+const ALL_VARIABLES = [
+  { name: 'cids', desc: 'CIDs diagnosticados (JSON)' },
+  { name: 'postoTrabalho', desc: 'Descrição do posto de trabalho' },
+  { name: 'atividadesLaborais', desc: 'Descrição das atividades laborais' },
+  { name: 'historicoOcupacional', desc: 'Histórico ocupacional' },
+  { name: 'historiaAcidente', desc: 'História do acidente' },
+  { name: 'historiaAtual', desc: 'História atual / Anamnese' },
+  { name: 'exameFisico', desc: 'Exame físico' },
+  { name: 'examesComplementares', desc: 'Exames complementares' },
+  { name: 'antecedentes', desc: 'Antecedentes patológicos' },
+  { name: 'tratamentos', desc: 'Tratamentos realizados' },
+  { name: 'afastamentos', desc: 'Períodos de afastamento' },
+  { name: 'nexoCausal', desc: 'Justificativa do nexo causal' },
+  { name: 'nexoCausalTipo', desc: 'Tipo de nexo causal' },
+  { name: 'conclusao', desc: 'Análise conclusiva' },
+  { name: 'conclusaoIncapacidade', desc: 'Conclusão sobre incapacidade' },
+  { name: 'laudosMedicos', desc: 'Laudos médicos' },
+  { name: 'tabelaSUSEP', desc: 'Tabela SUSEP' },
+  { name: 'danoEstetico', desc: 'Dano estético' },
+  { name: 'auxilioTerceiros', desc: 'Auxílio de terceiros' },
+  { name: 'analiseIncapacidade', desc: 'Análise de incapacidade laboral' },
+];
+
+function getPromptType(promptId: string): { type: 'gen' | 'regen' | 'system' | 'import'; label: string; color: string } {
+  if (promptId.startsWith('prompt_gen_')) {
+    return { type: 'gen', label: 'Gerar', color: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30' };
+  }
+  if (promptId.startsWith('prompt_regen_')) {
+    return { type: 'regen', label: 'Regerar', color: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30' };
+  }
+  if (promptId.startsWith('prompt_import_')) {
+    return { type: 'import', label: 'Importar', color: 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30' };
+  }
+  return { type: 'system', label: 'Sistema', color: 'bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/30' };
 }
 
 // ============================================
@@ -212,7 +266,18 @@ export function PromptEditor({
             <Sparkles className="h-5 w-5 text-primary" />
             Editar Prompt
           </DialogTitle>
-          <DialogDescription className="flex items-center gap-2">
+          <DialogDescription className="flex items-center gap-2 flex-wrap">
+            {(() => {
+              const promptType = getPromptType(prompt.id);
+              return (
+                <Badge 
+                  variant="outline" 
+                  className={cn("text-xs font-medium", promptType.color)}
+                >
+                  {promptType.label}
+                </Badge>
+              );
+            })()}
             <code className="text-xs bg-muted px-2 py-0.5 rounded font-mono">
               {prompt.id}
             </code>
@@ -350,7 +415,7 @@ export function PromptEditor({
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Variable className="h-4 w-4 text-muted-foreground" />
-                  <Label>Variáveis detectadas</Label>
+                  <Label>Variáveis detectadas no prompt</Label>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {detectedVariables.map(v => (
@@ -362,6 +427,90 @@ export function PromptEditor({
                 <p className="text-xs text-muted-foreground">
                   Estas variáveis serão substituídas automaticamente pelo contexto durante a execução.
                 </p>
+              </div>
+            )}
+
+            {/* Variáveis disponíveis para este prompt */}
+            {prompt && (
+              <div className="space-y-2 bg-blue-500/5 border border-blue-500/20 rounded-lg p-4">
+                <div className="flex items-center gap-2">
+                  <HelpCircle className="h-4 w-4 text-blue-500" />
+                  <Label className="text-blue-700 dark:text-blue-400">Variáveis disponíveis</Label>
+                </div>
+                
+                {(() => {
+                  const availableVars = AVAILABLE_VARIABLES[prompt.id];
+                  const promptType = getPromptType(prompt.id);
+                  
+                  if (promptType.type === 'regen') {
+                    return (
+                      <div className="space-y-3">
+                        <p className="text-xs text-muted-foreground">
+                          Prompts de <strong>Regeneração</strong> recebem contexto cruzado de outros campos do laudo.
+                          Use estas variáveis para enriquecer a resposta:
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {(availableVars || ALL_VARIABLES.map(v => v.name)).map(varName => {
+                            const varInfo = ALL_VARIABLES.find(v => v.name === varName);
+                            return (
+                              <Badge 
+                                key={varName} 
+                                variant="outline" 
+                                className="font-mono text-xs cursor-pointer hover:bg-blue-500/10"
+                                onClick={() => {
+                                  const varText = '${' + varName + '}';
+                                  setEditedPrompt(prev => prev + ' ' + varText);
+                                }}
+                                title={varInfo?.desc || varName}
+                              >
+                                ${"{" + varName + "}"}
+                              </Badge>
+                            );
+                          })}
+                        </div>
+                        <p className="text-xs text-muted-foreground italic">
+                          Clique em uma variável para adicioná-la ao final do prompt.
+                        </p>
+                      </div>
+                    );
+                  }
+                  
+                  if (promptType.type === 'gen') {
+                    return (
+                      <div className="space-y-3">
+                        <p className="text-xs text-muted-foreground">
+                          Prompts de <strong>Geração</strong> já recebem contexto completo automaticamente.
+                          Variáveis sugeridas para este prompt:
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {(availableVars || []).map(varName => {
+                            const varInfo = ALL_VARIABLES.find(v => v.name === varName);
+                            return (
+                              <Badge 
+                                key={varName} 
+                                variant="outline" 
+                                className="font-mono text-xs cursor-pointer hover:bg-emerald-500/10"
+                                onClick={() => {
+                                  const varText = '${' + varName + '}';
+                                  setEditedPrompt(prev => prev + ' ' + varText);
+                                }}
+                                title={varInfo?.desc || varName}
+                              >
+                                ${"{" + varName + "}"}
+                              </Badge>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  }
+                  
+                  return (
+                    <p className="text-xs text-muted-foreground">
+                      Este prompt de <strong>{promptType.label}</strong> não utiliza variáveis de contexto cruzado.
+                    </p>
+                  );
+                })()}
               </div>
             )}
 

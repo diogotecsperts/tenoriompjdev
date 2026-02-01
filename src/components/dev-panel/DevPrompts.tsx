@@ -527,6 +527,23 @@ export function DevPrompts() {
 }
 
 // ============================================
+// PROMPT TYPE UTILITIES
+// ============================================
+
+function getPromptType(promptId: string): { type: 'gen' | 'regen' | 'system' | 'import'; label: string; color: string } {
+  if (promptId.startsWith('prompt_gen_')) {
+    return { type: 'gen', label: 'Gerar', color: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30' };
+  }
+  if (promptId.startsWith('prompt_regen_')) {
+    return { type: 'regen', label: 'Regerar', color: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30' };
+  }
+  if (promptId.startsWith('prompt_import_')) {
+    return { type: 'import', label: 'Importar', color: 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30' };
+  }
+  return { type: 'system', label: 'Sistema', color: 'bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/30' };
+}
+
+// ============================================
 // PROMPT CARD COMPONENT
 // ============================================
 
@@ -539,6 +556,7 @@ interface PromptCardProps {
 function PromptCard({ prompt, onEdit, showClassifyHint }: PromptCardProps) {
   const promptPreview = prompt.prompt?.substring(0, 150) || "";
   const hasVariables = (prompt.variables?.length || 0) > 0;
+  const promptType = getPromptType(prompt.id);
 
   return (
     <div
@@ -550,14 +568,28 @@ function PromptCard({ prompt, onEdit, showClassifyHint }: PromptCardProps) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge 
+              variant="outline" 
+              className={cn("text-xs font-medium", promptType.color)}
+            >
+              {promptType.label}
+            </Badge>
             <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
               {prompt.id}
             </code>
             {hasVariables && (
-              <Badge variant="outline" className="text-xs">
-                {prompt.variables?.length} var
-              </Badge>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge variant="outline" className="text-xs gap-1">
+                    <Sparkles className="h-3 w-3" />
+                    {prompt.variables?.length} var
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-xs">Variáveis: {prompt.variables?.join(', ')}</p>
+                </TooltipContent>
+              </Tooltip>
             )}
           </div>
           
@@ -579,17 +611,24 @@ function PromptCard({ prompt, onEdit, showClassifyHint }: PromptCardProps) {
           )}
         </div>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className="opacity-0 group-hover:opacity-100 transition-opacity"
-          onClick={(e) => {
-            e.stopPropagation();
-            onEdit();
-          }}
-        >
-          <Edit3 className="h-4 w-4" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit();
+              }}
+            >
+              <Edit3 className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p className="text-xs">Clique para editar este prompt</p>
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {showClassifyHint && (
