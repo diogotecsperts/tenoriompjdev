@@ -1,21 +1,45 @@
 
-# Fase 2: Integração das Edge Functions ao Prompt Manager
+# Fase 2: Integração das Edge Functions ao Prompt Manager ✅ CONCLUÍDA
 
 ## Objetivo
 Conectar as três principais edge functions de IA (`gerar-resumos`, `regerar-campo-pdf` e `processar-autos`) ao `prompt-manager.ts` criado na Fase 1, permitindo que todos os prompts sejam gerenciados centralizadamente e editáveis via DevPanel.
 
 ---
 
-## Arquivos a Modificar
+## ✅ Arquivos Modificados
 
-### 1. `supabase/functions/gerar-resumos/index.ts`
-**Mudanças:**
-- Importar `getPrompt` do `prompt-manager.ts`
-- Substituir os prompts hardcoded (`prompts` object) por chamadas ao prompt-manager
-- Manter os prompts hardcoded como fallback (passados como `defaultPrompt`)
-- Adicionar metadados de classificacao (`cardId`, `sectionId`) para cada prompt
+### 1. `supabase/functions/gerar-resumos/index.ts` ✅
+**Mudanças realizadas:**
+- Importado `getPrompt` do `prompt-manager.ts`
+- Substituídos prompts hardcoded (`prompts` object → `defaultPrompts`) por chamadas ao prompt-manager
+- Adicionado mapeamento `promptMapping` com IDs e metadados para cada tipo de resumo
+- System prompt agora também é buscado via prompt-manager (`prompt_system_gerar_resumos`)
 
-**IDs de prompts a criar:**
+### 2. `supabase/functions/regerar-campo-pdf/index.ts` ✅
+**Mudanças realizadas:**
+- Importado `getPrompt` do `prompt-manager.ts`
+- Adicionado mapeamento `fieldPromptMapping` com 21 campos configuráveis
+- Mantido `fieldPrompts` como fallback hardcoded
+- Duas chamadas de prompt-manager: uma para bucket_full_text e outra para cached content
+
+### 3. `supabase/functions/processar-autos/index.ts` ✅
+**Mudanças realizadas:**
+- Importado `getPrompt` do `prompt-manager.ts`
+- Renomeado `systemPrompt` para `defaultSystemPrompt`
+- Criada função `getSystemPrompt()` que busca via prompt-manager com cache por request
+- Mantida constante `systemPrompt` como alias para retrocompatibilidade
+
+### 4. `supabase/functions/_shared/smart-chunker.ts` ✅
+**Mudanças realizadas:**
+- Importado `getPrompt` do `prompt-manager.ts`
+- Criada função assíncrona `getFieldPromptAsync()` que busca prompts via prompt-manager
+- Mantida função síncrona `getFieldPrompt()` como fallback
+
+---
+
+## IDs de Prompts Registrados
+
+### Geração de Conteúdo (gerar-resumos)
 | promptId | Descrição | cardId | sectionId |
 |----------|-----------|--------|-----------|
 | `prompt_gen_resumo_peticao` | Resumir petição inicial | `resumo-autos` | `resumo` |
@@ -25,19 +49,10 @@ Conectar as três principais edge functions de IA (`gerar-resumos`, `regerar-cam
 | `prompt_gen_incapacidade` | Análise de incapacidade | `analise-tecnica` | `analise-incapacidade` |
 | `prompt_gen_sugestoes_pericia` | Sugestões para perícia | `periciando` | `anamnese` |
 | `prompt_gen_referencias` | Referências bibliográficas | `referencias` | `referencias` |
-| `prompt_gen_aprimorar_texto` | Aprimorar texto (grammar/style) | `_global` | `_aprimorar` |
+| `prompt_gen_aprimorar_texto` | Aprimorar texto | `_global` | `_aprimorar` |
 | `prompt_system_gerar_resumos` | System prompt padrão | `_system` | `_gerar_resumos` |
 
----
-
-### 2. `supabase/functions/regerar-campo-pdf/index.ts`
-**Mudanças:**
-- Importar `getPrompt` do `prompt-manager.ts`
-- Substituir o objeto `fieldPrompts` por chamadas dinâmicas ao prompt-manager
-- Cada campo regenerável terá seu próprio prompt configurável
-- Manter fallback com prompts atuais detalhados
-
-**IDs de prompts a criar (regeneração via PDF):**
+### Regeneração via PDF (regerar-campo-pdf)
 | promptId | Campo | cardId | sectionId |
 |----------|-------|--------|-----------|
 | `prompt_regen_historiaAtual` | historiaAtual | `periciando` | `anamnese` |
@@ -62,99 +77,49 @@ Conectar as três principais edge functions de IA (`gerar-resumos`, `regerar-cam
 | `prompt_regen_resumoPeticaoInicial` | resumoPeticaoInicial | `resumo-autos` | `resumo` |
 | `prompt_regen_resumoContestacao` | resumoContestacao | `resumo-autos` | `resumo` |
 
----
-
-### 3. `supabase/functions/processar-autos/index.ts`
-**Mudanças:**
-- Importar `getPrompt` do `prompt-manager.ts`
-- Extrair o mega-prompt de sistema (`systemPrompt`) para ser configurável
-- O prompt de sistema é crítico e extenso (~15KB), mas será editável via DevPanel
-
-**IDs de prompts a criar:**
+### Sistema / Importação
 | promptId | Descrição | cardId | sectionId |
 |----------|-----------|--------|-----------|
-| `prompt_import_system` | Mega-prompt principal de extração | `_system` | `_import` |
+| `prompt_import_system` | Mega-prompt de extração | `_system` | `_import` |
 
 ---
 
-### 4. `supabase/functions/_shared/smart-chunker.ts`
-**Mudanças:**
-- Importar `getPrompt` do `prompt-manager.ts`
-- Substituir o objeto `prompts` em `getFieldPrompt()` por chamadas ao prompt-manager
-- Usar padrão de nomenclatura: `prompt_chunk_{fieldKey}`
-
----
-
-## Dependências Cruzadas (Campos que "se enxergam")
-
-Para alguns prompts, o contexto precisa incluir dados de outros campos. Isso será implementado via **variáveis de template**:
-
-```typescript
-// Exemplo: prompt de nexo causal precisa ver CIDs, histórico, etc.
-const prompt = await getPrompt(
-  'prompt_gen_nexo_causal',
-  defaultNexoCausalPrompt,
-  {
-    cids: contexto.cids,
-    postoTrabalho: contexto.postoTrabalho,
-    atividadesLaborais: contexto.atividadesLaborais,
-    historicoOcupacional: contexto.historicoOcupacional,
-    historiaAcidente: contexto.historiaAcidente,
-    // ... outros campos relacionados
-  }
-);
-```
-
-O prompt armazenado no banco poderá usar `${cids}`, `${postoTrabalho}`, etc., e o `prompt-manager` fará a interpolação automaticamente.
-
----
-
-## Fluxo de Execução
+## Fluxo de Execução Implementado
 
 ```text
 1. Edge function recebe requisição
 2. Determina qual promptId usar baseado no tipo/campo
-3. Chama getPrompt(promptId, defaultPrompt, context)
+3. Chama getPrompt(promptId, defaultPrompt, context, options)
    └─ prompt-manager verifica cache (TTL 5 min)
    └─ Se não em cache: busca do system_config
-   └─ Se não existe: usa fallback + auto-registra
+   └─ Se não existe: usa fallback + auto-registra (se autoRegister=true)
 4. Retorna prompt interpolado com variáveis do contexto
 5. Edge function usa o prompt para chamar a IA
 ```
 
 ---
 
-## Garantias de Segurança
-
-- **Fallback sempre funciona**: Se o banco estiver indisponível ou o prompt não existir, o sistema usa o prompt hardcoded original
-- **Cache reduz latência**: Prompts são cacheados por 5 minutos, minimizando queries ao banco
-- **Auto-registro**: Novos campos adicionados no futuro automaticamente criam seus prompts no banco como "não classificados"
-- **Nenhuma quebra**: A mudança é transparente - comportamento idêntico ao atual até que alguém edite um prompt no DevPanel
-
----
-
-## Arquivos Finais
-
-| Arquivo | Ação |
-|---------|------|
-| `supabase/functions/gerar-resumos/index.ts` | Modificar |
-| `supabase/functions/regerar-campo-pdf/index.ts` | Modificar |
-| `supabase/functions/processar-autos/index.ts` | Modificar |
-| `supabase/functions/_shared/smart-chunker.ts` | Modificar |
-| `supabase/functions/_shared/prompt-manager.ts` | Já criado (Fase 1) |
-
----
-
-## Testes de Validação
-
-Após implementação, validar:
-1. Gerar resumo de petição (botão "Resumir Texto")
-2. Regenerar campo via PDF (botão de refresh em campo com PDF importado)
-3. Importar autos completo (processar PDF)
-4. Verificar que prompts aparecem no `system_config` com IDs corretos
-
----
-
 ## Próxima Fase (Fase 3)
 
-Após esta fase, a Fase 3 implementará a UI do DevPanel para editar os prompts que foram registrados no banco. Os prompts estarão prontos para serem visualizados e editados.
+Implementar a UI do DevPanel para editar os prompts que foram registrados no banco:
+
+1. Criar componentes:
+   - `DevPrompts.tsx` - Página principal de gerenciamento
+   - `PromptEditor.tsx` - Editor individual de prompt
+
+2. Implementar leitura/escrita no `system_config` (com versionamento simples)
+
+3. Implementar a seção "Novos / Não classificados"
+   - Lista todos os prompts com `isClassified: false`
+
+4. Adicionar tab no `DevPanel` para abrir "Prompts IA"
+
+---
+
+## Fase 4 (Futura)
+
+Fonte única de verdade: sincronizar ordem com o LaudoEditor:
+
+1. Extrair `consolidatedCards` do `LaudoEditor.tsx` para um módulo compartilhado
+2. Usar essa mesma estrutura para LaudoEditor e DevPrompts
+3. Garantir que mudanças futuras de cards/sections sejam refletidas automaticamente

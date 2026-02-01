@@ -4,9 +4,10 @@ import { encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { getAIConfig, callAI, callPDFProvider } from "../_shared/ai-config.ts";
 import { logToBackend, logError, logWarn, logInfo } from "../_shared/backend-logger.ts";
 import { extractVisualContent, storeExtractedContent, ExtractedContent } from "../_shared/pdf-visual-extractor.ts";
-import { getRelevantChunk, getFieldPrompt } from "../_shared/smart-chunker.ts";
+import { getRelevantChunk } from "../_shared/smart-chunker.ts";
 import { splitPDF, needsSplit } from "../_shared/pdf-splitter.ts";
 import { extractWithMistralOCR, getMistralAPIKey } from "../_shared/mistral-ocr.ts";
+import { getPrompt } from "../_shared/prompt-manager.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -21,7 +22,9 @@ const GEMINI_PROCESSING_LIMIT = 45_000_000; // 45MB - max size for single Gemini
 const MAX_SPLIT_PARTS = 4; // Maximum parts for split PDFs (~180MB total)
 const SPLIT_TARGET_SIZE = 40_000_000; // 40MB per part target
 
-const systemPrompt = `Você é um perito médico especialista em medicina do trabalho com vasta experiência em elaboração de laudos periciais. Analise os autos do processo e extraia TODAS as informações disponíveis com MÁXIMO DETALHAMENTO para preencher um laudo pericial completo.
+// O system prompt principal foi movido para uma constante para servir como fallback
+// O prompt real é buscado via prompt-manager para permitir edição via DevPanel
+const defaultSystemPrompt = `Você é um perito médico especialista em medicina do trabalho com vasta experiência em elaboração de laudos periciais. Analise os autos do processo e extraia TODAS as informações disponíveis com MÁXIMO DETALHAMENTO para preencher um laudo pericial completo.
 
 === REGRAS GERAIS DE EXTRAÇÃO - LEIA COM ATENÇÃO ===
 
@@ -385,7 +388,35 @@ const systemPrompt = `Você é um perito médico especialista em medicina do tra
 - Comece diretamente com { e termine com }
 - NÃO use blocos de código. Apenas JSON puro.`;
 
-// Helper to try to fix truncated JSON - ROBUST VERSION
+// Variável para cache do system prompt (carregado uma vez por request)
+let cachedSystemPrompt: string | null = null;
+
+/**
+ * Busca o system prompt via prompt-manager
+ * Usa cache para evitar múltiplas queries dentro do mesmo request
+ */
+async function getSystemPrompt(): Promise<string> {
+  if (cachedSystemPrompt) {
+    return cachedSystemPrompt;
+  }
+  
+  cachedSystemPrompt = await getPrompt(
+    'prompt_import_system',
+    defaultSystemPrompt,
+    {},
+    {
+      autoRegister: true,
+      description: 'Mega-prompt de sistema para extração de dados de processos trabalhistas',
+      cardId: '_system',
+      sectionId: '_import'
+    }
+  );
+  
+  return cachedSystemPrompt;
+}
+
+// Alias para retrocompatibilidade - será substituído por await getSystemPrompt() onde possível
+const systemPrompt = defaultSystemPrompt;
 function tryFixTruncatedJson(jsonStr: string): object | null {
   if (!jsonStr || typeof jsonStr !== 'string') return null;
   

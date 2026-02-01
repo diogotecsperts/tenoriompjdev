@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getAIConfig, callAI } from "../_shared/ai-config.ts";
+import { getPrompt } from "../_shared/prompt-manager.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -29,7 +30,8 @@ interface GerarResumoRequest {
   };
 }
 
-const prompts = {
+// Prompts padrão (fallback) - mantidos para retrocompatibilidade
+const defaultPrompts = {
   resumo_peticao: (ctx: GerarResumoRequest['contexto']) => `
 Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da petição inicial para um laudo pericial médico trabalhista.
 
@@ -244,7 +246,19 @@ Retorne APENAS o texto corrigido, sem comentários ou explicações.
 `
 };
 
-const systemPrompt = 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.';
+// Mapeamento de tipos para IDs de prompt e metadados
+const promptMapping: Record<string, { promptId: string; cardId: string; sectionId: string; description: string }> = {
+  resumo_peticao: { promptId: 'prompt_gen_resumo_peticao', cardId: 'resumo-autos', sectionId: 'resumo', description: 'Resumir petição inicial' },
+  resumo_contestacao: { promptId: 'prompt_gen_resumo_contestacao', cardId: 'resumo-autos', sectionId: 'resumo', description: 'Resumir contestação' },
+  descricao_doencas: { promptId: 'prompt_gen_descricao_doencas', cardId: 'analise-tecnica', sectionId: 'descricao-doencas', description: 'Descrição técnica das doenças' },
+  nexo_causal: { promptId: 'prompt_gen_nexo_causal', cardId: 'analise-tecnica', sectionId: 'nexo', description: 'Análise de nexo causal' },
+  incapacidade: { promptId: 'prompt_gen_incapacidade', cardId: 'analise-tecnica', sectionId: 'analise-incapacidade', description: 'Análise de incapacidade' },
+  sugestoes_pericia: { promptId: 'prompt_gen_sugestoes_pericia', cardId: 'periciando', sectionId: 'anamnese', description: 'Sugestões para perícia' },
+  referencias_bibliograficas: { promptId: 'prompt_gen_referencias', cardId: 'referencias', sectionId: 'referencias', description: 'Referências bibliográficas' },
+  aprimorar_texto: { promptId: 'prompt_gen_aprimorar_texto', cardId: '_global', sectionId: '_aprimorar', description: 'Aprimorar texto (correção gramatical)' }
+};
+
+const defaultSystemPrompt = 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.';
 
 serve(async (req) => {
   // Handle CORS preflight requests
@@ -255,7 +269,7 @@ serve(async (req) => {
   try {
     const { tipo, contexto } = await req.json() as GerarResumoRequest;
 
-    if (!tipo || !prompts[tipo]) {
+    if (!tipo || !defaultPrompts[tipo]) {
       return new Response(
         JSON.stringify({ error: 'Tipo de resumo inválido' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -274,8 +288,56 @@ serve(async (req) => {
       );
     }
 
-    const prompt = prompts[tipo](contexto);
-    console.log(`[gerar-resumos] Gerando resumo do tipo: ${tipo}`);
+    // Gerar prompt base (fallback)
+    const defaultPrompt = defaultPrompts[tipo](contexto);
+    
+    // Buscar prompt customizado via prompt-manager
+    const mapping = promptMapping[tipo];
+    const prompt = await getPrompt(
+      mapping.promptId,
+      defaultPrompt,
+      {
+        // Variáveis para interpolação
+        peticaoInicial: contexto.peticaoInicial || '',
+        contestacao: contexto.contestacao || '',
+        cids: contexto.cids || '',
+        postoTrabalho: contexto.postoTrabalho || '',
+        atividadesLaborais: contexto.atividadesLaborais || '',
+        historicoOcupacional: contexto.historicoOcupacional || '',
+        exameFisico: contexto.exameFisico || '',
+        examesComplementares: contexto.examesComplementares || '',
+        antecedentes: contexto.antecedentes || '',
+        tratamentos: contexto.tratamentos || '',
+        historiaAcidente: contexto.historiaAcidente || '',
+        historiaAtual: contexto.historiaAtual || '',
+        nexoCausal: contexto.nexoCausal || '',
+        conclusao: contexto.conclusao || '',
+        metodologia: contexto.metodologia || '',
+        textoOriginal: contexto.textoOriginal || '',
+        campo: contexto.campo || ''
+      },
+      {
+        autoRegister: true,
+        description: mapping.description,
+        cardId: mapping.cardId,
+        sectionId: mapping.sectionId
+      }
+    );
+    
+    console.log(`[gerar-resumos] Gerando resumo do tipo: ${tipo} (promptId: ${mapping.promptId})`);
+
+    // Buscar system prompt via prompt-manager
+    const systemPrompt = await getPrompt(
+      'prompt_system_gerar_resumos',
+      defaultSystemPrompt,
+      {},
+      {
+        autoRegister: true,
+        description: 'System prompt padrão para geração de resumos',
+        cardId: '_system',
+        sectionId: '_gerar_resumos'
+      }
+    );
 
     try {
       const result = await callAI(aiConfig, systemPrompt, prompt, {
