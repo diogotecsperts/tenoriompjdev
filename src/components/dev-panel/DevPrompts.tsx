@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { 
@@ -14,13 +15,10 @@ import {
   RefreshCw, 
   AlertCircle,
   CheckCircle2,
-  Folder,
   FolderOpen,
   MessageSquare,
   Edit3,
   Clock,
-  Tag,
-  Filter,
   ChevronRight,
   ChevronDown,
   Sparkles,
@@ -28,7 +26,10 @@ import {
   Stethoscope,
   ClipboardCheck,
   BookOpen,
-  Briefcase
+  Briefcase,
+  Download,
+  Loader2,
+  Database
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PromptEditor } from "./PromptEditor";
@@ -80,6 +81,7 @@ const LAUDO_STRUCTURE = [...LAUDO_CARDS_STRUCTURE, ...PROMPT_ONLY_CARDS].map(car
 export function DevPrompts() {
   const [prompts, setPrompts] = useState<PromptConfig[]>([]);
   const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set(LAUDO_STRUCTURE.map(c => c.id)));
   const [selectedPrompt, setSelectedPrompt] = useState<PromptConfig | null>(null);
@@ -123,6 +125,34 @@ export function DevPrompts() {
   useEffect(() => {
     fetchPrompts();
   }, []);
+
+  // Carregar prompts padrão via edge function
+  const seedPrompts = async () => {
+    setSeeding(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('seed-prompts', {
+        method: 'POST'
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Prompts carregados!",
+        description: `${data.inserted} inseridos, ${data.updated} atualizados`,
+      });
+
+      await fetchPrompts();
+    } catch (error) {
+      console.error("Erro ao carregar prompts:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Falha ao carregar prompts padrão"
+      });
+    } finally {
+      setSeeding(false);
+    }
+  };
 
   // Prompts classificados vs não classificados
   const { classifiedPrompts, unclassifiedPrompts } = useMemo(() => {
@@ -228,7 +258,51 @@ export function DevPrompts() {
     );
   }
 
+  // Estado vazio - mostrar CTA para carregar prompts
+  if (!loading && prompts.length === 0) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Prompts de IA</h1>
+            <p className="text-muted-foreground mt-1">
+              Gerencie os prompts utilizados em todas as funções de IA do sistema
+            </p>
+          </div>
+        </div>
+
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center py-16">
+            <Database className="h-16 w-16 text-muted-foreground/50 mb-6" />
+            <h3 className="text-xl font-semibold mb-2">Nenhum prompt encontrado</h3>
+            <p className="text-muted-foreground text-center max-w-md mb-6">
+              O banco de dados ainda não possui prompts cadastrados. Clique no botão abaixo para
+              carregar todos os prompts padrão do sistema.
+            </p>
+            <Button onClick={seedPrompts} disabled={seeding} size="lg">
+              {seeding ? (
+                <>
+                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                  Carregando prompts...
+                </>
+              ) : (
+                <>
+                  <Download className="h-5 w-5 mr-2" />
+                  Carregar Prompts Padrão
+                </>
+              )}
+            </Button>
+            <p className="text-xs text-muted-foreground mt-4">
+              Isso irá inserir ~30 prompts pré-configurados e classificados
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
+    <TooltipProvider>
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -238,10 +312,20 @@ export function DevPrompts() {
             Gerencie os prompts utilizados em todas as funções de IA do sistema
           </p>
         </div>
-        <Button onClick={fetchPrompts} variant="outline" size="sm">
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Atualizar
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={seedPrompts} variant="outline" size="sm" disabled={seeding}>
+            {seeding ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4 mr-2" />
+            )}
+            Carregar Padrão
+          </Button>
+          <Button onClick={fetchPrompts} variant="outline" size="sm">
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Atualizar
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -438,6 +522,7 @@ export function DevPrompts() {
         laudoStructure={LAUDO_STRUCTURE}
       />
     </div>
+    </TooltipProvider>
   );
 }
 
