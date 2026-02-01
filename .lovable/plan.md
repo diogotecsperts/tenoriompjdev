@@ -1,125 +1,131 @@
 
+# Plano: Exportar Prompts para PDF
 
-# Plano de Correção: Dependências Cruzadas nos Prompts de Regeneração
+## Decisão Tomada
 
-## Problema Principal
+Após avaliação cuidadosa, implementarei **apenas a exportação em PDF** pelos seguintes motivos:
 
-Os prompts de regeneração (`prompt_regen_*`) atualmente **não recebem contexto de outros campos**. Quando você clica no botão 🔄 para regenerar um campo, o sistema:
+| Funcionalidade | Risco | Benefício | Veredicto |
+|----------------|-------|-----------|-----------|
+| Importação JSON | Alto - pode sobrescrever prompts incorretamente | Médio - restauração rápida | Não implementar |
+| Exportação PDF | Zero | Alto - backup seguro e organizado | Implementar |
 
-1. Busca o prompt do banco ✅
-2. NÃO passa dados de outros campos para interpolação ❌
+A importação exigiria validação extensiva (IDs, variáveis, estrutura), sistema de preview/merge, e ainda assim teria risco de corromper dados. A exportação PDF é 100% segura e atende perfeitamente à necessidade de backup.
 
-Isso significa que se você editar um prompt para usar `${cids}` ou `${exameFisico}`, essas variáveis ficarão literalmente como `${cids}` ao invés de serem substituídas pelos valores reais.
+## O que será implementado
 
-## Diferença: Geração vs Regeneração
+### Botão "Exportar PDF" no header da página DevPrompts
 
-### Geração (✅ Funciona com contexto)
-- Botões: "Resumir Texto", "Gerar Nexo Causal", "Gerar Análise de Incapacidade"
-- Edge Function: `gerar-resumos`
-- Contexto: Recebe dados de vários campos do laudo
-- **Funciona perfeitamente com dependências cruzadas**
+**Localização**: Ao lado dos botões "Carregar Padrão" e "Atualizar"
 
-### Regeneração (⚠️ Não recebe contexto)
-- Botão: 🔄 (Regerar a partir do PDF)
-- Edge Function: `regerar-campo-pdf`
-- Contexto: Recebe apenas o conteúdo do PDF
-- **NÃO suporta dependências cruzadas atualmente**
+**Comportamento**:
+1. Gera um PDF profissional com todos os prompts
+2. Organizado exatamente na mesma ordem do app (seguindo `LAUDO_CARDS_STRUCTURE`)
+3. Cada seção separada visualmente
+4. Inclui metadados importantes
 
-## Solução Proposta
+## Estrutura do PDF Exportado
 
-### 1. Modificar `regerar-campo-pdf` para buscar dados do laudo
+```
+BACKUP DE PROMPTS DE IA
+Data: 01/02/2026 às 20:35
+Total: 31 prompts
 
-**Arquivo:** `supabase/functions/regerar-campo-pdf/index.ts`
+═══════════════════════════════════════════
+PRELIMINARES
+═══════════════════════════════════════════
 
-Alterar a query do laudo para buscar todos os campos relevantes:
+┌─ Objetivo da Perícia ─────────────────────
+│ ID: prompt_regen_objetivoPericia
+│ Tipo: Regerar
+│ Variáveis: cids, exameFisico
+│ 
+│ [Texto completo do prompt aqui...]
+│ 
+│ Atualizado em: 01/02/2026
+└───────────────────────────────────────────
 
-```text
-// De:
-.select('id, user_id, ai_metadata')
+┌─ Metodologia Pericial ────────────────────
+│ ID: prompt_regen_metodologiaPericial
+│ ...
+└───────────────────────────────────────────
 
-// Para:
-.select('id, user_id, ai_metadata, diagnostico_cids, 
-  descricao_posto_trabalho, descricao_atividades_laborais,
-  historico_ocupacional, historia_acidente, historia_atual,
-  exame_fisico, exames_complementares, antecedentes,
-  tratamentos, afastamentos, nexo_causal_justificativa,
-  conclusao_analise, ...')
+═══════════════════════════════════════════
+RESUMO DOS AUTOS
+═══════════════════════════════════════════
+
+... (continua para cada card/seção)
 ```
 
-### 2. Passar contexto para getPrompt
+## Detalhes Técnicos
 
-Após buscar o laudo, passar os dados como contexto:
+### Arquivo a modificar
 
-```text
-const specificPrompt = await getPrompt(
-  mapping?.promptId,
-  defaultPrompt,
-  {
-    // Dados do laudo para interpolação
-    cids: JSON.stringify(laudo.diagnostico_cids || []),
-    postoTrabalho: laudo.descricao_posto_trabalho || '',
-    atividadesLaborais: laudo.descricao_atividades_laborais || '',
-    historicoOcupacional: laudo.historico_ocupacional || '',
-    historiaAcidente: laudo.historia_acidente || '',
-    historiaAtual: laudo.historia_atual || '',
-    exameFisico: laudo.exame_fisico || '',
-    examesComplementares: laudo.exames_complementares || '',
-    antecedentes: laudo.antecedentes || '',
-    tratamentos: laudo.tratamentos || '',
-    nexoCausal: laudo.nexo_causal_justificativa || '',
-    conclusao: laudo.conclusao_analise || ''
-  },
-  { autoRegister: true, ... }
-);
+`src/components/dev-panel/DevPrompts.tsx`
+
+### Dependência
+
+Utilizará a biblioteca `jspdf` já instalada no projeto.
+
+### Função de exportação
+
+```typescript
+const exportToPDF = async () => {
+  const doc = new jsPDF();
+  
+  // Header
+  doc.setFontSize(18);
+  doc.text('BACKUP DE PROMPTS DE IA', 105, 20, { align: 'center' });
+  doc.setFontSize(10);
+  doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 105, 28, { align: 'center' });
+  doc.text(`Total: ${prompts.length} prompts`, 105, 34, { align: 'center' });
+  
+  let yPos = 50;
+  
+  // Iterar por cada card na ordem do laudo
+  LAUDO_STRUCTURE.forEach(card => {
+    // Título do card
+    doc.setFontSize(14);
+    doc.text(card.title.toUpperCase(), 20, yPos);
+    yPos += 10;
+    
+    card.sections.forEach(section => {
+      const sectionPrompts = groupedPrompts[card.id]?.[section.id] || [];
+      
+      sectionPrompts.forEach(prompt => {
+        // Verificar se precisa nova página
+        if (yPos > 260) {
+          doc.addPage();
+          yPos = 20;
+        }
+        
+        // Renderizar prompt
+        doc.setFontSize(10);
+        doc.text(`ID: ${prompt.id}`, 20, yPos);
+        // ... resto do conteúdo
+      });
+    });
+  });
+  
+  doc.save(`prompts-backup-${Date.now()}.pdf`);
+};
 ```
 
-### 3. Definir quais campos cada prompt pode "enxergar"
+### Informações incluídas no PDF para cada prompt
 
-Criar um mapeamento de dependências:
+1. ID do prompt (ex: `prompt_regen_historiaAtual`)
+2. Tipo (Gerar, Regerar, Sistema, Importar)
+3. Descrição
+4. Variáveis utilizadas
+5. Texto completo do prompt
+6. Data da última atualização
 
-| Campo sendo regenerado | Campos que pode ver |
-|------------------------|---------------------|
-| `descricaoTecnicaDoencas` | cids |
-| `conclusaoAnalise` | cids, nexoCausal, exameFisico, examesComplementares |
-| `tabelaSUSEP` | cids, exameFisico, conclusaoAnalise |
-| `danoEstetico` | cids, exameFisico |
-| `auxilioTerceiros` | cids, exameFisico, conclusaoAnalise |
-| `nexoCausal` (se tivesse regen) | cids, postoTrabalho, atividadesLaborais, historicoOcupacional |
+## Resultado Final
 
-## Melhoria de UI Proposta
+Após implementação, você terá:
 
-### 4. Separar visualmente prompts de Geração vs Regeneração
-
-Na página de Prompts IA, adicionar indicadores visuais:
-
-- **Badge "Gerar"** (verde): Prompts `prompt_gen_*`
-- **Badge "Regerar"** (azul): Prompts `prompt_regen_*`
-- **Badge "Sistema"** (cinza): Prompts `prompt_system_*` e `prompt_import_*`
-
-### 5. Adicionar documentação das variáveis disponíveis
-
-No editor de prompts, exibir:
-- Lista de variáveis detectadas no prompt atual
-- Lista de variáveis **disponíveis** para aquele contexto
-- Tooltip explicando que variáveis são substituídas automaticamente
-
-## Arquivos a Modificar
-
-| Arquivo | Ação |
-|---------|------|
-| `supabase/functions/regerar-campo-pdf/index.ts` | Modificar - Buscar dados do laudo e passar como contexto |
-| `src/components/dev-panel/DevPrompts.tsx` | Modificar - Adicionar badges de tipo |
-| `src/components/dev-panel/PromptEditor.tsx` | Modificar - Mostrar variáveis disponíveis |
-
-## Resultado Esperado
-
-Após implementação:
-
-1. Ao editar o prompt `prompt_regen_descricaoTecnicaDoencas`, você poderá usar `${cids}` e ele será substituído pelos CIDs reais do laudo durante a regeneração
-
-2. Ao editar `prompt_regen_conclusaoAnalise`, você poderá usar `${nexoCausal}`, `${exameFisico}`, etc.
-
-3. A UI mostrará claramente quais variáveis estão disponíveis para cada prompt
-
-4. Os prompts de geração e regeneração serão visualmente diferenciados
-
+- Botão **"Exportar PDF"** no header da página Prompts IA
+- PDF profissional e organizado
+- Segue exatamente a mesma ordem do LaudoEditor
+- Serve como backup permanente dos seus prompts otimizados
+- Zero risco de quebrar qualquer funcionalidade
