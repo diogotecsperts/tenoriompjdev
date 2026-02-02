@@ -1,131 +1,122 @@
 
-# Plano: Exportar Prompts para PDF
+# Plano: Adicionar Confirmação de Segurança ao Botão "Carregar Padrão"
 
-## Decisão Tomada
+## Problema Identificado
 
-Após avaliação cuidadosa, implementarei **apenas a exportação em PDF** pelos seguintes motivos:
+O botão "Carregar Padrão" executa `upsert` imediatamente, sobrescrevendo TODOS os prompts existentes com as versões hardcoded do código, sem pedir confirmação.
 
-| Funcionalidade | Risco | Benefício | Veredicto |
-|----------------|-------|-----------|-----------|
-| Importação JSON | Alto - pode sobrescrever prompts incorretamente | Médio - restauração rápida | Não implementar |
-| Exportação PDF | Zero | Alto - backup seguro e organizado | Implementar |
-
-A importação exigiria validação extensiva (IDs, variáveis, estrutura), sistema de preview/merge, e ainda assim teria risco de corromper dados. A exportação PDF é 100% segura e atende perfeitamente à necessidade de backup.
-
-## O que será implementado
-
-### Botão "Exportar PDF" no header da página DevPrompts
-
-**Localização**: Ao lado dos botões "Carregar Padrão" e "Atualizar"
-
-**Comportamento**:
-1. Gera um PDF profissional com todos os prompts
-2. Organizado exatamente na mesma ordem do app (seguindo `LAUDO_CARDS_STRUCTURE`)
-3. Cada seção separada visualmente
-4. Inclui metadados importantes
-
-## Estrutura do PDF Exportado
+## Comportamento Atual
 
 ```
-BACKUP DE PROMPTS DE IA
-Data: 01/02/2026 às 20:35
-Total: 31 prompts
-
-═══════════════════════════════════════════
-PRELIMINARES
-═══════════════════════════════════════════
-
-┌─ Objetivo da Perícia ─────────────────────
-│ ID: prompt_regen_objetivoPericia
-│ Tipo: Regerar
-│ Variáveis: cids, exameFisico
-│ 
-│ [Texto completo do prompt aqui...]
-│ 
-│ Atualizado em: 01/02/2026
-└───────────────────────────────────────────
-
-┌─ Metodologia Pericial ────────────────────
-│ ID: prompt_regen_metodologiaPericial
-│ ...
-└───────────────────────────────────────────
-
-═══════════════════════════════════════════
-RESUMO DOS AUTOS
-═══════════════════════════════════════════
-
-... (continua para cada card/seção)
+[Clique no botão] → [Sobrescreve tudo] → [Toast "X inseridos, Y atualizados"]
 ```
 
-## Detalhes Técnicos
+O campo "atualizados" indica quantos prompts personalizados foram substituídos pelos padrões.
+
+## Comportamento Desejado
+
+```
+[Clique no botão] → [Dialog de confirmação] → [Escolha do usuário] → [Ação]
+```
+
+## Implementação
 
 ### Arquivo a modificar
 
 `src/components/dev-panel/DevPrompts.tsx`
 
-### Dependência
+### Mudanças
 
-Utilizará a biblioteca `jspdf` já instalada no projeto.
-
-### Função de exportação
-
+1. **Adicionar state para controlar o dialog**
 ```typescript
-const exportToPDF = async () => {
-  const doc = new jsPDF();
-  
-  // Header
-  doc.setFontSize(18);
-  doc.text('BACKUP DE PROMPTS DE IA', 105, 20, { align: 'center' });
-  doc.setFontSize(10);
-  doc.text(`Data: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 105, 28, { align: 'center' });
-  doc.text(`Total: ${prompts.length} prompts`, 105, 34, { align: 'center' });
-  
-  let yPos = 50;
-  
-  // Iterar por cada card na ordem do laudo
-  LAUDO_STRUCTURE.forEach(card => {
-    // Título do card
-    doc.setFontSize(14);
-    doc.text(card.title.toUpperCase(), 20, yPos);
-    yPos += 10;
-    
-    card.sections.forEach(section => {
-      const sectionPrompts = groupedPrompts[card.id]?.[section.id] || [];
-      
-      sectionPrompts.forEach(prompt => {
-        // Verificar se precisa nova página
-        if (yPos > 260) {
-          doc.addPage();
-          yPos = 20;
-        }
-        
-        // Renderizar prompt
-        doc.setFontSize(10);
-        doc.text(`ID: ${prompt.id}`, 20, yPos);
-        // ... resto do conteúdo
-      });
-    });
-  });
-  
-  doc.save(`prompts-backup-${Date.now()}.pdf`);
-};
+const [showSeedConfirmDialog, setShowSeedConfirmDialog] = useState(false);
 ```
 
-### Informações incluídas no PDF para cada prompt
+2. **Modificar o botão "Carregar Padrão"**
+Ao invés de chamar `seedPrompts()` diretamente, abre o dialog:
+```typescript
+onClick={() => setShowSeedConfirmDialog(true)}
+```
 
-1. ID do prompt (ex: `prompt_regen_historiaAtual`)
-2. Tipo (Gerar, Regerar, Sistema, Importar)
-3. Descrição
-4. Variáveis utilizadas
-5. Texto completo do prompt
-6. Data da última atualização
+3. **Adicionar AlertDialog de confirmação**
+```text
++----------------------------------------------------------+
+|  ⚠️ Restaurar Prompts para Padrão de Fábrica?            |
+|                                                           |
+|  Esta ação irá SOBRESCREVER todos os prompts              |
+|  existentes com as versões originais do sistema.          |
+|                                                           |
+|  ❌ Todas as suas edições personalizadas serão perdidas!  |
+|                                                           |
+|  💡 Recomendação: Faça um backup clicando em              |
+|  "Exportar PDF" antes de continuar.                       |
+|                                                           |
+|        [Cancelar]            [Restaurar Padrão]           |
++----------------------------------------------------------+
+```
 
-## Resultado Final
+4. **Opção secundária: Exportar primeiro**
+Dentro do dialog, incluir um link ou botão para exportar PDF antes de confirmar.
 
-Após implementação, você terá:
+## Detalhes Técnicos
 
-- Botão **"Exportar PDF"** no header da página Prompts IA
-- PDF profissional e organizado
-- Segue exatamente a mesma ordem do LaudoEditor
-- Serve como backup permanente dos seus prompts otimizados
-- Zero risco de quebrar qualquer funcionalidade
+### Imports necessários
+```typescript
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+```
+
+### Fluxo do Dialog
+
+| Ação do Usuário | Resultado |
+|-----------------|-----------|
+| Cancelar | Fecha dialog, nada acontece |
+| Restaurar Padrão | Fecha dialog, executa `seedPrompts()` |
+
+## Resumo Visual do Fluxo
+
+```
+Usuário clica "Carregar Padrão"
+         │
+         ▼
+┌─────────────────────────┐
+│  Dialog de Confirmação  │
+│  "Tem certeza? Suas     │
+│   edições serão         │
+│   perdidas!"            │
+└─────────────────────────┘
+         │
+    ┌────┴────┐
+    │         │
+ Cancelar   Confirmar
+    │         │
+    ▼         ▼
+ Nada    seedPrompts()
+         │
+         ▼
+   Prompts resetados
+   para versão de fábrica
+```
+
+## Segurança Adicional
+
+O texto do dialog deixará explícito que:
+1. **Prompts existentes serão sobrescritos**
+2. **Edições personalizadas serão perdidas**
+3. **Recomendação de exportar PDF antes**
+
+## Resultado Esperado
+
+Após implementação, o usuário:
+- Terá aviso claro antes de resetar prompts
+- Poderá cancelar se clicar por engano
+- Será lembrado de fazer backup via PDF
+
