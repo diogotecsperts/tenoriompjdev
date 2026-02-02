@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 interface GerarResumoRequest {
-  tipo: 'resumo_peticao' | 'resumo_contestacao' | 'descricao_doencas' | 'nexo_causal' | 'incapacidade' | 'sugestoes_pericia' | 'referencias_bibliograficas' | 'aprimorar_texto';
+  tipo: 'resumo_peticao' | 'resumo_contestacao' | 'descricao_doencas' | 'descricao_cid' | 'nexo_causal' | 'incapacidade' | 'sugestoes_pericia' | 'referencias_bibliograficas' | 'aprimorar_texto';
   contexto: {
     textoOriginal?: string;
     campo?: string;
@@ -85,10 +85,46 @@ Para cada CID mencionado, forneça:
 Use linguagem técnica médica apropriada para laudo pericial.
 `,
 
-  nexo_causal: (ctx: GerarResumoRequest['contexto']) => `
-Você é um perito médico especialista em medicina do trabalho. Elabore uma análise técnica do nexo causal para um laudo pericial médico trabalhista.
+  // Novo tipo: Gera descrição técnica específica para CIDs inseridos manualmente
+  descricao_cid: (ctx: GerarResumoRequest['contexto']) => `
+Você é um perito médico especialista em medicina do trabalho. Elabore a descrição técnica detalhada para cada CID informado.
 
-Dados para análise:
+CÓDIGOS CID A DESCREVER:
+${ctx.cids || 'Não informado'}
+
+CONTEXTO OCUPACIONAL (se disponível):
+- Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
+- Histórico ocupacional: ${ctx.historicoOcupacional || 'Não informado'}
+
+INSTRUÇÕES OBRIGATÓRIAS:
+Para CADA CID informado, forneça obrigatoriamente:
+
+1. TÍTULO EM CAIXA ALTA com nome completo da doença e código CID-10
+   Exemplo: TENDINITE DO SUPRAESPINHOSO (CID-10: M75.1)
+
+2. DEFINIÇÃO TÉCNICA
+   Descreva tecnicamente o que é a patologia, sua localização anatômica e características principais.
+
+3. ETIOLOGIA
+   Liste as causas possíveis, incluindo fatores ocupacionais quando aplicável.
+
+4. SINTOMAS CARACTERÍSTICOS
+   Descreva os sintomas típicos da condição.
+
+5. FATORES DE RISCO OCUPACIONAIS
+   Relacione com atividades laborais que podem causar ou agravar a condição.
+
+FORMATO DE SAÍDA:
+- Use CAIXA ALTA para títulos de seção (não use markdown com asteriscos)
+- Separe cada CID com uma linha em branco
+- Seja técnico e objetivo, mas completo
+- Mínimo 2 parágrafos por CID
+`,
+
+  nexo_causal: (ctx: GerarResumoRequest['contexto']) => `
+Você é um perito médico especialista em medicina do trabalho. Elabore uma análise técnica COMPLETA do nexo causal para um laudo pericial médico trabalhista, seguindo OBRIGATORIAMENTE os critérios científicos estabelecidos.
+
+DADOS PARA ANÁLISE:
 - CIDs/Diagnósticos: ${ctx.cids || 'Não informado'}
 - Posto de trabalho: ${ctx.postoTrabalho || 'Não informado'}
 - Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
@@ -99,40 +135,107 @@ Dados para análise:
 - Exames complementares: ${ctx.examesComplementares || 'Não informado'}
 - Antecedentes patológicos: ${ctx.antecedentes || 'Não informado'}
 
-Instruções:
-Analise o nexo causal utilizando os critérios de Bradford-Hill e Simonin:
-1. Plausibilidade biológica
-2. Força da associação
-3. Temporalidade
-4. Consistência
-5. Especificidade
-6. Gradiente dose-resposta
+ESTRUTURA OBRIGATÓRIA DA ANÁLISE:
 
-Classifique o nexo como: Direto, Concausa, Agravamento ou Sem Nexo Causal.
-Fundamente tecnicamente sua conclusão citando evidências clínicas e documentais.
+1. CLASSIFICAÇÃO DE SCHILLING
+Aplique a Classificação de Schilling (1983) para determinar a relação trabalho-doença:
+- GRUPO I: Doença Ocupacional Típica (trabalho é causa NECESSÁRIA)
+- GRUPO II: Doença Agravada pelo Trabalho (trabalho é fator CONTRIBUTIVO - Concausa)
+- GRUPO III: Doença Comum sem Relação (ausência de nexo)
+- GRUPO IV: Doença do Trabalho (listada em legislação específica)
+
+Justifique em 1-2 linhas o enquadramento escolhido.
+
+2. CRITÉRIOS DE SIMONIN
+Analise os 3 critérios de Simonin (1960):
+- MECANISMO: Há compatibilidade entre a exposição ocupacional e a patologia diagnosticada?
+- CRONOLOGIA: O tempo de exposição é compatível com o surgimento da doença?
+- EXCLUSÃO: Existem causas extraocupacionais que explicam a doença?
+
+Para cada critério, forneça justificativa de 1 linha.
+
+3. CRITÉRIOS DE BRADFORD-HILL
+Analise os critérios de Bradford-Hill (1965) aplicáveis ao caso:
+- Força da associação: [justificativa em 1 linha]
+- Consistência: [justificativa em 1 linha]
+- Especificidade: [justificativa em 1 linha]
+- Temporalidade: [justificativa em 1 linha]
+- Gradiente biológico: [justificativa em 1 linha]
+- Plausibilidade biológica: [justificativa em 1 linha]
+- Coerência: [justificativa em 1 linha]
+
+4. CONCLUSÃO DO NEXO
+Com base na análise acima, classifique como:
+- NEXO CAUSAL DIRETO (Grupo I de Schilling)
+- CONCAUSA (Grupo II de Schilling)
+- AUSÊNCIA DE NEXO CAUSAL (Grupo III de Schilling)
+
+IMPORTANTE:
+- Se faltar dado crítico para a análise, declare explicitamente: "INFORMAÇÃO INSUFICIENTE para determinar [aspecto específico]"
+- Use CAIXA ALTA para títulos de seção
+- Não use markdown com asteriscos
+- Seja objetivo mas fundamentado
 `,
 
   incapacidade: (ctx: GerarResumoRequest['contexto']) => `
-Você é um perito médico especialista em medicina do trabalho. Elabore uma análise técnica da incapacidade laboral para um laudo pericial.
+Você é um perito médico especialista em medicina do trabalho. Elabore uma análise técnica COMPLETA da incapacidade laboral, seguindo a metodologia pericial obrigatória.
 
-Dados para análise:
+DADOS PARA ANÁLISE:
 - CIDs/Diagnósticos: ${ctx.cids || 'Não informado'}
+- Cargo/Função: ${ctx.postoTrabalho || 'Não informado'}
+- Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
 - Exame físico: ${ctx.exameFisico || 'Não informado'}
 - Exames complementares: ${ctx.examesComplementares || 'Não informado'}
 - Tratamentos realizados: ${ctx.tratamentos || 'Não informado'}
-- Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
-- Posto de trabalho: ${ctx.postoTrabalho || 'Não informado'}
+- Histórico ocupacional: ${ctx.historicoOcupacional || 'Não informado'}
+- Nexo causal estabelecido: ${ctx.nexoCausal || 'Não informado'}
 
-Instruções:
-Analise a capacidade laboral considerando:
-1. Tipo de incapacidade (parcial/total, temporária/permanente)
-2. Limitações funcionais identificadas no exame físico
-3. Compatibilidade com a função exercida
-4. Possibilidade de reabilitação profissional
-5. Necessidade de readaptação de função
-6. Impacto nas atividades de vida diária
+ESTRUTURA OBRIGATÓRIA DA ANÁLISE:
 
-Fundamente tecnicamente sua análise com base nos achados clínicos e exames.
+1. EXIGÊNCIAS DA FUNÇÃO
+Descreva as demandas físicas e/ou cognitivas do cargo ocupado:
+- Movimentos exigidos
+- Posturas adotadas
+- Carga física/mental
+- Jornada de trabalho
+
+2. BASE CLÍNICA OBJETIVA
+Apresente os achados que fundamentam a análise:
+- Alterações no exame físico
+- Resultados de exames complementares
+- CIDs diagnosticados e sua gravidade
+- Estágio evolutivo da patologia
+
+3. LIMITAÇÕES FUNCIONAIS
+Descreva objetivamente:
+- O que o periciando NÃO consegue realizar
+- Restrições de movimento, força, cognição
+- Impacto nas atividades de vida diária
+- Necessidade de auxílio de terceiros
+
+4. CORRELAÇÃO COM O NEXO
+Se houver nexo causal estabelecido, correlacione:
+- Classificação de Schilling aplicada
+- Critérios de Simonin atendidos
+- Critérios de Bradford-Hill aplicáveis
+
+5. CONCLUSÃO DA INCAPACIDADE
+Classifique a incapacidade como:
+- INCAPACIDADE TOTAL TEMPORÁRIA
+- INCAPACIDADE PARCIAL TEMPORÁRIA
+- INCAPACIDADE TOTAL PERMANENTE
+- INCAPACIDADE PARCIAL PERMANENTE
+- AUSÊNCIA DE INCAPACIDADE LABORAL
+
+Indique também:
+- Possibilidade de reabilitação profissional
+- Necessidade de readaptação de função
+- Prognóstico
+
+IMPORTANTE:
+- Use CAIXA ALTA para títulos de seção
+- Não use markdown com asteriscos
+- Se faltar informação crítica, declare: "INFORMAÇÃO INSUFICIENTE"
 `,
 
   sugestoes_pericia: (ctx: GerarResumoRequest['contexto']) => `
@@ -190,8 +293,20 @@ ESTRUTURA DA RESPOSTA:
 Forneça entre 8-12 perguntas e 5-8 testes/manobras específicas relevantes para os CIDs informados.
 `,
 
-  referencias_bibliograficas: (ctx: GerarResumoRequest['contexto']) => `
-Você é um perito médico especialista em medicina do trabalho. Com base nas informações do laudo, identifique e liste referências bibliográficas pertinentes e específicas para o caso.
+  referencias_bibliograficas: (ctx: GerarResumoRequest['contexto']) => {
+    // Detecta se há documentos ocupacionais (ASO/PCMSO) no contexto
+    const hasOccupationalDocs = [
+      ctx.postoTrabalho || '',
+      ctx.atividadesLaborais || '',
+      ctx.historicoOcupacional || '',
+      ctx.nexoCausal || '',
+      ctx.examesComplementares || ''
+    ].some(field => 
+      /\b(ASO|PCMSO|Atestado de Sa[úu]de Ocupacional|PPRA|LTCAT|PPP)\b/i.test(field)
+    );
+
+    return `
+Você é um perito médico especialista em medicina do trabalho. Elabore a lista de referências bibliográficas para o laudo pericial.
 
 DADOS DO LAUDO:
 - CIDs/Diagnósticos: ${ctx.cids || 'Não informado'}
@@ -199,30 +314,39 @@ DADOS DO LAUDO:
 - Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
 - Histórico ocupacional: ${ctx.historicoOcupacional || 'Não informado'}
 - Nexo causal: ${ctx.nexoCausal || 'Não informado'}
-- Conclusão: ${ctx.conclusao || 'Não informado'}
-- Metodologia: ${ctx.metodologia || 'Não informado'}
 - Tratamentos: ${ctx.tratamentos || 'Não informado'}
 - Exames complementares: ${ctx.examesComplementares || 'Não informado'}
 
-INSTRUÇÕES:
-- Liste entre 5 e 8 referências bibliográficas pertinentes ao caso específico
-- Numere cada referência (1-, 2-, 3-, etc.)
-- Inclua obras de medicina do trabalho relacionadas aos CIDs informados
-- Inclua legislação aplicável (CLT, Lei 8.213/91, NRs relevantes para o caso)
-- Inclua normas técnicas do CFM e CID-10
-- NÃO inclua referências genéricas desnecessárias
-- Seja específico: se há lesão de coluna, cite obras sobre coluna; se há LER/DORT, cite obras sobre ergonomia
-- Use formato ABNT para as referências
+REFERÊNCIAS OBRIGATÓRIAS (SEMPRE incluir):
+1- SCHILLING, R.S.F. More effective prevention in occupational health practice. J Soc Occup Med, v. 33, p. 71-79, 1983.
+
+2- BRADFORD HILL, A. The Environment and Disease: Association or Causation? Proc R Soc Med, v. 58, p. 295-300, 1965.
+
+3- SIMONIN, C. Medicina Legal Judicial. Barcelona: Editorial JIMS, 1960.
+
+${hasOccupationalDocs ? `4- ASSOCIAÇÃO NACIONAL DE MEDICINA DO TRABALHO. Diretrizes para avaliação de nexo técnico em doenças ocupacionais. São Paulo: ANAMT, 2024.
+
+` : ''}
+INSTRUÇÕES PARA REFERÊNCIAS DINÂMICAS:
+- Adicione 3-5 referências REAIS e específicas relacionadas aos CIDs informados
+- Inclua legislação aplicável (CLT, Lei 8.213/91, NRs relevantes)
+- Inclua CID-10 (OMS) e normas do CFM quando pertinente
+- Use formato ABNT para todas as referências
+- Numere sequencialmente (${hasOccupationalDocs ? '5' : '4'}-, ${hasOccupationalDocs ? '6' : '5'}-, etc.)
+- Seja ESPECÍFICO: se há lesão de ombro, cite obras sobre ombro; se há LER/DORT, cite obras sobre ergonomia
 
 FORMATO DE SAÍDA:
-1- AUTOR. Título da obra. Cidade: Editora, Ano.
+1- SCHILLING, R.S.F. More effective prevention in occupational health practice...
 
-2- BRASIL. Lei/Norma específica aplicável ao caso.
+2- BRADFORD HILL, A. The Environment and Disease...
 
-3- Norma técnica ou regulamentadora pertinente.
+3- SIMONIN, C. Medicina Legal Judicial...
+${hasOccupationalDocs ? '\n4- ASSOCIAÇÃO NACIONAL DE MEDICINA DO TRABALHO. Diretrizes...\n' : ''}
+[Referências dinâmicas específicas para o caso]
 
-Forneça referências que realmente embasem tecnicamente o laudo para este caso específico.
-`,
+Forneça entre 6 e 10 referências no total, sempre incluindo as obrigatórias primeiro.
+`;
+  },
 
   aprimorar_texto: (ctx: GerarResumoRequest['contexto']) => `
 Você é um revisor especializado em textos médico-periciais. Seu trabalho é APENAS corrigir e aprimorar o texto fornecido, SEM alterar seu conteúdo técnico ou factual.
@@ -251,6 +375,7 @@ const promptMapping: Record<string, { promptId: string; cardId: string; sectionI
   resumo_peticao: { promptId: 'prompt_gen_resumo_peticao', cardId: 'resumo-autos', sectionId: 'resumo', description: 'Resumir petição inicial' },
   resumo_contestacao: { promptId: 'prompt_gen_resumo_contestacao', cardId: 'resumo-autos', sectionId: 'resumo', description: 'Resumir contestação' },
   descricao_doencas: { promptId: 'prompt_gen_descricao_doencas', cardId: 'analise-tecnica', sectionId: 'descricao-doencas', description: 'Descrição técnica das doenças' },
+  descricao_cid: { promptId: 'prompt_gen_descricao_cid', cardId: 'analise-tecnica', sectionId: 'descricao-doencas', description: 'Gerar descrição técnica para CIDs específicos' },
   nexo_causal: { promptId: 'prompt_gen_nexo_causal', cardId: 'analise-tecnica', sectionId: 'nexo', description: 'Análise de nexo causal' },
   incapacidade: { promptId: 'prompt_gen_incapacidade', cardId: 'analise-tecnica', sectionId: 'analise-incapacidade', description: 'Análise de incapacidade' },
   sugestoes_pericia: { promptId: 'prompt_gen_sugestoes_pericia', cardId: 'periciando', sectionId: 'anamnese', description: 'Sugestões para perícia' },

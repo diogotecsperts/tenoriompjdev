@@ -1,6 +1,6 @@
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LaudoTextareaAIField } from "@/components/laudo/LaudoTextareaAIField";
 
@@ -21,34 +21,56 @@ export function AnaliseIncapacidade() {
   const hasPdfSource = !!(currentLaudo.aiMetadata as any)?.pdfFilePath || 
                        !!(currentLaudo.aiMetadata as any)?.importJobId;
 
-  // Map old conclusaoStatus values to new incapacidadeTipo values
-  const getIncapacidadeTipo = (): string => {
-    // First check if new field exists
-    if ((currentLaudo as any).incapacidadeTipo) {
-      return (currentLaudo as any).incapacidadeTipo;
+  // Parse conclusaoStatus como array (pode ser JSON array ou string legada)
+  const getSelectedTypes = (): string[] => {
+    const status = currentLaudo.conclusaoStatus;
+    if (!status) return [];
+    
+    // Tenta parsear como JSON array
+    try {
+      const parsed = JSON.parse(status);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // Se não for JSON, trata como string única (compatibilidade legada)
     }
-    // Fall back to mapping from old conclusaoStatus
-    const statusMap: Record<string, string> = {
+    
+    // Mapeia valores antigos para novos
+    const legacyMap: Record<string, string> = {
       'total-temp': 'total_temporaria',
       'parcial-temp': 'parcial_temporaria',
       'total-perm': 'total_permanente',
       'parcial-perm': 'parcial_permanente',
       'nenhuma': 'ausencia',
     };
-    return statusMap[currentLaudo.conclusaoStatus] || '';
+    
+    const mapped = legacyMap[status] || status;
+    return mapped ? [mapped] : [];
   };
 
-  const handleIncapacidadeChange = (value: string) => {
+  const handleCheckboxChange = (value: string, checked: boolean) => {
+    const currentSelected = getSelectedTypes();
+    let newSelected: string[];
+    
+    if (checked) {
+      // Adiciona ao array se não existir
+      newSelected = currentSelected.includes(value) 
+        ? currentSelected 
+        : [...currentSelected, value];
+    } else {
+      // Remove do array
+      newSelected = currentSelected.filter(v => v !== value);
+    }
+    
+    // Salva como JSON array
     updateLaudo({ 
-      // Update both fields for compatibility
-      conclusaoStatus: value,
-      // Use type assertion since we're adding a new field
-    } as any);
+      conclusaoStatus: JSON.stringify(newSelected)
+    });
   };
+
+  const selectedTypes = getSelectedTypes();
 
   const getJustificativa = (): string => {
-    // First check new field, then fall back to old analiseIncapacidadeLaboral
-    return (currentLaudo as any).incapacidadeJustificativa || currentLaudo.analiseIncapacidadeLaboral || '';
+    return currentLaudo.analiseIncapacidadeLaboral || '';
   };
 
   const handleJustificativaChange = (value: string) => {
@@ -62,20 +84,22 @@ export function AnaliseIncapacidade() {
       <CardHeader>
         <CardTitle>Análise da Incapacidade Laboral</CardTitle>
         <CardDescription>
-          Avaliação técnica da capacidade laboral do periciando
+          Avaliação técnica da capacidade laboral do periciando (permite seleção múltipla)
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-3">
-          <Label>Tipo de Incapacidade</Label>
-          <RadioGroup
-            value={getIncapacidadeTipo()}
-            onValueChange={handleIncapacidadeChange}
-            className="space-y-2"
-          >
+          <Label>Tipo(s) de Incapacidade</Label>
+          <div className="space-y-3">
             {incapacidadeOptions.map((option) => (
-              <div key={option.value} className="flex items-center space-x-2">
-                <RadioGroupItem value={option.value} id={`incap-${option.value}`} />
+              <div key={option.value} className="flex items-center space-x-3">
+                <Checkbox
+                  id={`incap-${option.value}`}
+                  checked={selectedTypes.includes(option.value)}
+                  onCheckedChange={(checked) => 
+                    handleCheckboxChange(option.value, checked === true)
+                  }
+                />
                 <Label 
                   htmlFor={`incap-${option.value}`} 
                   className="font-normal cursor-pointer"
@@ -84,7 +108,7 @@ export function AnaliseIncapacidade() {
                 </Label>
               </div>
             ))}
-          </RadioGroup>
+          </div>
         </div>
         
         <LaudoTextareaAIField
