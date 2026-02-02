@@ -7,6 +7,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { 
@@ -30,7 +40,8 @@ import {
   Download,
   Loader2,
   Database,
-  FileDown
+  FileDown,
+  AlertTriangle
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { cn } from "@/lib/utils";
@@ -90,6 +101,7 @@ export function DevPrompts() {
   const [selectedPrompt, setSelectedPrompt] = useState<PromptConfig | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"classified" | "unclassified">("classified");
+  const [showSeedConfirmDialog, setShowSeedConfirmDialog] = useState(false);
 
   // Carregar prompts
   const fetchPrompts = async () => {
@@ -546,7 +558,7 @@ export function DevPrompts() {
             )}
             Exportar PDF
           </Button>
-          <Button onClick={seedPrompts} variant="outline" size="sm" disabled={seeding}>
+          <Button onClick={() => setShowSeedConfirmDialog(true)} variant="outline" size="sm" disabled={seeding}>
             {seeding ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
             ) : (
@@ -754,6 +766,53 @@ export function DevPrompts() {
         onSaved={handleSaved}
         laudoStructure={LAUDO_STRUCTURE}
       />
+
+      {/* Confirmation Dialog for Seed */}
+      <AlertDialog open={showSeedConfirmDialog} onOpenChange={setShowSeedConfirmDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Restaurar Prompts para Padrão de Fábrica?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3">
+              <p>
+                Esta ação irá <strong className="text-foreground">SOBRESCREVER todos os prompts</strong> existentes 
+                com as versões originais do sistema.
+              </p>
+              <p className="text-destructive font-medium">
+                ❌ Todas as suas edições personalizadas serão perdidas!
+              </p>
+              <p className="text-muted-foreground text-sm">
+                💡 Recomendação: Faça um backup clicando em "Exportar PDF" antes de continuar.
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setShowSeedConfirmDialog(false);
+                exportToPDF();
+              }}
+            >
+              <FileDown className="h-4 w-4 mr-2" />
+              Exportar PDF Primeiro
+            </Button>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setShowSeedConfirmDialog(false);
+                seedPrompts();
+              }}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              Restaurar Padrão
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
     </TooltipProvider>
   );
