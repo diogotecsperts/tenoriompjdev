@@ -56,6 +56,30 @@ let pageLayout: PageLayout = { ...DEFAULT_LAYOUT };
 
 // ========== FUNÇÕES AUXILIARES ==========
 
+// Sanitiza markdown convertendo **texto** e __texto__ para CAIXA ALTA
+// Remove formatação simples *texto* e _texto_
+const sanitizeMarkdown = (text: string): string => {
+  if (!text) return "";
+  return text
+    .replace(/\*\*(.+?)\*\*/g, (_, p1) => p1.toUpperCase()) // **texto** -> TEXTO
+    .replace(/__(.+?)__/g, (_, p1) => p1.toUpperCase())     // __texto__ -> TEXTO
+    .replace(/\*(.+?)\*/g, '$1')  // *texto* -> texto
+    .replace(/_(.+?)_/g, '$1');   // _texto_ -> texto
+};
+
+// Formata quesitos garantindo quebra de linha para cada item numerado
+const formatQuesitos = (text: string): string => {
+  if (!text) return "";
+  // Primeiro sanitiza o markdown
+  let sanitized = sanitizeMarkdown(text);
+  // Garante quebra de linha antes de cada quesito numerado
+  // Padrões: "1.", "1)", "1 -", "1-", etc.
+  sanitized = sanitized.replace(/(\d+[\.\)\-])\s*/g, '\n$1 ');
+  // Remove possíveis quebras duplas e limpa início
+  sanitized = sanitized.replace(/^\n+/, '').replace(/\n{3,}/g, '\n\n');
+  return sanitized.trim();
+};
+
 const formatDate = (dateString: string): string => {
   if (!dateString) return "";
   try {
@@ -162,12 +186,17 @@ const addSubtitle = (doc: jsPDF, title: string, y: number): number => {
 };
 
 // Adiciona parágrafo com quebra de linha e JUSTIFICAÇÃO
+// IMPORTANTE: Aplica sanitização de markdown automaticamente
 const addParagraph = (doc: jsPDF, text: string, y: number, maxWidth: number = PAGE.contentWidth): number => {
   if (!text) return y;
+  
+  // Sanitiza markdown antes de processar
+  const sanitizedText = sanitizeMarkdown(text);
+  
   doc.setFontSize(10);
   doc.setFont("helvetica", "normal");
   
-  const lines = doc.splitTextToSize(text, maxWidth);
+  const lines = doc.splitTextToSize(sanitizedText, maxWidth);
   
   lines.forEach((line: string, index: number) => {
     // Verificar nova página para cada linha
@@ -510,7 +539,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 7. DADOS DO POSTO DE TRABALHO
-  const hasDadosPosto = laudo.dadosFuncionaisCargo || laudo.descricaoPostoTrabalho || laudo.descricaoAtividadesLaborais;
+  const hasDadosPosto = laudo.dadosFuncionaisCargo || laudo.descricaoAtividadesLaborais;
   if (hasDadosPosto) {
     y = ensureSpace(doc, y, SECTION_TITLE_HEIGHT + 20);
     y = addSectionTitle(doc, `${sectionNumber}. DADOS DO POSTO DE TRABALHO`, y);
@@ -525,15 +554,10 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
       y = addLabeledField(doc, "Data de Afastamento", formatDate(laudo.dadosFuncionaisAfastamento), y);
     }
     
-    if (laudo.descricaoPostoTrabalho) {
-      y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
-      y = addSubtitle(doc, "Descrição do Posto de Trabalho:", y);
-      y = addParagraph(doc, laudo.descricaoPostoTrabalho, y);
-    }
-    
+    // Campo unificado: Ambiente e Atividades Laborais
     if (laudo.descricaoAtividadesLaborais) {
       y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
-      y = addSubtitle(doc, "Atividades Laborais:", y);
+      y = addSubtitle(doc, "Ambiente e Atividades Laborais:", y);
       y = addParagraph(doc, laudo.descricaoAtividadesLaborais, y);
     }
     sectionNumber++;
@@ -729,13 +753,34 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   if (laudo.conclusaoStatus) {
+    // Suporta tanto array JSON quanto string legada
     const statusMap: Record<string, string> = {
+      "total_temporaria": "Incapacidade Total Temporária",
+      "parcial_temporaria": "Incapacidade Parcial Temporária",
+      "total_permanente": "Incapacidade Total Permanente",
+      "parcial_permanente": "Incapacidade Parcial Permanente",
+      "ausencia": "Ausência de Incapacidade Laboral",
+      // Mapeamento legado
       "temporaria_total": "Incapacidade Temporária Total",
       "temporaria_parcial": "Incapacidade Temporária Parcial",
       "permanente_total": "Incapacidade Permanente Total",
       "permanente_parcial": "Incapacidade Permanente Parcial",
     };
-    y = addLabeledField(doc, "Tipo de Incapacidade", statusMap[laudo.conclusaoStatus] || laudo.conclusaoStatus, y);
+    
+    let statusText = "";
+    try {
+      const parsed = JSON.parse(laudo.conclusaoStatus);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        statusText = parsed.map(v => statusMap[v] || v).join("; ");
+      }
+    } catch {
+      // String legada
+      statusText = statusMap[laudo.conclusaoStatus] || laudo.conclusaoStatus;
+    }
+    
+    if (statusText) {
+      y = addLabeledField(doc, "Tipo(s) de Incapacidade", statusText, y);
+    }
   }
   
   if (laudo.conclusaoDestino) {
@@ -756,6 +801,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   sectionNumber++;
   
   // 20. RESPOSTAS AOS QUESITOS
+  // Aplica formatação especial para garantir quebra de linha em cada quesito
   const hasQuesitos = laudo.quesitosJuizo || laudo.quesitosReclamante || laudo.quesitosReclamada;
   if (hasQuesitos) {
     y = ensureSpace(doc, y, SECTION_TITLE_HEIGHT + 20);
@@ -766,21 +812,21 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
     if (laudo.quesitosJuizo) {
       y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
       y = addSubtitle(doc, `${sectionNumber}.${subSection} Quesitos do Juízo`, y);
-      y = addParagraph(doc, laudo.quesitosJuizo, y);
+      y = addParagraph(doc, formatQuesitos(laudo.quesitosJuizo), y);
       subSection++;
     }
     
     if (laudo.quesitosReclamante) {
       y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
       y = addSubtitle(doc, `${sectionNumber}.${subSection} Quesitos do Reclamante`, y);
-      y = addParagraph(doc, laudo.quesitosReclamante, y);
+      y = addParagraph(doc, formatQuesitos(laudo.quesitosReclamante), y);
       subSection++;
     }
     
     if (laudo.quesitosReclamada) {
       y = ensureSpace(doc, y, SUBTITLE_HEIGHT + 15);
       y = addSubtitle(doc, `${sectionNumber}.${subSection} Quesitos da Reclamada`, y);
-      y = addParagraph(doc, laudo.quesitosReclamada, y);
+      y = addParagraph(doc, formatQuesitos(laudo.quesitosReclamada), y);
     }
     sectionNumber++;
   }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLaudo } from "@/contexts/LaudoContext";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,30 +6,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LaudoTextareaAIField } from "@/components/laudo/LaudoTextareaAIField";
 import { toast } from "@/hooks/use-toast";
-import { Replace, Loader2 } from "lucide-react";
-
-// Fields that should be searched for SID replacement
-const SID_REPLACEABLE_FIELDS = [
-  'descricaoTecnicaDoencas',
-  'conclusaoCID',
-  'conclusaoAnalise',
-  'nexoCausalJustificativa',
-  'analiseIncapacidadeLaboral',
-  'exameFisico',
-  'examesComplementares',
-  'laudosMedicos',
-  'antecedentes',
-  'tratamentos',
-  'historiaAtual',
-  'historicoOcupacional',
-  'resumoPeticaoInicial',
-  'resumoContestacao',
-] as const;
+import { Sparkles, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 export function DescricaoTecnicaDoencas() {
   const { currentLaudo, updateLaudo } = useLaudo();
-  const [sidValue, setSidValue] = useState("");
-  const [isApplying, setIsApplying] = useState(false);
+  const [cidValue, setCidValue] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // Reset estado local quando trocar de laudo (corrige bug de vazamento de dados)
+  useEffect(() => {
+    setCidValue("");
+  }, [currentLaudo?.id]);
 
   if (!currentLaudo) return null;
 
@@ -37,67 +25,59 @@ export function DescricaoTecnicaDoencas() {
   const hasPdfSource = !!(currentLaudo.aiMetadata as any)?.pdfFilePath || 
                        !!(currentLaudo.aiMetadata as any)?.importJobId;
 
-  const handleApplySid = () => {
-    if (!sidValue.trim()) {
+  // Nova lógica: Gerar descrição técnica via IA para os CIDs inseridos
+  const handleGenerateCidDescription = async () => {
+    if (!cidValue.trim()) {
       toast({
         variant: "destructive",
         title: "CID não informado",
-        description: "Digite o código CID antes de aplicar.",
+        description: "Digite um ou mais códigos CID separados por vírgula (ex: M54.5, G56.0)",
       });
       return;
     }
 
-    setIsApplying(true);
+    setIsGenerating(true);
 
     try {
-      // Regex patterns to match SID variations: {SID}, {{SID}}, or SID as isolated word
-      const patterns = [
-        /\{SID\}/gi,
-        /\{\{SID\}\}/gi,
-        /\bSID\b/g, // Word boundary to avoid replacing partial matches
-      ];
-
-      let replacementsCount = 0;
-      const updates: Partial<typeof currentLaudo> = {};
-
-      SID_REPLACEABLE_FIELDS.forEach((field) => {
-        const fieldValue = (currentLaudo as any)[field];
-        if (typeof fieldValue === 'string' && fieldValue) {
-          let newValue = fieldValue;
-          patterns.forEach((pattern) => {
-            const matches = newValue.match(pattern);
-            if (matches) {
-              replacementsCount += matches.length;
-              newValue = newValue.replace(pattern, sidValue.trim());
-            }
-          });
-          if (newValue !== fieldValue) {
-            (updates as any)[field] = newValue;
+      // Chama a edge function para gerar descrição técnica dos CIDs
+      const { data, error } = await supabase.functions.invoke('gerar-resumos', {
+        body: {
+          tipo: 'descricao_cid',
+          contexto: {
+            cids: cidValue.trim(),
+            postoTrabalho: currentLaudo.descricaoAtividadesLaborais || '',
+            historicoOcupacional: currentLaudo.historicoOcupacional || '',
           }
         }
       });
 
-      if (Object.keys(updates).length > 0) {
-        updateLaudo(updates);
+      if (error) throw error;
+
+      if (data?.texto) {
+        // APPEND: Adiciona o novo texto ao final do campo existente
+        const existingContent = currentLaudo.descricaoTecnicaDoencas || '';
+        const separator = existingContent.trim() ? '\n\n---\n\n' : '';
+        const newContent = existingContent + separator + data.texto;
+        
+        updateLaudo({ descricaoTecnicaDoencas: newContent });
+        
+        // Limpa o campo de CID após sucesso
+        setCidValue("");
+        
         toast({
-          title: "CID aplicado",
-          description: `${replacementsCount} ocorrência(s) de "CID" substituída(s) por "${sidValue.trim()}".`,
-        });
-      } else {
-        toast({
-          title: "Nenhuma ocorrência encontrada",
-          description: "Não foi encontrado 'CID' nos campos do laudo.",
+          title: "Descrição gerada com sucesso",
+          description: `Descrição técnica dos CIDs (${cidValue.trim()}) adicionada ao campo.`,
         });
       }
     } catch (error) {
-      console.error("Erro ao aplicar SID:", error);
+      console.error("Erro ao gerar descrição de CID:", error);
       toast({
         variant: "destructive",
-        title: "Erro ao aplicar CID",
-        description: "Ocorreu um erro ao substituir o CID.",
+        title: "Erro ao gerar descrição",
+        description: error instanceof Error ? error.message : "Erro desconhecido ao buscar informações do CID.",
       });
     } finally {
-      setIsApplying(false);
+      setIsGenerating(false);
     }
   };
 
@@ -106,37 +86,42 @@ export function DescricaoTecnicaDoencas() {
       <CardHeader>
         <CardTitle>Descrição Técnica das Doenças</CardTitle>
         <CardDescription>
-          Descrição técnica detalhada das patologias identificadas, incluindo CID, definição, etiologia e características
+          Insira os códigos CID para gerar automaticamente a descrição técnica das patologias
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* SID Input Section */}
+        {/* CID Input Section - Nova lógica com geração via IA */}
         <div className="flex items-end gap-2 p-3 bg-muted/50 rounded-lg border">
           <div className="flex-1 space-y-1.5">
-          <Label htmlFor="sidInput" className="text-sm font-medium">
-            Inserir CID
-          </Label>
+            <Label htmlFor="cidInput" className="text-sm font-medium">
+              Inserir CID(s)
+            </Label>
             <Input
-              id="sidInput"
-              value={sidValue}
-              onChange={(e) => setSidValue(e.target.value)}
-              placeholder="Ex: M75.1"
+              id="cidInput"
+              value={cidValue}
+              onChange={(e) => setCidValue(e.target.value)}
+              placeholder="Ex: M54.5, G56.0, M75.1"
               className="h-9"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !isGenerating && cidValue.trim()) {
+                  handleGenerateCidDescription();
+                }
+              }}
             />
           </div>
           <Button
             variant="secondary"
             size="sm"
-            onClick={handleApplySid}
-            disabled={isApplying || !sidValue.trim()}
+            onClick={handleGenerateCidDescription}
+            disabled={isGenerating || !cidValue.trim()}
             className="gap-2 h-9"
           >
-            {isApplying ? (
+            {isGenerating ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Replace className="h-4 w-4" />
+              <Sparkles className="h-4 w-4" />
             )}
-            Aplicar
+            {isGenerating ? "Gerando..." : "Gerar Descrição"}
           </Button>
         </div>
 
@@ -145,14 +130,7 @@ export function DescricaoTecnicaDoencas() {
           label="Descrição Técnica"
           value={currentLaudo.descricaoTecnicaDoencas || ""}
           onChange={(value) => updateLaudo({ descricaoTecnicaDoencas: value })}
-          placeholder={`Exemplo:
-
-TENDINITE DO SUPRAESPINHOSO (CID-10: M75.1)
-A tendinite do supraespinhoso é uma condição inflamatória que afeta o tendão do músculo supraespinhoso, localizado no ombro. Este tendão faz parte do manguito rotador e é essencial para a elevação e rotação do braço.
-
-Etiologia: A tendinite do supraespinhoso pode ser causada por uso excessivo, especialmente em atividades que requerem movimentos repetitivos de elevação do braço, como ocorre em determinadas profissões...
-
-Sintomas: Dor no ombro, especialmente ao levantar o braço acima da cabeça, fraqueza muscular, dificuldade para dormir sobre o lado afetado...`}
+          placeholder="Use o campo acima para inserir códigos CID e gerar automaticamente a descrição técnica das doenças. Cada CID adicionado será empilhado aqui com sua definição, etiologia e características clínicas."
           rows={12}
           enableEnhance={true}
           enableRegenerate={true}

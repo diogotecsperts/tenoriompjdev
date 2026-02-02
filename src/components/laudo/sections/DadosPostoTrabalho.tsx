@@ -16,7 +16,7 @@ export function DadosPostoTrabalho() {
       <CardHeader>
         <CardTitle>Dados do Posto de Trabalho</CardTitle>
         <CardDescription>
-          Informações funcionais e descrição das atividades laborais
+          Informações funcionais e descrição do ambiente e atividades laborais
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -55,27 +55,14 @@ export function DadosPostoTrabalho() {
           </div>
         </div>
 
-        <LaudoTextareaAIField
-          id="descricaoPostoTrabalho"
-          label="Descrição do Posto de Trabalho"
-          value={currentLaudo.descricaoPostoTrabalho || ""}
-          onChange={(value) => updateLaudo({ descricaoPostoTrabalho: value })}
-          placeholder="Descreva o ambiente físico, equipamentos utilizados, condições ergonômicas, exposição a riscos ocupacionais..."
-          rows={5}
-          enableEnhance={true}
-          enableRegenerate={true}
-          fieldKey="descricaoPostoTrabalho"
-          laudoId={currentLaudo.id}
-          hasPdfSource={hasPdfSource}
-        />
-
+        {/* Campo unificado: Ambiente e Atividades Laborais */}
         <LaudoTextareaAIField
           id="descricaoAtividadesLaborais"
-          label="Descrição das Atividades Laborais"
+          label="Ambiente e Atividades Laborais"
           value={currentLaudo.descricaoAtividadesLaborais || ""}
           onChange={(value) => updateLaudo({ descricaoAtividadesLaborais: value })}
-          placeholder="Descreva detalhadamente as atividades desenvolvidas pelo trabalhador, movimentos repetitivos, carga de trabalho, jornada..."
-          rows={5}
+          placeholder="Descreva o ambiente de trabalho (mobiliário, equipamentos, condições ergonômicas, exposição a riscos ocupacionais), bem como as atividades desenvolvidas pelo trabalhador, incluindo movimentos repetitivos, posturas adotadas, carga de trabalho e jornada..."
+          rows={8}
           enableEnhance={true}
           enableRegenerate={true}
           fieldKey="descricaoAtividadesLaborais"
