@@ -1189,7 +1189,7 @@ export function DevPrompts() {
 
       {/* Confirmation Dialog for Seed */}
       <AlertDialog open={showSeedConfirmDialog} onOpenChange={setShowSeedConfirmDialog}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-2xl">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
@@ -1208,7 +1208,7 @@ export function DevPrompts() {
               </p>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="gap-2">
+          <AlertDialogFooter className="gap-2 flex-wrap sm:flex-nowrap">
             <Button
               variant="outline"
               size="sm"
