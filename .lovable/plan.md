@@ -1,92 +1,77 @@
 
-# Correção: Unificar Prompts na Importação de PDF
 
-## Problema Identificado
+# Adicionar Prompt de Impugnação ao DevPanel
 
-A função de importação de PDF (`processar-autos`) usa **prompts hardcoded** internos em vez de buscar os prompts do banco de dados. Isso causa inconsistência: as regras otimizadas que você definiu só funcionam ao clicar em "Buscar novamente", mas não durante a importação inicial do PDF.
+## Objetivo
 
-| Fluxo | Onde busca o prompt | Resultado |
-|-------|---------------------|-----------|
-| Importar PDF (processar-autos) | Hardcoded em `getPromptForType()` | Referências genéricas, sem Schilling/Bradford-Hill/Simonin |
-| Buscar Novamente (gerar-resumos) | `system_config` via `prompt-manager` | Referências corretas com regras obrigatórias |
+Permitir que o prompt usado no botão "Gerar com IA" da página Responder Impugnação seja editável no DevPanel.
 
-## Por que "Regerar" não existe para Referências
+## Escopo Reduzido
 
-Este comportamento **está correto**. Referências bibliográficas são geradas *analiticamente* a partir dos dados do laudo (CIDs, atividades, etc.), não *extraídas* do PDF. Por isso:
-- O botão "Buscar novamente" (✨) É a função de gerar referências
-- Não existe "Regerar" (🔄) porque não há texto para extrair do PDF
+| O que será feito | O que NÃO será alterado |
+|------------------|-------------------------|
+| Integrar `gerar-resposta-impugnacao` com `prompt-manager` | Nenhuma tabela do banco |
+| Adicionar 1 prompt ao `seed-prompts` | Nenhuma lógica de negócio |
+| Registrar prompt no banco | Nenhum componente de UI |
 
-## Solução
+## Risco Real
 
-Modificar a função `getPromptForType()` em `processar-autos/index.ts` para usar o `prompt-manager` em vez de prompts hardcoded.
+**Zero impacto em laudos.** Se algo quebrar, apenas o botão "Gerar com IA" na página de impugnação para de funcionar. O fallback hardcoded garante que mesmo isso seja improvável.
 
-## Arquivo a Modificar
+## Arquivos a Modificar
 
-| Arquivo | Modificação |
-|---------|-------------|
-| `supabase/functions/processar-autos/index.ts` | Refatorar `getPromptForType()` para usar `prompt-manager` |
+| Arquivo | Mudança |
+|---------|---------|
+| `supabase/functions/gerar-resposta-impugnacao/index.ts` | Usar `getPrompt()` com fallback |
+| `supabase/functions/seed-prompts/index.ts` | Adicionar `prompt_system_impugnacao` |
 
-## Implementação Técnica
+## Implementação
 
-### Antes (atual - problemático)
-```text
-function getPromptForType(tipo, ctx) {
-  const prompts = {
-    referencias_bibliograficas: `... prompt genérico hardcoded ...`
-  };
-  return prompts[tipo] || '';
+### 1. Modificar gerar-resposta-impugnacao/index.ts
+
+```typescript
+// Adicionar import
+import { getPrompt } from "../_shared/prompt-manager.ts";
+
+// Mover prompt atual para constante de fallback
+const DEFAULT_SYSTEM_PROMPT = `Você é um perito médico especialista...`;
+
+// Na função serve(), antes de chamar callAI():
+const systemPromptFinal = await getPrompt(
+  'prompt_system_impugnacao',
+  DEFAULT_SYSTEM_PROMPT,
+  {}
+);
+
+// Usar systemPromptFinal no callAI()
+```
+
+### 2. Adicionar ao seed-prompts/index.ts
+
+```typescript
+prompt_system_impugnacao: {
+  cardId: 'impugnacao',
+  sectionId: 'resposta',
+  description: 'Instruções para Gerar Resposta a Impugnação',
+  prompt: `Você é um perito médico especialista em medicina do trabalho...`
 }
 ```
 
-### Depois (corrigido)
-```text
-async function getPromptForType(tipo, ctx) {
-  // Mapeamento de tipos para IDs de prompt
-  const promptMapping = {
-    referencias_bibliograficas: 'prompt_gen_referencias',
-    nexo_causal: 'prompt_gen_nexo_causal',
-    incapacidade: 'prompt_gen_incapacidade',
-    descricao_doencas: 'prompt_gen_descricao_doencas',
-    // ... outros tipos
-  };
+### 3. Inserir prompt no banco
 
-  // Contexto para interpolação de variáveis
-  const interpolationContext = {
-    cids: ctx.cids || 'Não informado',
-    atividadesLaborais: ctx.atividadesLaborais || 'Não informado',
-    laudosMedicos: ctx.laudosMedicos || 'Não informado',
-    // ... outras variáveis
-  };
-
-  // Buscar prompt do banco via prompt-manager
-  const prompt = await getPrompt(
-    promptMapping[tipo],
-    defaultPrompts[tipo], // fallback hardcoded
-    interpolationContext
-  );
-
-  return prompt;
-}
+```sql
+INSERT INTO system_config (id, value, description)
+VALUES (
+  'prompt_system_impugnacao',
+  '"Você é um perito médico especialista..."',
+  'Instruções para Gerar Resposta a Impugnação'
+);
 ```
 
-## Mudanças Necessárias
+## Resultado
 
-1. **Tornar `getPromptForType()` assíncrona** para usar `await getPrompt()`
-2. **Adicionar mapeamento** de tipos para IDs de prompt do banco
-3. **Criar contexto de interpolação** com todas as variáveis (${cids}, ${atividadesLaborais}, etc.)
-4. **Atualizar chamadas** de `getPromptForType()` para usar `await`
-5. **Manter prompts hardcoded como fallback** para resiliência
+- Prompt aparecerá no DevPanel > Prompts IA
+- Editável sem deploy de código
+- Se banco falhar → usa fallback hardcoded
+- Laudos não são afetados em nenhum cenário
 
-## Impacto
-
-- **Importação de PDF**: Passará a usar os prompts otimizados do banco
-- **Consistência**: O comportamento será idêntico ao "Buscar novamente"
-- **Retrocompatibilidade**: Se o banco falhar, usa o prompt hardcoded como fallback
-- **Zero impacto na UI**: Não requer mudanças no frontend
-
-## Resultado Esperado
-
-Após a implementação:
-1. Importar um novo PDF
-2. As referências bibliográficas virão com Schilling, Bradford-Hill e Simonin obrigatórios
-3. O comportamento será idêntico ao clicar em "Buscar novamente"
