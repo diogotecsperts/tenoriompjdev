@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getAIConfig, callAI } from "../_shared/ai-config.ts";
+import { getPrompt } from "../_shared/prompt-manager.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,7 +14,8 @@ interface GerarRespostaRequest {
   quesito_numero?: number;
 }
 
-const systemPrompt = `Você é um perito médico especialista em medicina do trabalho, respondendo a uma impugnação de laudo pericial.
+// Fallback hardcoded - usado se o banco estiver indisponível
+const DEFAULT_SYSTEM_PROMPT = `Você é um perito médico especialista em medicina do trabalho, respondendo a uma impugnação de laudo pericial.
 
 Sua tarefa é elaborar uma resposta técnica fundamentada que:
 1. Mantenha a coerência com as conclusões do laudo original
@@ -212,8 +214,17 @@ serve(async (req) => {
     // Montar prompt com contexto do laudo
     const userPrompt = buildUserPrompt(laudo, quesito_texto);
 
+    // Buscar prompt do banco (com fallback hardcoded)
+    const systemPromptFinal = await getPrompt(
+      'prompt_system_impugnacao',
+      DEFAULT_SYSTEM_PROMPT,
+      {} // System prompt não usa interpolação de variáveis
+    );
+
+    console.log(`[gerar-resposta-impugnacao] Using prompt from: ${systemPromptFinal === DEFAULT_SYSTEM_PROMPT ? 'fallback' : 'database'}`);
+
     try {
-      const result = await callAI(aiConfig, systemPrompt, userPrompt, {
+      const result = await callAI(aiConfig, systemPromptFinal, userPrompt, {
         userId,
         promptType: 'resposta_impugnacao',
         maxOutputTokens: 2048
