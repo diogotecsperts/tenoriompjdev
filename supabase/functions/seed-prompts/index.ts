@@ -196,13 +196,14 @@ SE HOUVER DESCRIÇÃO DE EXAME FÍSICO, EXTRAIA:
 
 Se não houver exame físico descrito nos autos, retorne: "Exame físico não descrito nos autos do processo."`
   },
-  prompt_regen_descricaoPostoTrabalho: {
+  // NOTA: prompt_regen_descricaoPostoTrabalho foi REMOVIDO - campo unificado em descricaoAtividadesLaborais
+  prompt_regen_descricaoAtividadesLaborais: {
     cardId: 'posto-trabalho',
     sectionId: 'dados-posto',
-    description: 'Descrição do posto de trabalho - Regenerar via PDF',
-    prompt: `Extraia e detalhe a "Descrição do Posto de Trabalho" do documento.
+    description: 'Ambiente e Atividades Laborais - Regenerar via PDF',
+    prompt: `Extraia e detalhe o "Ambiente de Trabalho" e as "Atividades Laborais" do documento.
 
-EXTRAIA COM MÁXIMO DETALHAMENTO:
+AMBIENTE DE TRABALHO - DETALHAR:
 - Ambiente físico (interno/externo, coberto/descoberto, climatizado)
 - Dimensões e layout do local de trabalho
 - Equipamentos e máquinas utilizados (listar todos)
@@ -217,16 +218,7 @@ EXTRAIA COM MÁXIMO DETALHAMENTO:
 - Condições de iluminação e ventilação
 - EPIs fornecidos e utilizados
 
-Busque em: PPP, PPRA, PCMSO, laudos ergonômicos, depoimentos.
-MÍNIMO 2 parágrafos. Seja detalhado.`
-  },
-  prompt_regen_descricaoAtividadesLaborais: {
-    cardId: 'posto-trabalho',
-    sectionId: 'dados-posto',
-    description: 'Descrição das atividades laborais - Regenerar via PDF',
-    prompt: `Extraia e detalhe as "Atividades Laborais" ou "Descrição das Funções" do documento.
-
-EXTRAIA COM MÁXIMO DETALHAMENTO:
+ATIVIDADES LABORAIS - DETALHAR:
 - Descrição completa das tarefas diárias
 - Movimentos repetitivos realizados (tipo, frequência, duração)
 - Esforço físico exigido (peso carregado em kg, frequência de levantamento)
@@ -240,8 +232,8 @@ EXTRAIA COM MÁXIMO DETALHAMENTO:
 - Uso de ferramentas manuais
 - Demanda física e mental da função
 
-Busque em: PPP, PPRA, depoimentos, petição inicial.
-MÍNIMO 2 parágrafos. Seja específico e detalhado.`
+Busque em: PPP, PPRA, PCMSO, laudos ergonômicos, depoimentos, petição inicial.
+MÍNIMO 3 parágrafos. Seja específico e detalhado.`
   },
   prompt_regen_descricaoTecnicaDoencas: {
     cardId: 'analise-tecnica',
