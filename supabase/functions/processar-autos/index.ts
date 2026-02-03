@@ -629,14 +629,26 @@ function ensureValidStructure(data: any): object {
   };
 }
 
-// Get prompt based on summary type
-function getPromptForType(tipo: string, ctx: any): string {
-  const prompts: Record<string, string> = {
-    resumo_peticao: `
-Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da petição inicial para um laudo pericial médico trabalhista.
+// ============================================
+// PROMPT SYSTEM - UNIFIED WITH DATABASE
+// ============================================
+
+// Mapeamento de tipos de resumo para IDs de prompt no banco de dados
+const PROMPT_ID_MAPPING: Record<string, string> = {
+  resumo_peticao: 'prompt_regen_resumoPeticaoInicial',
+  resumo_contestacao: 'prompt_regen_resumoContestacao',
+  descricao_doencas: 'prompt_gen_descricao_doencas',
+  nexo_causal: 'prompt_gen_nexo_causal',
+  incapacidade: 'prompt_gen_incapacidade',
+  referencias_bibliograficas: 'prompt_gen_referencias'
+};
+
+// Prompts padrão hardcoded como fallback (caso o banco não tenha ou falhe)
+const DEFAULT_PROMPTS: Record<string, string> = {
+  resumo_peticao: `Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da petição inicial para um laudo pericial médico trabalhista.
 
 Texto da Petição Inicial:
-${ctx.peticaoInicial || 'Não informado'}
+\${peticaoInicial}
 
 Instruções:
 - Resuma os pontos principais alegados pelo reclamante
@@ -644,13 +656,12 @@ Instruções:
 - Identifique os nexos causais alegados
 - Mencione os pedidos principais
 - Use linguagem técnica e imparcial
-- Máximo 3 parágrafos
-`,
-    resumo_contestacao: `
-Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da contestação para um laudo pericial médico trabalhista.
+- Máximo 3 parágrafos`,
+
+  resumo_contestacao: `Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da contestação para um laudo pericial médico trabalhista.
 
 Texto da Contestação:
-${ctx.contestacao || 'Não informado'}
+\${contestacao}
 
 Instruções:
 - Resuma os pontos principais alegados pela reclamada
@@ -658,112 +669,214 @@ Instruções:
 - Identifique documentos ou evidências mencionadas
 - Mencione os pedidos de improcedência
 - Use linguagem técnica e imparcial
-- Máximo 3 parágrafos
-`,
-    descricao_doencas: `
-Você é um perito médico especialista em medicina do trabalho. Elabore uma descrição técnica detalhada das doenças identificadas para um laudo pericial.
+- Máximo 3 parágrafos`,
 
-CIDs identificados:
-${ctx.cids || 'Não informado'}
+  descricao_doencas: `Você é um médico enciclopedista. Para o(s) CID(s) inserido(s), forneça uma descrição técnica completa.
 
-Informações adicionais:
-- Posto de trabalho: ${ctx.postoTrabalho || 'Não informado'}
-- Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
-- Histórico ocupacional: ${ctx.historicoOcupacional || 'Não informado'}
+CÓDIGOS CID A DESCREVER:
+\${cids}
 
-Instruções:
-Para cada CID mencionado, forneça:
-1. Nome da doença e código CID-10
-2. Definição técnica
-3. Etiologia (causas possíveis)
-4. Sintomas característicos
-5. Fatores de risco ocupacionais (quando aplicável)
-6. Relação com atividades laborais descritas
+CONTEXTO OCUPACIONAL (se disponível):
+- Atividades laborais: \${atividadesLaborais}
+- Histórico ocupacional: \${historicoOcupacional}
 
-Use linguagem técnica médica apropriada para laudo pericial.
-`,
-    nexo_causal: `
-Você é um perito médico especialista em medicina do trabalho. Elabore uma análise técnica do nexo causal para um laudo pericial médico trabalhista.
+PARA CADA CID, FORNEÇA:
 
-Dados para análise:
-- CIDs/Diagnósticos: ${ctx.cids || 'Não informado'}
-- Posto de trabalho: ${ctx.postoTrabalho || 'Não informado'}
-- Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
-- Histórico ocupacional: ${ctx.historicoOcupacional || 'Não informado'}
-- História do acidente/doença: ${ctx.historiaAcidente || 'Não informado'}
-- História atual: ${ctx.historiaAtual || 'Não informado'}
-- Exame físico: ${ctx.exameFisico || 'Não informado'}
-- Exames complementares: ${ctx.examesComplementares || 'Não informado'}
-- Antecedentes patológicos: ${ctx.antecedentes || 'Não informado'}
+1. NOME COMPLETO E CID-10
+Exemplo: TENDINITE DO SUPRAESPINHOSO (CID-10: M75.1)
 
-Instruções:
-Analise o nexo causal utilizando os critérios de Bradford-Hill e Simonin:
-1. Plausibilidade biológica
-2. Força da associação
-3. Temporalidade
-4. Consistência
-5. Especificidade
-6. Gradiente dose-resposta
+2. DEFINIÇÃO TÉCNICA
+Descreva tecnicamente o que é a patologia, localização anatômica e características principais.
 
-Classifique o nexo como: Direto, Concausa, Agravamento ou Sem Nexo Causal.
-Fundamente tecnicamente sua conclusão citando evidências clínicas e documentais.
-`,
-    incapacidade: `
-Você é um perito médico especialista em medicina do trabalho. Elabore uma análise técnica da incapacidade laboral para um laudo pericial.
+3. ETIOLOGIA
+Origem da doença - causas possíveis incluindo fatores ocupacionais.
 
-Dados para análise:
-- CIDs/Diagnósticos: ${ctx.cids || 'Não informado'}
-- Exame físico: ${ctx.exameFisico || 'Não informado'}
-- Exames complementares: ${ctx.examesComplementares || 'Não informado'}
-- Tratamentos realizados: ${ctx.tratamentos || 'Não informado'}
-- Atividades laborais: ${ctx.atividadesLaborais || 'Não informado'}
-- Posto de trabalho: ${ctx.postoTrabalho || 'Não informado'}
+4. SINTOMATOLOGIA CLÁSSICA
+Sintomas típicos da condição.
 
-Instruções:
-Analise a capacidade laboral considerando:
-1. Tipo de incapacidade (parcial/total, temporária/permanente)
-2. Limitações funcionais identificadas no exame físico
-3. Compatibilidade com a função exercida
-4. Possibilidade de reabilitação profissional
-5. Necessidade de readaptação de função
-6. Impacto nas atividades de vida diária
+5. RELAÇÃO OCUPACIONAL TÍPICA
+Se é uma DORT/LER comum em certas funções, ou outros vínculos ocupacionais conhecidos.
 
-Fundamente tecnicamente sua análise com base nos achados clínicos e exames.
-`,
-    referencias_bibliograficas: `
-Você é um perito médico especialista em medicina do trabalho. Com base nas informações do processo, identifique e liste referências bibliográficas pertinentes e específicas para o caso.
+FORMATAÇÃO:
+- Use CAIXA ALTA para títulos (não use markdown com asteriscos)
+- Retorne apenas o texto técnico para ser anexado ao campo
+- Linguagem formal e científica
+- Mínimo 2 parágrafos por CID`,
+
+  nexo_causal: `Você é médico-perito judicial. Gere a análise de NEXO CAUSAL / CONCAUSALIDADE em linguagem técnica absoluta.
 
 DADOS DO CASO:
-- CIDs/Diagnósticos: ${ctx.cids || 'Não informado'}
-- Histórico ocupacional: ${ctx.historicoOcupacional || 'Não informado'}
-- História do acidente/doença: ${ctx.historiaAcidente || 'Não informado'}
-- Tratamentos realizados: ${ctx.tratamentos || 'Não informado'}
-- Exames complementares: ${ctx.examesComplementares || 'Não informado'}
-- Laudos médicos: ${ctx.laudosMedicos || 'Não informado'}
-- Lesões descritas: ${ctx.lesoesDescritas || 'Não informado'}
+- CIDs: \${cids}
+- Atividades Laborais: \${atividadesLaborais}
+- História do Acidente/Doença: \${historiaAcidente}
+- Exame Físico: \${exameFisico}
+- Exames Complementares: \${examesComplementares}
+- Antecedentes: \${antecedentes}
+- Laudos Médicos: \${laudosMedicos}
 
-INSTRUÇÕES:
-- Liste entre 5 e 8 referências bibliográficas pertinentes ao caso específico
-- Numere cada referência (1-, 2-, 3-, etc.)
-- Inclua obras de medicina do trabalho relacionadas aos CIDs informados
-- Inclua legislação aplicável (CLT, Lei 8.213/91, NRs relevantes para o caso)
-- Inclua normas técnicas do CFM e CID-10
-- NÃO inclua referências genéricas desnecessárias
-- Seja específico: se há lesão de coluna, cite obras sobre coluna; se há LER/DORT, cite obras sobre ergonomia
-- Use formato ABNT para as referências
+CRITÉRIOS OBRIGATÓRIOS DE ANÁLISE:
 
-FORMATO DE SAÍDA:
-1- AUTOR. Título da obra. Cidade: Editora, Ano.
+1. CLASSIFICAÇÃO DE SCHILLING:
+Enquadre obrigatoriamente no Grupo I, II ou III:
+- Grupo I: Trabalho é causa necessária (doenças profissionais típicas)
+- Grupo II: Trabalho é fator contributivo (doenças do trabalho)
+- Grupo III: Trabalho é provocador de distúrbio latente
+Justifique com os dados de atividades laborais e história.
 
-2- BRASIL. Lei/Norma específica aplicável ao caso.
+2. CRITÉRIOS DE SIMONIN:
+Analise a coerência entre:
+- Topografia da lesão
+- Cronologia dos fatos
+- Mecanismo de trauma/exposição
 
-3- Norma técnica ou regulamentadora pertinente.
+3. CRITÉRIOS DE BRADFORD-HILL:
+Avalie e declare se cada critério é atendido (SIM/NÃO/PARCIAL):
+- Plausibilidade biológica
+- Temporalidade
+- Consistência
 
-Forneça referências que realmente embasem tecnicamente o laudo para este caso específico.
-`
+4. ANÁLISE ANAMT:
+Se houver ASO/PCMSO nos laudos médicos, comente se a documentação ocupacional é suficiente para a análise.
+
+REGRA: Se faltar dado essencial, declare "informação insuficiente nos autos".
+
+CONCLUSÃO OBRIGATÓRIA:
+Finalize com: "NEXO CAUSAL: [PRESENTE/AUSENTE/INCONCLUSIVO]" seguido de justificativa técnica em 2-3 linhas.`,
+
+  incapacidade: `Redija a análise de incapacidade laboral fundamentada tecnicamente.
+
+DADOS DO CASO:
+- CIDs: \${cids}
+- Atividades Laborais: \${atividadesLaborais}
+- Exame Físico: \${exameFisico}
+- Exames Complementares: \${examesComplementares}
+- Antecedentes: \${antecedentes}
+- Nexo Causal: \${nexoCausal}
+
+ESTRUTURA OBRIGATÓRIA DE RESPOSTA:
+
+1. DEMANDAS CRÍTICAS DO CARGO:
+Resuma 3-6 demandas físicas/cognitivas do cargo baseadas nas atividades laborais informadas.
+
+2. ACHADOS OBJETIVOS:
+Correlacione os achados do exame físico e exames complementares com o(s) diagnóstico(s).
+
+3. LIMITAÇÕES FUNCIONAIS:
+Liste objetivamente o que o periciando NÃO consegue realizar.
+Exemplos:
+- "Incapaz de elevação do membro superior acima de 90°"
+- "Incapaz de permanecer em pé por mais de 30 minutos"
+- "Incapaz de manipular cargas acima de 5kg"
+
+4. CLASSIFICAÇÃO DA INCAPACIDADE:
+- GRAU: Parcial ou Total
+- DURAÇÃO: Temporária ou Permanente
+- EXTENSÃO: Para a função habitual ou para toda atividade laborativa
+
+NOTA TÉCNICA: Utilize os critérios de Schilling e Simonin para fundamentar o peso do trabalho na incapacidade atual, se aplicável.`,
+
+  referencias_bibliograficas: `Gere as referências bibliográficas pertinentes ao laudo pericial.
+
+DADOS DO CASO:
+- CIDs: \${cids}
+- Atividades Laborais: \${atividadesLaborais}
+- Laudos Médicos: \${laudosMedicos}
+
+REFERÊNCIAS OBRIGATÓRIAS (SEMPRE INCLUIR):
+
+1. SCHILLING, R. S. F. More effective prevention in occupational health practice? Journal of the Society of Occupational Medicine, v. 39, p. 71-79, 1989.
+
+2. BRADFORD HILL, A. The environment and disease: association or causation? Proceedings of the Royal Society of Medicine, v. 58, p. 295-300, 1965.
+
+3. SIMONIN, C. Medicina Legal Judicial. 2. ed. Barcelona: Editorial JIMS, 1962.
+
+REFERÊNCIA CONDICIONAL:
+Inclua a referência da ANAMT (Associação Nacional de Medicina do Trabalho) APENAS se houver menção a ASO, PCMSO ou documentação ocupacional nos laudos médicos.
+
+REFERÊNCIAS DINÂMICAS:
+Adicione 2 a 4 referências científicas reais e pertinentes aos CIDs específicos do caso. Busque artigos, diretrizes ou livros-texto reconhecidos.
+
+FORMATO OBRIGATÓRIO: ABNT (NBR 6023)
+Exemplo:
+SOBRENOME, Nome. Título da obra. Edição. Cidade: Editora, Ano.`
+};
+
+/**
+ * Busca o prompt do banco de dados via prompt-manager com fallback hardcoded.
+ * Unifica o comportamento entre importação inicial e "Buscar novamente".
+ * 
+ * @param tipo - Tipo do resumo (ex: 'referencias_bibliograficas')
+ * @param ctx - Contexto com variáveis para interpolação
+ * @returns Prompt pronto para uso (já interpolado)
+ */
+async function getPromptForType(tipo: string, ctx: any): Promise<string> {
+  const promptId = PROMPT_ID_MAPPING[tipo];
+  const defaultPrompt = DEFAULT_PROMPTS[tipo];
+  
+  if (!promptId || !defaultPrompt) {
+    console.warn(`[getPromptForType] Tipo desconhecido: ${tipo}`);
+    return '';
+  }
+  
+  // Contexto de interpolação com todas as variáveis possíveis
+  const interpolationContext = {
+    // Petição e contestação
+    peticaoInicial: ctx.peticaoInicial || 'Não informado',
+    contestacao: ctx.contestacao || 'Não informado',
+    
+    // Diagnósticos e CIDs
+    cids: ctx.cids || 'Não informado',
+    
+    // Posto de trabalho
+    postoTrabalho: ctx.postoTrabalho || ctx.cargoFuncao || 'Não informado',
+    atividadesLaborais: ctx.atividadesLaborais || 'Não informado',
+    historicoOcupacional: ctx.historicoOcupacional || 'Não informado',
+    
+    // História clínica
+    historiaAcidente: ctx.historiaAcidente || 'Não informado',
+    historiaAtual: ctx.historiaAtual || 'Não informado',
+    antecedentes: ctx.antecedentes || 'Não informado',
+    
+    // Exames e laudos
+    exameFisico: ctx.exameFisico || 'Não informado',
+    examesComplementares: ctx.examesComplementares || 'Não informado',
+    laudosMedicos: ctx.laudosMedicos || 'Não informado',
+    lesoesDescritas: ctx.lesoesDescritas || 'Não informado',
+    
+    // Tratamentos
+    tratamentos: ctx.tratamentos || 'Não informado',
+    
+    // Nexo causal (para análise de incapacidade)
+    nexoCausal: ctx.nexoCausal || 'Não informado',
+    
+    // Outros campos que podem ser usados em prompts futuros
+    metodologia: ctx.metodologia || 'Não informado',
+    conclusao: ctx.conclusao || 'Não informado'
   };
-
-  return prompts[tipo] || '';
+  
+  try {
+    // Buscar prompt do banco via prompt-manager (com cache de 5 min)
+    const prompt = await getPrompt(
+      promptId,
+      defaultPrompt,
+      interpolationContext,
+      { autoRegister: true }
+    );
+    
+    console.log(`[getPromptForType] Prompt '${tipo}' carregado (promptId: ${promptId})`);
+    return prompt;
+  } catch (error) {
+    // Se falhar, usar o fallback local com interpolação manual
+    console.warn(`[getPromptForType] Fallback para prompt hardcoded: ${tipo}`, error);
+    
+    // Interpolação manual do fallback
+    let prompt = defaultPrompt;
+    for (const [key, value] of Object.entries(interpolationContext)) {
+      prompt = prompt.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), String(value));
+    }
+    
+    return prompt;
+  }
 }
 
 const summarySystemPrompt = 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.';
@@ -985,7 +1098,7 @@ const results = {
 
       console.log(`[gerarResumosIA] Generating: ${tipo} with ${aiConfig.provider}/${aiConfig.model}`);
       
-      const prompt = getPromptForType(tipo, contexto);
+      const prompt = await getPromptForType(tipo, contexto);
       
       // Create a timeout promise
       const timeoutPromise = new Promise<never>((_, reject) => {
