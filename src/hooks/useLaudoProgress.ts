@@ -39,7 +39,6 @@ const cardFields: Record<string, (keyof LaudoData)[]> = {
     "dadosFuncionaisCargo",
     "dadosFuncionaisAdmissao",
     "dadosFuncionaisAfastamento",
-    "descricaoPostoTrabalho",
     "descricaoAtividadesLaborais",
   ],
   exame: [

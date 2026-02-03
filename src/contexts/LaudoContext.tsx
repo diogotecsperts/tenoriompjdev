@@ -111,6 +111,30 @@ interface LaudoContextType {
 
 const LaudoContext = createContext<LaudoContextType | undefined>(undefined);
 
+/**
+ * Migra campos legados para o novo formato unificado.
+ * Concatena descricaoPostoTrabalho em descricaoAtividadesLaborais e limpa o campo antigo.
+ */
+const migrateLegacyFields = (laudo: LaudoData): LaudoData => {
+  // Migrar descricaoPostoTrabalho para descricaoAtividadesLaborais
+  if (laudo.descricaoPostoTrabalho && laudo.descricaoPostoTrabalho.trim()) {
+    const existing = laudo.descricaoAtividadesLaborais?.trim() || '';
+    const legacy = laudo.descricaoPostoTrabalho.trim();
+    
+    // Concatenar se atividades também tem conteúdo e não contém já o legado
+    if (existing && !existing.includes(legacy)) {
+      laudo.descricaoAtividadesLaborais = `${legacy}\n\n${existing}`;
+    } else if (!existing) {
+      laudo.descricaoAtividadesLaborais = legacy;
+    }
+    
+    // Limpar campo legado para próximo save
+    laudo.descricaoPostoTrabalho = '';
+  }
+  
+  return laudo;
+};
+
 export function LaudoProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [laudos, setLaudos] = useState<LaudoData[]>([]);
@@ -211,7 +235,10 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           peritoLogoUrl: "",
         }));
 
-        setLaudos(mappedLaudos);
+        // Aplicar migração de campos legados em todos os laudos
+        const migratedLaudos = mappedLaudos.map(migrateLegacyFields);
+
+        setLaudos(migratedLaudos);
       }
     } catch (error: any) {
       console.error("Erro ao carregar laudos:", error);
@@ -531,7 +558,9 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           aiMetadata: (data as any).ai_metadata || undefined,
         };
         
-        setCurrentLaudo(laudo);
+        // Aplicar migração de campos legados
+        const migratedLaudo = migrateLegacyFields(laudo);
+        setCurrentLaudo(migratedLaudo);
       }
     } catch (error: any) {
       console.error('Erro ao carregar laudo:', error);

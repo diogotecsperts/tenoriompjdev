@@ -989,12 +989,16 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         tratamentos: extractedData.historico.tratamentos_realizados || '',
         afastamentos: extractedData.historico.afastamentos || '',
         
-        // Dados do Posto de Trabalho (NOVOS)
+        // Dados do Posto de Trabalho (CAMPO UNIFICADO)
         dados_funcionais_cargo: extractedData.posto_trabalho?.cargo_funcao || '',
         dados_funcionais_admissao: extractedData.posto_trabalho?.data_admissao || null,
         dados_funcionais_afastamento: extractedData.posto_trabalho?.data_afastamento || null,
-        descricao_posto_trabalho: extractedData.posto_trabalho?.descricao_ambiente || '',
-        descricao_atividades_laborais: extractedData.posto_trabalho?.descricao_atividades || '',
+        descricao_posto_trabalho: '', // Campo legado - não mais usado
+        // Campo unificado: prioriza ambiente_e_atividades (novo), fallback para concatenar campos antigos
+        descricao_atividades_laborais: 
+          (extractedData.posto_trabalho as any)?.ambiente_e_atividades || 
+          [extractedData.posto_trabalho?.descricao_ambiente, extractedData.posto_trabalho?.descricao_atividades]
+            .filter(Boolean).join('\n\n') || '',
         
         laudos_medicos: extractedData.exame_clinico.laudos_medicos || '',
         exames_complementares: extractedData.exame_clinico.exames_complementares || '',

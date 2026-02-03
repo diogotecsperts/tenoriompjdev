@@ -85,8 +85,7 @@ const defaultSystemPrompt = `Você é um perito médico especialista em medicina
     "cargo_funcao": "",
     "data_admissao": "",
     "data_afastamento": "",
-    "descricao_ambiente": "",
-    "descricao_atividades": ""
+    "ambiente_e_atividades": ""
   },
   "exame_clinico": {
     "laudos_medicos": "",
@@ -354,7 +353,9 @@ const defaultSystemPrompt = `Você é um perito médico especialista em medicina
 
     10.3. data_afastamento: Data de afastamento ou desligamento (YYYY-MM-DD)
 
-    10.4. descricao_ambiente - DETALHAR AO MÁXIMO:
+    10.4. ambiente_e_atividades - CAMPO UNIFICADO - DETALHAR AO MÁXIMO:
+
+          AMBIENTE DE TRABALHO:
           - Ambiente físico (interno/externo, coberto/descoberto, climatizado/não)
           - Dimensões aproximadas do local de trabalho
           - Equipamentos e máquinas utilizados (listar todos)
@@ -365,9 +366,8 @@ const defaultSystemPrompt = `Você é um perito médico especialista em medicina
           - Exposição a riscos biológicos
           - Condições de iluminação e ventilação
           - Uso de EPIs (quais, frequência de uso)
-          MÍNIMO 2 parágrafos se houver informação. Busque em PPP, PPRA, PCMSO, laudos ergonômicos.
 
-    10.5. descricao_atividades - DETALHAR AO MÁXIMO:
+          ATIVIDADES LABORAIS:
           - Descrição completa das tarefas diárias executadas
           - Movimentos repetitivos (quais, frequência, duração)
           - Esforço físico exigido (peso carregado, frequência de levantamento)
@@ -378,7 +378,8 @@ const defaultSystemPrompt = `Você é um perito médico especialista em medicina
           - Ritmo de trabalho e metas de produção
           - Uso de ferramentas manuais
           - Exposições específicas da função
-          MÍNIMO 2 parágrafos se houver informação. Busque em PPP, PPRA, depoimentos, petição inicial.
+
+          MÍNIMO 3 parágrafos. Busque em PPP, PPRA, PCMSO, laudos ergonômicos, depoimentos.
 
 11. RESUMO:
     Síntese breve do caso para identificação rápida (máximo 300 caracteres).

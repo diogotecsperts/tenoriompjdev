@@ -21,8 +21,8 @@ const fieldPromptMapping: Record<string, { promptId: string; cardId: string; sec
   laudosMedicos: { promptId: 'prompt_regen_laudosMedicos', cardId: 'exame', sectionId: 'laudos', description: 'Laudos médicos - Regenerar via PDF' },
   examesComplementares: { promptId: 'prompt_regen_examesComplementares', cardId: 'exame', sectionId: 'exames', description: 'Exames complementares - Regenerar via PDF' },
   exameFisico: { promptId: 'prompt_regen_exameFisico', cardId: 'exame', sectionId: 'exame-fisico', description: 'Exame físico - Regenerar via PDF' },
-  descricaoPostoTrabalho: { promptId: 'prompt_regen_descricaoPostoTrabalho', cardId: 'posto-trabalho', sectionId: 'dados-posto', description: 'Descrição do posto de trabalho - Regenerar via PDF' },
-  descricaoAtividadesLaborais: { promptId: 'prompt_regen_descricaoAtividadesLaborais', cardId: 'posto-trabalho', sectionId: 'dados-posto', description: 'Descrição das atividades laborais - Regenerar via PDF' },
+  // Campo descricaoPostoTrabalho foi removido - campo unificado é descricaoAtividadesLaborais
+  descricaoAtividadesLaborais: { promptId: 'prompt_regen_descricaoAtividadesLaborais', cardId: 'posto-trabalho', sectionId: 'dados-posto', description: 'Ambiente e atividades laborais - Regenerar via PDF' },
   descricaoTecnicaDoencas: { promptId: 'prompt_regen_descricaoTecnicaDoencas', cardId: 'analise-tecnica', sectionId: 'descricao-doencas', description: 'Descrição técnica das doenças - Regenerar via PDF' },
   conclusaoAnalise: { promptId: 'prompt_regen_conclusaoAnalise', cardId: 'conclusao', sectionId: 'conclusao', description: 'Análise conclusiva - Regenerar via PDF' },
   tabelaSUSEP: { promptId: 'prompt_regen_tabelaSUSEP', cardId: 'conclusao', sectionId: 'sequelas', description: 'Tabela SUSEP - Regenerar via PDF' },

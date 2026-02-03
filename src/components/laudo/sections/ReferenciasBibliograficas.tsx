@@ -22,7 +22,7 @@ export function ReferenciasBibliograficas() {
           tipo: 'referencias_bibliograficas',
           contexto: {
             cids: currentLaudo.conclusaoCID || '',
-            postoTrabalho: currentLaudo.descricaoPostoTrabalho || '',
+            postoTrabalho: currentLaudo.descricaoAtividadesLaborais || '',
             atividadesLaborais: currentLaudo.descricaoAtividadesLaborais || '',
             historicoOcupacional: currentLaudo.historicoOcupacional || '',
             tratamentos: currentLaudo.tratamentos || '',
