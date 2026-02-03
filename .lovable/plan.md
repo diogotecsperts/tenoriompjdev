@@ -1,248 +1,136 @@
 
-# Plano de Refatoracao da Pagina DevPrompts
 
-## Visao Geral
+# Plano de Padronizacao de Nomenclatura - DevPrompts
 
-Este plano foca em melhorias de organizacao e layout da pagina de Prompts IA, sem alterar a logica funcional. O objetivo e criar uma experiencia mais intuitiva que espelhe a ordem exata do laudo e separe claramente os tipos de prompts.
+## Resumo da Analise
+
+Apos analise detalhada, confirmei que:
+
+1. **O campo "Ambiente e Atividades Laborais" esta CORRETO** - ja foi padronizado na ultima correcao
+2. **Existem inconsistencias menores** em outros campos entre o label no laudo e a descricao no prompt
+3. **Existe um problema residual**: fallback do campo legado `descricaoPostoTrabalho` ainda no `regerar-campo-pdf`
 
 ---
 
 ## PROBLEMAS IDENTIFICADOS
 
-| Problema | Impacto | Solucao |
-|----------|---------|---------|
-| Prompt obsoleto `descricaoPostoTrabalho` no seed-prompts | Confusao - mostra campo que nao existe mais | Remover do arquivo de seed |
-| Nomes inconsistentes entre UI do laudo e DevPrompts | Usuario nao entende qual campo esta editando | Padronizar nomenclatura |
-| Gerar/Regerar misturados sem distincao | Dificil encontrar o prompt certo | Agrupar por tipo dentro de cada secao |
-| Muito scroll para navegar | Experiencia ruim | Adicionar navegacao lateral fixa |
+### Problema 1: Fallback legado ainda existe
+
+**Arquivo:** `supabase/functions/regerar-campo-pdf/index.ts`
+
+**Localizacao:** Linhas 189-207 no objeto `fieldPrompts` (fallback)
+
+O campo `descricaoPostoTrabalho` foi removido do mapeamento principal (linha 24), mas o fallback hardcoded ainda existe. Isso pode causar confusao e nao deveria estar la.
+
+**Acao:** REMOVER a entrada `descricaoPostoTrabalho` do objeto `fieldPrompts`
 
 ---
 
-## MUDANCAS PROPOSTAS
+### Problema 2: Nomenclaturas ligeiramente diferentes
 
-### 1. Remover Prompt Obsoleto do Seed-Prompts
+Algumas descricoes de prompts nao correspondem exatamente aos labels dos campos no laudo:
 
-**Arquivo:** `supabase/functions/seed-prompts/index.ts`
-
-**Acao:** Remover a entrada `prompt_regen_descricaoPostoTrabalho` (linhas 199-222) que referencia o campo legado que foi unificado.
-
-**Justificativa:** Este prompt nao deveria mais existir apos a consolidacao de campos para "Ambiente e Atividades Laborais".
+| Campo no Laudo | Label Atual no Prompt | Label Sugerido |
+|----------------|----------------------|----------------|
+| "Historia da Molestia Atual" | "Historia atual - Regenerar via PDF" | "Historia da Molestia Atual - Regenerar via PDF" |
+| "Antecedentes Pessoais e Familiares" | "Antecedentes patologicos - Regenerar via PDF" | "Antecedentes Pessoais e Familiares - Regenerar via PDF" |
+| "Afastamentos do Trabalho" | "Afastamentos - Regenerar via PDF" | "Afastamentos do Trabalho - Regenerar via PDF" |
+| "Descricao dos Laudos" | "Laudos medicos - Regenerar via PDF" | "Descricao dos Laudos Medicos - Regenerar via PDF" |
+| "Descricao dos Exames" | "Exames complementares - Regenerar via PDF" | "Descricao dos Exames Complementares - Regenerar via PDF" |
+| "Achados do Exame Fisico" | "Exame fisico - Regenerar via PDF" | "Achados do Exame Fisico - Regenerar via PDF" |
+| "Necessidade de Auxilio de Terceiros" | "Auxilio de terceiros - Regenerar via PDF" | "Necessidade de Auxilio de Terceiros - Regenerar via PDF" |
 
 ---
 
-### 2. Padronizar Nomenclatura
+## SOBRE O BOTAO "CARREGAR PADRAO"
 
-**Problema:** O campo no laudo chama "Ambiente e Atividades Laborais" mas o prompt chama "Descricao das atividades laborais".
+O botao funciona assim:
 
-**Solucao:** Atualizar a descricao do prompt para refletir o nome correto:
+```text
+Usuario clica "Carregar Padrao"
+        |
+        v
+  Dialog de confirmacao aparece
+        |
+        v
+  Se confirmar, chama edge function `seed-prompts`
+        |
+        v
+  Edge function faz UPSERT de todos os prompts
+  definidos no codigo TypeScript
+        |
+        v
+  Prompts no banco sao SOBRESCRITOS
+  pelos valores hardcoded no codigo
+```
+
+**Pontos importantes:**
+
+1. **NAO existe backup isolado** - os prompts padrao estao no proprio codigo da edge function
+2. **Funciona apos refatoracoes** - desde que a edge function seja re-deployed
+3. **Sobrescreve customizacoes** - qualquer ajuste feito pelo perito sera perdido
+4. **Por isso existe o dialog de confirmacao** com alerta sobre perda de dados
+5. **Por isso existe o botao "Exportar PDF"** - para fazer backup antes de resetar
+
+---
+
+## ARQUIVOS A MODIFICAR
+
+| Arquivo | Modificacao |
+|---------|-------------|
+| `supabase/functions/seed-prompts/index.ts` | Padronizar nomenclatura das descricoes |
+| `supabase/functions/regerar-campo-pdf/index.ts` | Remover fallback do campo legado |
+
+---
+
+## MUDANCAS DETALHADAS
+
+### 1. seed-prompts/index.ts - Padronizar Descricoes
 
 ```typescript
 // Antes
-description: 'Descricao das atividades laborais - Regenerar via PDF'
+prompt_regen_historiaAtual: {
+  description: 'Historia atual - Regenerar via PDF',
+  ...
+}
 
-// Depois  
-description: 'Ambiente e Atividades Laborais - Regenerar via PDF'
+// Depois
+prompt_regen_historiaAtual: {
+  description: 'Historia da Molestia Atual - Regenerar via PDF',
+  ...
+}
 ```
 
----
+Aplicar para todos os 7 campos listados acima.
 
-### 3. Novo Layout da Pagina DevPrompts
+### 2. regerar-campo-pdf/index.ts - Remover Fallback Legado
 
-**Conceito:** Layout em 2 colunas com navegacao lateral fixa
+**Remover linhas 189-207** que contem:
 
-```text
-+-------------------+----------------------------------------+
-|  NAVEGACAO LATERAL |         AREA DE CONTEUDO              |
-|  (fixa, 240px)     |         (scroll independente)         |
-+-------------------+----------------------------------------+
-| ▼ Dados Preliminares |  Dados Preliminares                 |
-|   - Perito           |  +--------------------------------+  |
-|   - Processo         |  | Dados do Perito                |  |
-|   - Objetivo         |  | Gerar | Regerar                |  |
-|   - Documentos       |  | [prompt cards lado a lado]     |  |
-| ▼ Resumo dos Autos   |  +--------------------------------+  |
-|   - Resumo           |  +--------------------------------+  |
-|   - Metodologia      |  | Dados do Processo              |  |
-| ▼ Dados do Periciando|  | Gerar | Regerar                |  |
-|   ...                |  | [prompt cards lado a lado]     |  |
-|                      |  +--------------------------------+  |
-| [Nao Classificados]  |                                      |
-+-------------------+----------------------------------------+
+```typescript
+descricaoPostoTrabalho: `Extraia e detalhe a "Descricao do Posto de Trabalho"...`,
 ```
-
-**Beneficios:**
-- Navegacao rapida sem precisar rolar toda a pagina
-- Click no item da navegacao faz scroll suave ate a secao
-- Cada secao mostra claramente os prompts "Gerar" e "Regerar" separados
-- Cards mais compactos em grid 2 colunas
-
----
-
-### 4. Reorganizacao de Cada Secao
-
-**Estrutura atual (confusa):**
-```
-Secao: Dados do Posto de Trabalho
-  - prompt_regen_descricaoPostoTrabalho (Regerar)
-  - prompt_regen_descricaoAtividadesLaborais (Regerar)
-  [prompts misturados sem logica clara]
-```
-
-**Nova estrutura (organizada):**
-```
-Secao: Ambiente e Atividades Laborais
-  +-------------------+-------------------+
-  | GERAR             | REGERAR           |
-  +-------------------+-------------------+
-  | (nenhum)          | Regenerar via PDF |
-  +-------------------+-------------------+
-```
-
-**Cada prompt card mostrara:**
-- Badge colorido (Gerar=Verde, Regerar=Azul, Sistema=Cinza)
-- Descricao curta
-- Data de atualizacao
-- Icone de edicao
-
----
-
-### 5. Componentes a Criar/Modificar
-
-| Arquivo | Tipo | Descricao |
-|---------|------|-----------|
-| `src/components/dev-panel/DevPrompts.tsx` | Modificar | Novo layout 2 colunas, navegacao lateral |
-| `src/components/dev-panel/PromptSectionCard.tsx` | Criar (opcional) | Card de secao com separacao Gerar/Regerar |
-| `supabase/functions/seed-prompts/index.ts` | Modificar | Remover prompt obsoleto, atualizar descricoes |
-
----
-
-### 6. Navegacao Lateral - Especificacao
-
-**Comportamento:**
-- Lista hierarquica de Cards e Secoes seguindo exatamente a ordem do `LAUDO_STRUCTURE`
-- Cards podem expandir/colapsar para mostrar secoes
-- Click em secao faz scroll suave ate o elemento correspondente
-- Item ativo destacado visualmente
-- Contador de prompts ao lado de cada item
-- Posicao fixa durante scroll
-
-**Codigo conceitual:**
-```tsx
-<div className="flex gap-6">
-  {/* Navegacao lateral fixa */}
-  <aside className="w-60 shrink-0 sticky top-0 h-[calc(100vh-200px)]">
-    <ScrollArea className="h-full pr-4">
-      {LAUDO_STRUCTURE.map(card => (
-        <Collapsible key={card.id} defaultOpen>
-          <CollapsibleTrigger className="w-full">
-            <div className="flex justify-between py-2">
-              <span className="font-medium">{card.title}</span>
-              <Badge variant="outline">{count}</Badge>
-            </div>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            {card.sections.map(section => (
-              <button 
-                key={section.id}
-                onClick={() => scrollToSection(section.id)}
-                className={cn(
-                  "w-full text-left pl-4 py-1 text-sm",
-                  activeSection === section.id && "text-primary font-medium"
-                )}
-              >
-                {section.label}
-              </button>
-            ))}
-          </CollapsibleContent>
-        </Collapsible>
-      ))}
-    </ScrollArea>
-  </aside>
-
-  {/* Area de conteudo */}
-  <main className="flex-1">
-    {/* Secoes com refs para scroll */}
-  </main>
-</div>
-```
-
----
-
-### 7. Card de Secao com Separacao Gerar/Regerar
-
-**Layout de cada secao:**
-```tsx
-<Card id={`section-${section.id}`} ref={sectionRefs[section.id]}>
-  <CardHeader>
-    <CardTitle>{section.label}</CardTitle>
-  </CardHeader>
-  <CardContent>
-    <div className="grid grid-cols-2 gap-4">
-      {/* Coluna Gerar */}
-      <div className="space-y-2">
-        <h4 className="text-sm font-medium text-emerald-600">
-          <Sparkles className="inline h-4 w-4 mr-1" />
-          Gerar
-        </h4>
-        {gerarPrompts.length > 0 ? (
-          gerarPrompts.map(p => <PromptMiniCard prompt={p} />)
-        ) : (
-          <p className="text-xs text-muted-foreground italic">
-            Nenhum prompt de geracao
-          </p>
-        )}
-      </div>
-      
-      {/* Coluna Regerar */}
-      <div className="space-y-2">
-        <h4 className="text-sm font-medium text-blue-600">
-          <RefreshCw className="inline h-4 w-4 mr-1" />
-          Regerar
-        </h4>
-        {regenarPrompts.map(p => <PromptMiniCard prompt={p} />)}
-      </div>
-    </div>
-  </CardContent>
-</Card>
-```
-
----
-
-## RESUMO DAS MUDANCAS
-
-| Categoria | Mudanca | Impacto na Logica |
-|-----------|---------|-------------------|
-| Dados | Remover prompt obsoleto | Nenhum (prompt nao era usado) |
-| Nomenclatura | Padronizar descricoes | Nenhum (apenas labels) |
-| Layout | 2 colunas com nav lateral | Nenhum (visual apenas) |
-| Organizacao | Separar Gerar/Regerar por coluna | Nenhum (visual apenas) |
-| Navegacao | Scroll suave para secoes | Nenhum (UX apenas) |
 
 ---
 
 ## GARANTIAS
 
-1. **Zero impacto na logica** - Todas as mudancas sao visuais e organizacionais
-2. **Retrocompatibilidade** - Prompts existentes continuam funcionando
-3. **Nomenclatura unificada** - Mesmos nomes no laudo e no DevPrompts
-4. **Ordem identica ao laudo** - Navegacao espelha exatamente a estrutura do LaudoEditor
-5. **Separacao clara** - Gerar e Regerar nunca mais misturados
+1. **Zero impacto funcional** - apenas labels de exibicao mudam
+2. **Nomenclatura 100% identica ao laudo** - facilita localizacao
+3. **Codigo legado removido** - elimina confusao
+4. **Edge functions precisam ser re-deployed** - para aplicar mudancas
+5. **Apos deploy, clicar em "Carregar Padrao"** sincroniza os novos nomes no banco
 
 ---
 
-## ORDEM DE IMPLEMENTACAO
+## RESPOSTA AS SUAS PERGUNTAS
 
-```text
-FASE 1 - Limpeza de Dados
-├── Remover prompt obsoleto do seed-prompts
-└── Atualizar descricoes para nomenclatura correta
+**1. O botao "Carregar Padrao" ainda funciona?**
+Sim! Ele continua funcionando normalmente. Chama a edge function que faz upsert dos prompts padrao.
 
-FASE 2 - Refatoracao do Layout
-├── Criar estrutura 2 colunas
-├── Implementar navegacao lateral fixa
-└── Adicionar scroll suave para secoes
+**2. O "Padrao" esta guardado em backup isolado?**
+NAO. Os prompts padrao estao HARDCODED no codigo TypeScript da edge function `seed-prompts/index.ts`. Quando voce clica no botao, ele le esses valores do codigo e grava no banco. Por isso, apos cada refatoracao, precisamos fazer deploy da edge function para que o "padrao" reflita as mudancas.
 
-FASE 3 - Organizacao por Tipo
-├── Separar prompts Gerar/Regerar em cada secao
-└── Grid 2 colunas dentro de cada Card
-```
+**3. Isso esta funcionando mesmo com as refatoracoes?**
+Sim, mas apenas porque fizemos deploy das edge functions apos cada mudanca. Se nao tivessemos feito deploy, o "Carregar Padrao" ainda traria os prompts antigos.
+
