@@ -1,77 +1,96 @@
 
+## Diagnóstico (por que “impugnacao” não aparece no DevPanel > Prompts IA)
 
-# Adicionar Prompt de Impugnação ao DevPanel
+- O prompt **existe** no backend (tabela `system_config`) e também **existe no código-fonte** (em `seed-prompts`), com:
+  - `id: prompt_system_impugnacao`
+  - `cardId: impugnacao`
+  - `sectionId: resposta`
+- Porém, a UI do DevPanel (`src/components/dev-panel/DevPrompts.tsx`) **só renderiza prompts “classificados”** se o `cardId/sectionId` existir na estrutura conhecida `LAUDO_STRUCTURE`.
+- Hoje, `LAUDO_STRUCTURE` é construído a partir de:
+  - `LAUDO_CARDS_STRUCTURE` (estrutura do LaudoEditor)
+  - `PROMPT_ONLY_CARDS` (cards extras “só para prompts”)
+- **A categoria `impugnacao` não está em `PROMPT_ONLY_CARDS`**, então o prompt fica em um “limbo”:
+  - Ele é considerado “classificado” (tem `cardId` e `sectionId`)
+  - Mas não entra em nenhum agrupamento exibido
+  - Resultado: **não aparece em lugar nenhum na lista**
 
-## Objetivo
+## Resposta objetiva sobre “Restaurar Tudo” (e seus receios)
 
-Permitir que o prompt usado no botão "Gerar com IA" da página Responder Impugnação seja editável no DevPanel.
+- “Restaurar Tudo” chama a função `seed-prompts` com `action: 'seed'`, que faz duas coisas:
+  1) **Deleta prompts órfãos** (existem no banco mas não existem mais no código).
+  2) **Sobrescreve o conteúdo** dos prompts do banco com o conteúdo “padrão de fábrica” do código.
+- Você NÃO vai “perder” o `prompt_system_impugnacao` por causa do restore, porque ele está no código (`seed-prompts`) e portanto **não é órfão**.
+- O risco real do “Restaurar Tudo” é outro: **ele vai sobrescrever seus prompts personalizados** (os 8 “Personalizados” que você viu).
+- Então, se o objetivo for somente “arrumar a lista” / “limpar órfãos”, **não recomendo** “Restaurar Tudo” agora.
 
-## Escopo Reduzido
+## Objetivo do ajuste agora
 
-| O que será feito | O que NÃO será alterado |
-|------------------|-------------------------|
-| Integrar `gerar-resposta-impugnacao` com `prompt-manager` | Nenhuma tabela do banco |
-| Adicionar 1 prompt ao `seed-prompts` | Nenhuma lógica de negócio |
-| Registrar prompt no banco | Nenhum componente de UI |
+1) Fazer a categoria **Impugnação** aparecer em DevPanel > Prompts IA.
+2) Garantir que o prompt `prompt_system_impugnacao` apareça dentro dela.
+3) Evitar que qualquer prompt “classificado” com `cardId/sectionId` desconhecidos fique invisível no futuro (segurança de UX).
 
-## Risco Real
+---
 
-**Zero impacto em laudos.** Se algo quebrar, apenas o botão "Gerar com IA" na página de impugnação para de funcionar. O fallback hardcoded garante que mesmo isso seja improvável.
+## Mudanças propostas (mínimas e seguras)
 
-## Arquivos a Modificar
+### A) Adicionar “Impugnação” como card exclusivo de prompts (não mexe no LaudoEditor)
+**Arquivo**: `src/lib/laudo-structure.ts`
 
-| Arquivo | Mudança |
-|---------|---------|
-| `supabase/functions/gerar-resposta-impugnacao/index.ts` | Usar `getPrompt()` com fallback |
-| `supabase/functions/seed-prompts/index.ts` | Adicionar `prompt_system_impugnacao` |
+- Incluir um novo item em `PROMPT_ONLY_CARDS`:
+  - `id: "impugnacao"`
+  - `label: "Impugnação"`
+  - `sections: [{ id: "resposta", label: "Resposta à Impugnação" }]`
 
-## Implementação
+Impacto:
+- Isso **não entra** no LaudoEditor (porque o LaudoEditor usa `LAUDO_CARDS_STRUCTURE` e ignora `PROMPT_ONLY_CARDS`).
+- Isso **entra** no DevPrompts, porque ele usa `[...LAUDO_CARDS_STRUCTURE, ...PROMPT_ONLY_CARDS]`.
 
-### 1. Modificar gerar-resposta-impugnacao/index.ts
+### B) (Opcional, mas recomendado) Adicionar ícone para “Impugnação” no DevPanel
+**Arquivo**: `src/components/dev-panel/DevPrompts.tsx`
 
-```typescript
-// Adicionar import
-import { getPrompt } from "../_shared/prompt-manager.ts";
+- Incluir `impugnacao` no `cardIcons` para ficar visualmente consistente (se não fizer, ele usa um ícone padrão; não quebra nada).
 
-// Mover prompt atual para constante de fallback
-const DEFAULT_SYSTEM_PROMPT = `Você é um perito médico especialista...`;
+### C) (Recomendação de segurança) Não deixar prompts “classificados” sumirem se tiverem card/section desconhecidos
+**Arquivo**: `src/components/dev-panel/DevPrompts.tsx`
 
-// Na função serve(), antes de chamar callAI():
-const systemPromptFinal = await getPrompt(
-  'prompt_system_impugnacao',
-  DEFAULT_SYSTEM_PROMPT,
-  {}
-);
+Hoje:
+- Se `p.cardId/p.sectionId` não existirem no `LAUDO_STRUCTURE`, o prompt simplesmente não é renderizado.
 
-// Usar systemPromptFinal no callAI()
-```
+Ajuste simples:
+- Ao montar as listas:
+  - Continuar considerando “classificados” apenas os prompts com `cardId/sectionId`
+  - Mas se o `cardId/sectionId` não existir na estrutura, tratar como “não classificado” (ou “inconsistente”) e exibir na aba “Não classificados” com um aviso.
 
-### 2. Adicionar ao seed-prompts/index.ts
+Isso evita que qualquer prompt fique invisível por divergência de metadados.
 
-```typescript
-prompt_system_impugnacao: {
-  cardId: 'impugnacao',
-  sectionId: 'resposta',
-  description: 'Instruções para Gerar Resposta a Impugnação',
-  prompt: `Você é um perito médico especialista em medicina do trabalho...`
-}
-```
+---
 
-### 3. Inserir prompt no banco
+## Como proceder agora (orientação prática para você)
 
-```sql
-INSERT INTO system_config (id, value, description)
-VALUES (
-  'prompt_system_impugnacao',
-  '"Você é um perito médico especialista..."',
-  'Instruções para Gerar Resposta a Impugnação'
-);
-```
+1) **Não clique em “Restaurar Tudo”** se você quer preservar seus 8 prompts personalizados.
+2) No seu caso, como “Desatualizados = 0” e “Novos = 0”, não há nada para “Sincronizar Labels”.
+3) O problema principal é só de **UI/estrutura**: a categoria “impugnação” não existe na árvore do DevPanel — vamos corrigir com as mudanças acima.
+4) Depois que a categoria aparecer, você verá o prompt “Instruções para Gerar Resposta a Impugnação” dentro dela e poderá editar normalmente.
 
-## Resultado
+---
 
-- Prompt aparecerá no DevPanel > Prompts IA
-- Editável sem deploy de código
-- Se banco falhar → usa fallback hardcoded
-- Laudos não são afetados em nenhum cenário
+## Verificação (checklist de validação)
 
+Após implementar:
+
+1) Abrir **DevPanel > Prompts IA**
+2) Confirmar que existe o card/categoria **Impugnação**
+3) Confirmar que dentro dele aparece:
+   - `prompt_system_impugnacao` (descrição: “Instruções para Gerar Resposta a Impugnação”)
+4) Testar o fluxo end-to-end:
+   - Ir em “Responder Impugnação”
+   - Clicar “Gerar com IA”
+   - Confirmar que funciona e que alterações no prompt refletem na próxima geração
+
+---
+
+## Risco e impacto
+
+- Risco para “Laudos”: **zero** (não altera LaudoEditor nem prompts de laudo).
+- Risco para “Impugnação”: **muito baixo** (só melhora visibilidade/organização do prompt já existente).
+- Benefício: o prompt deixa de ficar “invisível” e a estrutura do DevPanel passa a refletir corretamente o que o backend já suporta.
