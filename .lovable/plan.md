@@ -1,20 +1,51 @@
-# Plano de Correção: Limpeza de Prompts Obsoletos e Melhoria da UI
 
-## ✅ IMPLEMENTADO
+# Plano de Correção: Permissão DELETE na tabela system_config
 
-### Problema Resolvido
+## Problema Identificado
 
-1. **Prompt Fantasma**: `prompt_regen_descricaoPostoTrabalho` será deletado automaticamente ao executar "Restaurar Padrão de Fábrica"
-2. **Detecção de Órfãos**: O sistema agora detecta e exibe prompts no banco que foram removidos do código
-3. **UI Documentada**: Tooltip explicando "Gerar vs Regerar" adicionado
+A tabela `system_config` tem RLS habilitado mas **não possui política de DELETE** para desenvolvedores:
 
-### Arquivos Modificados
+| Comando | Política | Status |
+|---------|----------|--------|
+| SELECT | Developers can view | ✅ |
+| INSERT | Developers can insert | ✅ |
+| UPDATE | Developers can update | ✅ |
+| DELETE | (nenhuma) | ❌ **FALTANDO** |
 
-- `supabase/functions/seed-prompts/index.ts` - Adicionado cleanup de prompts obsoletos e detecção de órfãos
-- `src/components/dev-panel/DevPrompts.tsx` - Seção de órfãos no dialog + tooltip explicativo
+Isso explica por que:
+1. O log mostra "Deleted obsolete prompt" (porque `error` é `null`)
+2. Mas o banco de dados **não deleta nada** (0 linhas afetadas)
+3. O prompt fantasma continua aparecendo
 
-### Como Usar
+## Solução
 
-1. **Verificar Atualizações**: Clique no botão para ver prompts órfãos (em vermelho)
-2. **Restaurar Tudo**: Executar restaura prompts E deleta os órfãos
-3. **Tooltip**: Passe o mouse sobre "Nenhum prompt de geração" para ver explicação
+Adicionar política RLS de DELETE para desenvolvedores na tabela `system_config`.
+
+## Comando SQL
+
+```sql
+CREATE POLICY "Developers can delete system_config"
+ON public.system_config
+FOR DELETE
+TO authenticated
+USING (is_developer());
+```
+
+## Arquivo a Modificar
+
+Nenhum arquivo de código precisa ser alterado. A lógica de deleção já está correta - só falta a permissão no banco.
+
+## Arquivos Relacionados (apenas para referência)
+
+| Arquivo | Status |
+|---------|--------|
+| `supabase/functions/seed-prompts/index.ts` | Código OK - já deleta corretamente |
+| `src/components/dev-panel/DevPrompts.tsx` | Código OK - já chama a função corretamente |
+
+## Resultado Esperado
+
+Após adicionar a política:
+1. Clicar em "Restaurar Padrão de Fábrica" → prompt órfão será deletado de verdade
+2. O `prompt_regen_descricaoPostoTrabalho` sumirá do banco
+3. A exportação PDF não mostrará mais o campo fantasma
+4. A seção "Dados do Posto de Trabalho" mostrará apenas "Ambiente e Atividades Laborais"
