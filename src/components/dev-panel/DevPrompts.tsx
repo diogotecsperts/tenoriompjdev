@@ -18,6 +18,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { 
@@ -42,7 +50,10 @@ import {
   Loader2,
   Database,
   FileDown,
-  AlertTriangle
+  AlertTriangle,
+  ArrowRight,
+  RotateCcw,
+  GitCompare
 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { cn } from "@/lib/utils";
@@ -65,6 +76,14 @@ interface PromptConfig {
   isClassified?: boolean;
   createdAt?: string;
   updatedAt?: string;
+}
+
+interface UpdatesResult {
+  outdatedDescriptions: Array<{ id: string; current: string; new: string }>;
+  newPrompts: Array<{ id: string; description: string }>;
+  customized: Array<{ id: string; description: string }>;
+  upToDate: Array<{ id: string }>;
+  totalHardcoded: number;
 }
 
 // Map card IDs to icons
@@ -121,6 +140,10 @@ export function DevPrompts() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"classified" | "unclassified">("classified");
   const [showSeedConfirmDialog, setShowSeedConfirmDialog] = useState(false);
+  const [showUpdatesDialog, setShowUpdatesDialog] = useState(false);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [syncingMetadata, setSyncingMetadata] = useState(false);
+  const [pendingUpdates, setPendingUpdates] = useState<UpdatesResult | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
   // Get all section IDs for scroll spy
@@ -174,18 +197,71 @@ export function DevPrompts() {
     fetchPrompts();
   }, []);
 
-  // Carregar prompts padrão via edge function
-  const seedPrompts = async () => {
-    setSeeding(true);
+  // Verificar atualizações disponíveis
+  const checkForUpdates = async () => {
+    setCheckingUpdates(true);
     try {
       const { data, error } = await supabase.functions.invoke('seed-prompts', {
-        method: 'POST'
+        body: { action: 'check_updates' }
+      });
+
+      if (error) throw error;
+
+      setPendingUpdates(data as UpdatesResult);
+      setShowUpdatesDialog(true);
+    } catch (error) {
+      console.error("Erro ao verificar atualizações:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Falha ao verificar atualizações"
+      });
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
+
+  // Sincronizar apenas metadados (preserva prompts customizados)
+  const syncMetadataOnly = async () => {
+    setSyncingMetadata(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('seed-prompts', {
+        body: { action: 'sync_metadata' }
       });
 
       if (error) throw error;
 
       toast({
-        title: "Prompts carregados!",
+        title: "Metadados sincronizados!",
+        description: `${data.updated} atualizados, ${data.inserted} novos inseridos. Seus prompts customizados foram preservados.`,
+      });
+
+      setShowUpdatesDialog(false);
+      await fetchPrompts();
+    } catch (error) {
+      console.error("Erro ao sincronizar metadados:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Falha ao sincronizar metadados"
+      });
+    } finally {
+      setSyncingMetadata(false);
+    }
+  };
+
+  // Carregar prompts padrão via edge function (factory reset)
+  const seedPrompts = async () => {
+    setSeeding(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('seed-prompts', {
+        body: { action: 'seed' }
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Prompts restaurados!",
         description: `${data.inserted} inseridos, ${data.updated} atualizados`,
       });
 
@@ -594,7 +670,7 @@ export function DevPrompts() {
             Gerencie os prompts utilizados em todas as funções de IA do sistema
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button onClick={exportToPDF} variant="outline" size="sm" disabled={exporting || prompts.length === 0}>
             {exporting ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -603,17 +679,24 @@ export function DevPrompts() {
             )}
             Exportar PDF
           </Button>
-          <Button onClick={() => setShowSeedConfirmDialog(true)} variant="outline" size="sm" disabled={seeding}>
+          <Button onClick={checkForUpdates} variant="outline" size="sm" disabled={checkingUpdates}>
+            {checkingUpdates ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <GitCompare className="h-4 w-4 mr-2" />
+            )}
+            Verificar Atualizações
+          </Button>
+          <Button onClick={() => setShowSeedConfirmDialog(true)} variant="destructive" size="sm" disabled={seeding}>
             {seeding ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
             ) : (
-              <Download className="h-4 w-4 mr-2" />
+              <RotateCcw className="h-4 w-4 mr-2" />
             )}
-            Carregar Padrão
+            Restaurar Padrão de Fábrica
           </Button>
-          <Button onClick={fetchPrompts} variant="outline" size="sm">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Atualizar
+          <Button onClick={fetchPrompts} variant="ghost" size="sm">
+            <RefreshCw className="h-4 w-4" />
           </Button>
         </div>
       </div>
@@ -952,12 +1035,164 @@ export function DevPrompts() {
         laudoStructure={LAUDO_STRUCTURE}
       />
 
+      {/* Updates Dialog */}
+      <Dialog open={showUpdatesDialog} onOpenChange={setShowUpdatesDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GitCompare className="h-5 w-5 text-primary" />
+              Verificar Atualizações de Prompts
+            </DialogTitle>
+            <DialogDescription>
+              Comparação entre os prompts do código-fonte e os salvos no banco de dados.
+            </DialogDescription>
+          </DialogHeader>
+
+          {pendingUpdates && (
+            <div className="space-y-4">
+              {/* Summary */}
+              <div className="grid grid-cols-4 gap-2">
+                <Card className="p-3">
+                  <div className="text-xl font-bold text-center">{pendingUpdates.totalHardcoded}</div>
+                  <div className="text-xs text-muted-foreground text-center">No código</div>
+                </Card>
+                <Card className={cn("p-3", pendingUpdates.outdatedDescriptions.length > 0 && "border-amber-500/30")}>
+                  <div className="text-xl font-bold text-center text-amber-600">{pendingUpdates.outdatedDescriptions.length}</div>
+                  <div className="text-xs text-muted-foreground text-center">Labels desatualizados</div>
+                </Card>
+                <Card className={cn("p-3", pendingUpdates.newPrompts.length > 0 && "border-blue-500/30")}>
+                  <div className="text-xl font-bold text-center text-blue-600">{pendingUpdates.newPrompts.length}</div>
+                  <div className="text-xs text-muted-foreground text-center">Novos prompts</div>
+                </Card>
+                <Card className={cn("p-3", pendingUpdates.customized.length > 0 && "border-green-500/30")}>
+                  <div className="text-xl font-bold text-center text-green-600">{pendingUpdates.customized.length}</div>
+                  <div className="text-xs text-muted-foreground text-center">Personalizados</div>
+                </Card>
+              </div>
+
+              {/* Outdated descriptions */}
+              {pendingUpdates.outdatedDescriptions.length > 0 && (
+                <div className="border rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    <h4 className="font-semibold text-amber-600">Labels Desatualizados ({pendingUpdates.outdatedDescriptions.length})</h4>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Estas descrições mudaram no código e serão atualizadas ao sincronizar:
+                  </p>
+                  <ScrollArea className="max-h-40">
+                    <div className="space-y-2">
+                      {pendingUpdates.outdatedDescriptions.map(p => (
+                        <div key={p.id} className="text-sm border rounded p-2 bg-muted/30">
+                          <code className="text-xs bg-muted px-1 rounded">{p.id}</code>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-muted-foreground line-through text-xs">{p.current}</span>
+                            <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-foreground text-xs font-medium">{p.new}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                </div>
+              )}
+
+              {/* New prompts */}
+              {pendingUpdates.newPrompts.length > 0 && (
+                <div className="border rounded-lg p-4 border-blue-500/30">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Sparkles className="h-4 w-4 text-blue-500" />
+                    <h4 className="font-semibold text-blue-600">Novos Prompts ({pendingUpdates.newPrompts.length})</h4>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Prompts adicionados ao código que serão inseridos no banco:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {pendingUpdates.newPrompts.map(p => (
+                      <Badge key={p.id} variant="secondary" className="text-xs">
+                        {p.description || p.id}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Customized prompts */}
+              {pendingUpdates.customized.length > 0 && (
+                <div className="border rounded-lg p-4 border-green-500/30">
+                  <div className="flex items-center gap-2 mb-3">
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    <h4 className="font-semibold text-green-600">Prompts Personalizados ({pendingUpdates.customized.length})</h4>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Estes prompts foram editados e <strong>serão preservados</strong> ao sincronizar labels:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {pendingUpdates.customized.map(p => (
+                      <Badge key={p.id} variant="outline" className="text-xs border-green-500/50">
+                        {p.description || p.id}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* All up to date message */}
+              {pendingUpdates.outdatedDescriptions.length === 0 && 
+               pendingUpdates.newPrompts.length === 0 && (
+                <div className="border rounded-lg p-6 text-center">
+                  <CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-3" />
+                  <h4 className="font-semibold text-green-600">Tudo sincronizado!</h4>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Os labels e metadados estão atualizados com o código-fonte.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            {pendingUpdates && (pendingUpdates.outdatedDescriptions.length > 0 || pendingUpdates.newPrompts.length > 0) && (
+              <Button 
+                onClick={syncMetadataOnly} 
+                disabled={syncingMetadata}
+                className="flex-1"
+              >
+                {syncingMetadata ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Sincronizar Labels
+                <span className="text-xs opacity-70 ml-2">(preserva conteúdo)</span>
+              </Button>
+            )}
+            <Button 
+              variant="outline" 
+              onClick={() => setShowUpdatesDialog(false)}
+            >
+              Fechar
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={() => {
+                setShowUpdatesDialog(false);
+                setShowSeedConfirmDialog(true);
+              }}
+            >
+              <RotateCcw className="h-4 w-4 mr-2" />
+              Restaurar Tudo
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Confirmation Dialog for Seed */}
       <AlertDialog open={showSeedConfirmDialog} onOpenChange={setShowSeedConfirmDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              <AlertTriangle className="h-5 w-5 text-destructive" />
               Restaurar Prompts para Padrão de Fábrica?
             </AlertDialogTitle>
             <AlertDialogDescription className="space-y-3">
@@ -966,7 +1201,7 @@ export function DevPrompts() {
                 com as versões originais do sistema.
               </p>
               <p className="text-destructive font-medium">
-                ❌ Todas as suas edições personalizadas serão perdidas!
+                ❌ Todas as suas edições personalizadas serão PERDIDAS!
               </p>
               <p className="text-muted-foreground text-sm">
                 💡 Recomendação: Faça um backup clicando em "Exportar PDF" antes de continuar.
@@ -993,7 +1228,7 @@ export function DevPrompts() {
               }}
               className="bg-destructive hover:bg-destructive/90"
             >
-              Restaurar Padrão
+              Restaurar Padrão de Fábrica
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
