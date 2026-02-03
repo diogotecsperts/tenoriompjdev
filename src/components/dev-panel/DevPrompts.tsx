@@ -12,7 +12,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { Search, FileText, RefreshCw, AlertCircle, CheckCircle2, FolderOpen, MessageSquare, Edit3, Clock, ChevronRight, ChevronDown, Sparkles, User, Stethoscope, ClipboardCheck, BookOpen, Briefcase, Download, Loader2, Database, FileDown, AlertTriangle, ArrowRight, RotateCcw, GitCompare } from "lucide-react";
+import { Search, FileText, RefreshCw, AlertCircle, CheckCircle2, FolderOpen, MessageSquare, Edit3, Clock, ChevronRight, ChevronDown, Sparkles, User, Stethoscope, ClipboardCheck, BookOpen, Briefcase, Download, Loader2, Database, FileDown, AlertTriangle, ArrowRight, RotateCcw, GitCompare, Trash2, HelpCircle } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { cn } from "@/lib/utils";
 import { PromptEditor } from "./PromptEditor";
@@ -51,6 +51,10 @@ interface UpdatesResult {
   }>;
   upToDate: Array<{
     id: string;
+  }>;
+  orphaned: Array<{
+    id: string;
+    description: string;
   }>;
   totalHardcoded: number;
 }
@@ -798,9 +802,24 @@ export function DevPrompts() {
                                       </div>
                                       {genPrompts.length > 0 ? <div className="space-y-2">
                                           {genPrompts.map(prompt => <PromptMiniCard key={prompt.id} prompt={prompt} onEdit={() => openEditor(prompt)} />)}
-                                        </div> : <p className="text-xs text-muted-foreground italic py-2">
-                                          Nenhum prompt de geração
-                                        </p>}
+                                        </div> : <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <span className="text-xs text-muted-foreground cursor-help flex items-center gap-1 py-2">
+                                              <HelpCircle className="h-3 w-3" />
+                                              Nenhum prompt de geração
+                                            </span>
+                                          </TooltipTrigger>
+                                          <TooltipContent className="max-w-xs">
+                                            <p>
+                                              Campos descritivos (história, exames, atividades) usam apenas
+                                              <strong> Regerar</strong> para extrair do PDF original.
+                                            </p>
+                                            <p className="mt-1">
+                                              Prompts de <strong>Gerar</strong> são usados em campos analíticos
+                                              (nexo causal, incapacidade) que combinam dados de outros campos.
+                                            </p>
+                                          </TooltipContent>
+                                        </Tooltip>}
                                     </div>
 
                                     {/* Coluna Regerar */}
@@ -893,24 +912,49 @@ export function DevPrompts() {
 
           {pendingUpdates && <div className="space-y-4">
               {/* Summary */}
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-5 gap-2">
                 <Card className="p-3">
                   <div className="text-xl font-bold text-center">{pendingUpdates.totalHardcoded}</div>
                   <div className="text-xs text-muted-foreground text-center">No código</div>
                 </Card>
+                <Card className={cn("p-3", (pendingUpdates.orphaned?.length || 0) > 0 && "border-destructive/50 bg-destructive/5")}>
+                  <div className="text-xl font-bold text-center text-destructive">{pendingUpdates.orphaned?.length || 0}</div>
+                  <div className="text-xs text-muted-foreground text-center">Órfãos</div>
+                </Card>
                 <Card className={cn("p-3", pendingUpdates.outdatedDescriptions.length > 0 && "border-amber-500/30")}>
                   <div className="text-xl font-bold text-center text-amber-600">{pendingUpdates.outdatedDescriptions.length}</div>
-                  <div className="text-xs text-muted-foreground text-center">Labels desatualizados</div>
+                  <div className="text-xs text-muted-foreground text-center">Desatualizados</div>
                 </Card>
                 <Card className={cn("p-3", pendingUpdates.newPrompts.length > 0 && "border-blue-500/30")}>
                   <div className="text-xl font-bold text-center text-blue-600">{pendingUpdates.newPrompts.length}</div>
-                  <div className="text-xs text-muted-foreground text-center">Novos prompts</div>
+                  <div className="text-xs text-muted-foreground text-center">Novos</div>
                 </Card>
                 <Card className={cn("p-3", pendingUpdates.customized.length > 0 && "border-green-500/30")}>
                   <div className="text-xl font-bold text-center text-green-600">{pendingUpdates.customized.length}</div>
                   <div className="text-xs text-muted-foreground text-center">Personalizados</div>
                 </Card>
               </div>
+
+              {/* Orphaned prompts - NEW SECTION */}
+              {pendingUpdates.orphaned && pendingUpdates.orphaned.length > 0 && <div className="border rounded-lg p-4 border-destructive/50 bg-destructive/5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                    <h4 className="font-semibold text-destructive">Prompts Órfãos ({pendingUpdates.orphaned.length})</h4>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Estes prompts existem no banco mas foram <strong>removidos do código</strong>. 
+                    Serão deletados ao clicar em "Restaurar Tudo":
+                  </p>
+                  <ScrollArea className="max-h-32">
+                    <div className="space-y-1">
+                      {pendingUpdates.orphaned.map(p => <div key={p.id} className="text-sm flex items-center gap-2 p-2 bg-destructive/10 rounded">
+                          <Trash2 className="h-3 w-3 text-destructive flex-shrink-0" />
+                          <code className="text-xs bg-muted px-1 rounded">{p.id}</code>
+                          <span className="text-muted-foreground text-xs truncate">- {p.description}</span>
+                        </div>)}
+                    </div>
+                  </ScrollArea>
+                </div>}
 
               {/* Outdated descriptions */}
               {pendingUpdates.outdatedDescriptions.length > 0 && <div className="border rounded-lg p-4">
@@ -968,7 +1012,7 @@ export function DevPrompts() {
                 </div>}
 
               {/* All up to date message */}
-              {pendingUpdates.outdatedDescriptions.length === 0 && pendingUpdates.newPrompts.length === 0 && <div className="border rounded-lg p-6 text-center">
+              {pendingUpdates.outdatedDescriptions.length === 0 && pendingUpdates.newPrompts.length === 0 && (pendingUpdates.orphaned?.length || 0) === 0 && <div className="border rounded-lg p-6 text-center">
                   <CheckCircle2 className="h-12 w-12 text-green-500 mx-auto mb-3" />
                   <h4 className="font-semibold text-green-600">Tudo sincronizado!</h4>
                   <p className="text-sm text-muted-foreground mt-1">
