@@ -433,7 +433,7 @@ export default function LaudoEditor() {
             cids: currentLaudo.conclusaoCID,
             historiaAcidente: currentLaudo.historiaAcidente,
             historiaAtual: currentLaudo.historiaAtual,
-            postoTrabalho: currentLaudo.descricaoPostoTrabalho,
+            postoTrabalho: currentLaudo.descricaoAtividadesLaborais,
             atividadesLaborais: currentLaudo.descricaoAtividadesLaborais,
             antecedentes: currentLaudo.antecedentes,
           }
