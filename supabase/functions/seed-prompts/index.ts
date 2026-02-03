@@ -722,6 +722,164 @@ Retorne APENAS o JSON válido com os campos preenchidos conforme encontrado nos 
   }
 };
 
+// ============================================
+// HELPER: Get all prompts as a map
+// ============================================
+
+function getAllPromptsMap(): Record<string, { prompt: string; description: string; cardId: string; sectionId: string; variables?: string[] }> {
+  const map: Record<string, { prompt: string; description: string; cardId: string; sectionId: string; variables?: string[] }> = {};
+  
+  for (const [id, data] of Object.entries(regenPrompts)) {
+    map[id] = { prompt: data.prompt, description: data.description, cardId: data.cardId, sectionId: data.sectionId };
+  }
+  
+  for (const [id, data] of Object.entries(genPrompts)) {
+    map[id] = { prompt: data.prompt, description: data.description, cardId: data.cardId, sectionId: data.sectionId, variables: data.variables };
+  }
+  
+  for (const [id, data] of Object.entries(systemPrompts)) {
+    map[id] = { prompt: data.prompt, description: data.description, cardId: data.cardId, sectionId: data.sectionId };
+  }
+  
+  return map;
+}
+
+// ============================================
+// ACTION: Check for updates
+// ============================================
+
+// deno-lint-ignore no-explicit-any
+async function checkUpdates(supabase: any) {
+  const hardcodedPrompts = getAllPromptsMap();
+  
+  const results = {
+    outdatedDescriptions: [] as Array<{ id: string; current: string; new: string }>,
+    newPrompts: [] as Array<{ id: string; description: string }>,
+    customized: [] as Array<{ id: string; description: string }>,
+    upToDate: [] as Array<{ id: string }>,
+    totalHardcoded: Object.keys(hardcodedPrompts).length
+  };
+  
+  for (const [id, config] of Object.entries(hardcodedPrompts)) {
+    const { data: existing } = await supabase
+      .from('system_config')
+      .select('value')
+      .eq('id', id)
+      .single();
+    
+    if (!existing) {
+      results.newPrompts.push({ id, description: config.description });
+    } else {
+      const dbConfig = existing.value as { prompt?: string; description?: string };
+      
+      // Check if description/metadata changed
+      if (dbConfig.description !== config.description) {
+        results.outdatedDescriptions.push({
+          id,
+          current: dbConfig.description || '(sem descrição)',
+          new: config.description
+        });
+      }
+      
+      // Check if prompt was customized
+      if (dbConfig.prompt !== config.prompt) {
+        results.customized.push({
+          id,
+          description: config.description
+        });
+      } else {
+        results.upToDate.push({ id });
+      }
+    }
+  }
+  
+  return results;
+}
+
+// ============================================
+// ACTION: Sync metadata only (preserve prompt content)
+// ============================================
+
+// deno-lint-ignore no-explicit-any
+async function syncMetadataOnly(supabase: any) {
+  const hardcodedPrompts = getAllPromptsMap();
+  
+  let updated = 0;
+  let inserted = 0;
+  let errors = 0;
+  
+  for (const [id, config] of Object.entries(hardcodedPrompts)) {
+    const { data: existing } = await supabase
+      .from('system_config')
+      .select('value')
+      .eq('id', id)
+      .single();
+    
+    if (existing) {
+      // Preserve the existing prompt, update only metadata
+      // deno-lint-ignore no-explicit-any
+      const existingValue = existing.value as Record<string, any>;
+      const updatedConfig: Record<string, unknown> = {
+        ...existingValue,
+        description: config.description,
+        cardId: config.cardId,
+        sectionId: config.sectionId,
+        isClassified: true,
+        // Preserve: prompt, variables (if user edited them)
+      };
+      
+      // Only update variables if they don't exist in DB
+      if (!existingValue.variables && config.variables) {
+        updatedConfig.variables = config.variables;
+      }
+      
+      const { error } = await supabase
+        .from('system_config')
+        .update({ 
+          value: updatedConfig, 
+          description: config.description,
+          updated_at: new Date().toISOString() 
+        })
+        .eq('id', id);
+      
+      if (error) {
+        console.error(`[seed-prompts] Error updating metadata for ${id}:`, error);
+        errors++;
+      } else {
+        updated++;
+      }
+    } else {
+      // Insert new prompt with full content
+      const newValue = {
+        prompt: config.prompt,
+        description: config.description,
+        cardId: config.cardId,
+        sectionId: config.sectionId,
+        variables: config.variables,
+        isClassified: true
+      };
+      
+      const { error } = await supabase
+        .from('system_config')
+        .insert({
+          id,
+          value: newValue,
+          description: config.description,
+          updated_at: new Date().toISOString()
+        });
+      
+      if (error) {
+        console.error(`[seed-prompts] Error inserting ${id}:`, error);
+        errors++;
+      } else {
+        inserted++;
+      }
+    }
+  }
+  
+  return { updated, inserted, errors };
+}
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -758,7 +916,41 @@ serve(async (req) => {
       );
     }
 
-    console.log('[seed-prompts] Starting prompt seeding...');
+    // Parse request body for action
+    let action = 'seed'; // default action
+    try {
+      const body = await req.json();
+      action = body?.action || 'seed';
+    } catch {
+      // No body or invalid JSON, use default action
+    }
+
+    console.log(`[seed-prompts] Action: ${action}`);
+
+    // Handle check_updates action
+    if (action === 'check_updates') {
+      const results = await checkUpdates(supabase);
+      console.log(`[seed-prompts] Check updates: ${results.outdatedDescriptions.length} outdated, ${results.newPrompts.length} new, ${results.customized.length} customized`);
+      
+      return new Response(
+        JSON.stringify({ success: true, ...results }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Handle sync_metadata action
+    if (action === 'sync_metadata') {
+      const results = await syncMetadataOnly(supabase);
+      console.log(`[seed-prompts] Sync metadata: ${results.updated} updated, ${results.inserted} inserted, ${results.errors} errors`);
+      
+      return new Response(
+        JSON.stringify({ success: true, ...results }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Default: Full seed (factory reset)
+    console.log('[seed-prompts] Starting full prompt seeding...');
 
     // Combine all prompts
     const allPrompts: Array<{
