@@ -1,96 +1,152 @@
 
-## Diagnóstico (por que “impugnacao” não aparece no DevPanel > Prompts IA)
 
-- O prompt **existe** no backend (tabela `system_config`) e também **existe no código-fonte** (em `seed-prompts`), com:
-  - `id: prompt_system_impugnacao`
-  - `cardId: impugnacao`
-  - `sectionId: resposta`
-- Porém, a UI do DevPanel (`src/components/dev-panel/DevPrompts.tsx`) **só renderiza prompts “classificados”** se o `cardId/sectionId` existir na estrutura conhecida `LAUDO_STRUCTURE`.
-- Hoje, `LAUDO_STRUCTURE` é construído a partir de:
-  - `LAUDO_CARDS_STRUCTURE` (estrutura do LaudoEditor)
-  - `PROMPT_ONLY_CARDS` (cards extras “só para prompts”)
-- **A categoria `impugnacao` não está em `PROMPT_ONLY_CARDS`**, então o prompt fica em um “limbo”:
-  - Ele é considerado “classificado” (tem `cardId` e `sectionId`)
-  - Mas não entra em nenhum agrupamento exibido
-  - Resultado: **não aparece em lugar nenhum na lista**
+# Tornar Metodologia Pericial Editável via Banco de Dados
 
-## Resposta objetiva sobre “Restaurar Tudo” (e seus receios)
+## Objetivo
 
-- “Restaurar Tudo” chama a função `seed-prompts` com `action: 'seed'`, que faz duas coisas:
-  1) **Deleta prompts órfãos** (existem no banco mas não existem mais no código).
-  2) **Sobrescreve o conteúdo** dos prompts do banco com o conteúdo “padrão de fábrica” do código.
-- Você NÃO vai “perder” o `prompt_system_impugnacao` por causa do restore, porque ele está no código (`seed-prompts`) e portanto **não é órfão**.
-- O risco real do “Restaurar Tudo” é outro: **ele vai sobrescrever seus prompts personalizados** (os 8 “Personalizados” que você viu).
-- Então, se o objetivo for somente “arrumar a lista” / “limpar órfãos”, **não recomendo** “Restaurar Tudo” agora.
+Permitir editar o texto padrão da "Metodologia Pericial" diretamente no banco de dados, sem necessidade de alterar código.
 
-## Objetivo do ajuste agora
+## Texto Padrão (Novo)
 
-1) Fazer a categoria **Impugnação** aparecer em DevPanel > Prompts IA.
-2) Garantir que o prompt `prompt_system_impugnacao` apareça dentro dela.
-3) Evitar que qualquer prompt “classificado” com `cardId/sectionId` desconhecidos fique invisível no futuro (segurança de UX).
+```text
+A perícia médica judicial foi realizada segundo critérios técnicos e científicos reconhecidos na Medicina Legal e na Perícia Médica, observando princípios de causalidade médica, análise de exposição e risco ocupacional e fundamentos de Medicina Baseada em Evidências, em consonância com referenciais técnicos da Associação Brasileira de Medicina Legal e Perícia Médica.
 
----
+O procedimento pericial compreendeu:
 
-## Mudanças propostas (mínimas e seguras)
+a) anamnese clínica e ocupacional;
 
-### A) Adicionar “Impugnação” como card exclusivo de prompts (não mexe no LaudoEditor)
-**Arquivo**: `src/lib/laudo-structure.ts`
+b) exame físico pericial direto;
 
-- Incluir um novo item em `PROMPT_ONLY_CARDS`:
-  - `id: "impugnacao"`
-  - `label: "Impugnação"`
-  - `sections: [{ id: "resposta", label: "Resposta à Impugnação" }]`
+c) análise crítica dos documentos médicos apresentados e daqueles constantes nos autos;
 
-Impacto:
-- Isso **não entra** no LaudoEditor (porque o LaudoEditor usa `LAUDO_CARDS_STRUCTURE` e ignora `PROMPT_ONLY_CARDS`).
-- Isso **entra** no DevPrompts, porque ele usa `[...LAUDO_CARDS_STRUCTURE, ...PROMPT_ONLY_CARDS]`.
+d) avaliação das atividades laborativas sob a ótica dos riscos ocupacionais, quando pertinente.
 
-### B) (Opcional, mas recomendado) Adicionar ícone para “Impugnação” no DevPanel
-**Arquivo**: `src/components/dev-panel/DevPrompts.tsx`
+A análise do nexo causal ou concausal foi realizada com base em critérios técnicos consagrados na literatura médico-pericial, incluindo a classificação de Schilling e os critérios de Simonin e de Bradford-Hill, correlacionando os achados clínicos, o curso temporal, a plausibilidade biológica e a compatibilidade com o padrão de exposição ocupacional descrito.
 
-- Incluir `impugnacao` no `cardIcons` para ficar visualmente consistente (se não fizer, ele usa um ícone padrão; não quebra nada).
+A avaliação da capacidade laborativa foi efetuada de forma individualizada, considerando as exigências funcionais da atividade exercida e a repercussão clínico-funcional dos achados ao exame físico, conforme recomendações técnicas em saúde ocupacional e medicina do trabalho.
 
-### C) (Recomendação de segurança) Não deixar prompts “classificados” sumirem se tiverem card/section desconhecidos
-**Arquivo**: `src/components/dev-panel/DevPrompts.tsx`
+Ressalta-se que este Perito Judicial limita-se à análise técnico-pericial, não sendo de sua atribuição questionar, revisar ou emitir juízo de valor sobre condutas adotadas por profissionais assistentes, cujos registros foram considerados exclusivamente como elementos informativos no contexto da presente perícia.
 
-Hoje:
-- Se `p.cardId/p.sectionId` não existirem no `LAUDO_STRUCTURE`, o prompt simplesmente não é renderizado.
-
-Ajuste simples:
-- Ao montar as listas:
-  - Continuar considerando “classificados” apenas os prompts com `cardId/sectionId`
-  - Mas se o `cardId/sectionId` não existir na estrutura, tratar como “não classificado” (ou “inconsistente”) e exibir na aba “Não classificados” com um aviso.
-
-Isso evita que qualquer prompt fique invisível por divergência de metadados.
+Os achados foram interpretados à luz do princípio da imparcialidade, do contraditório e do conjunto probatório disponível nos autos.
+```
 
 ---
 
-## Como proceder agora (orientação prática para você)
+## Implementação
 
-1) **Não clique em “Restaurar Tudo”** se você quer preservar seus 8 prompts personalizados.
-2) No seu caso, como “Desatualizados = 0” e “Novos = 0”, não há nada para “Sincronizar Labels”.
-3) O problema principal é só de **UI/estrutura**: a categoria “impugnação” não existe na árvore do DevPanel — vamos corrigir com as mudanças acima.
-4) Depois que a categoria aparecer, você verá o prompt “Instruções para Gerar Resposta a Impugnação” dentro dela e poderá editar normalmente.
+### 1. Inserir configuração no banco de dados
+
+Inserir na tabela `system_config` com ID `config_metodologia_padrao`:
+
+```sql
+INSERT INTO system_config (id, value, description)
+VALUES (
+  'config_metodologia_padrao',
+  '{"texto": "A perícia médica judicial foi realizada segundo critérios técnicos e científicos reconhecidos na Medicina Legal e na Perícia Médica, observando princípios de causalidade médica, análise de exposição e risco ocupacional e fundamentos de Medicina Baseada em Evidências, em consonância com referenciais técnicos da Associação Brasileira de Medicina Legal e Perícia Médica.\n\nO procedimento pericial compreendeu:\n\na) anamnese clínica e ocupacional;\n\nb) exame físico pericial direto;\n\nc) análise crítica dos documentos médicos apresentados e daqueles constantes nos autos;\n\nd) avaliação das atividades laborativas sob a ótica dos riscos ocupacionais, quando pertinente.\n\nA análise do nexo causal ou concausal foi realizada com base em critérios técnicos consagrados na literatura médico-pericial, incluindo a classificação de Schilling e os critérios de Simonin e de Bradford-Hill, correlacionando os achados clínicos, o curso temporal, a plausibilidade biológica e a compatibilidade com o padrão de exposição ocupacional descrito.\n\nA avaliação da capacidade laborativa foi efetuada de forma individualizada, considerando as exigências funcionais da atividade exercida e a repercussão clínico-funcional dos achados ao exame físico, conforme recomendações técnicas em saúde ocupacional e medicina do trabalho.\n\nRessalta-se que este Perito Judicial limita-se à análise técnico-pericial, não sendo de sua atribuição questionar, revisar ou emitir juízo de valor sobre condutas adotadas por profissionais assistentes, cujos registros foram considerados exclusivamente como elementos informativos no contexto da presente perícia.\n\nOs achados foram interpretados à luz do princípio da imparcialidade, do contraditório e do conjunto probatório disponível nos autos."}'::jsonb,
+  'Texto padrão da Metodologia Pericial'
+)
+ON CONFLICT (id) DO UPDATE SET 
+  value = EXCLUDED.value,
+  description = EXCLUDED.description,
+  updated_at = now();
+```
+
+### 2. Modificar componente MetodologiaPericial.tsx
+
+**Mudanças:**
+
+| Antes | Depois |
+|-------|--------|
+| Texto padrão hardcoded em constante | Buscar do banco via `useEffect` |
+| `handleRestaurarPadrao` usa constante | Usa estado carregado do banco |
+
+**Código atualizado:**
+
+```typescript
+import { useState, useEffect } from "react";
+import { useLaudo } from "@/contexts/LaudoContext";
+import { supabase } from "@/integrations/supabase/client";
+// ... demais imports
+
+// Fallback caso banco esteja indisponível
+const METODOLOGIA_FALLBACK = `A perícia médica judicial foi realizada segundo critérios técnicos...`;
+
+export function MetodologiaPericial() {
+  const { currentLaudo, updateLaudo } = useLaudo();
+  const [metodologiaPadrao, setMetodologiaPadrao] = useState(METODOLOGIA_FALLBACK);
+  const [loading, setLoading] = useState(true);
+
+  // Buscar texto padrão do banco na montagem
+  useEffect(() => {
+    const fetchMetodologia = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("system_config")
+          .select("value")
+          .eq("id", "config_metodologia_padrao")
+          .single();
+
+        if (data?.value && !error) {
+          const parsed = typeof data.value === 'string' 
+            ? JSON.parse(data.value) 
+            : data.value;
+          if (parsed.texto) {
+            setMetodologiaPadrao(parsed.texto);
+          }
+        }
+      } catch (err) {
+        console.error("Erro ao buscar metodologia padrão:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchMetodologia();
+  }, []);
+
+  const handleRestaurarPadrao = () => {
+    updateLaudo({ metodologiaPericial: metodologiaPadrao });
+  };
+  
+  // ... resto do componente
+}
+```
 
 ---
 
-## Verificação (checklist de validação)
+## Arquivos a Modificar
 
-Após implementar:
-
-1) Abrir **DevPanel > Prompts IA**
-2) Confirmar que existe o card/categoria **Impugnação**
-3) Confirmar que dentro dele aparece:
-   - `prompt_system_impugnacao` (descrição: “Instruções para Gerar Resposta a Impugnação”)
-4) Testar o fluxo end-to-end:
-   - Ir em “Responder Impugnação”
-   - Clicar “Gerar com IA”
-   - Confirmar que funciona e que alterações no prompt refletem na próxima geração
+| Arquivo | Ação |
+|---------|------|
+| Tabela `system_config` | INSERT da configuração |
+| `src/components/laudo/sections/MetodologiaPericial.tsx` | Buscar texto do banco |
 
 ---
 
-## Risco e impacto
+## Como Editar Futuramente (Opção A)
 
-- Risco para “Laudos”: **zero** (não altera LaudoEditor nem prompts de laudo).
-- Risco para “Impugnação”: **muito baixo** (só melhora visibilidade/organização do prompt já existente).
-- Benefício: o prompt deixa de ficar “invisível” e a estrutura do DevPanel passa a refletir corretamente o que o backend já suporta.
+Para alterar o texto da metodologia, execute via SQL:
+
+```sql
+UPDATE system_config
+SET value = '{"texto": "SEU NOVO TEXTO AQUI"}'::jsonb,
+    updated_at = now()
+WHERE id = 'config_metodologia_padrao';
+```
+
+---
+
+## Lembrete para o Futuro
+
+Quando este assunto surgir novamente, considerar implementar a **Opção B**: criar uma interface no DevPanel (aba "Configurações de Texto") para editar `config_metodologia_padrao` visualmente, sem necessidade de SQL.
+
+---
+
+## Resultado Esperado
+
+1. O botão "Restaurar padrão" usará o texto do banco de dados
+2. Laudos **existentes** não são afetados
+3. Novos laudos ou ao clicar "Restaurar padrão" recebem o novo texto
+4. Fallback seguro: se o banco falhar, usa texto hardcoded
+5. Editável via SQL sem deploy de código
+
