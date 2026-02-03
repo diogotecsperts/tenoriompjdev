@@ -12,22 +12,22 @@ const corsHeaders = {
 
 // Mapeamento de campos para IDs de prompt e metadados
 const fieldPromptMapping: Record<string, { promptId: string; cardId: string; sectionId: string; description: string }> = {
-  historiaAtual: { promptId: 'prompt_regen_historiaAtual', cardId: 'periciando', sectionId: 'anamnese', description: 'História atual - Regenerar via PDF' },
+  historiaAtual: { promptId: 'prompt_regen_historiaAtual', cardId: 'periciando', sectionId: 'anamnese', description: 'História da Moléstia Atual - Regenerar via PDF' },
   historicoOcupacional: { promptId: 'prompt_regen_historicoOcupacional', cardId: 'periciando', sectionId: 'anamnese', description: 'Histórico ocupacional - Regenerar via PDF' },
   historiaAcidente: { promptId: 'prompt_regen_historiaAcidente', cardId: 'periciando', sectionId: 'acidente', description: 'História do acidente - Regenerar via PDF' },
-  antecedentes: { promptId: 'prompt_regen_antecedentes', cardId: 'periciando', sectionId: 'antecedentes', description: 'Antecedentes patológicos - Regenerar via PDF' },
+  antecedentes: { promptId: 'prompt_regen_antecedentes', cardId: 'periciando', sectionId: 'antecedentes', description: 'Antecedentes Pessoais e Familiares - Regenerar via PDF' },
   tratamentos: { promptId: 'prompt_regen_tratamentos', cardId: 'periciando', sectionId: 'antecedentes', description: 'Tratamentos realizados - Regenerar via PDF' },
-  afastamentos: { promptId: 'prompt_regen_afastamentos', cardId: 'periciando', sectionId: 'antecedentes', description: 'Afastamentos - Regenerar via PDF' },
-  laudosMedicos: { promptId: 'prompt_regen_laudosMedicos', cardId: 'exame', sectionId: 'laudos', description: 'Laudos médicos - Regenerar via PDF' },
-  examesComplementares: { promptId: 'prompt_regen_examesComplementares', cardId: 'exame', sectionId: 'exames', description: 'Exames complementares - Regenerar via PDF' },
-  exameFisico: { promptId: 'prompt_regen_exameFisico', cardId: 'exame', sectionId: 'exame-fisico', description: 'Exame físico - Regenerar via PDF' },
+  afastamentos: { promptId: 'prompt_regen_afastamentos', cardId: 'periciando', sectionId: 'antecedentes', description: 'Afastamentos do Trabalho - Regenerar via PDF' },
+  laudosMedicos: { promptId: 'prompt_regen_laudosMedicos', cardId: 'exame', sectionId: 'laudos', description: 'Descrição dos Laudos Médicos - Regenerar via PDF' },
+  examesComplementares: { promptId: 'prompt_regen_examesComplementares', cardId: 'exame', sectionId: 'exames', description: 'Descrição dos Exames Complementares - Regenerar via PDF' },
+  exameFisico: { promptId: 'prompt_regen_exameFisico', cardId: 'exame', sectionId: 'exame-fisico', description: 'Achados do Exame Físico - Regenerar via PDF' },
   // Campo descricaoPostoTrabalho foi removido - campo unificado é descricaoAtividadesLaborais
   descricaoAtividadesLaborais: { promptId: 'prompt_regen_descricaoAtividadesLaborais', cardId: 'posto-trabalho', sectionId: 'dados-posto', description: 'Ambiente e atividades laborais - Regenerar via PDF' },
   descricaoTecnicaDoencas: { promptId: 'prompt_regen_descricaoTecnicaDoencas', cardId: 'analise-tecnica', sectionId: 'descricao-doencas', description: 'Descrição técnica das doenças - Regenerar via PDF' },
   conclusaoAnalise: { promptId: 'prompt_regen_conclusaoAnalise', cardId: 'conclusao', sectionId: 'conclusao', description: 'Análise conclusiva - Regenerar via PDF' },
   tabelaSUSEP: { promptId: 'prompt_regen_tabelaSUSEP', cardId: 'conclusao', sectionId: 'sequelas', description: 'Tabela SUSEP - Regenerar via PDF' },
   danoEstetico: { promptId: 'prompt_regen_danoEstetico', cardId: 'conclusao', sectionId: 'sequelas', description: 'Dano estético - Regenerar via PDF' },
-  auxilioTerceiros: { promptId: 'prompt_regen_auxilioTerceiros', cardId: 'conclusao', sectionId: 'sequelas', description: 'Auxílio de terceiros - Regenerar via PDF' },
+  auxilioTerceiros: { promptId: 'prompt_regen_auxilioTerceiros', cardId: 'conclusao', sectionId: 'sequelas', description: 'Necessidade de Auxílio de Terceiros - Regenerar via PDF' },
   quesitosJuizo: { promptId: 'prompt_regen_quesitosJuizo', cardId: 'conclusao', sectionId: 'quesitos', description: 'Quesitos do juízo - Regenerar via PDF' },
   quesitosReclamante: { promptId: 'prompt_regen_quesitosReclamante', cardId: 'conclusao', sectionId: 'quesitos', description: 'Quesitos do reclamante - Regenerar via PDF' },
   quesitosReclamada: { promptId: 'prompt_regen_quesitosReclamada', cardId: 'conclusao', sectionId: 'quesitos', description: 'Quesitos da reclamada - Regenerar via PDF' },
@@ -186,25 +186,7 @@ SE HOUVER DESCRIÇÃO DE EXAME FÍSICO, EXTRAIA:
 
 Se não houver exame físico descrito nos autos, retorne: "Exame físico não descrito nos autos do processo."`,
 
-  descricaoPostoTrabalho: `Extraia e detalhe a "Descrição do Posto de Trabalho" do documento.
-
-EXTRAIA COM MÁXIMO DETALHAMENTO:
-- Ambiente físico (interno/externo, coberto/descoberto, climatizado)
-- Dimensões e layout do local de trabalho
-- Equipamentos e máquinas utilizados (listar todos)
-- Mobiliário disponível (mesa, cadeira, bancada - alturas, regulagens)
-- Condições ergonômicas do posto
-- Exposição a riscos físicos:
-  * Ruído (intensidade se disponível)
-  * Vibração (tipo, frequência)
-  * Temperatura extrema
-  * Radiação
-- Exposição a riscos químicos (produtos, substâncias)
-- Condições de iluminação e ventilação
-- EPIs fornecidos e utilizados
-
-Busque em: PPP, PPRA, PCMSO, laudos ergonômicos, depoimentos.
-MÍNIMO 2 parágrafos. Seja detalhado.`,
+  // NOTA: descricaoPostoTrabalho foi REMOVIDO - campo unificado em descricaoAtividadesLaborais
 
   descricaoAtividadesLaborais: `Extraia e detalhe as "Atividades Laborais" ou "Descrição das Funções" do documento.
 
