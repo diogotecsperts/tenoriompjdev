@@ -1,259 +1,248 @@
 
-# Plano de Correção das Pendências - Fase Final
+# Plano de Refatoracao da Pagina DevPrompts
 
-## Sumário Executivo
+## Visao Geral
 
-Este plano corrige todas as pendências identificadas na implementação anterior, garantindo 100% de conformidade com o plano original aprovado.
-
----
-
-## PENDÊNCIAS IDENTIFICADAS E CORREÇÕES
-
-### 1. Remover Referências ao Campo `descricaoPostoTrabalho`
-
-O campo foi visualmente removido do componente `DadosPostoTrabalho.tsx`, mas ainda existe em vários outros arquivos do sistema.
-
-#### 1.1 Arquivos que Precisam de Correção
-
-| Arquivo | Linha | Problema | Solução |
-|---------|-------|----------|---------|
-| `src/contexts/LaudoContext.tsx` | 85, 204, 322, 424, 525, 624, 714 | Campo ainda existe na interface e mapeamento | Manter campo na interface (compatibilidade com banco), mas ignorar/não usar |
-| `src/hooks/useLaudoProgress.ts` | 42 | Campo conta para progresso | REMOVER da lista de campos do card "posto-trabalho" |
-| `src/pages/LaudoEditor.tsx` | 436 | Passa campo para contexto de IA | Substituir por `descricaoAtividadesLaborais` |
-| `src/components/laudo/sections/ReferenciasBibliograficas.tsx` | 25 | Usa campo para contexto de IA | Substituir por `descricaoAtividadesLaborais` |
-| `supabase/functions/regerar-campo-pdf/index.ts` | 24 | Prompt de regeneração para campo antigo | REMOVER entrada do mapeamento |
-| `src/components/tools/ImportarAutosDialog.tsx` | 996 | Mapeia dados extraídos para campo antigo | Unificar dados em `descricao_atividades_laborais` |
-
-#### 1.2 Decisão Técnica Importante
-
-**O campo `descricaoPostoTrabalho` NÃO será removido do LaudoContext ou banco de dados** porque:
-1. Laudos antigos podem ter dados nesse campo
-2. Migração de esquema de banco é complexa e arriscada
-
-**Estratégia: Migração em Tempo de Execução**
-- Ao carregar um laudo, concatenar `descricaoPostoTrabalho` + `descricaoAtividadesLaborais` em um único campo
-- Ao salvar, gravar tudo apenas em `descricaoAtividadesLaborais`
-- Limpar `descricaoPostoTrabalho` após migração
+Este plano foca em melhorias de organizacao e layout da pagina de Prompts IA, sem alterar a logica funcional. O objetivo e criar uma experiencia mais intuitiva que espelhe a ordem exata do laudo e separe claramente os tipos de prompts.
 
 ---
 
-### 2. Atualizar Prompt de Extração do PDF
+## PROBLEMAS IDENTIFICADOS
 
-#### Arquivo: `supabase/functions/processar-autos/index.ts`
+| Problema | Impacto | Solucao |
+|----------|---------|---------|
+| Prompt obsoleto `descricaoPostoTrabalho` no seed-prompts | Confusao - mostra campo que nao existe mais | Remover do arquivo de seed |
+| Nomes inconsistentes entre UI do laudo e DevPrompts | Usuario nao entende qual campo esta editando | Padronizar nomenclatura |
+| Gerar/Regerar misturados sem distincao | Dificil encontrar o prompt certo | Agrupar por tipo dentro de cada secao |
+| Muito scroll para navegar | Experiencia ruim | Adicionar navegacao lateral fixa |
 
-**Mudança no Schema JSON:**
+---
 
-Atual:
-```json
-"posto_trabalho": {
-  "descricao_ambiente": "",
-  "descricao_atividades": ""
-}
-```
+## MUDANCAS PROPOSTAS
 
-Novo:
-```json
-"posto_trabalho": {
-  "ambiente_e_atividades": ""
-}
-```
+### 1. Remover Prompt Obsoleto do Seed-Prompts
 
-**Mudança nas Instruções:**
+**Arquivo:** `supabase/functions/seed-prompts/index.ts`
 
-Seção 10.4 e 10.5 devem ser UNIFICADAS:
+**Acao:** Remover a entrada `prompt_regen_descricaoPostoTrabalho` (linhas 199-222) que referencia o campo legado que foi unificado.
 
-```
-10.4. ambiente_e_atividades - CAMPO UNIFICADO - DETALHAR AO MÁXIMO:
+**Justificativa:** Este prompt nao deveria mais existir apos a consolidacao de campos para "Ambiente e Atividades Laborais".
 
-AMBIENTE DE TRABALHO:
-- Ambiente físico (interno/externo, coberto/descoberto, climatizado)
-- Dimensões aproximadas do local
-- Equipamentos e máquinas utilizados
-- Mobiliário (mesa, cadeira, bancada)
-- Condições ergonômicas do posto
-- Exposição a riscos físicos (ruído, vibração, temperatura)
-- Exposição a riscos químicos e biológicos
-- Condições de iluminação e ventilação
-- EPIs fornecidos e utilizados
+---
 
-ATIVIDADES LABORAIS:
-- Descrição completa das tarefas diárias
-- Movimentos repetitivos (quais, frequência, duração)
-- Esforço físico exigido (peso carregado, frequência)
-- Posturas predominantes (tempo em cada postura)
-- Jornada de trabalho e horas extras
-- Pausas durante o trabalho
-- Ritmo de trabalho e metas
-- Ferramentas manuais utilizadas
+### 2. Padronizar Nomenclatura
 
-MÍNIMO 3 parágrafos. Busque em PPP, PPRA, PCMSO, laudos ergonômicos, depoimentos.
+**Problema:** O campo no laudo chama "Ambiente e Atividades Laborais" mas o prompt chama "Descricao das atividades laborais".
+
+**Solucao:** Atualizar a descricao do prompt para refletir o nome correto:
+
+```typescript
+// Antes
+description: 'Descricao das atividades laborais - Regenerar via PDF'
+
+// Depois  
+description: 'Ambiente e Atividades Laborais - Regenerar via PDF'
 ```
 
 ---
 
-### 3. Atualizar Mapeamento no ImportarAutosDialog
+### 3. Novo Layout da Pagina DevPrompts
 
-#### Arquivo: `src/components/tools/ImportarAutosDialog.tsx`
+**Conceito:** Layout em 2 colunas com navegacao lateral fixa
 
-**Mudança na Linha ~996:**
-
-De:
-```typescript
-descricao_posto_trabalho: extractedData.posto_trabalho?.descricao_ambiente || '',
-descricao_atividades_laborais: extractedData.posto_trabalho?.descricao_atividades || '',
+```text
++-------------------+----------------------------------------+
+|  NAVEGACAO LATERAL |         AREA DE CONTEUDO              |
+|  (fixa, 240px)     |         (scroll independente)         |
++-------------------+----------------------------------------+
+| ▼ Dados Preliminares |  Dados Preliminares                 |
+|   - Perito           |  +--------------------------------+  |
+|   - Processo         |  | Dados do Perito                |  |
+|   - Objetivo         |  | Gerar | Regerar                |  |
+|   - Documentos       |  | [prompt cards lado a lado]     |  |
+| ▼ Resumo dos Autos   |  +--------------------------------+  |
+|   - Resumo           |  +--------------------------------+  |
+|   - Metodologia      |  | Dados do Processo              |  |
+| ▼ Dados do Periciando|  | Gerar | Regerar                |  |
+|   ...                |  | [prompt cards lado a lado]     |  |
+|                      |  +--------------------------------+  |
+| [Nao Classificados]  |                                      |
++-------------------+----------------------------------------+
 ```
 
-Para:
-```typescript
-descricao_posto_trabalho: '', // Campo legado - não mais usado
-descricao_atividades_laborais: 
-  (extractedData.posto_trabalho?.ambiente_e_atividades || '') ||
-  [extractedData.posto_trabalho?.descricao_ambiente, extractedData.posto_trabalho?.descricao_atividades]
-    .filter(Boolean).join('\n\n'),
-```
-
-**Compatibilidade retroativa:** Se o PDF foi processado com o prompt antigo (campos separados), concatenar ambos.
+**Beneficios:**
+- Navegacao rapida sem precisar rolar toda a pagina
+- Click no item da navegacao faz scroll suave ate a secao
+- Cada secao mostra claramente os prompts "Gerar" e "Regerar" separados
+- Cards mais compactos em grid 2 colunas
 
 ---
 
-### 4. Adicionar Lógica de Migração de Dados Legados
+### 4. Reorganizacao de Cada Secao
 
-#### Arquivo: `src/contexts/LaudoContext.tsx`
-
-**Adicionar função de migração:**
-
-```typescript
-const migrateLegacyFields = (laudo: LaudoData): LaudoData => {
-  // Migrar descricaoPostoTrabalho para descricaoAtividadesLaborais
-  if (laudo.descricaoPostoTrabalho && laudo.descricaoPostoTrabalho.trim()) {
-    const existing = laudo.descricaoAtividadesLaborais?.trim() || '';
-    const legacy = laudo.descricaoPostoTrabalho.trim();
-    
-    // Concatenar se atividades também tem conteúdo
-    if (existing && !existing.includes(legacy)) {
-      laudo.descricaoAtividadesLaborais = `${legacy}\n\n${existing}`;
-    } else if (!existing) {
-      laudo.descricaoAtividadesLaborais = legacy;
-    }
-    
-    // Limpar campo legado
-    laudo.descricaoPostoTrabalho = '';
-  }
-  
-  return laudo;
-};
+**Estrutura atual (confusa):**
+```
+Secao: Dados do Posto de Trabalho
+  - prompt_regen_descricaoPostoTrabalho (Regerar)
+  - prompt_regen_descricaoAtividadesLaborais (Regerar)
+  [prompts misturados sem logica clara]
 ```
 
-**Aplicar em `loadLaudo` e `refreshLaudos`:**
-Após mapear os dados do banco, chamar `migrateLegacyFields()`.
+**Nova estrutura (organizada):**
+```
+Secao: Ambiente e Atividades Laborais
+  +-------------------+-------------------+
+  | GERAR             | REGERAR           |
+  +-------------------+-------------------+
+  | (nenhum)          | Regenerar via PDF |
+  +-------------------+-------------------+
+```
+
+**Cada prompt card mostrara:**
+- Badge colorido (Gerar=Verde, Regerar=Azul, Sistema=Cinza)
+- Descricao curta
+- Data de atualizacao
+- Icone de edicao
 
 ---
 
-### 5. Remover Campo do useLaudoProgress
+### 5. Componentes a Criar/Modificar
 
-#### Arquivo: `src/hooks/useLaudoProgress.ts`
-
-**Linha 38-44 - Antes:**
-```typescript
-"posto-trabalho": [
-  "dadosFuncionaisCargo",
-  "dadosFuncionaisAdmissao",
-  "dadosFuncionaisAfastamento",
-  "descricaoPostoTrabalho",
-  "descricaoAtividadesLaborais",
-],
-```
-
-**Depois:**
-```typescript
-"posto-trabalho": [
-  "dadosFuncionaisCargo",
-  "dadosFuncionaisAdmissao",
-  "dadosFuncionaisAfastamento",
-  "descricaoAtividadesLaborais",
-],
-```
+| Arquivo | Tipo | Descricao |
+|---------|------|-----------|
+| `src/components/dev-panel/DevPrompts.tsx` | Modificar | Novo layout 2 colunas, navegacao lateral |
+| `src/components/dev-panel/PromptSectionCard.tsx` | Criar (opcional) | Card de secao com separacao Gerar/Regerar |
+| `supabase/functions/seed-prompts/index.ts` | Modificar | Remover prompt obsoleto, atualizar descricoes |
 
 ---
 
-### 6. Atualizar Referências em LaudoEditor e ReferenciasBibliograficas
+### 6. Navegacao Lateral - Especificacao
 
-#### Arquivo: `src/pages/LaudoEditor.tsx` (linha ~436)
+**Comportamento:**
+- Lista hierarquica de Cards e Secoes seguindo exatamente a ordem do `LAUDO_STRUCTURE`
+- Cards podem expandir/colapsar para mostrar secoes
+- Click em secao faz scroll suave ate o elemento correspondente
+- Item ativo destacado visualmente
+- Contador de prompts ao lado de cada item
+- Posicao fixa durante scroll
 
-**Antes:**
-```typescript
-contexto: {
-  postoTrabalho: currentLaudo.descricaoPostoTrabalho,
-  atividadesLaborais: currentLaudo.descricaoAtividadesLaborais,
-```
+**Codigo conceitual:**
+```tsx
+<div className="flex gap-6">
+  {/* Navegacao lateral fixa */}
+  <aside className="w-60 shrink-0 sticky top-0 h-[calc(100vh-200px)]">
+    <ScrollArea className="h-full pr-4">
+      {LAUDO_STRUCTURE.map(card => (
+        <Collapsible key={card.id} defaultOpen>
+          <CollapsibleTrigger className="w-full">
+            <div className="flex justify-between py-2">
+              <span className="font-medium">{card.title}</span>
+              <Badge variant="outline">{count}</Badge>
+            </div>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            {card.sections.map(section => (
+              <button 
+                key={section.id}
+                onClick={() => scrollToSection(section.id)}
+                className={cn(
+                  "w-full text-left pl-4 py-1 text-sm",
+                  activeSection === section.id && "text-primary font-medium"
+                )}
+              >
+                {section.label}
+              </button>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
+      ))}
+    </ScrollArea>
+  </aside>
 
-**Depois:**
-```typescript
-contexto: {
-  postoTrabalho: currentLaudo.descricaoAtividadesLaborais, // Campo unificado
-  atividadesLaborais: currentLaudo.descricaoAtividadesLaborais,
-```
-
-#### Arquivo: `src/components/laudo/sections/ReferenciasBibliograficas.tsx` (linha ~25)
-
-**Antes:**
-```typescript
-postoTrabalho: currentLaudo.descricaoPostoTrabalho || '',
-```
-
-**Depois:**
-```typescript
-postoTrabalho: currentLaudo.descricaoAtividadesLaborais || '',
-```
-
----
-
-### 7. Remover Prompt de Regeneração do Campo Legado
-
-#### Arquivo: `supabase/functions/regerar-campo-pdf/index.ts`
-
-**Remover linha 24:**
-```typescript
-descricaoPostoTrabalho: { promptId: 'prompt_regen_descricaoPostoTrabalho', ... },
+  {/* Area de conteudo */}
+  <main className="flex-1">
+    {/* Secoes com refs para scroll */}
+  </main>
+</div>
 ```
 
 ---
 
-## RESUMO DAS ALTERAÇÕES
+### 7. Card de Secao com Separacao Gerar/Regerar
 
-| Arquivo | Tipo de Mudança |
-|---------|-----------------|
-| `src/contexts/LaudoContext.tsx` | Adicionar função `migrateLegacyFields()` |
-| `src/hooks/useLaudoProgress.ts` | Remover `descricaoPostoTrabalho` do array |
-| `src/pages/LaudoEditor.tsx` | Substituir referência por `descricaoAtividadesLaborais` |
-| `src/components/laudo/sections/ReferenciasBibliograficas.tsx` | Substituir referência |
-| `src/components/tools/ImportarAutosDialog.tsx` | Unificar mapeamento de dados |
-| `supabase/functions/processar-autos/index.ts` | Unificar prompt de extração |
-| `supabase/functions/regerar-campo-pdf/index.ts` | Remover entrada do campo legado |
+**Layout de cada secao:**
+```tsx
+<Card id={`section-${section.id}`} ref={sectionRefs[section.id]}>
+  <CardHeader>
+    <CardTitle>{section.label}</CardTitle>
+  </CardHeader>
+  <CardContent>
+    <div className="grid grid-cols-2 gap-4">
+      {/* Coluna Gerar */}
+      <div className="space-y-2">
+        <h4 className="text-sm font-medium text-emerald-600">
+          <Sparkles className="inline h-4 w-4 mr-1" />
+          Gerar
+        </h4>
+        {gerarPrompts.length > 0 ? (
+          gerarPrompts.map(p => <PromptMiniCard prompt={p} />)
+        ) : (
+          <p className="text-xs text-muted-foreground italic">
+            Nenhum prompt de geracao
+          </p>
+        )}
+      </div>
+      
+      {/* Coluna Regerar */}
+      <div className="space-y-2">
+        <h4 className="text-sm font-medium text-blue-600">
+          <RefreshCw className="inline h-4 w-4 mr-1" />
+          Regerar
+        </h4>
+        {regenarPrompts.map(p => <PromptMiniCard prompt={p} />)}
+      </div>
+    </div>
+  </CardContent>
+</Card>
+```
 
 ---
 
-## GARANTIAS DE QUALIDADE
+## RESUMO DAS MUDANCAS
 
-Após esta implementação:
-
-1. **100% do plano original será implementado**
-2. **Dados legados serão migrados automaticamente** ao carregar laudos antigos
-3. **Novos laudos usarão apenas o campo unificado**
-4. **Nenhuma quebra de compatibilidade** com laudos existentes
-5. **Prompts atualizados para extração consolidada**
-6. **Progresso do laudo calculado corretamente** (sem campo fantasma)
+| Categoria | Mudanca | Impacto na Logica |
+|-----------|---------|-------------------|
+| Dados | Remover prompt obsoleto | Nenhum (prompt nao era usado) |
+| Nomenclatura | Padronizar descricoes | Nenhum (apenas labels) |
+| Layout | 2 colunas com nav lateral | Nenhum (visual apenas) |
+| Organizacao | Separar Gerar/Regerar por coluna | Nenhum (visual apenas) |
+| Navegacao | Scroll suave para secoes | Nenhum (UX apenas) |
 
 ---
 
-## APLICAÇÃO GLOBAL
+## GARANTIAS
 
-Todas as mudanças serão aplicadas:
-- ✅ No código fonte (frontend React)
-- ✅ Nas Edge Functions (backend Supabase)
-- ✅ Na lógica de importação de PDFs
-- ✅ Na lógica de regeneração de campos
-- ✅ No cálculo de progresso do laudo
-- ✅ Na geração de sugestões de IA
+1. **Zero impacto na logica** - Todas as mudancas sao visuais e organizacionais
+2. **Retrocompatibilidade** - Prompts existentes continuam funcionando
+3. **Nomenclatura unificada** - Mesmos nomes no laudo e no DevPrompts
+4. **Ordem identica ao laudo** - Navegacao espelha exatamente a estrutura do LaudoEditor
+5. **Separacao clara** - Gerar e Regerar nunca mais misturados
 
-**Resultado:** Sistema consistente e limpo para todos os usuários existentes e novos.
+---
+
+## ORDEM DE IMPLEMENTACAO
+
+```text
+FASE 1 - Limpeza de Dados
+├── Remover prompt obsoleto do seed-prompts
+└── Atualizar descricoes para nomenclatura correta
+
+FASE 2 - Refatoracao do Layout
+├── Criar estrutura 2 colunas
+├── Implementar navegacao lateral fixa
+└── Adicionar scroll suave para secoes
+
+FASE 3 - Organizacao por Tipo
+├── Separar prompts Gerar/Regerar em cada secao
+└── Grid 2 colunas dentro de cada Card
+```
