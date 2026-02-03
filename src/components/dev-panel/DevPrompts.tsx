@@ -12,7 +12,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { Search, FileText, RefreshCw, AlertCircle, CheckCircle2, FolderOpen, MessageSquare, Edit3, Clock, ChevronRight, ChevronDown, Sparkles, User, Stethoscope, ClipboardCheck, BookOpen, Briefcase, Download, Loader2, Database, FileDown, AlertTriangle, ArrowRight, RotateCcw, GitCompare, Trash2, HelpCircle } from "lucide-react";
+import { Search, FileText, RefreshCw, AlertCircle, CheckCircle2, FolderOpen, MessageSquare, Edit3, Clock, ChevronRight, ChevronDown, Sparkles, User, Stethoscope, ClipboardCheck, BookOpen, Briefcase, Download, Loader2, Database, FileDown, AlertTriangle, ArrowRight, RotateCcw, GitCompare, Trash2, HelpCircle, Scale } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { cn } from "@/lib/utils";
 import { PromptEditor } from "./PromptEditor";
@@ -72,7 +72,8 @@ const cardIcons: Record<string, React.ComponentType<{
   conclusao: CheckCircle2,
   referencias: BookOpen,
   _system: RefreshCw,
-  _global: Sparkles
+  _global: Sparkles,
+  impugnacao: Scale
 };
 
 // Build LAUDO_STRUCTURE from shared module
@@ -298,6 +299,7 @@ export function DevPrompts() {
       unclassifiedPrompts: unclassified
     };
   }, [prompts]);
+  
 
   // Filtrar por busca
   const filteredClassified = useMemo(() => {
@@ -305,28 +307,42 @@ export function DevPrompts() {
     const term = searchTerm.toLowerCase();
     return classifiedPrompts.filter(p => p.id.toLowerCase().includes(term) || p.description?.toLowerCase().includes(term) || p.prompt?.toLowerCase().includes(term));
   }, [classifiedPrompts, searchTerm]);
-  const filteredUnclassified = useMemo(() => {
-    if (!searchTerm) return unclassifiedPrompts;
-    const term = searchTerm.toLowerCase();
-    return unclassifiedPrompts.filter(p => p.id.toLowerCase().includes(term) || p.description?.toLowerCase().includes(term) || p.prompt?.toLowerCase().includes(term));
-  }, [unclassifiedPrompts, searchTerm]);
 
   // Agrupar prompts classificados por card/section
-  const groupedPrompts = useMemo(() => {
+  // Prompts com cardId/sectionId desconhecidos são tratados como não classificados
+  const { groupedPrompts, orphanedClassified } = useMemo(() => {
     const grouped: Record<string, Record<string, PromptConfig[]>> = {};
+    const orphaned: PromptConfig[] = [];
+    
     LAUDO_STRUCTURE.forEach(card => {
       grouped[card.id] = {};
       card.sections.forEach(section => {
         grouped[card.id][section.id] = [];
       });
     });
+    
     filteredClassified.forEach(p => {
       if (p.cardId && p.sectionId && grouped[p.cardId]?.[p.sectionId]) {
         grouped[p.cardId][p.sectionId].push(p);
+      } else if (p.cardId || p.sectionId) {
+        // Has classification but doesn't match known structure - treat as orphaned
+        orphaned.push(p);
       }
     });
-    return grouped;
+    
+    return { groupedPrompts: grouped, orphanedClassified: orphaned };
   }, [filteredClassified]);
+
+  // Combined unclassified: truly unclassified + orphaned (unknown cardId/sectionId)
+  const combinedUnclassified = useMemo(() => {
+    return [...unclassifiedPrompts, ...orphanedClassified];
+  }, [unclassifiedPrompts, orphanedClassified]);
+  
+  const filteredUnclassified = useMemo(() => {
+    if (!searchTerm) return combinedUnclassified;
+    const term = searchTerm.toLowerCase();
+    return combinedUnclassified.filter(p => p.id.toLowerCase().includes(term) || p.description?.toLowerCase().includes(term) || p.prompt?.toLowerCase().includes(term));
+  }, [combinedUnclassified, searchTerm]);
 
   // Separar prompts por tipo (Gerar vs Regerar)
   const getPromptsTypeSplit = (prompts: PromptConfig[]) => {
