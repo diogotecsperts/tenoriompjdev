@@ -418,29 +418,32 @@ serve(async (req) => {
     
     // Buscar prompt customizado via prompt-manager
     const mapping = promptMapping[tipo];
+    
+    // Contexto completo para interpolação - todas as variáveis possíveis
+    const interpolationContext = {
+      cids: contexto.cids || 'Não informado',
+      postoTrabalho: contexto.postoTrabalho || 'Não informado',
+      atividadesLaborais: contexto.atividadesLaborais || 'Não informado',
+      historicoOcupacional: contexto.historicoOcupacional || 'Não informado',
+      exameFisico: contexto.exameFisico || 'Não informado',
+      examesComplementares: contexto.examesComplementares || 'Não informado',
+      antecedentes: contexto.antecedentes || 'Não informado',
+      tratamentos: contexto.tratamentos || 'Não informado',
+      historiaAcidente: contexto.historiaAcidente || 'Não informado',
+      historiaAtual: contexto.historiaAtual || 'Não informado',
+      peticaoInicial: contexto.peticaoInicial || 'Não informado',
+      contestacao: contexto.contestacao || 'Não informado',
+      nexoCausal: contexto.nexoCausal || 'Não informado',
+      conclusao: contexto.conclusao || 'Não informado',
+      metodologia: contexto.metodologia || 'Não informado',
+      textoOriginal: contexto.textoOriginal || '',
+      campo: contexto.campo || 'Não especificado',
+    };
+    
     const prompt = await getPrompt(
       mapping.promptId,
       defaultPrompt,
-      {
-        // Variáveis para interpolação
-        peticaoInicial: contexto.peticaoInicial || '',
-        contestacao: contexto.contestacao || '',
-        cids: contexto.cids || '',
-        postoTrabalho: contexto.postoTrabalho || '',
-        atividadesLaborais: contexto.atividadesLaborais || '',
-        historicoOcupacional: contexto.historicoOcupacional || '',
-        exameFisico: contexto.exameFisico || '',
-        examesComplementares: contexto.examesComplementares || '',
-        antecedentes: contexto.antecedentes || '',
-        tratamentos: contexto.tratamentos || '',
-        historiaAcidente: contexto.historiaAcidente || '',
-        historiaAtual: contexto.historiaAtual || '',
-        nexoCausal: contexto.nexoCausal || '',
-        conclusao: contexto.conclusao || '',
-        metodologia: contexto.metodologia || '',
-        textoOriginal: contexto.textoOriginal || '',
-        campo: contexto.campo || ''
-      },
+      interpolationContext,
       {
         autoRegister: true,
         description: mapping.description,
