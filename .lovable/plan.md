@@ -1,355 +1,259 @@
 
-# Plano de Refatoracao e Otimizacao do Sistema Pericial
+# Plano de Correção das Pendências - Fase Final
 
-## Visao Geral
+## Sumário Executivo
 
-Este plano aborda 6 grandes areas de melhorias solicitadas, organizadas em ordem de prioridade tecnica e dependencias entre si.
-
----
-
-## PARTE 1: Reestruturacao da UI e Fluxo
-
-### 1.1 Refatoracao da Secao "Descricao Tecnica das Doencas"
-
-**Arquivo:** `src/components/laudo/sections/DescricaoTecnicaDoencas.tsx`
-
-**Mudancas:**
-
-| Elemento | Estado Atual | Estado Futuro |
-|----------|--------------|---------------|
-| Campo "Inserir CID" | Substitui texto "{CID}" nos campos | Gera descricao tecnica via IA |
-| Campo "Descricao Tecnica" | Pre-preenchido na importacao | Inicia VAZIO, recebe dados sob demanda |
-| Botao "Aplicar" | Localizar/substituir | Chama IA e ADICIONA texto ao final |
-| Multiplos CIDs | Nao suportado | Aceita lista separada por virgula |
-
-**Nova Logica do Botao "Aplicar":**
-
-```text
-Usuario digita: "M54.5, G56.0, M75.1"
-         |
-         v
-Clica em "Aplicar"
-         |
-         v
-Edge Function busca descricao oficial de cada CID
-         |
-         v
-Retorna texto formatado para cada CID:
-  - Nome completo
-  - Definicao tecnica
-  - Etiologia
-  - Caracteristicas clinicas
-         |
-         v
-ADICIONA ao campo "Descricao Tecnica" (abaixo do existente)
-```
-
-**Componente Refatorado:**
-- Input aceita multiplos CIDs (placeholder: "Ex: M54.5, G56.0")
-- Botao "Aplicar" chama novo endpoint `gerar-resumos` com tipo `descricao_cid`
-- Loading state durante busca
-- Texto gerado e CONCATENADO (append) ao campo existente
-- Separador visual entre blocos de CIDs diferentes
-
-**Edge Function:** Adicionar novo tipo `descricao_cid` em `gerar-resumos` que:
-1. Recebe lista de CIDs
-2. Gera descricao tecnica de cada um
-3. Formata com titulos em CAIXA ALTA
-4. Retorna texto organizado
+Este plano corrige todas as pendências identificadas na implementação anterior, garantindo 100% de conformidade com o plano original aprovado.
 
 ---
 
-### 1.2 Fusao de Campos: "Dados do Posto de Trabalho"
+## PENDÊNCIAS IDENTIFICADAS E CORREÇÕES
 
-**Arquivo:** `src/components/laudo/sections/DadosPostoTrabalho.tsx`
+### 1. Remover Referências ao Campo `descricaoPostoTrabalho`
 
-**Mudanca:** Remover o campo "Descricao do Posto de Trabalho" e manter apenas "Descricao das Atividades Laborais"
+O campo foi visualmente removido do componente `DadosPostoTrabalho.tsx`, mas ainda existe em vários outros arquivos do sistema.
 
-| Campo Atual | Acao |
-|-------------|------|
-| `descricaoPostoTrabalho` | REMOVER do componente |
-| `descricaoAtividadesLaborais` | MANTER e expandir placeholder |
+#### 1.1 Arquivos que Precisam de Correção
 
-**Novo Placeholder do Campo Unificado:**
-```
-Descreva o ambiente de trabalho (mobiliario, equipamentos, condicoes ergonomicas), 
-bem como as atividades desenvolvidas pelo trabalhador, incluindo movimentos 
-repetitivos, posturas adotadas, carga de trabalho e jornada...
-```
+| Arquivo | Linha | Problema | Solução |
+|---------|-------|----------|---------|
+| `src/contexts/LaudoContext.tsx` | 85, 204, 322, 424, 525, 624, 714 | Campo ainda existe na interface e mapeamento | Manter campo na interface (compatibilidade com banco), mas ignorar/não usar |
+| `src/hooks/useLaudoProgress.ts` | 42 | Campo conta para progresso | REMOVER da lista de campos do card "posto-trabalho" |
+| `src/pages/LaudoEditor.tsx` | 436 | Passa campo para contexto de IA | Substituir por `descricaoAtividadesLaborais` |
+| `src/components/laudo/sections/ReferenciasBibliograficas.tsx` | 25 | Usa campo para contexto de IA | Substituir por `descricaoAtividadesLaborais` |
+| `supabase/functions/regerar-campo-pdf/index.ts` | 24 | Prompt de regeneração para campo antigo | REMOVER entrada do mapeamento |
+| `src/components/tools/ImportarAutosDialog.tsx` | 996 | Mapeia dados extraídos para campo antigo | Unificar dados em `descricao_atividades_laborais` |
 
-**IMPORTANTE - Migrar dados existentes:**
-- No LaudoContext, ao carregar laudo: se `descricaoPostoTrabalho` tiver conteudo e `descricaoAtividadesLaborais` estiver vazio, concatenar os dois
-- Prompt de extracao do PDF deve ser atualizado para consolidar tudo neste unico campo
+#### 1.2 Decisão Técnica Importante
 
-**Impacto no PDF:**
-- Em `generateLaudoPDF.ts`: Remover linhas 528-532 que renderizam `descricaoPostoTrabalho` separadamente
-- Ajustar subtitulo para "Ambiente e Atividades Laborais"
+**O campo `descricaoPostoTrabalho` NÃO será removido do LaudoContext ou banco de dados** porque:
+1. Laudos antigos podem ter dados nesse campo
+2. Migração de esquema de banco é complexa e arriscada
+
+**Estratégia: Migração em Tempo de Execução**
+- Ao carregar um laudo, concatenar `descricaoPostoTrabalho` + `descricaoAtividadesLaborais` em um único campo
+- Ao salvar, gravar tudo apenas em `descricaoAtividadesLaborais`
+- Limpar `descricaoPostoTrabalho` após migração
 
 ---
 
-### 1.3 Conversao RadioGroup para Checkboxes - Analise de Incapacidade
+### 2. Atualizar Prompt de Extração do PDF
 
-**Arquivo:** `src/components/laudo/sections/AnaliseIncapacidade.tsx`
+#### Arquivo: `supabase/functions/processar-autos/index.ts`
 
-**Estado Atual:** RadioGroup com 5 opcoes (selecao unica)
-**Estado Futuro:** Grupo de Checkboxes (multipla selecao)
+**Mudança no Schema JSON:**
 
-**Mudancas Tecnicas:**
+Atual:
+```json
+"posto_trabalho": {
+  "descricao_ambiente": "",
+  "descricao_atividades": ""
+}
+```
+
+Novo:
+```json
+"posto_trabalho": {
+  "ambiente_e_atividades": ""
+}
+```
+
+**Mudança nas Instruções:**
+
+Seção 10.4 e 10.5 devem ser UNIFICADAS:
+
+```
+10.4. ambiente_e_atividades - CAMPO UNIFICADO - DETALHAR AO MÁXIMO:
+
+AMBIENTE DE TRABALHO:
+- Ambiente físico (interno/externo, coberto/descoberto, climatizado)
+- Dimensões aproximadas do local
+- Equipamentos e máquinas utilizados
+- Mobiliário (mesa, cadeira, bancada)
+- Condições ergonômicas do posto
+- Exposição a riscos físicos (ruído, vibração, temperatura)
+- Exposição a riscos químicos e biológicos
+- Condições de iluminação e ventilação
+- EPIs fornecidos e utilizados
+
+ATIVIDADES LABORAIS:
+- Descrição completa das tarefas diárias
+- Movimentos repetitivos (quais, frequência, duração)
+- Esforço físico exigido (peso carregado, frequência)
+- Posturas predominantes (tempo em cada postura)
+- Jornada de trabalho e horas extras
+- Pausas durante o trabalho
+- Ritmo de trabalho e metas
+- Ferramentas manuais utilizadas
+
+MÍNIMO 3 parágrafos. Busque em PPP, PPRA, PCMSO, laudos ergonômicos, depoimentos.
+```
+
+---
+
+### 3. Atualizar Mapeamento no ImportarAutosDialog
+
+#### Arquivo: `src/components/tools/ImportarAutosDialog.tsx`
+
+**Mudança na Linha ~996:**
+
+De:
+```typescript
+descricao_posto_trabalho: extractedData.posto_trabalho?.descricao_ambiente || '',
+descricao_atividades_laborais: extractedData.posto_trabalho?.descricao_atividades || '',
+```
+
+Para:
+```typescript
+descricao_posto_trabalho: '', // Campo legado - não mais usado
+descricao_atividades_laborais: 
+  (extractedData.posto_trabalho?.ambiente_e_atividades || '') ||
+  [extractedData.posto_trabalho?.descricao_ambiente, extractedData.posto_trabalho?.descricao_atividades]
+    .filter(Boolean).join('\n\n'),
+```
+
+**Compatibilidade retroativa:** Se o PDF foi processado com o prompt antigo (campos separados), concatenar ambos.
+
+---
+
+### 4. Adicionar Lógica de Migração de Dados Legados
+
+#### Arquivo: `src/contexts/LaudoContext.tsx`
+
+**Adicionar função de migração:**
 
 ```typescript
-// Antes: string unico
-conclusaoStatus: string
-
-// Depois: array de strings
-incapacidadeTipos: string[] 
-```
-
-**Novo Componente:**
-- Substituir `<RadioGroup>` por grupo de `<Checkbox>` individuais
-- Handler alterna items no array
-- Salvar como JSON array no banco (campo `conclusao_status` aceita texto, converter para JSON stringify)
-
-**Mapeamento de Dados:**
-| Valor | Label |
-|-------|-------|
-| `total_temporaria` | Incapacidade Total Temporaria |
-| `parcial_permanente` | Incapacidade Parcial Permanente |
-| `parcial_temporaria` | Incapacidade Parcial Temporaria |
-| `ausencia` | Ausencia de Incapacidade |
-| `total_permanente` | Incapacidade Total Permanente |
-
----
-
-### 1.4 Correcao de Formatacao dos Quesitos
-
-**Problema:** Quesitos do Reclamante e Reclamada saindo em bloco unico no PDF
-**Solucao:** Verificar e ajustar a funcao `addParagraph` para respeitar quebras de linha
-
-**Arquivo:** `src/utils/generateLaudoPDF.ts`
-
-**Analise:** A funcao `addParagraph` ja utiliza `splitTextToSize`, mas o texto original pode estar vindo sem `\n` adequados. A correcao deve ser:
-
-1. No prompt de extracao (`processar-autos`): Garantir que cada quesito venha em linha separada
-2. No PDF: Processar linhas individualmente quando detectar padrao de quesito numerado
-
-**Regex para detectar quesitos:**
-```typescript
-const isQuesito = /^\d+[\.\)]\s/.test(line.trim());
-// Matches: "1. Texto", "1) Texto", "2. Texto", etc.
-```
-
----
-
-### 1.5 Markdown no PDF - Remover Asteriscos
-
-**Problema:** Texto exportado exibe `**texto**` ao inves de negrito
-**Solucao:** Sanitizar markdown antes de renderizar
-
-**Arquivo:** `src/utils/generateLaudoPDF.ts`
-
-**Funcao de Sanitizacao:**
-```typescript
-const sanitizeMarkdown = (text: string): string => {
-  return text
-    .replace(/\*\*(.+?)\*\*/g, (_, p1) => p1.toUpperCase()) // **texto** -> TEXTO
-    .replace(/\*(.+?)\*/g, '$1')  // *texto* -> texto
-    .replace(/__(.+?)__/g, (_, p1) => p1.toUpperCase()) // __texto__ -> TEXTO
-    .replace(/_(.+?)_/g, '$1'); // _texto_ -> texto
+const migrateLegacyFields = (laudo: LaudoData): LaudoData => {
+  // Migrar descricaoPostoTrabalho para descricaoAtividadesLaborais
+  if (laudo.descricaoPostoTrabalho && laudo.descricaoPostoTrabalho.trim()) {
+    const existing = laudo.descricaoAtividadesLaborais?.trim() || '';
+    const legacy = laudo.descricaoPostoTrabalho.trim();
+    
+    // Concatenar se atividades também tem conteúdo
+    if (existing && !existing.includes(legacy)) {
+      laudo.descricaoAtividadesLaborais = `${legacy}\n\n${existing}`;
+    } else if (!existing) {
+      laudo.descricaoAtividadesLaborais = legacy;
+    }
+    
+    // Limpar campo legado
+    laudo.descricaoPostoTrabalho = '';
+  }
+  
+  return laudo;
 };
 ```
 
-**Aplicar em:** Todas as chamadas de `addParagraph`, `addLabeledField`, etc.
+**Aplicar em `loadLaudo` e `refreshLaudos`:**
+Após mapear os dados do banco, chamar `migrateLegacyFields()`.
 
 ---
 
-## PARTE 2: Gestao de Estado e Cache
+### 5. Remover Campo do useLaudoProgress
 
-### 2.1 Reset de Estado ao Importar Novo PDF
+#### Arquivo: `src/hooks/useLaudoProgress.ts`
 
-**Problema Identificado:** Dados de laudo anterior persistem ao abrir novo laudo
-
-**Arquivo Principal:** `src/contexts/LaudoContext.tsx`
-
-**Arquivos Secundarios:**
-- `src/components/laudo/sections/DescricaoTecnicaDoencas.tsx` (estado local `sidValue`)
-- Outros componentes com `useState` local
-
-**Solucao:**
-
-1. **LaudoContext - Reset Explícito:**
-   - Quando `createLocalLaudo()` e chamado, garantir que TODOS os campos iniciam vazios
-   - Quando `loadLaudo(id)` e chamado para ID diferente, limpar `currentLaudo` primeiro
-
-2. **Componentes com Estado Local:**
-   - Adicionar `useEffect` que reseta estado local quando `currentLaudo.id` muda:
-
+**Linha 38-44 - Antes:**
 ```typescript
-// Em DescricaoTecnicaDoencas.tsx
-useEffect(() => {
-  setSidValue(""); // Reset ao trocar de laudo
-}, [currentLaudo?.id]);
+"posto-trabalho": [
+  "dadosFuncionaisCargo",
+  "dadosFuncionaisAdmissao",
+  "dadosFuncionaisAfastamento",
+  "descricaoPostoTrabalho",
+  "descricaoAtividadesLaborais",
+],
 ```
 
-3. **Campo descricaoTecnicaDoencas:**
-   - Inicializar como string vazia `""` no `createLocalLaudo`
-   - NAO pre-popular durante importacao (deixar para o perito adicionar via botao CID)
-
----
-
-## PARTE 3: Referencias Bibliograficas Inteligentes
-
-### 3.1 Logica de Referencias
-
-**Arquivo:** `supabase/functions/gerar-resumos/index.ts`
-
-**Nova Logica:**
-
-| Referencia | Comportamento |
-|------------|---------------|
-| Schilling (1983) | **SEMPRE** incluir |
-| Bradford-Hill (1965) | **SEMPRE** incluir |
-| Simonin (1960) | **SEMPRE** incluir |
-| ANAMT (2026) | **CONDICIONAL** - apenas se detectar ASO/PCMSO no documento |
-| Dinamicas | IA complementa com referencias pertinentes aos CIDs |
-
-**Deteccao de ASO/PCMSO:**
-- Durante extracao do PDF, o sistema ja extrai campo `documentos_checklist`
-- Verificar se existe mencao a "ASO", "PCMSO", "Atestado de Saude Ocupacional"
-- Passar flag `hasOccupationalDocs: boolean` para o prompt de referencias
-
-**Prompt Atualizado:**
-```
-REFERENCIAS OBRIGATORIAS (sempre incluir):
-1- SCHILLING, R.S.F. More effective prevention in occupational health practice. J Soc Occup Med, v. 33, p. 71-79, 1983.
-2- BRADFORD HILL, A. The Environment and Disease: Association or Causation? Proc R Soc Med, v. 58, p. 295-300, 1965.
-3- SIMONIN, C. Medicina Legal Judicial. Barcelona: Editorial JIMS, 1960.
-
-${hasOccupationalDocs ? 
-  '4- ASSOCIACAO NACIONAL DE MEDICINA DO TRABALHO. Diretrizes para avaliacao de nexo tecnico. Sao Paulo: ANAMT, 2026.' : 
-  ''}
-
-REFERENCIAS DINAMICAS:
-Com base nos CIDs ${cids}, adicione 3-4 referencias especificas e reais...
+**Depois:**
+```typescript
+"posto-trabalho": [
+  "dadosFuncionaisCargo",
+  "dadosFuncionaisAdmissao",
+  "dadosFuncionaisAfastamento",
+  "descricaoAtividadesLaborais",
+],
 ```
 
 ---
 
-## PARTE 4: Otimizacao de Prompts Tecnicos
+### 6. Atualizar Referências em LaudoEditor e ReferenciasBibliograficas
 
-### 4.1 Nexo Causal - Criterios Obrigatorios
+#### Arquivo: `src/pages/LaudoEditor.tsx` (linha ~436)
 
-**Arquivo:** `supabase/functions/gerar-resumos/index.ts` (prompt `nexo_causal`)
-
-**Criterios a Incluir no Prompt:**
-
-1. **Classificacao de Schilling (I-IV)**
-   - Grupo I: Doenca ocupacional tipica (trabalho e causa necessaria)
-   - Grupo II: Doenca agravada pelo trabalho (concausa)
-   - Grupo III: Doenca comum sem relacao (ausencia de nexo)
-   - Grupo IV: Doenca do trabalho (lista de doencas ocupacionais)
-
-2. **Criterios de Simonin**
-   - Mecanismo: compatibilidade entre exposicao e patologia
-   - Cronologia: tempo de exposicao vs surgimento
-   - Exclusao de causas extraocupacionais
-
-3. **Criterios de Bradford-Hill**
-   - Forca da associacao
-   - Consistencia
-   - Especificidade
-   - Temporalidade
-   - Gradiente biologico
-   - Plausibilidade
-   - Coerencia
-   - Evidencia experimental
-   - Analogia
-
-4. **ANAMT** (se houver ASO/PCMSO)
-   - Citar diretrizes ocupacionais
-
-5. **Declaracao de insuficiencia**
-   - Se faltar dado critico: "Informacao insuficiente para estabelecer nexo"
-
----
-
-### 4.2 Analise de Incapacidade - Criterios Obrigatorios
-
-**Arquivo:** `supabase/functions/gerar-resumos/index.ts` (prompt `incapacidade`)
-
-**Estrutura do Prompt:**
-
+**Antes:**
+```typescript
+contexto: {
+  postoTrabalho: currentLaudo.descricaoPostoTrabalho,
+  atividadesLaborais: currentLaudo.descricaoAtividadesLaborais,
 ```
-A analise de incapacidade deve abordar OBRIGATORIAMENTE:
 
-1. EXIGENCIAS DA FUNCAO
-   - Descrever as demandas fisicas/cognitivas do cargo
+**Depois:**
+```typescript
+contexto: {
+  postoTrabalho: currentLaudo.descricaoAtividadesLaborais, // Campo unificado
+  atividadesLaborais: currentLaudo.descricaoAtividadesLaborais,
+```
 
-2. BASE CLINICA OBJETIVA
-   - Achados do exame fisico
-   - Resultados de exames complementares
-   - CIDs diagnosticados
+#### Arquivo: `src/components/laudo/sections/ReferenciasBibliograficas.tsx` (linha ~25)
 
-3. LIMITACOES FUNCIONAIS
-   - O que o periciando NAO consegue fazer
-   - Restricoes de movimento, forca, cognicao
+**Antes:**
+```typescript
+postoTrabalho: currentLaudo.descricaoPostoTrabalho || '',
+```
 
-4. CORRELACAO COM NEXO
-   - Aplicar Schilling para classificar a origem
-   - Aplicar Simonin para verificar mecanismo/cronologia
-   - Aplicar Bradford-Hill para fundamentar a associacao
-   - Se houver ASO/PCMSO, citar ANAMT
-
-Concluir com classificacao:
-- Incapacidade Total Temporaria / Parcial Temporaria
-- Incapacidade Total Permanente / Parcial Permanente
-- Ausencia de Incapacidade
+**Depois:**
+```typescript
+postoTrabalho: currentLaudo.descricaoAtividadesLaborais || '',
 ```
 
 ---
 
-## PARTE 5: Arquivos a Modificar (Resumo)
+### 7. Remover Prompt de Regeneração do Campo Legado
 
-| Arquivo | Modificacoes |
-|---------|--------------|
-| `src/components/laudo/sections/DescricaoTecnicaDoencas.tsx` | Refatorar para buscar CIDs via IA e append |
-| `src/components/laudo/sections/DadosPostoTrabalho.tsx` | Remover campo duplicado |
-| `src/components/laudo/sections/AnaliseIncapacidade.tsx` | Converter para Checkboxes |
-| `src/contexts/LaudoContext.tsx` | Reset de estado ao trocar laudo |
-| `src/utils/generateLaudoPDF.ts` | Sanitizar markdown, formatar quesitos |
-| `supabase/functions/gerar-resumos/index.ts` | Novo tipo `descricao_cid`, atualizar prompts |
-| `supabase/functions/processar-autos/index.ts` | Atualizar prompt de extracao |
+#### Arquivo: `supabase/functions/regerar-campo-pdf/index.ts`
 
----
-
-## PARTE 6: Ordem de Implementacao Sugerida
-
-```
-FASE 1 (Prioridade Alta - Corrigir bugs)
-├── 2.1 Reset de estado ao importar PDF
-├── 1.4 Formatacao dos quesitos
-└── 1.5 Markdown no PDF
-
-FASE 2 (Refatoracao de UI)
-├── 1.1 Descricao Tecnica das Doencas
-├── 1.2 Fusao de campos Posto de Trabalho
-└── 1.3 Checkboxes de Incapacidade
-
-FASE 3 (Otimizacao de Prompts)
-├── 4.1 Nexo Causal com criterios
-├── 4.2 Incapacidade com criterios
-└── 3.1 Referencias bibliograficas
+**Remover linha 24:**
+```typescript
+descricaoPostoTrabalho: { promptId: 'prompt_regen_descricaoPostoTrabalho', ... },
 ```
 
 ---
 
-## Observacoes Tecnicas
+## RESUMO DAS ALTERAÇÕES
 
-1. **Nao existe banco de CIDs local**: A geracao de descricoes sera 100% via IA em tempo real
+| Arquivo | Tipo de Mudança |
+|---------|-----------------|
+| `src/contexts/LaudoContext.tsx` | Adicionar função `migrateLegacyFields()` |
+| `src/hooks/useLaudoProgress.ts` | Remover `descricaoPostoTrabalho` do array |
+| `src/pages/LaudoEditor.tsx` | Substituir referência por `descricaoAtividadesLaborais` |
+| `src/components/laudo/sections/ReferenciasBibliograficas.tsx` | Substituir referência |
+| `src/components/tools/ImportarAutosDialog.tsx` | Unificar mapeamento de dados |
+| `supabase/functions/processar-autos/index.ts` | Unificar prompt de extração |
+| `supabase/functions/regerar-campo-pdf/index.ts` | Remover entrada do campo legado |
 
-2. **Campo unificado de Posto de Trabalho**: Dados existentes serao migrados automaticamente
+---
 
-3. **Checkboxes de Incapacidade**: Suporta multipla selecao, serializado como JSON array
+## GARANTIAS DE QUALIDADE
 
-4. **Prompts de Nexo/Incapacidade**: Os prompts serao grandes e detalhados - isso e intencional para garantir qualidade medico-legal
+Após esta implementação:
 
-5. **ANAMT Condicional**: A deteccao de ASO/PCMSO sera feita via analise de texto, nao checkbox manual
+1. **100% do plano original será implementado**
+2. **Dados legados serão migrados automaticamente** ao carregar laudos antigos
+3. **Novos laudos usarão apenas o campo unificado**
+4. **Nenhuma quebra de compatibilidade** com laudos existentes
+5. **Prompts atualizados para extração consolidada**
+6. **Progresso do laudo calculado corretamente** (sem campo fantasma)
+
+---
+
+## APLICAÇÃO GLOBAL
+
+Todas as mudanças serão aplicadas:
+- ✅ No código fonte (frontend React)
+- ✅ Nas Edge Functions (backend Supabase)
+- ✅ Na lógica de importação de PDFs
+- ✅ Na lógica de regeneração de campos
+- ✅ No cálculo de progresso do laudo
+- ✅ Na geração de sugestões de IA
+
+**Resultado:** Sistema consistente e limpo para todos os usuários existentes e novos.
