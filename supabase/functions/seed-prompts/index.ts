@@ -753,22 +753,57 @@ const OBSOLETE_PROMPTS = [
 ];
 
 // ============================================
-// ACTION: Cleanup obsolete prompts
+// ACTION: Cleanup obsolete prompts (AUTOMATIC ORPHAN DETECTION)
 // ============================================
 
 // deno-lint-ignore no-explicit-any
 async function cleanupObsoletePrompts(supabase: any) {
+  const hardcodedPrompts = getAllPromptsMap();
+  const hardcodedIds = new Set(Object.keys(hardcodedPrompts));
+  
+  // Fetch all prompts from database with prompt_% prefix
+  const { data: allDbPrompts, error: fetchError } = await supabase
+    .from('system_config')
+    .select('id')
+    .like('id', 'prompt_%');
+  
+  if (fetchError) {
+    console.error('[seed-prompts] Error fetching prompts for cleanup:', fetchError);
+    return 0;
+  }
+  
   let deletedCount = 0;
   
+  // Delete prompts that exist in DB but NOT in code (orphans)
+  for (const row of (allDbPrompts || [])) {
+    if (!hardcodedIds.has(row.id)) {
+      const { error } = await supabase
+        .from('system_config')
+        .delete()
+        .eq('id', row.id);
+      
+      if (!error) {
+        console.log(`[seed-prompts] Deleted orphan prompt: ${row.id}`);
+        deletedCount++;
+      } else {
+        console.error(`[seed-prompts] Failed to delete orphan ${row.id}:`, error);
+      }
+    }
+  }
+  
+  // Also delete from manual obsolete list (retrocompatibility)
   for (const id of OBSOLETE_PROMPTS) {
-    const { error } = await supabase
-      .from('system_config')
-      .delete()
-      .eq('id', id);
-    
-    if (!error) {
-      console.log(`[seed-prompts] Deleted obsolete prompt: ${id}`);
-      deletedCount++;
+    // Skip if already deleted by automatic detection
+    if (!hardcodedIds.has(id)) {
+      const { error } = await supabase
+        .from('system_config')
+        .delete()
+        .eq('id', id);
+      
+      if (!error) {
+        console.log(`[seed-prompts] Deleted obsolete (manual) prompt: ${id}`);
+        // Don't double-count if already deleted above
+      }
     }
   }
   
