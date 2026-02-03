@@ -14,7 +14,7 @@ const regenPrompts: Record<string, { prompt: string; cardId: string; sectionId: 
   prompt_regen_historiaAtual: {
     cardId: 'periciando',
     sectionId: 'anamnese',
-    description: 'História atual - Regenerar via PDF',
+    description: 'História da Moléstia Atual - Regenerar via PDF',
     prompt: `Extraia e detalhe ao máximo a "História Atual" ou "Queixas Atuais" / "Anamnese" do documento.
 
 EXTRAIA COM MÁXIMO DETALHAMENTO:
@@ -71,7 +71,7 @@ MÍNIMO 2 parágrafos. NÃO resuma. Transcreva todos os detalhes disponíveis.`
   prompt_regen_antecedentes: {
     cardId: 'periciando',
     sectionId: 'antecedentes',
-    description: 'Antecedentes patológicos - Regenerar via PDF',
+    description: 'Antecedentes Pessoais e Familiares - Regenerar via PDF',
     prompt: `Extraia TODOS os "Antecedentes Patológicos" do documento.
 
 LISTE COMPLETAMENTE:
@@ -107,7 +107,7 @@ Seja específico com datas e resultados de cada tratamento.`
   prompt_regen_afastamentos: {
     cardId: 'periciando',
     sectionId: 'antecedentes',
-    description: 'Afastamentos - Regenerar via PDF',
+    description: 'Afastamentos do Trabalho - Regenerar via PDF',
     prompt: `Extraia TODOS os "Períodos de Afastamento" do documento.
 
 LISTE CRONOLOGICAMENTE:
@@ -128,7 +128,7 @@ EXTRAIA DATAS EXATAS. Liste todos os afastamentos identificados.`
   prompt_regen_laudosMedicos: {
     cardId: 'exame',
     sectionId: 'laudos',
-    description: 'Laudos médicos - Regenerar via PDF',
+    description: 'Descrição dos Laudos Médicos - Regenerar via PDF',
     prompt: `Extraia TODOS os "Laudos Médicos" ou "Pareceres Médicos" do documento.
 
 PARA CADA LAUDO, EXTRAIA:
@@ -153,7 +153,7 @@ Liste CADA laudo separadamente. NÃO resuma.`
   prompt_regen_examesComplementares: {
     cardId: 'exame',
     sectionId: 'exames',
-    description: 'Exames complementares - Regenerar via PDF',
+    description: 'Descrição dos Exames Complementares - Regenerar via PDF',
     prompt: `Extraia TODOS os "Exames Complementares" do documento.
 
 PARA CADA EXAME, EXTRAIA:
@@ -175,7 +175,7 @@ NÃO resuma. Liste TODOS os achados de cada exame.`
   prompt_regen_exameFisico: {
     cardId: 'exame',
     sectionId: 'exame-fisico',
-    description: 'Exame físico - Regenerar via PDF',
+    description: 'Achados do Exame Físico - Regenerar via PDF',
     prompt: `Extraia as informações do "Exame Físico" realizadas no periciando.
 
 SE HOUVER DESCRIÇÃO DE EXAME FÍSICO, EXTRAIA:
@@ -313,7 +313,7 @@ Se não houver menção a dano estético, retorne:
   prompt_regen_auxilioTerceiros: {
     cardId: 'conclusao',
     sectionId: 'sequelas',
-    description: 'Auxílio de terceiros - Regenerar via PDF',
+    description: 'Necessidade de Auxílio de Terceiros - Regenerar via PDF',
     prompt: `Extraia informações sobre "Necessidade de Auxílio de Terceiros" do documento.
 
 BUSQUE NOS AUTOS:
