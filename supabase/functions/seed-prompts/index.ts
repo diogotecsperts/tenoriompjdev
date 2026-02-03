@@ -745,27 +745,75 @@ function getAllPromptsMap(): Record<string, { prompt: string; description: strin
 }
 
 // ============================================
+// OBSOLETE PROMPTS - Removed from code, should be deleted from DB
+// ============================================
+
+const OBSOLETE_PROMPTS = [
+  'prompt_regen_descricaoPostoTrabalho', // Unificado em descricaoAtividadesLaborais
+];
+
+// ============================================
+// ACTION: Cleanup obsolete prompts
+// ============================================
+
+// deno-lint-ignore no-explicit-any
+async function cleanupObsoletePrompts(supabase: any) {
+  let deletedCount = 0;
+  
+  for (const id of OBSOLETE_PROMPTS) {
+    const { error } = await supabase
+      .from('system_config')
+      .delete()
+      .eq('id', id);
+    
+    if (!error) {
+      console.log(`[seed-prompts] Deleted obsolete prompt: ${id}`);
+      deletedCount++;
+    }
+  }
+  
+  return deletedCount;
+}
+
+// ============================================
 // ACTION: Check for updates
 // ============================================
 
 // deno-lint-ignore no-explicit-any
 async function checkUpdates(supabase: any) {
   const hardcodedPrompts = getAllPromptsMap();
+  const hardcodedIds = new Set(Object.keys(hardcodedPrompts));
+  
+  // Fetch ALL prompts from database
+  const { data: allDbPrompts } = await supabase
+    .from('system_config')
+    .select('id, value')
+    .like('id', 'prompt_%');
   
   const results = {
     outdatedDescriptions: [] as Array<{ id: string; current: string; new: string }>,
     newPrompts: [] as Array<{ id: string; description: string }>,
     customized: [] as Array<{ id: string; description: string }>,
     upToDate: [] as Array<{ id: string }>,
-    totalHardcoded: Object.keys(hardcodedPrompts).length
+    // NEW: orphaned prompts that exist in DB but removed from code
+    orphaned: [] as Array<{ id: string; description: string }>,
+    totalHardcoded: hardcodedIds.size
   };
   
+  // Detect orphaned prompts: in DB but not in code
+  for (const row of (allDbPrompts || [])) {
+    if (!hardcodedIds.has(row.id)) {
+      const dbConfig = row.value as { description?: string };
+      results.orphaned.push({
+        id: row.id,
+        description: dbConfig?.description || '(sem descrição)'
+      });
+    }
+  }
+  
+  // Check each hardcoded prompt
   for (const [id, config] of Object.entries(hardcodedPrompts)) {
-    const { data: existing } = await supabase
-      .from('system_config')
-      .select('value')
-      .eq('id', id)
-      .single();
+    const existing = (allDbPrompts || []).find((p: { id: string }) => p.id === id);
     
     if (!existing) {
       results.newPrompts.push({ id, description: config.description });
@@ -952,6 +1000,10 @@ serve(async (req) => {
     // Default: Full seed (factory reset)
     console.log('[seed-prompts] Starting full prompt seeding...');
 
+    // First, cleanup obsolete prompts
+    const deletedCount = await cleanupObsoletePrompts(supabase);
+    console.log(`[seed-prompts] Cleaned up ${deletedCount} obsolete prompts`);
+
     // Combine all prompts
     const allPrompts: Array<{
       id: string;
@@ -1046,7 +1098,7 @@ serve(async (req) => {
       }
     }
 
-    console.log(`[seed-prompts] Completed: ${inserted} inserted, ${updated} updated, ${errors} errors`);
+    console.log(`[seed-prompts] Completed: ${inserted} inserted, ${updated} updated, ${deletedCount} deleted, ${errors} errors`);
 
     return new Response(
       JSON.stringify({
@@ -1054,6 +1106,7 @@ serve(async (req) => {
         total: allPrompts.length,
         inserted,
         updated,
+        deleted: deletedCount,
         errors
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
