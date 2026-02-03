@@ -152,6 +152,14 @@ export const PROMPT_ONLY_CARDS: Omit<LaudoCard, "icon">[] = [
       { id: "_aprimorar", label: "Aprimorar Texto" },
     ],
   },
+  {
+    id: "impugnacao",
+    label: "Impugnação",
+    description: "Prompts para resposta a impugnações",
+    sections: [
+      { id: "resposta", label: "Resposta à Impugnação" },
+    ],
+  },
 ];
 
 // ============================================
