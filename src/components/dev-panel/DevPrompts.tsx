@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { useEffect, useState, useMemo, useRef } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -47,6 +48,7 @@ import { jsPDF } from "jspdf";
 import { cn } from "@/lib/utils";
 import { PromptEditor } from "./PromptEditor";
 import { LAUDO_CARDS_STRUCTURE, PROMPT_ONLY_CARDS } from "@/lib/laudo-structure";
+import { useScrollSpy } from "@/hooks/useScrollSpy";
 
 // ============================================
 // TIPOS
@@ -88,6 +90,23 @@ const LAUDO_STRUCTURE = [...LAUDO_CARDS_STRUCTURE, ...PROMPT_ONLY_CARDS].map(car
 }));
 
 // ============================================
+// PROMPT TYPE UTILITIES
+// ============================================
+
+function getPromptType(promptId: string): { type: 'gen' | 'regen' | 'system' | 'import'; label: string; color: string } {
+  if (promptId.startsWith('prompt_gen_')) {
+    return { type: 'gen', label: 'Gerar', color: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30' };
+  }
+  if (promptId.startsWith('prompt_regen_')) {
+    return { type: 'regen', label: 'Regerar', color: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30' };
+  }
+  if (promptId.startsWith('prompt_import_')) {
+    return { type: 'import', label: 'Importar', color: 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30' };
+  }
+  return { type: 'system', label: 'Sistema', color: 'bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/30' };
+}
+
+// ============================================
 // COMPONENTE PRINCIPAL
 // ============================================
 
@@ -102,6 +121,20 @@ export function DevPrompts() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"classified" | "unclassified">("classified");
   const [showSeedConfirmDialog, setShowSeedConfirmDialog] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // Get all section IDs for scroll spy
+  const allSectionIds = useMemo(() => 
+    LAUDO_STRUCTURE.flatMap(card => card.sections.map(s => `section-${s.id}`)),
+    []
+  );
+
+  // Use scroll spy for navigation highlighting
+  const { activeId, scrollToSection } = useScrollSpy({
+    sectionIds: allSectionIds,
+    offset: 120,
+    enabled: activeTab === "classified"
+  });
 
   // Carregar prompts
   const fetchPrompts = async () => {
@@ -169,228 +202,6 @@ export function DevPrompts() {
     }
   };
 
-  // Exportar prompts para PDF
-  const exportToPDF = async () => {
-    setExporting(true);
-    try {
-      const doc = new jsPDF();
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 20;
-      const contentWidth = pageWidth - margin * 2;
-      let yPos = 20;
-
-      // Helper para adicionar nova página se necessário
-      const checkNewPage = (requiredSpace: number = 30) => {
-        if (yPos + requiredSpace > pageHeight - 20) {
-          doc.addPage();
-          yPos = 20;
-          return true;
-        }
-        return false;
-      };
-
-      // Helper para quebrar texto longo
-      const splitText = (text: string, maxWidth: number): string[] => {
-        return doc.splitTextToSize(text, maxWidth);
-      };
-
-      // Header do documento
-      doc.setFontSize(18);
-      doc.setFont("helvetica", "bold");
-      doc.text("BACKUP DE PROMPTS DE IA", pageWidth / 2, yPos, { align: "center" });
-      yPos += 10;
-
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      const dateStr = `Data: ${new Date().toLocaleDateString("pt-BR")} às ${new Date().toLocaleTimeString("pt-BR")}`;
-      doc.text(dateStr, pageWidth / 2, yPos, { align: "center" });
-      yPos += 6;
-
-      doc.text(`Total: ${prompts.length} prompts`, pageWidth / 2, yPos, { align: "center" });
-      yPos += 15;
-
-      // Linha separadora
-      doc.setDrawColor(100);
-      doc.line(margin, yPos, pageWidth - margin, yPos);
-      yPos += 10;
-
-      // Iterar por cada card na ordem do laudo
-      for (const card of LAUDO_STRUCTURE) {
-        const cardPrompts = Object.values(groupedPrompts[card.id] || {}).flat();
-        if (cardPrompts.length === 0) continue;
-
-        checkNewPage(25);
-
-        // Título do card
-        doc.setFontSize(14);
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(59, 130, 246); // Blue
-        doc.text(card.title.toUpperCase(), margin, yPos);
-        yPos += 3;
-
-        // Linha sob o título
-        doc.setDrawColor(59, 130, 246);
-        doc.line(margin, yPos, pageWidth - margin, yPos);
-        yPos += 10;
-
-        // Resetar cor
-        doc.setTextColor(0);
-
-        for (const section of card.sections) {
-          const sectionPrompts = groupedPrompts[card.id]?.[section.id] || [];
-          if (sectionPrompts.length === 0) continue;
-
-          for (const prompt of sectionPrompts) {
-            checkNewPage(50);
-
-            // Box para o prompt
-            const boxStartY = yPos;
-
-            // Nome da seção
-            doc.setFontSize(11);
-            doc.setFont("helvetica", "bold");
-            doc.text(section.label, margin, yPos);
-            yPos += 6;
-
-            // ID e tipo
-            const promptType = getPromptType(prompt.id);
-            doc.setFontSize(9);
-            doc.setFont("helvetica", "normal");
-            doc.setTextColor(100);
-            doc.text(`ID: ${prompt.id}  |  Tipo: ${promptType.label}`, margin, yPos);
-            yPos += 5;
-
-            // Variáveis se existirem
-            if (prompt.variables && prompt.variables.length > 0) {
-              doc.text(`Variáveis: ${prompt.variables.join(", ")}`, margin, yPos);
-              yPos += 5;
-            }
-
-            // Data de atualização
-            if (prompt.updatedAt) {
-              doc.text(`Atualizado em: ${new Date(prompt.updatedAt).toLocaleDateString("pt-BR")}`, margin, yPos);
-              yPos += 5;
-            }
-
-            doc.setTextColor(0);
-            yPos += 3;
-
-            // Descrição
-            if (prompt.description) {
-              doc.setFontSize(9);
-              doc.setFont("helvetica", "italic");
-              const descLines = splitText(prompt.description, contentWidth);
-              for (const line of descLines) {
-                checkNewPage(6);
-                doc.text(line, margin, yPos);
-                yPos += 5;
-              }
-              yPos += 2;
-            }
-
-            // Texto do prompt
-            doc.setFontSize(9);
-            doc.setFont("helvetica", "normal");
-            const promptText = prompt.prompt || "(Sem texto)";
-            const promptLines = splitText(promptText, contentWidth);
-
-            for (const line of promptLines) {
-              checkNewPage(6);
-              doc.text(line, margin, yPos);
-              yPos += 5;
-            }
-
-            yPos += 8;
-
-            // Linha separadora entre prompts
-            doc.setDrawColor(220);
-            doc.line(margin, yPos - 4, pageWidth - margin, yPos - 4);
-          }
-        }
-
-        yPos += 5;
-      }
-
-      // Prompts não classificados
-      if (unclassifiedPrompts.length > 0) {
-        checkNewPage(25);
-
-        doc.setFontSize(14);
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(245, 158, 11); // Amber
-        doc.text("PROMPTS NÃO CLASSIFICADOS", margin, yPos);
-        yPos += 3;
-
-        doc.setDrawColor(245, 158, 11);
-        doc.line(margin, yPos, pageWidth - margin, yPos);
-        yPos += 10;
-
-        doc.setTextColor(0);
-
-        for (const prompt of unclassifiedPrompts) {
-          checkNewPage(40);
-
-          const promptType = getPromptType(prompt.id);
-          doc.setFontSize(10);
-          doc.setFont("helvetica", "bold");
-          doc.text(prompt.id, margin, yPos);
-          yPos += 6;
-
-          doc.setFontSize(9);
-          doc.setFont("helvetica", "normal");
-          doc.setTextColor(100);
-          doc.text(`Tipo: ${promptType.label}`, margin, yPos);
-          yPos += 5;
-          doc.setTextColor(0);
-
-          if (prompt.description) {
-            doc.setFont("helvetica", "italic");
-            const descLines = splitText(prompt.description, contentWidth);
-            for (const line of descLines) {
-              checkNewPage(6);
-              doc.text(line, margin, yPos);
-              yPos += 5;
-            }
-            yPos += 2;
-          }
-
-          doc.setFont("helvetica", "normal");
-          const promptText = prompt.prompt || "(Sem texto)";
-          const promptLines = splitText(promptText, contentWidth);
-
-          for (const line of promptLines) {
-            checkNewPage(6);
-            doc.text(line, margin, yPos);
-            yPos += 5;
-          }
-
-          yPos += 8;
-          doc.setDrawColor(220);
-          doc.line(margin, yPos - 4, pageWidth - margin, yPos - 4);
-        }
-      }
-
-      // Salvar o PDF
-      const timestamp = new Date().toISOString().slice(0, 10);
-      doc.save(`prompts-backup-${timestamp}.pdf`);
-
-      toast({
-        title: "PDF exportado!",
-        description: `Backup com ${prompts.length} prompts salvo com sucesso.`,
-      });
-    } catch (error) {
-      console.error("Erro ao exportar PDF:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro",
-        description: "Falha ao gerar o PDF"
-      });
-    } finally {
-      setExporting(false);
-    }
-  };
-
   // Prompts classificados vs não classificados
   const { classifiedPrompts, unclassifiedPrompts } = useMemo(() => {
     const classified: PromptConfig[] = [];
@@ -448,6 +259,26 @@ export function DevPrompts() {
     return grouped;
   }, [filteredClassified]);
 
+  // Separar prompts por tipo (Gerar vs Regerar)
+  const getPromptsTypeSplit = (prompts: PromptConfig[]) => {
+    const genPrompts: PromptConfig[] = [];
+    const regenPrompts: PromptConfig[] = [];
+    const otherPrompts: PromptConfig[] = [];
+
+    prompts.forEach(p => {
+      const type = getPromptType(p.id);
+      if (type.type === 'gen') {
+        genPrompts.push(p);
+      } else if (type.type === 'regen') {
+        regenPrompts.push(p);
+      } else {
+        otherPrompts.push(p);
+      }
+    });
+
+    return { genPrompts, regenPrompts, otherPrompts };
+  };
+
   // Toggle card expansion
   const toggleCard = (cardId: string) => {
     setExpandedCards(prev => {
@@ -480,6 +311,220 @@ export function DevPrompts() {
     return Object.values(groupedPrompts[cardId]).reduce((sum, arr) => sum + arr.length, 0);
   };
 
+  // Contar prompts por seção
+  const getSectionPromptCount = (cardId: string, sectionId: string) => {
+    return groupedPrompts[cardId]?.[sectionId]?.length || 0;
+  };
+
+  // Scroll para seção específica
+  const handleScrollToSection = (sectionId: string) => {
+    scrollToSection(`section-${sectionId}`);
+  };
+
+  // Exportar prompts para PDF
+  const exportToPDF = async () => {
+    setExporting(true);
+    try {
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 20;
+      const contentWidth = pageWidth - margin * 2;
+      let yPos = 20;
+
+      const checkNewPage = (requiredSpace: number = 30) => {
+        if (yPos + requiredSpace > pageHeight - 20) {
+          doc.addPage();
+          yPos = 20;
+          return true;
+        }
+        return false;
+      };
+
+      const splitText = (text: string, maxWidth: number): string[] => {
+        return doc.splitTextToSize(text, maxWidth);
+      };
+
+      // Header
+      doc.setFontSize(18);
+      doc.setFont("helvetica", "bold");
+      doc.text("BACKUP DE PROMPTS DE IA", pageWidth / 2, yPos, { align: "center" });
+      yPos += 10;
+
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      const dateStr = `Data: ${new Date().toLocaleDateString("pt-BR")} às ${new Date().toLocaleTimeString("pt-BR")}`;
+      doc.text(dateStr, pageWidth / 2, yPos, { align: "center" });
+      yPos += 6;
+
+      doc.text(`Total: ${prompts.length} prompts`, pageWidth / 2, yPos, { align: "center" });
+      yPos += 15;
+
+      doc.setDrawColor(100);
+      doc.line(margin, yPos, pageWidth - margin, yPos);
+      yPos += 10;
+
+      // Iterar por cada card na ordem do laudo
+      for (const card of LAUDO_STRUCTURE) {
+        const cardPrompts = Object.values(groupedPrompts[card.id] || {}).flat();
+        if (cardPrompts.length === 0) continue;
+
+        checkNewPage(25);
+
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(59, 130, 246);
+        doc.text(card.title.toUpperCase(), margin, yPos);
+        yPos += 3;
+
+        doc.setDrawColor(59, 130, 246);
+        doc.line(margin, yPos, pageWidth - margin, yPos);
+        yPos += 10;
+
+        doc.setTextColor(0);
+
+        for (const section of card.sections) {
+          const sectionPrompts = groupedPrompts[card.id]?.[section.id] || [];
+          if (sectionPrompts.length === 0) continue;
+
+          for (const prompt of sectionPrompts) {
+            checkNewPage(50);
+
+            doc.setFontSize(11);
+            doc.setFont("helvetica", "bold");
+            doc.text(section.label, margin, yPos);
+            yPos += 6;
+
+            const promptType = getPromptType(prompt.id);
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(100);
+            doc.text(`ID: ${prompt.id}  |  Tipo: ${promptType.label}`, margin, yPos);
+            yPos += 5;
+
+            if (prompt.variables && prompt.variables.length > 0) {
+              doc.text(`Variáveis: ${prompt.variables.join(", ")}`, margin, yPos);
+              yPos += 5;
+            }
+
+            if (prompt.updatedAt) {
+              doc.text(`Atualizado em: ${new Date(prompt.updatedAt).toLocaleDateString("pt-BR")}`, margin, yPos);
+              yPos += 5;
+            }
+
+            doc.setTextColor(0);
+            yPos += 3;
+
+            if (prompt.description) {
+              doc.setFontSize(9);
+              doc.setFont("helvetica", "italic");
+              const descLines = splitText(prompt.description, contentWidth);
+              for (const line of descLines) {
+                checkNewPage(6);
+                doc.text(line, margin, yPos);
+                yPos += 5;
+              }
+              yPos += 2;
+            }
+
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "normal");
+            const promptText = prompt.prompt || "(Sem texto)";
+            const promptLines = splitText(promptText, contentWidth);
+
+            for (const line of promptLines) {
+              checkNewPage(6);
+              doc.text(line, margin, yPos);
+              yPos += 5;
+            }
+
+            yPos += 8;
+            doc.setDrawColor(220);
+            doc.line(margin, yPos - 4, pageWidth - margin, yPos - 4);
+          }
+        }
+
+        yPos += 5;
+      }
+
+      // Prompts não classificados
+      if (unclassifiedPrompts.length > 0) {
+        checkNewPage(25);
+
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(245, 158, 11);
+        doc.text("PROMPTS NÃO CLASSIFICADOS", margin, yPos);
+        yPos += 3;
+
+        doc.setDrawColor(245, 158, 11);
+        doc.line(margin, yPos, pageWidth - margin, yPos);
+        yPos += 10;
+
+        doc.setTextColor(0);
+
+        for (const prompt of unclassifiedPrompts) {
+          checkNewPage(40);
+
+          const promptType = getPromptType(prompt.id);
+          doc.setFontSize(10);
+          doc.setFont("helvetica", "bold");
+          doc.text(prompt.id, margin, yPos);
+          yPos += 6;
+
+          doc.setFontSize(9);
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(100);
+          doc.text(`Tipo: ${promptType.label}`, margin, yPos);
+          yPos += 5;
+          doc.setTextColor(0);
+
+          if (prompt.description) {
+            doc.setFont("helvetica", "italic");
+            const descLines = splitText(prompt.description, contentWidth);
+            for (const line of descLines) {
+              checkNewPage(6);
+              doc.text(line, margin, yPos);
+              yPos += 5;
+            }
+            yPos += 2;
+          }
+
+          doc.setFont("helvetica", "normal");
+          const promptText = prompt.prompt || "(Sem texto)";
+          const promptLines = splitText(promptText, contentWidth);
+
+          for (const line of promptLines) {
+            checkNewPage(6);
+            doc.text(line, margin, yPos);
+            yPos += 5;
+          }
+
+          yPos += 8;
+          doc.setDrawColor(220);
+          doc.line(margin, yPos - 4, pageWidth - margin, yPos - 4);
+        }
+      }
+
+      const timestamp = new Date().toISOString().slice(0, 10);
+      doc.save(`prompts-backup-${timestamp}.pdf`);
+
+      toast({
+        title: "PDF exportado!",
+        description: `Backup com ${prompts.length} prompts salvo com sucesso.`,
+      });
+    } catch (error) {
+      console.error("Erro ao exportar PDF:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Falha ao gerar o PDF"
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-6">
@@ -495,7 +540,7 @@ export function DevPrompts() {
     );
   }
 
-  // Estado vazio - mostrar CTA para carregar prompts
+  // Estado vazio
   if (!loading && prompts.length === 0) {
     return (
       <div className="space-y-6">
@@ -639,80 +684,220 @@ export function DevPrompts() {
         </TabsList>
 
         <TabsContent value="classified" className="mt-4">
-          <ScrollArea className="h-[calc(100vh-400px)]">
-            <div className="space-y-3">
-              {LAUDO_STRUCTURE.map(card => {
-                const count = getCardPromptCount(card.id);
-                const isExpanded = expandedCards.has(card.id);
-                const Icon = card.icon;
+          {/* 2-Column Layout */}
+          <div className="flex gap-6">
+            {/* Navegação Lateral Fixa */}
+            <aside className="w-64 shrink-0 hidden lg:block">
+              <div className="sticky top-4">
+                <Card>
+                  <CardHeader className="py-3 px-4">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <FolderOpen className="h-4 w-4" />
+                      Navegação
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <ScrollArea className="h-[calc(100vh-400px)]">
+                      <div className="p-2 space-y-1">
+                        {LAUDO_STRUCTURE.map(card => {
+                          const count = getCardPromptCount(card.id);
+                          const isExpanded = expandedCards.has(card.id);
+                          const Icon = card.icon;
 
-                return (
-                  <Card key={card.id} className={cn(count === 0 && "opacity-50")}>
-                    <CardHeader
-                      className="cursor-pointer hover:bg-muted/50 transition-colors py-3"
-                      onClick={() => toggleCard(card.id)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          {isExpanded ? (
-                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                          )}
-                          <Icon className="h-5 w-5 text-primary" />
-                          <CardTitle className="text-base">{card.title}</CardTitle>
-                        </div>
-                        <Badge variant={count > 0 ? "default" : "secondary"}>
-                          {count} prompt{count !== 1 ? "s" : ""}
-                        </Badge>
+                          return (
+                            <Collapsible 
+                              key={card.id} 
+                              open={isExpanded}
+                              onOpenChange={() => toggleCard(card.id)}
+                            >
+                              <CollapsibleTrigger className="w-full">
+                                <div className={cn(
+                                  "flex items-center justify-between px-2 py-1.5 rounded-md text-sm hover:bg-muted/50 transition-colors",
+                                  count === 0 && "opacity-50"
+                                )}>
+                                  <div className="flex items-center gap-2">
+                                    {isExpanded ? (
+                                      <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                                    ) : (
+                                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                                    )}
+                                    <Icon className="h-4 w-4 text-primary" />
+                                    <span className="font-medium truncate max-w-[120px]">{card.title}</span>
+                                  </div>
+                                  <Badge variant="outline" className="text-xs h-5 px-1.5">
+                                    {count}
+                                  </Badge>
+                                </div>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent>
+                                <div className="ml-6 mt-1 space-y-0.5">
+                                  {card.sections.map(section => {
+                                    const sectionCount = getSectionPromptCount(card.id, section.id);
+                                    const isActive = activeId === `section-${section.id}`;
+                                    
+                                    return (
+                                      <button
+                                        key={section.id}
+                                        onClick={() => handleScrollToSection(section.id)}
+                                        className={cn(
+                                          "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                          isActive 
+                                            ? "bg-primary/10 text-primary font-medium"
+                                            : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+                                          sectionCount === 0 && "opacity-40"
+                                        )}
+                                      >
+                                        <span className="truncate">{section.label}</span>
+                                        {sectionCount > 0 && (
+                                          <span className="text-[10px] bg-muted px-1 rounded">
+                                            {sectionCount}
+                                          </span>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </CollapsibleContent>
+                            </Collapsible>
+                          );
+                        })}
                       </div>
-                    </CardHeader>
+                    </ScrollArea>
+                  </CardContent>
+                </Card>
+              </div>
+            </aside>
 
-                    {isExpanded && (
-                      <CardContent className="pt-0">
+            {/* Área de Conteúdo */}
+            <div className="flex-1 min-w-0" ref={contentRef}>
+              <ScrollArea className="h-[calc(100vh-400px)]">
+                <div className="space-y-6 pr-4">
+                  {LAUDO_STRUCTURE.map(card => {
+                    const count = getCardPromptCount(card.id);
+                    const Icon = card.icon;
+
+                    if (count === 0) return null;
+
+                    return (
+                      <div key={card.id}>
+                        {/* Card Header */}
+                        <div className="flex items-center gap-3 mb-4 pb-2 border-b">
+                          <Icon className="h-5 w-5 text-primary" />
+                          <h2 className="text-lg font-semibold">{card.title}</h2>
+                          <Badge variant="secondary" className="text-xs">
+                            {count} prompt{count !== 1 ? "s" : ""}
+                          </Badge>
+                        </div>
+
+                        {/* Seções */}
                         <div className="space-y-4">
                           {card.sections.map(section => {
                             const sectionPrompts = groupedPrompts[card.id]?.[section.id] || [];
                             
+                            if (sectionPrompts.length === 0) return null;
+
+                            const { genPrompts, regenPrompts, otherPrompts } = getPromptsTypeSplit(sectionPrompts);
+
                             return (
-                              <div key={section.id} className="border-l-2 border-border pl-4">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <span className="text-sm font-medium text-muted-foreground">
-                                    {section.label}
-                                  </span>
-                                  {sectionPrompts.length > 0 && (
+                              <Card 
+                                key={section.id} 
+                                id={`section-${section.id}`}
+                                className="scroll-mt-4"
+                              >
+                                <CardHeader className="py-3 px-4">
+                                  <CardTitle className="text-base font-medium flex items-center justify-between">
+                                    <span>{section.label}</span>
                                     <Badge variant="outline" className="text-xs">
                                       {sectionPrompts.length}
                                     </Badge>
-                                  )}
-                                </div>
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent className="pt-0 px-4 pb-4">
+                                  {/* Grid 2 colunas: Gerar | Regerar */}
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {/* Coluna Gerar */}
+                                    <div className="space-y-2">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <Sparkles className="h-4 w-4 text-emerald-600" />
+                                        <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                                          Gerar
+                                        </span>
+                                      </div>
+                                      {genPrompts.length > 0 ? (
+                                        <div className="space-y-2">
+                                          {genPrompts.map(prompt => (
+                                            <PromptMiniCard
+                                              key={prompt.id}
+                                              prompt={prompt}
+                                              onEdit={() => openEditor(prompt)}
+                                            />
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <p className="text-xs text-muted-foreground italic py-2">
+                                          Nenhum prompt de geração
+                                        </p>
+                                      )}
+                                    </div>
 
-                                {sectionPrompts.length === 0 ? (
-                                  <p className="text-xs text-muted-foreground italic">
-                                    Nenhum prompt nesta seção
-                                  </p>
-                                ) : (
-                                  <div className="space-y-2">
-                                    {sectionPrompts.map(prompt => (
-                                      <PromptCard
-                                        key={prompt.id}
-                                        prompt={prompt}
-                                        onEdit={() => openEditor(prompt)}
-                                      />
-                                    ))}
+                                    {/* Coluna Regerar */}
+                                    <div className="space-y-2">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <RefreshCw className="h-4 w-4 text-blue-600" />
+                                        <span className="text-sm font-medium text-blue-700 dark:text-blue-400">
+                                          Regerar
+                                        </span>
+                                      </div>
+                                      {regenPrompts.length > 0 ? (
+                                        <div className="space-y-2">
+                                          {regenPrompts.map(prompt => (
+                                            <PromptMiniCard
+                                              key={prompt.id}
+                                              prompt={prompt}
+                                              onEdit={() => openEditor(prompt)}
+                                            />
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <p className="text-xs text-muted-foreground italic py-2">
+                                          Nenhum prompt de regeneração
+                                        </p>
+                                      )}
+                                    </div>
                                   </div>
-                                )}
-                              </div>
+
+                                  {/* Outros prompts (Sistema, Importar) */}
+                                  {otherPrompts.length > 0 && (
+                                    <div className="mt-4 pt-4 border-t">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <FileText className="h-4 w-4 text-muted-foreground" />
+                                        <span className="text-sm font-medium text-muted-foreground">
+                                          Outros
+                                        </span>
+                                      </div>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                        {otherPrompts.map(prompt => (
+                                          <PromptMiniCard
+                                            key={prompt.id}
+                                            prompt={prompt}
+                                            onEdit={() => openEditor(prompt)}
+                                          />
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </CardContent>
+                              </Card>
                             );
                           })}
                         </div>
-                      </CardContent>
-                    )}
-                  </Card>
-                );
-              })}
+                      </div>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
             </div>
-          </ScrollArea>
+          </div>
         </TabsContent>
 
         <TabsContent value="unclassified" className="mt-4">
@@ -819,24 +1004,79 @@ export function DevPrompts() {
 }
 
 // ============================================
-// PROMPT TYPE UTILITIES
+// PROMPT MINI CARD (Compacto para grid 2 colunas)
 // ============================================
 
-function getPromptType(promptId: string): { type: 'gen' | 'regen' | 'system' | 'import'; label: string; color: string } {
-  if (promptId.startsWith('prompt_gen_')) {
-    return { type: 'gen', label: 'Gerar', color: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30' };
-  }
-  if (promptId.startsWith('prompt_regen_')) {
-    return { type: 'regen', label: 'Regerar', color: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30' };
-  }
-  if (promptId.startsWith('prompt_import_')) {
-    return { type: 'import', label: 'Importar', color: 'bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30' };
-  }
-  return { type: 'system', label: 'Sistema', color: 'bg-gray-500/10 text-gray-700 dark:text-gray-400 border-gray-500/30' };
+interface PromptMiniCardProps {
+  prompt: PromptConfig;
+  onEdit: () => void;
+}
+
+function PromptMiniCard({ prompt, onEdit }: PromptMiniCardProps) {
+  const promptType = getPromptType(prompt.id);
+  const hasVariables = (prompt.variables?.length || 0) > 0;
+
+  return (
+    <div
+      className="border rounded-lg p-3 hover:bg-muted/50 transition-colors cursor-pointer group"
+      onClick={onEdit}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Badge 
+              variant="outline" 
+              className={cn("text-[10px] font-medium px-1.5 py-0", promptType.color)}
+            >
+              {promptType.label}
+            </Badge>
+            {hasVariables && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge variant="outline" className="text-[10px] gap-0.5 px-1 py-0">
+                    <Sparkles className="h-2.5 w-2.5" />
+                    {prompt.variables?.length}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p className="text-xs">Variáveis: {prompt.variables?.join(', ')}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+          
+          {prompt.description && (
+            <p className="text-xs text-foreground mt-1 line-clamp-1">
+              {prompt.description}
+            </p>
+          )}
+
+          {prompt.updatedAt && (
+            <div className="flex items-center gap-1 mt-1 text-[10px] text-muted-foreground">
+              <Clock className="h-2.5 w-2.5" />
+              <span>{new Date(prompt.updatedAt).toLocaleDateString("pt-BR")}</span>
+            </div>
+          )}
+        </div>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+        >
+          <Edit3 className="h-3 w-3" />
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 // ============================================
-// PROMPT CARD COMPONENT
+// PROMPT CARD (Para não classificados)
 // ============================================
 
 interface PromptCardProps {
