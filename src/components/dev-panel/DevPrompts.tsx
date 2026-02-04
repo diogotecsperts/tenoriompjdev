@@ -344,7 +344,7 @@ export function DevPrompts() {
     return combinedUnclassified.filter(p => p.id.toLowerCase().includes(term) || p.description?.toLowerCase().includes(term) || p.prompt?.toLowerCase().includes(term));
   }, [combinedUnclassified, searchTerm]);
 
-  // Separar prompts por tipo (Gerar vs Regerar)
+  // Separar prompts por tipo (Gerar vs Regerar) e ordenar pelo campo order
   const getPromptsTypeSplit = (prompts: PromptConfig[]) => {
     const genPrompts: PromptConfig[] = [];
     const regenPrompts: PromptConfig[] = [];
@@ -359,10 +359,18 @@ export function DevPrompts() {
         otherPrompts.push(p);
       }
     });
+    
+    // Ordenar cada grupo pelo campo order (prompts sem order vão para o final)
+    const sortByOrder = (a: PromptConfig, b: PromptConfig) => {
+      const orderA = a.order ?? 999;
+      const orderB = b.order ?? 999;
+      return orderA - orderB;
+    };
+    
     return {
-      genPrompts,
-      regenPrompts,
-      otherPrompts
+      genPrompts: genPrompts.sort(sortByOrder),
+      regenPrompts: regenPrompts.sort(sortByOrder),
+      otherPrompts: otherPrompts.sort(sortByOrder)
     };
   };
 
