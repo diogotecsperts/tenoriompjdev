@@ -1,152 +1,139 @@
 
+# Corrigir Organização da Tela Prompts IA para Espelhar o Laudo
 
-# Tornar Metodologia Pericial Editável via Banco de Dados
+## Diagnóstico Realizado
 
-## Objetivo
-
-Permitir editar o texto padrão da "Metodologia Pericial" diretamente no banco de dados, sem necessidade de alterar código.
-
-## Texto Padrão (Novo)
-
-```text
-A perícia médica judicial foi realizada segundo critérios técnicos e científicos reconhecidos na Medicina Legal e na Perícia Médica, observando princípios de causalidade médica, análise de exposição e risco ocupacional e fundamentos de Medicina Baseada em Evidências, em consonância com referenciais técnicos da Associação Brasileira de Medicina Legal e Perícia Médica.
-
-O procedimento pericial compreendeu:
-
-a) anamnese clínica e ocupacional;
-
-b) exame físico pericial direto;
-
-c) análise crítica dos documentos médicos apresentados e daqueles constantes nos autos;
-
-d) avaliação das atividades laborativas sob a ótica dos riscos ocupacionais, quando pertinente.
-
-A análise do nexo causal ou concausal foi realizada com base em critérios técnicos consagrados na literatura médico-pericial, incluindo a classificação de Schilling e os critérios de Simonin e de Bradford-Hill, correlacionando os achados clínicos, o curso temporal, a plausibilidade biológica e a compatibilidade com o padrão de exposição ocupacional descrito.
-
-A avaliação da capacidade laborativa foi efetuada de forma individualizada, considerando as exigências funcionais da atividade exercida e a repercussão clínico-funcional dos achados ao exame físico, conforme recomendações técnicas em saúde ocupacional e medicina do trabalho.
-
-Ressalta-se que este Perito Judicial limita-se à análise técnico-pericial, não sendo de sua atribuição questionar, revisar ou emitir juízo de valor sobre condutas adotadas por profissionais assistentes, cujos registros foram considerados exclusivamente como elementos informativos no contexto da presente perícia.
-
-Os achados foram interpretados à luz do princípio da imparcialidade, do contraditório e do conjunto probatório disponível nos autos.
-```
+Comparei a estrutura definida em `src/lib/laudo-structure.ts` (fonte de verdade do laudo) com os dados no banco (`system_config`) e identifiquei **17 problemas** entre campos fora de ordem, classificados na seção errada ou com nomenclatura diferente do laudo.
 
 ---
 
-## Implementação
+## Resumo das Discrepâncias Encontradas
 
-### 1. Inserir configuração no banco de dados
+| Tipo de Problema | Quantidade |
+|------------------|------------|
+| Prompts na **seção errada** (cardId ou sectionId incorreto) | 3 |
+| Prompts com **descrição diferente** do label no laudo | 5 |
+| Prompts **sem ordem definida** (campo `order` null) | 33 (todos) |
+| **Total de ajustes necessários** | 17 registros a corrigir |
 
-Inserir na tabela `system_config` com ID `config_metodologia_padrao`:
+---
 
-```sql
-INSERT INTO system_config (id, value, description)
-VALUES (
-  'config_metodologia_padrao',
-  '{"texto": "A perícia médica judicial foi realizada segundo critérios técnicos e científicos reconhecidos na Medicina Legal e na Perícia Médica, observando princípios de causalidade médica, análise de exposição e risco ocupacional e fundamentos de Medicina Baseada em Evidências, em consonância com referenciais técnicos da Associação Brasileira de Medicina Legal e Perícia Médica.\n\nO procedimento pericial compreendeu:\n\na) anamnese clínica e ocupacional;\n\nb) exame físico pericial direto;\n\nc) análise crítica dos documentos médicos apresentados e daqueles constantes nos autos;\n\nd) avaliação das atividades laborativas sob a ótica dos riscos ocupacionais, quando pertinente.\n\nA análise do nexo causal ou concausal foi realizada com base em critérios técnicos consagrados na literatura médico-pericial, incluindo a classificação de Schilling e os critérios de Simonin e de Bradford-Hill, correlacionando os achados clínicos, o curso temporal, a plausibilidade biológica e a compatibilidade com o padrão de exposição ocupacional descrito.\n\nA avaliação da capacidade laborativa foi efetuada de forma individualizada, considerando as exigências funcionais da atividade exercida e a repercussão clínico-funcional dos achados ao exame físico, conforme recomendações técnicas em saúde ocupacional e medicina do trabalho.\n\nRessalta-se que este Perito Judicial limita-se à análise técnico-pericial, não sendo de sua atribuição questionar, revisar ou emitir juízo de valor sobre condutas adotadas por profissionais assistentes, cujos registros foram considerados exclusivamente como elementos informativos no contexto da presente perícia.\n\nOs achados foram interpretados à luz do princípio da imparcialidade, do contraditório e do conjunto probatório disponível nos autos."}'::jsonb,
-  'Texto padrão da Metodologia Pericial'
-)
-ON CONFLICT (id) DO UPDATE SET 
-  value = EXCLUDED.value,
-  description = EXCLUDED.description,
-  updated_at = now();
-```
+## Detalhamento das Correções
 
-### 2. Modificar componente MetodologiaPericial.tsx
+### 1. Prompts na Seção Errada (cardId/sectionId incorretos)
 
-**Mudanças:**
+| Prompt ID | Atual | Deveria Ser | Label no Laudo |
+|-----------|-------|-------------|----------------|
+| `prompt_regen_historicoOcupacional` | periciando/anamnese | periciando/**acidente** | Histórico Ocupacional |
+| `prompt_gen_sugestoes_pericia` | periciando/anamnese | _(interno, mover para _system)_ | Sugestões IA (não é seção do laudo) |
+| `prompt_system_perito` | _system/_global | _system/**_gerar_resumos** | Identidade Perito (system) |
 
-| Antes | Depois |
-|-------|--------|
-| Texto padrão hardcoded em constante | Buscar do banco via `useEffect` |
-| `handleRestaurarPadrao` usa constante | Usa estado carregado do banco |
+### 2. Prompts com Descrição Diferente do Label do Laudo
 
-**Código atualizado:**
+| Prompt ID | Descrição Atual | Label Esperado (igual ao laudo) |
+|-----------|-----------------|--------------------------------|
+| `prompt_regen_historiaAtual` | "História da Moléstia Atual - Regenerar via PDF" | "Anamnese - Regenerar via PDF" |
+| `prompt_regen_antecedentes` | "Antecedentes Pessoais e Familiares - Regenerar via PDF" | "Antecedentes Patológicos - Regenerar via PDF" |
+| `prompt_regen_exameFisico` | "Achados do Exame Físico - Regenerar via PDF" | "Exame Físico Pericial - Regenerar via PDF" |
+| `prompt_regen_descricaoAtividadesLaborais` | "Ambiente e Atividades Laborais - Regenerar via PDF" | "Dados do Posto de Trabalho - Regenerar via PDF" |
+| `prompt_gen_descricao_doencas` | "Descrição técnica das doenças" | "Descrição Técnica das Doenças - Gerar" |
 
-```typescript
-import { useState, useEffect } from "react";
-import { useLaudo } from "@/contexts/LaudoContext";
-import { supabase } from "@/integrations/supabase/client";
-// ... demais imports
+### 3. Ordem dos Prompts (campo `order` - todos estão `null`)
 
-// Fallback caso banco esteja indisponível
-const METODOLOGIA_FALLBACK = `A perícia médica judicial foi realizada segundo critérios técnicos...`;
+Para garantir ordenação igual ao laudo, atribuirei um número sequencial baseado na posição do campo dentro do laudo:
 
-export function MetodologiaPericial() {
-  const { currentLaudo, updateLaudo } = useLaudo();
-  const [metodologiaPadrao, setMetodologiaPadrao] = useState(METODOLOGIA_FALLBACK);
-  const [loading, setLoading] = useState(true);
-
-  // Buscar texto padrão do banco na montagem
-  useEffect(() => {
-    const fetchMetodologia = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("system_config")
-          .select("value")
-          .eq("id", "config_metodologia_padrao")
-          .single();
-
-        if (data?.value && !error) {
-          const parsed = typeof data.value === 'string' 
-            ? JSON.parse(data.value) 
-            : data.value;
-          if (parsed.texto) {
-            setMetodologiaPadrao(parsed.texto);
-          }
-        }
-      } catch (err) {
-        console.error("Erro ao buscar metodologia padrão:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchMetodologia();
-  }, []);
-
-  const handleRestaurarPadrao = () => {
-    updateLaudo({ metodologiaPericial: metodologiaPadrao });
-  };
-  
-  // ... resto do componente
-}
-```
+| cardId | sectionId | Prompt ID | order |
+|--------|-----------|-----------|-------|
+| resumo-autos | resumo | prompt_gen_resumo_peticao | 1 |
+| resumo-autos | resumo | prompt_regen_resumoPeticaoInicial | 2 |
+| resumo-autos | resumo | prompt_gen_resumo_contestacao | 3 |
+| resumo-autos | resumo | prompt_regen_resumoContestacao | 4 |
+| periciando | acidente | prompt_regen_historicoOcupacional | 1 |
+| periciando | acidente | prompt_regen_historiaAcidente | 2 |
+| periciando | anamnese | prompt_regen_historiaAtual | 1 |
+| periciando | antecedentes | prompt_regen_antecedentes | 1 |
+| periciando | antecedentes | prompt_regen_tratamentos | 2 |
+| periciando | antecedentes | prompt_regen_afastamentos | 3 |
+| posto-trabalho | dados-posto | prompt_regen_descricaoAtividadesLaborais | 1 |
+| exame | laudos | prompt_regen_laudosMedicos | 1 |
+| exame | exames | prompt_regen_examesComplementares | 1 |
+| exame | exame-fisico | prompt_regen_exameFisico | 1 |
+| analise-tecnica | descricao-doencas | prompt_gen_descricao_doencas | 1 |
+| analise-tecnica | descricao-doencas | prompt_gen_descricao_cid | 2 |
+| analise-tecnica | descricao-doencas | prompt_regen_descricaoTecnicaDoencas | 3 |
+| analise-tecnica | nexo | prompt_gen_nexo_causal | 1 |
+| analise-tecnica | analise-incapacidade | prompt_gen_incapacidade | 1 |
+| conclusao | conclusao | prompt_regen_conclusaoAnalise | 1 |
+| conclusao | sequelas | prompt_regen_tabelaSUSEP | 1 |
+| conclusao | sequelas | prompt_regen_danoEstetico | 2 |
+| conclusao | sequelas | prompt_regen_auxilioTerceiros | 3 |
+| conclusao | quesitos | prompt_regen_quesitosJuizo | 1 |
+| conclusao | quesitos | prompt_regen_quesitosReclamante | 2 |
+| conclusao | quesitos | prompt_regen_quesitosReclamada | 3 |
+| referencias | referencias | prompt_gen_referencias | 1 |
+| _global | _aprimorar | prompt_gen_aprimorar_texto | 1 |
+| _system | _gerar_resumos | prompt_system_gerar_resumos | 1 |
+| _system | _gerar_resumos | prompt_system_perito | 2 |
+| _system | _import | prompt_import_system | 1 |
+| impugnacao | resposta | prompt_system_impugnacao | 1 |
 
 ---
 
 ## Arquivos a Modificar
 
-| Arquivo | Ação |
-|---------|------|
-| Tabela `system_config` | INSERT da configuração |
-| `src/components/laudo/sections/MetodologiaPericial.tsx` | Buscar texto do banco |
+| Local | Ação |
+|-------|------|
+| Tabela `system_config` (banco de dados) | UPDATE nos 17 registros para corrigir cardId, sectionId, description e order |
+| `supabase/functions/seed-prompts/index.ts` | Atualizar as definições hardcoded para refletir as correções (para restaurar padrão) |
+| `supabase/functions/gerar-resumos/index.ts` | Atualizar promptMapping para `prompt_gen_sugestoes_pericia` (mover para _system) |
+| `src/components/dev-panel/DevPrompts.tsx` | Ordenar prompts pelo campo `order` dentro de cada seção |
 
 ---
 
-## Como Editar Futuramente (Opção A)
+## Implementação
 
-Para alterar o texto da metodologia, execute via SQL:
+### Passo 1: Atualizar registros no banco via SQL
 
-```sql
-UPDATE system_config
-SET value = '{"texto": "SEU NOVO TEXTO AQUI"}'::jsonb,
-    updated_at = now()
-WHERE id = 'config_metodologia_padrao';
-```
+Executar UPDATEs para corrigir os 17 registros afetados, ajustando:
+- `value.cardId`
+- `value.sectionId`
+- `value.description`
+- `value.order`
 
----
+### Passo 2: Modificar DevPrompts.tsx para ordenar por `order`
 
-## Lembrete para o Futuro
+Na função `getPromptsTypeSplit` ou no agrupamento, ordenar os prompts pelo campo `order` antes de renderizar.
 
-Quando este assunto surgir novamente, considerar implementar a **Opção B**: criar uma interface no DevPanel (aba "Configurações de Texto") para editar `config_metodologia_padrao` visualmente, sem necessidade de SQL.
+### Passo 3: Atualizar seed-prompts para manter consistência
+
+Corrigir os mapeamentos hardcoded no `seed-prompts/index.ts` para que ao "Restaurar Padrão de Fábrica" os valores sejam corretos.
+
+### Passo 4: Corrigir gerar-resumos (sugestões perícia)
+
+Mover `prompt_gen_sugestoes_pericia` para `_system/_internal` já que não é uma seção visível do laudo.
 
 ---
 
 ## Resultado Esperado
 
-1. O botão "Restaurar padrão" usará o texto do banco de dados
-2. Laudos **existentes** não são afetados
-3. Novos laudos ou ao clicar "Restaurar padrão" recebem o novo texto
-4. Fallback seguro: se o banco falhar, usa texto hardcoded
-5. Editável via SQL sem deploy de código
+Após as correções:
 
+1. A navegação lateral em "Prompts IA" terá a **mesma ordem exata** do LaudoEditor
+2. Os **nomes das seções** serão idênticos aos do laudo
+3. Dentro de cada seção, os prompts aparecerão **ordenados** (ex: primeiro Gerar, depois Regerar)
+4. "Restaurar Padrão" manterá a estrutura correta
+
+---
+
+## Seções Finais (mantidas ao final)
+
+Após os cards do laudo, as seções especiais permanecerão:
+1. **Sistema** - prompts de sistema
+2. **Globais** - aprimorar texto
+3. **Impugnação** - resposta a impugnações
+
+---
+
+## Lembrete
+
+Quando tocar no assunto da "Metodologia Pericial" (config_metodologia_padrao), lembrar de sugerir a **Opção B**: criar interface visual no DevPanel para editar sem SQL.
