@@ -13,7 +13,7 @@ const corsHeaders = {
 // Mapeamento de campos para IDs de prompt e metadados
 const fieldPromptMapping: Record<string, { promptId: string; cardId: string; sectionId: string; description: string }> = {
   historiaAtual: { promptId: 'prompt_regen_historiaAtual', cardId: 'periciando', sectionId: 'anamnese', description: 'História da Moléstia Atual - Regenerar via PDF' },
-  historicoOcupacional: { promptId: 'prompt_regen_historicoOcupacional', cardId: 'periciando', sectionId: 'anamnese', description: 'Histórico ocupacional - Regenerar via PDF' },
+  historicoOcupacional: { promptId: 'prompt_regen_historicoOcupacional', cardId: 'periciando', sectionId: 'acidente', description: 'Histórico Ocupacional - Regerar via PDF' },
   historiaAcidente: { promptId: 'prompt_regen_historiaAcidente', cardId: 'periciando', sectionId: 'acidente', description: 'História do acidente - Regenerar via PDF' },
   antecedentes: { promptId: 'prompt_regen_antecedentes', cardId: 'periciando', sectionId: 'antecedentes', description: 'Antecedentes Pessoais e Familiares - Regenerar via PDF' },
   tratamentos: { promptId: 'prompt_regen_tratamentos', cardId: 'periciando', sectionId: 'antecedentes', description: 'Tratamentos realizados - Regenerar via PDF' },
