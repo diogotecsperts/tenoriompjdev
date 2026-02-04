@@ -142,6 +142,7 @@ export const PROMPT_ONLY_CARDS: Omit<LaudoCard, "icon">[] = [
     sections: [
       { id: "_gerar_resumos", label: "System Prompt - Geração" },
       { id: "_import", label: "System Prompt - Importação" },
+      { id: "_internal", label: "Prompts Internos" },
     ],
   },
   {

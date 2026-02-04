@@ -10,30 +10,49 @@ const corsHeaders = {
 // PROMPTS DE REGENERAÇÃO (regerar-campo-pdf)
 // ============================================
 
-const regenPrompts: Record<string, { prompt: string; cardId: string; sectionId: string; description: string }> = {
-  prompt_regen_historiaAtual: {
-    cardId: 'periciando',
-    sectionId: 'anamnese',
-    description: 'História da Moléstia Atual - Regenerar via PDF',
-    prompt: `Extraia e detalhe ao máximo a "História Atual" ou "Queixas Atuais" / "Anamnese" do documento.
+const regenPrompts: Record<string, { prompt: string; cardId: string; sectionId: string; description: string; order: number }> = {
+  // ================================
+  // CARD: resumo-autos | SECTION: resumo
+  // ================================
+  prompt_regen_resumoPeticaoInicial: {
+    cardId: 'resumo-autos',
+    sectionId: 'resumo',
+    description: 'Resumo da Petição Inicial - Regerar via PDF',
+    order: 2,
+    prompt: `Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da petição inicial para um laudo pericial médico trabalhista.
 
-EXTRAIA COM MÁXIMO DETALHAMENTO:
-- Todos os sintomas relatados pelo periciando e sua intensidade
-- Localização e irradiação da dor (onde dói, para onde irradia)
-- Fatores de melhora e piora dos sintomas
-- Periodicidade e frequência dos sintomas
-- Impacto nas atividades diárias (o que não consegue fazer)
-- Impacto nas atividades laborais (limitações no trabalho)
-- Medicamentos em uso atual (nomes, doses)
-- Qualidade do sono e alterações de humor
-- Limitações funcionais específicas
-
-MÍNIMO 3 parágrafos. NÃO resuma. Use linguagem técnica médico-legal.`
+Instruções:
+- Resuma os pontos principais alegados pelo reclamante
+- Destaque as doenças/lesões mencionadas
+- Identifique os nexos causais alegados
+- Mencione os pedidos principais
+- Use linguagem técnica e imparcial
+- Máximo 3 parágrafos`
   },
+  prompt_regen_resumoContestacao: {
+    cardId: 'resumo-autos',
+    sectionId: 'resumo',
+    description: 'Resumo da Contestação - Regerar via PDF',
+    order: 4,
+    prompt: `Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da contestação para um laudo pericial médico trabalhista.
+
+Instruções:
+- Resuma os pontos principais alegados pela reclamada
+- Destaque os argumentos contrários ao nexo causal
+- Identifique documentos ou evidências mencionadas
+- Mencione os pedidos de improcedência
+- Use linguagem técnica e imparcial
+- Máximo 3 parágrafos`
+  },
+  
+  // ================================
+  // CARD: periciando | SECTION: acidente
+  // ================================
   prompt_regen_historicoOcupacional: {
     cardId: 'periciando',
-    sectionId: 'anamnese',
-    description: 'Histórico ocupacional - Regenerar via PDF',
+    sectionId: 'acidente',
+    description: 'Histórico Ocupacional - Regerar via PDF',
+    order: 1,
     prompt: `Extraia e detalhe ao máximo o "Histórico Ocupacional" do documento.
 
 EXTRAIA CRONOLOGICAMENTE:
@@ -51,7 +70,8 @@ MÍNIMO 2 parágrafos ou lista cronológica completa. Use linguagem técnica.`
   prompt_regen_historiaAcidente: {
     cardId: 'periciando',
     sectionId: 'acidente',
-    description: 'História do acidente - Regenerar via PDF',
+    description: 'História do Acidente - Regerar via PDF',
+    order: 2,
     prompt: `Extraia e detalhe ao máximo a "História do Acidente" ou "Descrição do Evento" do documento.
 
 EXTRAIA COM PRECISÃO:
@@ -68,10 +88,39 @@ EXTRAIA COM PRECISÃO:
 
 MÍNIMO 2 parágrafos. NÃO resuma. Transcreva todos os detalhes disponíveis.`
   },
+  
+  // ================================
+  // CARD: periciando | SECTION: anamnese
+  // ================================
+  prompt_regen_historiaAtual: {
+    cardId: 'periciando',
+    sectionId: 'anamnese',
+    description: 'Anamnese - Regerar via PDF',
+    order: 1,
+    prompt: `Extraia e detalhe ao máximo a "História Atual" ou "Queixas Atuais" / "Anamnese" do documento.
+
+EXTRAIA COM MÁXIMO DETALHAMENTO:
+- Todos os sintomas relatados pelo periciando e sua intensidade
+- Localização e irradiação da dor (onde dói, para onde irradia)
+- Fatores de melhora e piora dos sintomas
+- Periodicidade e frequência dos sintomas
+- Impacto nas atividades diárias (o que não consegue fazer)
+- Impacto nas atividades laborais (limitações no trabalho)
+- Medicamentos em uso atual (nomes, doses)
+- Qualidade do sono e alterações de humor
+- Limitações funcionais específicas
+
+MÍNIMO 3 parágrafos. NÃO resuma. Use linguagem técnica médico-legal.`
+  },
+  
+  // ================================
+  // CARD: periciando | SECTION: antecedentes
+  // ================================
   prompt_regen_antecedentes: {
     cardId: 'periciando',
     sectionId: 'antecedentes',
-    description: 'Antecedentes Pessoais e Familiares - Regenerar via PDF',
+    description: 'Antecedentes Patológicos - Regerar via PDF',
+    order: 1,
     prompt: `Extraia TODOS os "Antecedentes Patológicos" do documento.
 
 LISTE COMPLETAMENTE:
@@ -89,7 +138,8 @@ NÃO deixe vazio se houver QUALQUER menção a saúde prévia.`
   prompt_regen_tratamentos: {
     cardId: 'periciando',
     sectionId: 'antecedentes',
-    description: 'Tratamentos realizados - Regenerar via PDF',
+    description: 'Tratamentos Realizados - Regerar via PDF',
+    order: 2,
     prompt: `Extraia TODOS os "Tratamentos Realizados" do documento.
 
 LISTE EM FORMATO ESTRUTURADO:
@@ -107,7 +157,8 @@ Seja específico com datas e resultados de cada tratamento.`
   prompt_regen_afastamentos: {
     cardId: 'periciando',
     sectionId: 'antecedentes',
-    description: 'Afastamentos do Trabalho - Regenerar via PDF',
+    description: 'Afastamentos do Trabalho - Regerar via PDF',
+    order: 3,
     prompt: `Extraia TODOS os "Períodos de Afastamento" do documento.
 
 LISTE CRONOLOGICAMENTE:
@@ -125,82 +176,15 @@ LISTE CRONOLOGICAMENTE:
 
 EXTRAIA DATAS EXATAS. Liste todos os afastamentos identificados.`
   },
-  prompt_regen_laudosMedicos: {
-    cardId: 'exame',
-    sectionId: 'laudos',
-    description: 'Descrição dos Laudos Médicos - Regenerar via PDF',
-    prompt: `Extraia TODOS os "Laudos Médicos" ou "Pareceres Médicos" do documento.
-
-PARA CADA LAUDO, EXTRAIA:
-- Data do documento
-- Nome do médico e especialidade
-- Diagnósticos (com códigos CID-10 se disponíveis)
-- Achados do exame clínico descritos
-- Conclusões do médico
-- Recomendações e restrições médicas
-- Limitações funcionais apontadas
-- Prognóstico (se mencionado)
-
-ESTRUTURE ASSIM:
-**Laudo Dr. [Nome] - [Especialidade] (DD/MM/AAAA):**
-- Diagnósticos: [listar com CIDs]
-- Conclusões: [descrever]
-- Recomendações: [descrever]
-- Limitações: [listar]
-
-Liste CADA laudo separadamente. NÃO resuma.`
-  },
-  prompt_regen_examesComplementares: {
-    cardId: 'exame',
-    sectionId: 'exames',
-    description: 'Descrição dos Exames Complementares - Regenerar via PDF',
-    prompt: `Extraia TODOS os "Exames Complementares" do documento.
-
-PARA CADA EXAME, EXTRAIA:
-- Tipo de exame (Radiografia, RNM, TC, EMG, Ultrassonografia, Laboratoriais, etc.)
-- Data de realização
-- Região/área examinada
-- TODOS os achados e resultados
-- Conclusão do laudo do exame
-
-ESTRUTURE ASSIM:
-**[Tipo do Exame] - [Região] (DD/MM/AAAA):**
-[Descrição completa dos achados]
-Conclusão: [conclusão do exame]
-
-Exemplo: "**RNM Coluna Lombar (15/03/2023):** Retificação da lordose lombar. Protrusão discal L4-L5 com contato radicular. Abaulamento discal difuso L5-S1. Estenose foraminal bilateral."
-
-NÃO resuma. Liste TODOS os achados de cada exame.`
-  },
-  prompt_regen_exameFisico: {
-    cardId: 'exame',
-    sectionId: 'exame-fisico',
-    description: 'Achados do Exame Físico - Regenerar via PDF',
-    prompt: `Extraia as informações do "Exame Físico" realizadas no periciando.
-
-SE HOUVER DESCRIÇÃO DE EXAME FÍSICO, EXTRAIA:
-- Estado geral do periciando
-- Inspeção (deformidades, atrofias, edemas, cicatrizes, posturas antálgicas)
-- Palpação (pontos dolorosos, contraturas musculares, massas palpáveis)
-- Testes especiais realizados e seus resultados:
-  * Coluna: Lasègue, Wassermann, Schober
-  * Ombro: Jobe, Neer, Hawkins
-  * Punho: Phalen, Tinel, Finkelstein
-  * Outros conforme região avaliada
-- Amplitude de movimentos (ADM) de cada articulação
-- Força muscular (graus 0-5 por grupamento)
-- Reflexos profundos
-- Sensibilidade
-- Marcha e postura
-- Manobras específicas
-
-Se não houver exame físico descrito nos autos, retorne: "Exame físico não descrito nos autos do processo."`
-  },
-  // NOTA: prompt_regen_descricaoPostoTrabalho foi REMOVIDO - campo unificado em descricaoAtividadesLaborais
+  
+  // ================================
+  // CARD: posto-trabalho | SECTION: dados-posto
+  // ================================
   prompt_regen_descricaoAtividadesLaborais: {
     cardId: 'posto-trabalho',
     sectionId: 'dados-posto',
-    description: 'Ambiente e Atividades Laborais - Regenerar via PDF',
+    description: 'Dados do Posto de Trabalho - Regerar via PDF',
+    order: 1,
     prompt: `Extraia e detalhe o "Ambiente de Trabalho" e as "Atividades Laborais" do documento.
 
 AMBIENTE DE TRABALHO - DETALHAR:
@@ -235,18 +219,114 @@ ATIVIDADES LABORAIS - DETALHAR:
 Busque em: PPP, PPRA, PCMSO, laudos ergonômicos, depoimentos, petição inicial.
 MÍNIMO 3 parágrafos. Seja específico e detalhado.`
   },
+  
+  // ================================
+  // CARD: exame | SECTION: laudos
+  // ================================
+  prompt_regen_laudosMedicos: {
+    cardId: 'exame',
+    sectionId: 'laudos',
+    description: 'Laudos Médicos - Regerar via PDF',
+    order: 1,
+    prompt: `Extraia TODOS os "Laudos Médicos" ou "Pareceres Médicos" do documento.
+
+PARA CADA LAUDO, EXTRAIA:
+- Data do documento
+- Nome do médico e especialidade
+- Diagnósticos (com códigos CID-10 se disponíveis)
+- Achados do exame clínico descritos
+- Conclusões do médico
+- Recomendações e restrições médicas
+- Limitações funcionais apontadas
+- Prognóstico (se mencionado)
+
+ESTRUTURE ASSIM:
+**Laudo Dr. [Nome] - [Especialidade] (DD/MM/AAAA):**
+- Diagnósticos: [listar com CIDs]
+- Conclusões: [descrever]
+- Recomendações: [descrever]
+- Limitações: [listar]
+
+Liste CADA laudo separadamente. NÃO resuma.`
+  },
+  
+  // ================================
+  // CARD: exame | SECTION: exames
+  // ================================
+  prompt_regen_examesComplementares: {
+    cardId: 'exame',
+    sectionId: 'exames',
+    description: 'Exames Complementares - Regerar via PDF',
+    order: 1,
+    prompt: `Extraia TODOS os "Exames Complementares" do documento.
+
+PARA CADA EXAME, EXTRAIA:
+- Tipo de exame (Radiografia, RNM, TC, EMG, Ultrassonografia, Laboratoriais, etc.)
+- Data de realização
+- Região/área examinada
+- TODOS os achados e resultados
+- Conclusão do laudo do exame
+
+ESTRUTURE ASSIM:
+**[Tipo do Exame] - [Região] (DD/MM/AAAA):**
+[Descrição completa dos achados]
+Conclusão: [conclusão do exame]
+
+Exemplo: "**RNM Coluna Lombar (15/03/2023):** Retificação da lordose lombar. Protrusão discal L4-L5 com contato radicular. Abaulamento discal difuso L5-S1. Estenose foraminal bilateral."
+
+NÃO resuma. Liste TODOS os achados de cada exame.`
+  },
+  
+  // ================================
+  // CARD: exame | SECTION: exame-fisico
+  // ================================
+  prompt_regen_exameFisico: {
+    cardId: 'exame',
+    sectionId: 'exame-fisico',
+    description: 'Exame Físico - Regerar via PDF',
+    order: 1,
+    prompt: `Extraia as informações do "Exame Físico" realizadas no periciando.
+
+SE HOUVER DESCRIÇÃO DE EXAME FÍSICO, EXTRAIA:
+- Estado geral do periciando
+- Inspeção (deformidades, atrofias, edemas, cicatrizes, posturas antálgicas)
+- Palpação (pontos dolorosos, contraturas musculares, massas palpáveis)
+- Testes especiais realizados e seus resultados:
+  * Coluna: Lasègue, Wassermann, Schober
+  * Ombro: Jobe, Neer, Hawkins
+  * Punho: Phalen, Tinel, Finkelstein
+  * Outros conforme região avaliada
+- Amplitude de movimentos (ADM) de cada articulação
+- Força muscular (graus 0-5 por grupamento)
+- Reflexos profundos
+- Sensibilidade
+- Marcha e postura
+- Manobras específicas
+
+Se não houver exame físico descrito nos autos, retorne: "Exame físico não descrito nos autos do processo."`
+  },
+  
+  // ================================
+  // CARD: analise-tecnica | SECTION: descricao-doencas
+  // ================================
   prompt_regen_descricaoTecnicaDoencas: {
     cardId: 'analise-tecnica',
     sectionId: 'descricao-doencas',
-    description: 'Descrição técnica das doenças - Regenerar via PDF',
+    description: 'Descrição Técnica das Doenças - Regerar via PDF',
+    order: 3,
     prompt: `Extraia informações sobre as doenças mencionadas e descreva tecnicamente cada uma.
 Para cada CID/doença, forneça: definição, etiologia, sintomas, relação ocupacional quando aplicável.
 Use linguagem técnica médica apropriada para laudo pericial.`
   },
+  
+  // ================================
+  // CARD: conclusao | SECTION: conclusao
+  // ================================
   prompt_regen_conclusaoAnalise: {
     cardId: 'conclusao',
     sectionId: 'conclusao',
-    description: 'Análise conclusiva - Regenerar via PDF',
+    description: 'Conclusão - Regerar via PDF',
+    order: 1,
     prompt: `Elabore uma "Análise Conclusiva" técnica para o laudo pericial com base em todas as informações extraídas.
 
 A ANÁLISE DEVE CONTER:
@@ -261,10 +341,15 @@ A ANÁLISE DEVE CONTER:
 Use linguagem técnica médico-legal. Seja objetivo e fundamentado.
 MÍNIMO 2 parágrafos.`
   },
+  
+  // ================================
+  // CARD: conclusao | SECTION: sequelas
+  // ================================
   prompt_regen_tabelaSUSEP: {
     cardId: 'conclusao',
     sectionId: 'sequelas',
-    description: 'Tabela SUSEP - Regenerar via PDF',
+    description: 'Tabela SUSEP - Regerar via PDF',
+    order: 1,
     prompt: `Extraia informações para avaliação pela "Tabela SUSEP/DPVAT" de invalidez permanente.
 
 BUSQUE NOS AUTOS:
@@ -287,7 +372,8 @@ Se não houver menção a percentuais de invalidez, retorne:
   prompt_regen_danoEstetico: {
     cardId: 'conclusao',
     sectionId: 'sequelas',
-    description: 'Dano estético - Regenerar via PDF',
+    description: 'Dano Estético - Regerar via PDF',
+    order: 2,
     prompt: `Extraia informações sobre "Dano Estético" do documento.
 
 BUSQUE NOS AUTOS:
@@ -313,7 +399,8 @@ Se não houver menção a dano estético, retorne:
   prompt_regen_auxilioTerceiros: {
     cardId: 'conclusao',
     sectionId: 'sequelas',
-    description: 'Necessidade de Auxílio de Terceiros - Regenerar via PDF',
+    description: 'Auxílio de Terceiros - Regerar via PDF',
+    order: 3,
     prompt: `Extraia informações sobre "Necessidade de Auxílio de Terceiros" do documento.
 
 BUSQUE NOS AUTOS:
@@ -334,10 +421,15 @@ o tipo de cuidador necessário (familiar, profissional), e a fonte documental da
 Se não houver menção a necessidade de auxílio, retorne:
 "Não foram identificados nos autos documentos que indiquem necessidade de auxílio permanente de terceiros para atividades da vida diária."`
   },
+  
+  // ================================
+  // CARD: conclusao | SECTION: quesitos
+  // ================================
   prompt_regen_quesitosJuizo: {
     cardId: 'conclusao',
     sectionId: 'quesitos',
-    description: 'Quesitos do juízo - Regenerar via PDF',
+    description: 'Quesitos do Juízo - Regerar via PDF',
+    order: 1,
     prompt: `Extraia INTEGRALMENTE os "Quesitos do Juízo" do documento.
 
 Os quesitos do Juízo são perguntas técnicas formuladas pelo Juiz para o perito responder.
@@ -365,7 +457,8 @@ Se não encontrar quesitos do Juízo, retorne: "Quesitos do Juízo não identifi
   prompt_regen_quesitosReclamante: {
     cardId: 'conclusao',
     sectionId: 'quesitos',
-    description: 'Quesitos do reclamante - Regenerar via PDF',
+    description: 'Quesitos do Reclamante - Regerar via PDF',
+    order: 2,
     prompt: `Extraia INTEGRALMENTE os "Quesitos do Reclamante" (ou do Autor) do documento.
 
 Os quesitos do Reclamante são perguntas formuladas pelo advogado da parte autora.
@@ -393,7 +486,8 @@ Se não encontrar quesitos do Reclamante, retorne: "Quesitos do Reclamante não 
   prompt_regen_quesitosReclamada: {
     cardId: 'conclusao',
     sectionId: 'quesitos',
-    description: 'Quesitos da reclamada - Regenerar via PDF',
+    description: 'Quesitos da Reclamada - Regerar via PDF',
+    order: 3,
     prompt: `Extraia INTEGRALMENTE os "Quesitos da Reclamada" (ou da Ré) do documento.
 
 Os quesitos da Reclamada são perguntas formuladas pelo advogado da parte ré/empresa.
@@ -417,34 +511,6 @@ FORMATO ESPERADO:
 ...
 
 Se não encontrar quesitos da Reclamada, retorne: "Quesitos da Reclamada não identificados nos autos."`
-  },
-  prompt_regen_resumoPeticaoInicial: {
-    cardId: 'resumo-autos',
-    sectionId: 'resumo',
-    description: 'Resumo da petição inicial - Regenerar via PDF',
-    prompt: `Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da petição inicial para um laudo pericial médico trabalhista.
-
-Instruções:
-- Resuma os pontos principais alegados pelo reclamante
-- Destaque as doenças/lesões mencionadas
-- Identifique os nexos causais alegados
-- Mencione os pedidos principais
-- Use linguagem técnica e imparcial
-- Máximo 3 parágrafos`
-  },
-  prompt_regen_resumoContestacao: {
-    cardId: 'resumo-autos',
-    sectionId: 'resumo',
-    description: 'Resumo da contestação - Regenerar via PDF',
-    prompt: `Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da contestação para um laudo pericial médico trabalhista.
-
-Instruções:
-- Resuma os pontos principais alegados pela reclamada
-- Destaque os argumentos contrários ao nexo causal
-- Identifique documentos ou evidências mencionadas
-- Mencione os pedidos de improcedência
-- Use linguagem técnica e imparcial
-- Máximo 3 parágrafos`
   }
 };
 
@@ -452,12 +518,16 @@ Instruções:
 // PROMPTS DE GERAÇÃO (gerar-resumos)
 // ============================================
 
-const genPrompts: Record<string, { prompt: string; cardId: string; sectionId: string; description: string; variables: string[] }> = {
+const genPrompts: Record<string, { prompt: string; cardId: string; sectionId: string; description: string; variables: string[]; order: number }> = {
+  // ================================
+  // CARD: resumo-autos | SECTION: resumo
+  // ================================
   prompt_gen_resumo_peticao: {
     cardId: 'resumo-autos',
     sectionId: 'resumo',
-    description: 'Resumir petição inicial',
+    description: 'Resumo da Petição Inicial - Gerar',
     variables: ['peticaoInicial'],
+    order: 1,
     prompt: `Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da petição inicial para um laudo pericial médico trabalhista.
 
 Texto da Petição Inicial:
@@ -474,8 +544,9 @@ Instruções:
   prompt_gen_resumo_contestacao: {
     cardId: 'resumo-autos',
     sectionId: 'resumo',
-    description: 'Resumir contestação',
+    description: 'Resumo da Contestação - Gerar',
     variables: ['contestacao'],
+    order: 3,
     prompt: `Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da contestação para um laudo pericial médico trabalhista.
 
 Texto da Contestação:
@@ -489,11 +560,16 @@ Instruções:
 - Use linguagem técnica e imparcial
 - Máximo 3 parágrafos`
   },
+  
+  // ================================
+  // CARD: analise-tecnica | SECTION: descricao-doencas
+  // ================================
   prompt_gen_descricao_doencas: {
     cardId: 'analise-tecnica',
     sectionId: 'descricao-doencas',
-    description: 'Descrição técnica das doenças',
+    description: 'Descrição Técnica das Doenças - Gerar',
     variables: ['cids', 'postoTrabalho', 'atividadesLaborais', 'historicoOcupacional'],
+    order: 1,
     prompt: `Você é um perito médico especialista em medicina do trabalho. Elabore uma descrição técnica detalhada das doenças identificadas para um laudo pericial.
 
 CIDs identificados:
@@ -515,11 +591,31 @@ Para cada CID mencionado, forneça:
 
 Use linguagem técnica médica apropriada para laudo pericial.`
   },
+  prompt_gen_descricao_cid: {
+    cardId: 'analise-tecnica',
+    sectionId: 'descricao-doencas',
+    description: 'Descrição por CID - Gerar',
+    variables: ['cid', 'postoTrabalho', 'atividadesLaborais'],
+    order: 2,
+    prompt: `Você é um perito médico especialista. Descreva tecnicamente a doença do CID informado.
+
+CID: \${cid}
+Posto de trabalho: \${postoTrabalho}
+Atividades laborais: \${atividadesLaborais}
+
+Forneça: definição, etiologia, sintomas, relação ocupacional quando aplicável.
+Use linguagem técnica médica apropriada para laudo pericial.`
+  },
+  
+  // ================================
+  // CARD: analise-tecnica | SECTION: nexo
+  // ================================
   prompt_gen_nexo_causal: {
     cardId: 'analise-tecnica',
     sectionId: 'nexo',
-    description: 'Análise de nexo causal',
+    description: 'Nexo Causal - Gerar',
     variables: ['cids', 'postoTrabalho', 'atividadesLaborais', 'historicoOcupacional', 'historiaAcidente', 'historiaAtual', 'exameFisico', 'examesComplementares', 'antecedentes'],
+    order: 1,
     prompt: `Você é um perito médico especialista em medicina do trabalho. Elabore uma análise técnica do nexo causal para um laudo pericial médico trabalhista.
 
 Dados para análise:
@@ -545,11 +641,16 @@ Analise o nexo causal utilizando os critérios de Bradford-Hill e Simonin:
 Classifique o nexo como: Direto, Concausa, Agravamento ou Sem Nexo Causal.
 Fundamente tecnicamente sua conclusão citando evidências clínicas e documentais.`
   },
+  
+  // ================================
+  // CARD: analise-tecnica | SECTION: analise-incapacidade
+  // ================================
   prompt_gen_incapacidade: {
     cardId: 'analise-tecnica',
     sectionId: 'analise-incapacidade',
-    description: 'Análise de incapacidade',
+    description: 'Análise da Incapacidade - Gerar',
     variables: ['cids', 'exameFisico', 'examesComplementares', 'tratamentos', 'atividadesLaborais', 'postoTrabalho'],
+    order: 1,
     prompt: `Você é um perito médico especialista em medicina do trabalho. Elabore uma análise técnica da incapacidade laboral para um laudo pericial.
 
 Dados para análise:
@@ -571,11 +672,87 @@ Analise a capacidade laboral considerando:
 
 Fundamente tecnicamente sua análise com base nos achados clínicos e exames.`
   },
+  
+  // ================================
+  // CARD: referencias | SECTION: referencias
+  // ================================
+  prompt_gen_referencias: {
+    cardId: 'referencias',
+    sectionId: 'referencias',
+    description: 'Referências Bibliográficas - Gerar',
+    variables: ['cids', 'postoTrabalho', 'atividadesLaborais', 'historicoOcupacional', 'nexoCausal', 'conclusao', 'metodologia', 'tratamentos', 'examesComplementares'],
+    order: 1,
+    prompt: `Você é um perito médico especialista em medicina do trabalho. Com base nas informações do laudo, identifique e liste referências bibliográficas pertinentes e específicas para o caso.
+
+DADOS DO LAUDO:
+- CIDs/Diagnósticos: \${cids}
+- Posto de trabalho: \${postoTrabalho}
+- Atividades laborais: \${atividadesLaborais}
+- Histórico ocupacional: \${historicoOcupacional}
+- Nexo causal: \${nexoCausal}
+- Conclusão: \${conclusao}
+- Metodologia: \${metodologia}
+- Tratamentos: \${tratamentos}
+- Exames complementares: \${examesComplementares}
+
+INSTRUÇÕES:
+- Liste entre 5 e 8 referências bibliográficas pertinentes ao caso específico
+- Numere cada referência (1-, 2-, 3-, etc.)
+- Inclua obras de medicina do trabalho relacionadas aos CIDs informados
+- Inclua legislação aplicável (CLT, Lei 8.213/91, NRs relevantes para o caso)
+- Inclua normas técnicas do CFM e CID-10
+- NÃO inclua referências genéricas desnecessárias
+- Seja específico: se há lesão de coluna, cite obras sobre coluna; se há LER/DORT, cite obras sobre ergonomia
+- Use formato ABNT para as referências
+
+FORMATO DE SAÍDA:
+1- AUTOR. Título da obra. Cidade: Editora, Ano.
+
+2- BRASIL. Lei/Norma específica aplicável ao caso.
+
+3- Norma técnica ou regulamentadora pertinente.
+
+Forneça referências que realmente embasem tecnicamente o laudo para este caso específico.`
+  },
+  
+  // ================================
+  // CARD: _global | SECTION: _aprimorar
+  // ================================
+  prompt_gen_aprimorar_texto: {
+    cardId: '_global',
+    sectionId: '_aprimorar',
+    description: 'Aprimorar Texto - Gerar',
+    variables: ['textoOriginal', 'campo'],
+    order: 1,
+    prompt: `Você é um revisor especializado em textos médico-periciais. Seu trabalho é APENAS corrigir e aprimorar o texto fornecido, SEM alterar seu conteúdo técnico ou factual.
+
+TEXTO ORIGINAL:
+\${textoOriginal}
+
+CAMPO DO LAUDO: \${campo}
+
+REGRAS ESTRITAS:
+1. Corrija APENAS: ortografia, gramática, concordância verbal/nominal, pontuação
+2. Melhore a formalidade e o estilo para padrão de laudo pericial
+3. NÃO altere dados técnicos: datas, números, CIDs, nomes, percentuais, medidas, lateralidade
+4. NÃO adicione informações novas
+5. NÃO remova informações existentes
+6. NÃO altere diagnósticos ou conclusões médicas
+7. Mantenha a estrutura de parágrafos original
+8. Use linguagem técnica e formal apropriada para laudos periciais
+
+Retorne APENAS o texto corrigido, sem comentários ou explicações.`
+  },
+  
+  // ================================
+  // CARD: _system | SECTION: _internal (não visível no laudo)
+  // ================================
   prompt_gen_sugestoes_pericia: {
-    cardId: 'periciando',
-    sectionId: 'anamnese',
-    description: 'Sugestões para perícia',
+    cardId: '_system',
+    sectionId: '_internal',
+    description: 'Sugestões para Perícia - Sistema',
     variables: ['cids', 'historiaAcidente', 'historiaAtual', 'postoTrabalho', 'atividadesLaborais', 'antecedentes'],
+    order: 1,
     prompt: `Você é um perito médico especialista em medicina do trabalho. 
 Com base nas informações do caso, elabore sugestões práticas para auxiliar a perícia.
 
@@ -628,67 +805,6 @@ ESTRUTURA DA RESPOSTA:
 - Sensibilidade (quando aplicável)
 
 Forneça entre 8-12 perguntas e 5-8 testes/manobras específicas relevantes para os CIDs informados.`
-  },
-  prompt_gen_referencias: {
-    cardId: 'referencias',
-    sectionId: 'referencias',
-    description: 'Referências bibliográficas',
-    variables: ['cids', 'postoTrabalho', 'atividadesLaborais', 'historicoOcupacional', 'nexoCausal', 'conclusao', 'metodologia', 'tratamentos', 'examesComplementares'],
-    prompt: `Você é um perito médico especialista em medicina do trabalho. Com base nas informações do laudo, identifique e liste referências bibliográficas pertinentes e específicas para o caso.
-
-DADOS DO LAUDO:
-- CIDs/Diagnósticos: \${cids}
-- Posto de trabalho: \${postoTrabalho}
-- Atividades laborais: \${atividadesLaborais}
-- Histórico ocupacional: \${historicoOcupacional}
-- Nexo causal: \${nexoCausal}
-- Conclusão: \${conclusao}
-- Metodologia: \${metodologia}
-- Tratamentos: \${tratamentos}
-- Exames complementares: \${examesComplementares}
-
-INSTRUÇÕES:
-- Liste entre 5 e 8 referências bibliográficas pertinentes ao caso específico
-- Numere cada referência (1-, 2-, 3-, etc.)
-- Inclua obras de medicina do trabalho relacionadas aos CIDs informados
-- Inclua legislação aplicável (CLT, Lei 8.213/91, NRs relevantes para o caso)
-- Inclua normas técnicas do CFM e CID-10
-- NÃO inclua referências genéricas desnecessárias
-- Seja específico: se há lesão de coluna, cite obras sobre coluna; se há LER/DORT, cite obras sobre ergonomia
-- Use formato ABNT para as referências
-
-FORMATO DE SAÍDA:
-1- AUTOR. Título da obra. Cidade: Editora, Ano.
-
-2- BRASIL. Lei/Norma específica aplicável ao caso.
-
-3- Norma técnica ou regulamentadora pertinente.
-
-Forneça referências que realmente embasem tecnicamente o laudo para este caso específico.`
-  },
-  prompt_gen_aprimorar_texto: {
-    cardId: '_global',
-    sectionId: '_aprimorar',
-    description: 'Aprimorar texto (correção gramatical)',
-    variables: ['textoOriginal', 'campo'],
-    prompt: `Você é um revisor especializado em textos médico-periciais. Seu trabalho é APENAS corrigir e aprimorar o texto fornecido, SEM alterar seu conteúdo técnico ou factual.
-
-TEXTO ORIGINAL:
-\${textoOriginal}
-
-CAMPO DO LAUDO: \${campo}
-
-REGRAS ESTRITAS:
-1. Corrija APENAS: ortografia, gramática, concordância verbal/nominal, pontuação
-2. Melhore a formalidade e o estilo para padrão de laudo pericial
-3. NÃO altere dados técnicos: datas, números, CIDs, nomes, percentuais, medidas, lateralidade
-4. NÃO adicione informações novas
-5. NÃO remova informações existentes
-6. NÃO altere diagnósticos ou conclusões médicas
-7. Mantenha a estrutura de parágrafos original
-8. Use linguagem técnica e formal apropriada para laudos periciais
-
-Retorne APENAS o texto corrigido, sem comentários ou explicações.`
   }
 };
 
@@ -696,17 +812,33 @@ Retorne APENAS o texto corrigido, sem comentários ou explicações.`
 // PROMPT DE SISTEMA (processar-autos)
 // ============================================
 
-const systemPrompts: Record<string, { prompt: string; cardId: string; sectionId: string; description: string }> = {
-  prompt_system_perito: {
+const systemPrompts: Record<string, { prompt: string; cardId: string; sectionId: string; description: string; order: number }> = {
+  // ================================
+  // CARD: _system | SECTION: _gerar_resumos
+  // ================================
+  prompt_system_gerar_resumos: {
     cardId: '_system',
-    sectionId: '_global',
-    description: 'Prompt de sistema - Identidade do perito médico',
+    sectionId: '_gerar_resumos',
+    description: 'System Prompt - Geração de Resumos',
+    order: 1,
     prompt: 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.'
   },
+  prompt_system_perito: {
+    cardId: '_system',
+    sectionId: '_gerar_resumos',
+    description: 'System Prompt - Identidade do Perito',
+    order: 2,
+    prompt: 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.'
+  },
+  
+  // ================================
+  // CARD: _system | SECTION: _import
+  // ================================
   prompt_import_system: {
     cardId: '_system',
     sectionId: '_import',
-    description: 'Mega-prompt de sistema para extração de dados de processos trabalhistas',
+    description: 'System Prompt - Importação de PDF',
+    order: 1,
     prompt: `Você é um EXTRATOR especializado em análise de processos judiciais trabalhistas médico-periciais. Sua tarefa é EXTRAIR e ORGANIZAR informações de documentos processuais para preencher um laudo pericial.
 
 REGRAS GERAIS:
@@ -720,10 +852,15 @@ REGRAS GERAIS:
 ESTRUTURA JSON DE SAÍDA:
 Retorne APENAS o JSON válido com os campos preenchidos conforme encontrado nos documentos.`
   },
+  
+  // ================================
+  // CARD: impugnacao | SECTION: resposta
+  // ================================
   prompt_system_impugnacao: {
     cardId: 'impugnacao',
     sectionId: 'resposta',
-    description: 'Instruções para Gerar Resposta a Impugnação',
+    description: 'Resposta à Impugnação - Sistema',
+    order: 1,
     prompt: `Você é um perito médico especialista em medicina do trabalho, respondendo a uma impugnação de laudo pericial.
 
 Sua tarefa é elaborar uma resposta técnica fundamentada que:
@@ -741,19 +878,19 @@ Responda sempre em português brasileiro, de forma técnica e profissional.`
 // HELPER: Get all prompts as a map
 // ============================================
 
-function getAllPromptsMap(): Record<string, { prompt: string; description: string; cardId: string; sectionId: string; variables?: string[] }> {
-  const map: Record<string, { prompt: string; description: string; cardId: string; sectionId: string; variables?: string[] }> = {};
+function getAllPromptsMap(): Record<string, { prompt: string; description: string; cardId: string; sectionId: string; order: number; variables?: string[] }> {
+  const map: Record<string, { prompt: string; description: string; cardId: string; sectionId: string; order: number; variables?: string[] }> = {};
   
   for (const [id, data] of Object.entries(regenPrompts)) {
-    map[id] = { prompt: data.prompt, description: data.description, cardId: data.cardId, sectionId: data.sectionId };
+    map[id] = { prompt: data.prompt, description: data.description, cardId: data.cardId, sectionId: data.sectionId, order: data.order };
   }
   
   for (const [id, data] of Object.entries(genPrompts)) {
-    map[id] = { prompt: data.prompt, description: data.description, cardId: data.cardId, sectionId: data.sectionId, variables: data.variables };
+    map[id] = { prompt: data.prompt, description: data.description, cardId: data.cardId, sectionId: data.sectionId, order: data.order, variables: data.variables };
   }
   
   for (const [id, data] of Object.entries(systemPrompts)) {
-    map[id] = { prompt: data.prompt, description: data.description, cardId: data.cardId, sectionId: data.sectionId };
+    map[id] = { prompt: data.prompt, description: data.description, cardId: data.cardId, sectionId: data.sectionId, order: data.order };
   }
   
   return map;
@@ -922,6 +1059,7 @@ async function syncMetadataOnly(supabase: any) {
         description: config.description,
         cardId: config.cardId,
         sectionId: config.sectionId,
+        order: config.order,
         isClassified: true,
         // Preserve: prompt, variables (if user edited them)
       };
@@ -953,6 +1091,7 @@ async function syncMetadataOnly(supabase: any) {
         description: config.description,
         cardId: config.cardId,
         sectionId: config.sectionId,
+        order: config.order,
         variables: config.variables,
         isClassified: true
       };
@@ -1062,6 +1201,7 @@ serve(async (req) => {
         description: string;
         cardId: string;
         sectionId: string;
+        order: number;
         variables?: string[];
         isClassified: boolean;
       };
@@ -1077,6 +1217,7 @@ serve(async (req) => {
           description: data.description,
           cardId: data.cardId,
           sectionId: data.sectionId,
+          order: data.order,
           isClassified: true
         },
         description: data.description
@@ -1092,6 +1233,7 @@ serve(async (req) => {
           description: data.description,
           cardId: data.cardId,
           sectionId: data.sectionId,
+          order: data.order,
           variables: data.variables,
           isClassified: true
         },
@@ -1108,6 +1250,7 @@ serve(async (req) => {
           description: data.description,
           cardId: data.cardId,
           sectionId: data.sectionId,
+          order: data.order,
           isClassified: true
         },
         description: data.description
