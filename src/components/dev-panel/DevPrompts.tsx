@@ -797,7 +797,7 @@ export function DevPrompts() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
-                    <ScrollArea className="max-h-[50vh]">
+                    <div className="max-h-[50vh] overflow-y-auto">
                       <div className="p-2 space-y-1">
                         {LAUDO_STRUCTURE.map(card => {
                           const count = getCardPromptCount(card.id);
@@ -833,7 +833,7 @@ export function DevPrompts() {
                             </Collapsible>;
                         })}
                       </div>
-                    </ScrollArea>
+                    </div>
                   </CardContent>
                 </Card>
               
