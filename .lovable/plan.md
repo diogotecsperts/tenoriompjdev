@@ -1,60 +1,36 @@
 
+# Renomear Labels do Menu DevPanel
 
-# Destaque Visual para Campo Fixo no PDF
+## Alterações
 
-## Objetivo
+Arquivo: `src/pages/DevPanel.tsx`
 
-Adicionar destaque visual ao texto "Tipo: Campo Fixo (SQL)" no PDF exportado:
-1. Símbolo de banco de dados (🗄️ ou similar) antes do texto
-2. Texto em **negrito** e cor **laranja forte**
-3. Manter o mesmo tamanho de fonte (9pt)
+Modificar apenas as propriedades `label` no array `navItems` (linhas 48-50):
 
----
+| Linha | ID (mantido) | Label Atual | Novo Label |
+|-------|--------------|-------------|------------|
+| 48 | `logs` | "Logs & Métricas" | "AI Analytics" |
+| 49 | `backend-logs` | "Logs Backend" | "Servidor & Jobs" |
+| 50 | `errors` | "Erros Frontend" | "UI Reports" |
 
-## Mudança no Código
-
-### Arquivo: `src/components/dev-panel/DevPrompts.tsx`
-
-Na função `exportToPDF`, dentro do bloco que renderiza campos fixos (linhas 591-596), modificar para:
+## Código Resultante
 
 ```tsx
-// Indicador de campo fixo com destaque
-doc.setFontSize(9);
-doc.setFont("helvetica", "normal");
-doc.setTextColor(100); // Cinza para o ID
-doc.text(`ID: ${isFixedConfig}  |  `, margin, yPos);
-
-// Calcular posição após o ID
-const idWidth = doc.getTextWidth(`ID: ${isFixedConfig}  |  `);
-
-// Símbolo + texto em laranja negrito
-doc.setFont("helvetica", "bold");
-doc.setTextColor(234, 88, 12); // Laranja forte (orange-600)
-doc.text(`[DB] Tipo: Campo Fixo (SQL)`, margin + idWidth, yPos);
-
-// Restaurar cor
-doc.setTextColor(100);
-doc.setFont("helvetica", "normal");
-yPos += 5;
+const navItems: NavItem[] = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "users", label: "Usuários", icon: Users },
+  { id: "logs", label: "AI Analytics", icon: FileText },           // ← alterado
+  { id: "backend-logs", label: "Servidor & Jobs", icon: Server },  // ← alterado
+  { id: "errors", label: "UI Reports", icon: AlertTriangle },      // ← alterado
+  { id: "ai", label: "Inteligência Artificial", icon: Cpu },
+  // ...resto igual
+];
 ```
 
----
+## Garantias Técnicas
 
-## Resultado Visual no PDF
-
-```
-Metodologia Pericial
-ID: config_metodologia_padrao  |  [DB] Tipo: Campo Fixo (SQL)  ← laranja negrito
-Atualizado em: 05/02/2025
-
-A perícia médica judicial foi realizada segundo critérios...
-```
-
-O `[DB]` funciona como representação textual do ícone de banco de dados, já que PDFs gerados via jsPDF não suportam emojis/ícones nativamente.
-
----
-
-## Nota Técnica
-
-O jsPDF não suporta inserir emojis diretamente (como 🗄️), então usaremos `[DB]` como identificador visual compacto. Alternativamente, poderia ser `◉` ou outro caractere especial, mas `[DB]` é mais claro e legível.
-
+- ✅ `id` permanece inalterado (`logs`, `backend-logs`, `errors`)
+- ✅ `DevTab` type não precisa de alteração
+- ✅ `switch (activeTab)` continua funcionando (usa `id`, não `label`)
+- ✅ Componentes importados (`DevLogs`, `DevBackendLogs`, `DevErrorLogs`) não são afetados
+- ✅ Ícones permanecem os mesmos
