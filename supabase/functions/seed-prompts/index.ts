@@ -1,10 +1,59 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { DEFAULT_IMPORT_PROMPTS, getImportPromptIds } from "../_shared/build-import-prompt.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+// ============================================
+// PROMPTS DE IMPORTAÇÃO (processar-autos)
+// ============================================
+
+function buildImportPrompts(): Record<string, { prompt: string; cardId: string; sectionId: string; description: string; order: number }> {
+  const importPrompts: Record<string, { prompt: string; cardId: string; sectionId: string; description: string; order: number }> = {};
+  
+  const cardMapping: Record<string, { cardId: string; sectionId: string }> = {
+    prompt_import_vitima: { cardId: 'preliminares', sectionId: 'dados-vitima' },
+    prompt_import_processo: { cardId: 'preliminares', sectionId: 'dados-processo' },
+    prompt_import_historiaAcidente: { cardId: 'periciando', sectionId: 'acidente' },
+    prompt_import_historicoOcupacional: { cardId: 'periciando', sectionId: 'acidente' },
+    prompt_import_historiaAtual: { cardId: 'periciando', sectionId: 'anamnese' },
+    prompt_import_antecedentes: { cardId: 'periciando', sectionId: 'antecedentes' },
+    prompt_import_tratamentos: { cardId: 'periciando', sectionId: 'antecedentes' },
+    prompt_import_afastamentos: { cardId: 'periciando', sectionId: 'antecedentes' },
+    prompt_import_postoTrabalho: { cardId: 'posto-trabalho', sectionId: 'dados-posto' },
+    prompt_import_ambienteAtividades: { cardId: 'posto-trabalho', sectionId: 'dados-posto' },
+    prompt_import_laudosMedicos: { cardId: 'exame', sectionId: 'laudos' },
+    prompt_import_examesComplementares: { cardId: 'exame', sectionId: 'exames' },
+    prompt_import_exameFisico: { cardId: 'exame', sectionId: 'exame-fisico' },
+    prompt_import_cids: { cardId: 'analise-tecnica', sectionId: 'descricao-doencas' },
+    prompt_import_incapacidade: { cardId: 'analise-tecnica', sectionId: 'analise-incapacidade' },
+    prompt_import_nexoCausal: { cardId: 'analise-tecnica', sectionId: 'nexo' },
+    prompt_import_sequelas: { cardId: 'conclusao', sectionId: 'sequelas' },
+    prompt_import_quesitos: { cardId: 'conclusao', sectionId: 'quesitos' },
+    prompt_import_textosBrutos: { cardId: 'resumo-autos', sectionId: 'resumo' },
+    prompt_import_resumo: { cardId: '_system', sectionId: '_import' }
+  };
+  
+  for (const promptId of getImportPromptIds()) {
+    const defaultData = DEFAULT_IMPORT_PROMPTS[promptId];
+    const mapping = cardMapping[promptId] || { cardId: '_system', sectionId: '_import' };
+    
+    if (defaultData) {
+      importPrompts[promptId] = {
+        cardId: mapping.cardId,
+        sectionId: mapping.sectionId,
+        description: `${defaultData.section} - Importar do PDF`,
+        order: defaultData.order,
+        prompt: defaultData.prompt
+      };
+    }
+  }
+  
+  return importPrompts;
+}
 
 // ============================================
 // PROMPTS DE REGENERAÇÃO (regerar-campo-pdf)
@@ -890,6 +939,12 @@ function getAllPromptsMap(): Record<string, { prompt: string; description: strin
   }
   
   for (const [id, data] of Object.entries(systemPrompts)) {
+    map[id] = { prompt: data.prompt, description: data.description, cardId: data.cardId, sectionId: data.sectionId, order: data.order };
+  }
+  
+  // Add import prompts
+  const importPrompts = buildImportPrompts();
+  for (const [id, data] of Object.entries(importPrompts)) {
     map[id] = { prompt: data.prompt, description: data.description, cardId: data.cardId, sectionId: data.sectionId, order: data.order };
   }
   
