@@ -45,9 +45,9 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "users", label: "Usuários", icon: Users },
-  { id: "logs", label: "Logs & Métricas", icon: FileText },
-  { id: "backend-logs", label: "Logs Backend", icon: Server },
-  { id: "errors", label: "Erros Frontend", icon: AlertTriangle },
+  { id: "logs", label: "AI Analytics", icon: FileText },
+  { id: "backend-logs", label: "Servidor & Jobs", icon: Server },
+  { id: "errors", label: "UI Reports", icon: AlertTriangle },
   { id: "ai", label: "Inteligência Artificial", icon: Cpu },
   { id: "ai-efficiency", label: "Eficiência de IAs", icon: Gauge },
   { id: "retries", label: "Retries & Rate Limits", icon: RefreshCw },
