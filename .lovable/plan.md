@@ -1,4 +1,32 @@
 
+# ✅ Plano Concluído
+
+As seguintes correções de consistência foram implementadas:
+
+## 1. Nomes de Campos Alinhados
+- `section` nos prompts de Importar agora usam nomes UI-friendly idênticos ao editor
+- Exemplo: "ACIDENTE - EXTRAÇÃO DETALHADA" → "História do Acidente"
+- As regras de extração agora estão **dentro** do corpo do prompt, não no título
+
+## 2. Ordem Corrigida
+- Em "Dados do Acidente": Histórico Ocupacional (order 3) → História do Acidente (order 4)
+- Ordem alinhada com o editor (DadosAcidente.tsx) e com Regerar
+
+## 3. Classificação Corrigida
+- `prompt_import_vitima`: preliminares/dados-vitima → periciando/vitima ✓
+- `prompt_import_processo`: preliminares/dados-processo → preliminares/processo ✓
+
+## 4. UI Melhorada
+- PromptMiniCard agora exibe o `fieldKey` (ex: `historicoOcupacional`) em fonte monoespaçada
+- Facilita identificação inequívoca do campo
+
+## Próximo Passo
+Execute **"Sincronizar Metadados"** no DevPanel > Prompts IA para aplicar as mudanças ao banco de dados.
+
+---
+
+## Plano Original (Referência)
+
 ## O que eu encontrei (por que está confuso hoje)
 
 ### 1) Os “nomes” que aparecem na coluna **Importar** não são nomes de campos — são “títulos internos” do catálogo de importação
