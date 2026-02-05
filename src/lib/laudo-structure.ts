@@ -119,6 +119,22 @@
 import { LucideIcon } from "lucide-react";
 
 // ============================================
+// CAMPOS FIXOS (gerenciados via system_config)
+// ============================================
+
+/**
+ * Mapeamento de seções que são gerenciadas via tabela system_config
+ * (não possuem prompts de IA associados).
+ * 
+ * Formato: { sectionId: configId }
+ * - sectionId: ID da seção no LAUDO_CARDS_STRUCTURE
+ * - configId: ID na tabela system_config
+ */
+export const FIXED_CONFIG_SECTIONS: Record<string, string> = {
+  'metodologia': 'config_metodologia_padrao',
+};
+
+// ============================================
 // TIPOS
 // ============================================
 

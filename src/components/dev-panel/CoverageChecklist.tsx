@@ -5,8 +5,10 @@
  import { ScrollArea } from "@/components/ui/scroll-area";
  import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
  import { ChevronDown, ChevronRight, CheckCircle2, XCircle, Minus } from "lucide-react";
+import { Database } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
  import { cn } from "@/lib/utils";
- import { LAUDO_CARDS_STRUCTURE, EXPECTED_PROMPT_TYPES, PromptType } from "@/lib/laudo-structure";
+import { LAUDO_CARDS_STRUCTURE, EXPECTED_PROMPT_TYPES, PromptType, FIXED_CONFIG_SECTIONS } from "@/lib/laudo-structure";
  
  interface PromptConfig {
    id: string;
@@ -196,8 +198,24 @@
                                : "text-foreground"
                            )}>
                              {section.label}
-                             {section.hasNoExpectations && (
-                               <span className="ml-1 text-muted-foreground">(manual)</span>
+                              {section.hasNoExpectations && FIXED_CONFIG_SECTIONS[section.id] && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="ml-1 text-amber-600 dark:text-amber-400 inline-flex items-center gap-0.5 cursor-help">
+                                      <Database className="h-2.5 w-2.5" />
+                                      (fixo - SQL)
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="right" className="max-w-xs">
+                                    <p className="text-xs">
+                                      Este campo é gerenciado via banco de dados (system_config). 
+                                      Para editar, acesse Cloud View &gt; Run SQL.
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
+                              {section.hasNoExpectations && !FIXED_CONFIG_SECTIONS[section.id] && (
+                                <span className="ml-1 text-muted-foreground">(preenchimento manual)</span>
                              )}
                            </div>
                            {!section.hasNoExpectations && (
