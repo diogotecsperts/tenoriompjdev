@@ -1,69 +1,73 @@
 
 
-# Correção: Scroll do Card de Navegação Travado
+# Estilização da Scrollbar - Card de Navegação
 
-## Problema Identificado
+## Problema
 
-O `ScrollArea` na navegação lateral tem `max-h-[50vh]`, mas está dentro de um container `sticky`. O problema é que:
-
-1. O `sticky` mantém o elemento fixo na viewport durante o scroll
-2. O `max-h-[50vh]` limita a altura máxima corretamente
-3. **MAS** o `ScrollArea` do Radix UI precisa de uma altura **definida** (não apenas máxima) para ativar o scroll interno
-
-### Por que `max-h` não funciona bem com ScrollArea
-
-O componente `ScrollArea` do Radix calcula se precisa mostrar scrollbar baseado na comparação entre a altura do container e a altura do conteúdo. Com `max-h`, o container pode crescer até o máximo, mas se o conteúdo for menor, não há altura fixa definida - isso confunde o cálculo.
+A scrollbar nativa do navegador aparece com cor preta/escura, destoando completamente do visual limpo e suave do site que usa tons de Slate/Teal.
 
 ## Solução
 
-Usar uma combinação de altura fixa com overflow controlado, ou usar `h-[50vh]` diretamente para garantir que o ScrollArea tenha uma altura definida para calcular o scroll.
+Adicionar estilos CSS personalizados para a scrollbar usando as variáveis de cor já definidas no design system. A abordagem mais limpa é criar uma classe utilitária que pode ser reutilizada em qualquer elemento com scroll nativo.
+
+---
+
+## Mudanças
+
+### Arquivo: `src/index.css`
+
+Adicionar estilos de scrollbar customizada na seção `@layer components`:
+
+```css
+/* Scrollbar customizada para elementos com overflow */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+```
 
 ### Arquivo: `src/components/dev-panel/DevPrompts.tsx`
 
-```tsx
-// Linha 800 - Antes
-<ScrollArea className="max-h-[50vh]">
-
-// Depois - Usar altura definida com flex para adaptação
-<ScrollArea className="h-[50vh]">
-```
-
-Porém, para casos onde o conteúdo é menor que 50vh, isso criaria espaço vazio. A solução ideal é:
+Aplicar a classe no div da navegação (linha 800):
 
 ```tsx
-// Solução otimizada - altura automática até um máximo, com scroll quando necessário
+// Antes
 <div className="max-h-[50vh] overflow-y-auto">
-  <div className="p-2 space-y-1">
-    {/* conteúdo */}
-  </div>
-</div>
+
+// Depois
+<div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
 ```
 
-**Remover o `ScrollArea`** e usar `overflow-y-auto` nativo do CSS, que funciona perfeitamente com `max-h`.
+---
+
+## Resultado Visual
+
+| Elemento | Antes | Depois |
+|----------|-------|--------|
+| Largura | ~12px (padrão) | 6px (fina e discreta) |
+| Track | Cinza escuro | Transparente |
+| Thumb | Preto | Cinza claro (`--border`) |
+| Hover | Sem mudança | Cinza médio suave |
+
+A scrollbar ficará sutil, com a mesma cor da borda (`--border` = Slate-200), alinhada perfeitamente ao design system do site.
 
 ---
 
-## Mudança Proposta
+## Compatibilidade
 
-| Local | Antes | Depois |
-|-------|-------|--------|
-| Linha 800-836 | `<ScrollArea className="max-h-[50vh]">...</ScrollArea>` | `<div className="max-h-[50vh] overflow-y-auto">...</div>` |
-
----
-
-## Por que esta solução é melhor
-
-1. **Simplicidade**: CSS nativo `overflow-y-auto` funciona perfeitamente com `max-h`
-2. **Performance**: Menos overhead que o componente ScrollArea do Radix
-3. **Compatibilidade**: Funciona bem com `sticky` positioning
-4. **Responsividade**: Altura se adapta ao conteúdo até o máximo definido
-
----
-
-## Resultado Esperado
-
-1. O card de Navegação terá scroll interno funcional
-2. Todas as opções do índice serão acessíveis
-3. O sticky positioning continuará funcionando
-4. Sem área branca extra na página
+- Chrome, Edge, Safari: Suporte completo via `-webkit-scrollbar`
+- Firefox: Usará fallback padrão (ainda funcional, apenas menos estilizado)
 
