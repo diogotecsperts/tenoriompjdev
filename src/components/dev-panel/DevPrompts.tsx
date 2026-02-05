@@ -466,6 +466,60 @@ export function DevPrompts() {
       doc.line(margin, yPos, pageWidth - margin, yPos);
       yPos += 10;
 
+       // Guia de Referência - Tipos de Prompts
+       checkNewPage(120);
+       doc.setFontSize(12);
+       doc.setFont("helvetica", "bold");
+       doc.setTextColor(0);
+       doc.text("GUIA DE REFERÊNCIA - TIPOS DE PROMPTS", margin, yPos);
+       yPos += 8;
+
+       doc.setFontSize(9);
+       doc.setFont("helvetica", "normal");
+
+       const guideText = [
+         "Este documento contém prompts utilizados por um sistema de geração de laudos médico-periciais.",
+         "Cada prompt instrui uma IA a realizar uma tarefa específica. Abaixo, a explicação de cada tipo:",
+         "",
+         "IMPORTAR (prompt_import_*)",
+         "Propósito: Extração de informações de documentos PDF durante upload inicial.",
+         "Entrada: Texto extraído via OCR do PDF. Saída: JSON estruturado com campos preenchidos.",
+         "",
+         "GERAR (prompt_gen_*)",
+         "Propósito: Criação de conteúdo analítico original (nexo causal, conclusões, análises).",
+         "Entrada: Variáveis do laudo. Saída: Texto dissertativo técnico-científico.",
+         "",
+         "REGERAR (prompt_regen_*)",
+         "Propósito: Re-extração de campo específico quando usuário clica em refresh.",
+         "Entrada: PDF original + campo alvo. Saída: Novo texto para o campo.",
+         "",
+         "SISTEMA",
+         "Propósito: Instruções globais de configuração e comportamento da IA.",
+         "",
+         "VARIÁVEIS: Prompts usam {{nomeVariavel}} que são substituídas em runtime pelos valores reais do laudo."
+       ];
+
+       for (const line of guideText) {
+         if (line === "") {
+           yPos += 3;
+         } else if (line.startsWith("IMPORTAR") || line.startsWith("GERAR") || 
+                    line.startsWith("REGERAR") || line.startsWith("SISTEMA") ||
+                    line.startsWith("VARIÁVEIS")) {
+           doc.setFont("helvetica", "bold");
+           doc.text(line, margin, yPos);
+           doc.setFont("helvetica", "normal");
+           yPos += 5;
+         } else {
+           doc.text(line, margin, yPos);
+           yPos += 5;
+         }
+       }
+
+       yPos += 5;
+       doc.setDrawColor(100);
+       doc.line(margin, yPos, pageWidth - margin, yPos);
+       yPos += 10;
+
       // Iterar por cada card na ordem do laudo
       for (const card of LAUDO_STRUCTURE) {
         const cardPrompts = Object.values(groupedPrompts[card.id] || {}).flat();
