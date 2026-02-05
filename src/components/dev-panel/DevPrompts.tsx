@@ -592,7 +592,19 @@ export function DevPrompts() {
             doc.setFontSize(9);
             doc.setFont("helvetica", "normal");
             doc.setTextColor(100);
-            doc.text(`ID: ${isFixedConfig}  |  Tipo: Campo Fixo (SQL)`, margin, yPos);
+             doc.text(`ID: ${isFixedConfig}  |  `, margin, yPos);
+             
+             // Calcular posição após o ID para o texto destacado
+             const idWidth = doc.getTextWidth(`ID: ${isFixedConfig}  |  `);
+             
+             // Símbolo + texto em laranja negrito
+             doc.setFont("helvetica", "bold");
+             doc.setTextColor(234, 88, 12); // Laranja forte (orange-600)
+             doc.text(`[DB] Tipo: Campo Fixo (SQL)`, margin + idWidth, yPos);
+             
+             // Restaurar estilo
+             doc.setTextColor(100);
+             doc.setFont("helvetica", "normal");
             yPos += 5;
             if (metodologiaConfig?.updatedAt) {
               doc.text(`Atualizado em: ${new Date(metodologiaConfig.updatedAt).toLocaleDateString("pt-BR")}`, margin, yPos);
