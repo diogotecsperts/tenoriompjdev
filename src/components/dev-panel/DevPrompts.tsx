@@ -788,7 +788,7 @@ export function DevPrompts() {
           <div className="flex gap-6">
             {/* Navegação Lateral Fixa */}
             <aside className="w-64 shrink-0 hidden lg:block">
-              <div className="sticky top-4">
+              <div className="sticky top-4 space-y-4">
                 <Card>
                   <CardHeader className="py-3 px-4">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -836,10 +836,10 @@ export function DevPrompts() {
                     </ScrollArea>
                   </CardContent>
                 </Card>
-              </div>
               
               {/* Coverage Checklist */}
               <CoverageChecklist prompts={prompts} />
+              </div>
             </aside>
 
             {/* Área de Conteúdo */}

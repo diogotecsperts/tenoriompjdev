@@ -151,7 +151,7 @@
          </CardTitle>
        </CardHeader>
        <CardContent className="p-0">
-         <ScrollArea className="h-[calc(100vh-600px)] min-h-[200px]">
+          <ScrollArea className="max-h-[300px]">
            <div className="p-2 space-y-1">
              {coverageData.map(card => {
                const isExpanded = expandedCards.has(card.id);
