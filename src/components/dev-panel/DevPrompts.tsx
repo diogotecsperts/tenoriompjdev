@@ -13,10 +13,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { Search, FileText, RefreshCw, AlertCircle, CheckCircle2, FolderOpen, MessageSquare, Edit3, Clock, ChevronRight, ChevronDown, Sparkles, User, Stethoscope, ClipboardCheck, BookOpen, Briefcase, Download, Loader2, Database, FileDown, AlertTriangle, ArrowRight, RotateCcw, GitCompare, Trash2, HelpCircle, Scale } from "lucide-react";
+import { Info } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { cn } from "@/lib/utils";
 import { PromptEditor } from "./PromptEditor";
-import { LAUDO_CARDS_STRUCTURE, PROMPT_ONLY_CARDS } from "@/lib/laudo-structure";
+import { LAUDO_CARDS_STRUCTURE, PROMPT_ONLY_CARDS, FIXED_CONFIG_SECTIONS } from "@/lib/laudo-structure";
 import { useScrollSpy } from "@/hooks/useScrollSpy";
 import { CoverageAlert } from "./CoverageAlert";
 import { CoverageChecklist } from "./CoverageChecklist";
@@ -145,6 +146,11 @@ export function DevPrompts() {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [syncingMetadata, setSyncingMetadata] = useState(false);
   const [pendingUpdates, setPendingUpdates] = useState<UpdatesResult | null>(null);
+  const [showMetodologiaModal, setShowMetodologiaModal] = useState(false);
+  const [metodologiaConfig, setMetodologiaConfig] = useState<{
+    texto: string;
+    updatedAt: string;
+  } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
   // Get all section IDs for scroll spy
@@ -192,6 +198,33 @@ export function DevPrompts() {
   };
   useEffect(() => {
     fetchPrompts();
+  }, []);
+
+  // Buscar configuração da Metodologia Pericial
+  useEffect(() => {
+    const fetchMetodologia = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("system_config")
+          .select("value, updated_at")
+          .eq("id", "config_metodologia_padrao")
+          .single();
+
+        if (data?.value && !error) {
+          const parsed = typeof data.value === 'string' 
+            ? JSON.parse(data.value) 
+            : data.value;
+          setMetodologiaConfig({
+            texto: parsed.texto || '',
+            updatedAt: data.updated_at || ''
+          });
+        }
+      } catch (err) {
+        console.error("Erro ao buscar metodologia:", err);
+      }
+    };
+
+    fetchMetodologia();
   }, []);
 
   // Verificar atualizações disponíveis
@@ -496,7 +529,12 @@ export function DevPrompts() {
          "SISTEMA",
          "Propósito: Instruções globais de configuração e comportamento da IA.",
          "",
-         "VARIÁVEIS: Prompts usam {{nomeVariavel}} que são substituídas em runtime pelos valores reais do laudo."
+         "VARIÁVEIS: Prompts usam {{nomeVariavel}} que são substituídas em runtime pelos valores reais do laudo.",
+         "",
+         "CAMPOS FIXOS (system_config)",
+         "Propósito: Textos padronizados que não variam entre laudos.",
+         "Gerenciamento: Banco de dados (Cloud View > Run SQL).",
+         "Campos: Metodologia Pericial"
        ];
 
        for (const line of guideText) {
@@ -519,6 +557,51 @@ export function DevPrompts() {
        doc.setDrawColor(100);
        doc.line(margin, yPos, pageWidth - margin, yPos);
        yPos += 10;
+
+      // Seção de Campos Fixos
+      checkNewPage(80);
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(245, 158, 11); // Amber
+      doc.text("CAMPOS FIXOS (GERENCIADOS VIA BANCO DE DADOS)", margin, yPos);
+      yPos += 3;
+      doc.setDrawColor(245, 158, 11);
+      doc.line(margin, yPos, pageWidth - margin, yPos);
+      yPos += 10;
+      doc.setTextColor(0);
+
+      // Metodologia Pericial
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      doc.text("Metodologia Pericial", margin, yPos);
+      yPos += 6;
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100);
+      doc.text("ID: config_metodologia_padrao  |  Tipo: Campo Fixo (SQL)", margin, yPos);
+      yPos += 5;
+      if (metodologiaConfig?.updatedAt) {
+        doc.text(`Atualizado em: ${new Date(metodologiaConfig.updatedAt).toLocaleDateString("pt-BR")}`, margin, yPos);
+        yPos += 5;
+      }
+      doc.setTextColor(0);
+      yPos += 3;
+      doc.setFont("helvetica", "italic");
+      doc.text("Texto técnico-científico padronizado que segue critérios médico-legais.", margin, yPos);
+      yPos += 7;
+      doc.setFont("helvetica", "normal");
+      
+      const metodologiaText = metodologiaConfig?.texto || "(Não carregado)";
+      const metodologiaLines = splitText(metodologiaText, contentWidth);
+      for (const line of metodologiaLines) {
+        checkNewPage(6);
+        doc.text(line, margin, yPos);
+        yPos += 5;
+      }
+      yPos += 8;
+      doc.setDrawColor(220);
+      doc.line(margin, yPos - 4, pageWidth - margin, yPos - 4);
+      yPos += 10;
 
       // Iterar por cada card na ordem do laudo
       for (const card of LAUDO_STRUCTURE) {
@@ -821,12 +904,36 @@ export function DevPrompts() {
                                   {card.sections.map(section => {
                                   const sectionCount = getSectionPromptCount(card.id, section.id);
                                   const isActive = activeId === `section-${section.id}`;
-                                  return <button key={section.id} onClick={() => handleScrollToSection(section.id)} className={cn("w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between", isActive ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted/50", sectionCount === 0 && "opacity-40")}>
-                                        <span className="truncate">{section.label}</span>
+                                  const isFixedConfig = FIXED_CONFIG_SECTIONS[section.id];
+                                  
+                                  return <Tooltip key={section.id}>
+                                    <TooltipTrigger asChild>
+                                      <button 
+                                        onClick={() => isFixedConfig 
+                                          ? setShowMetodologiaModal(true) 
+                                          : handleScrollToSection(section.id)
+                                        } 
+                                        className={cn(
+                                          "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
+                                          isActive ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+                                          !isFixedConfig && sectionCount === 0 && "opacity-40"
+                                        )}
+                                      >
+                                        <span className="truncate flex items-center gap-1">
+                                          {section.label}
+                                          {isFixedConfig && <Database className="h-3 w-3 text-amber-500" />}
+                                        </span>
                                         {sectionCount > 0 && <span className="text-[10px] bg-muted px-1 rounded">
                                             {sectionCount}
                                           </span>}
-                                      </button>;
+                                      </button>
+                                    </TooltipTrigger>
+                                    {isFixedConfig && (
+                                      <TooltipContent side="right" className="max-w-xs">
+                                        <p className="text-xs">Campo fixo - gerenciado via banco de dados. Clique para visualizar.</p>
+                                      </TooltipContent>
+                                    )}
+                                  </Tooltip>;
                                 })}
                                 </div>
                               </CollapsibleContent>
@@ -1202,6 +1309,69 @@ export function DevPrompts() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Modal Metodologia Pericial */}
+      <Dialog open={showMetodologiaModal} onOpenChange={setShowMetodologiaModal}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5 text-amber-500" />
+              Metodologia Pericial
+            </DialogTitle>
+            <DialogDescription>
+              Campo fixo gerenciado via banco de dados
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Informativo */}
+            <Card className="border-amber-500/30 bg-amber-500/5">
+              <CardContent className="pt-4 pb-4">
+                <div className="flex items-start gap-3">
+                  <Info className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Este campo é gerenciado via banco de dados</p>
+                    <p className="text-xs text-muted-foreground">
+                      A Metodologia Pericial é um texto técnico-científico padronizado que segue 
+                      critérios médico-legais consagrados. Por não variar entre laudos, não possui 
+                      prompts de IA associados.
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      <strong>Como editar:</strong> O texto é armazenado na tabela <code className="bg-muted px-1 rounded">system_config</code> com 
+                      ID <code className="bg-muted px-1 rounded">config_metodologia_padrao</code>. 
+                      Para modificá-lo, acesse Cloud View &gt; Run SQL.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Texto atual */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Texto Atual</span>
+                {metodologiaConfig?.updatedAt && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    Atualizado em {new Date(metodologiaConfig.updatedAt).toLocaleDateString("pt-BR")}
+                  </span>
+                )}
+              </div>
+              <div className="border rounded-lg p-4 bg-muted/30 max-h-[300px] overflow-y-auto custom-scrollbar">
+                <p className="text-sm whitespace-pre-wrap text-muted-foreground">
+                  {metodologiaConfig?.texto || "Não foi possível carregar o texto da metodologia."}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowMetodologiaModal(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
     </TooltipProvider>;
 }
