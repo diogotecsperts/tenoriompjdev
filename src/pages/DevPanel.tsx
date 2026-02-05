@@ -50,9 +50,9 @@ const navItems: NavItem[] = [
   { id: "errors", label: "Erros Frontend", icon: AlertTriangle },
   { id: "ai", label: "Inteligência Artificial", icon: Cpu },
   { id: "ai-efficiency", label: "Eficiência de IAs", icon: Gauge },
-  { id: "prompts", label: "Prompts IA", icon: MessageSquare },
   { id: "retries", label: "Retries & Rate Limits", icon: RefreshCw },
   { id: "pdf-costs", label: "Custos PDF", icon: DollarSign },
+  { id: "prompts", label: "DevPrompts", icon: MessageSquare },
   { id: "settings", label: "Configurações", icon: Settings },
 ];
 
