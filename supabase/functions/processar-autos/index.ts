@@ -8,6 +8,7 @@ import { getRelevantChunk } from "../_shared/smart-chunker.ts";
 import { splitPDF, needsSplit } from "../_shared/pdf-splitter.ts";
 import { extractWithMistralOCR, getMistralAPIKey } from "../_shared/mistral-ocr.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
+import { buildModularImportPrompt, isValidSystemPrompt } from "../_shared/build-import-prompt.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -393,7 +394,7 @@ const defaultSystemPrompt = `Você é um perito médico especialista em medicina
 let cachedSystemPrompt: string | null = null;
 
 /**
- * Busca o system prompt via prompt-manager
+ * Busca o system prompt modular (via prompts individuais) ou fallback para monolítico
  * Usa cache para evitar múltiplas queries dentro do mesmo request
  */
 async function getSystemPrompt(): Promise<string> {
@@ -401,17 +402,25 @@ async function getSystemPrompt(): Promise<string> {
     return cachedSystemPrompt;
   }
   
-  cachedSystemPrompt = await getPrompt(
-    'prompt_import_system',
-    defaultSystemPrompt,
-    {},
-    {
-      autoRegister: true,
-      description: 'Mega-prompt de sistema para extração de dados de processos trabalhistas',
-      cardId: '_system',
-      sectionId: '_import'
+  try {
+    // Tentar montar o prompt modular (prompts individuais do banco)
+    console.log('[processar-autos] Attempting to build modular system prompt...');
+    const modularPrompt = await buildModularImportPrompt();
+    
+    if (isValidSystemPrompt(modularPrompt)) {
+      console.log('[processar-autos] ✓ Using modular system prompt from database prompts');
+      cachedSystemPrompt = modularPrompt;
+      return cachedSystemPrompt;
     }
-  );
+    
+    console.warn('[processar-autos] Modular prompt validation failed, using fallback');
+  } catch (error) {
+    console.error('[processar-autos] Error building modular prompt, using fallback:', error);
+  }
+  
+  // Fallback: usar o prompt monolítico antigo
+  console.log('[processar-autos] Using default monolithic system prompt (fallback)');
+  cachedSystemPrompt = defaultSystemPrompt;
   
   return cachedSystemPrompt;
 }

@@ -348,6 +348,7 @@ export function DevPrompts() {
   const getPromptsTypeSplit = (prompts: PromptConfig[]) => {
     const genPrompts: PromptConfig[] = [];
     const regenPrompts: PromptConfig[] = [];
+    const importPrompts: PromptConfig[] = [];
     const otherPrompts: PromptConfig[] = [];
     prompts.forEach(p => {
       const type = getPromptType(p.id);
@@ -355,6 +356,8 @@ export function DevPrompts() {
         genPrompts.push(p);
       } else if (type.type === 'regen') {
         regenPrompts.push(p);
+      } else if (type.type === 'import') {
+        importPrompts.push(p);
       } else {
         otherPrompts.push(p);
       }
@@ -370,6 +373,7 @@ export function DevPrompts() {
     return {
       genPrompts: genPrompts.sort(sortByOrder),
       regenPrompts: regenPrompts.sort(sortByOrder),
+      importPrompts: importPrompts.sort(sortByOrder),
       otherPrompts: otherPrompts.sort(sortByOrder)
     };
   };
@@ -802,6 +806,7 @@ export function DevPrompts() {
                           const {
                             genPrompts,
                             regenPrompts,
+                            importPrompts,
                             otherPrompts
                           } = getPromptsTypeSplit(sectionPrompts);
                           return <Card key={section.id} id={`section-${section.id}`} className="scroll-mt-4">
@@ -814,8 +819,34 @@ export function DevPrompts() {
                                   </CardTitle>
                                 </CardHeader>
                                 <CardContent className="pt-0 px-4 pb-4">
-                                  {/* Grid 2 colunas: Gerar | Regerar */}
-                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {/* Grid 3 colunas: Importar | Gerar | Regerar */}
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    {/* Coluna Importar do PDF */}
+                                    <div className="space-y-2">
+                                      <div className="flex items-center gap-2 mb-2">
+                                        <Download className="h-4 w-4 text-purple-600" />
+                                        <span className="text-sm font-medium text-purple-700 dark:text-purple-400">
+                                          Importar
+                                        </span>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <HelpCircle className="h-3 w-3 text-muted-foreground cursor-help" />
+                                          </TooltipTrigger>
+                                          <TooltipContent className="max-w-xs">
+                                            <p>
+                                              Instrução usada na <strong>importação inicial</strong> do PDF.
+                                              Define como a IA extrai este campo ao processar os autos.
+                                            </p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </div>
+                                      {importPrompts.length > 0 ? <div className="space-y-2">
+                                          {importPrompts.map(prompt => <PromptMiniCard key={prompt.id} prompt={prompt} onEdit={() => openEditor(prompt)} />)}
+                                        </div> : <span className="text-xs text-muted-foreground italic py-2">
+                                          Nenhum prompt de importação
+                                        </span>}
+                                    </div>
+
                                     {/* Coluna Gerar */}
                                     <div className="space-y-2">
                                       <div className="flex items-center gap-2 mb-2">
@@ -823,27 +854,23 @@ export function DevPrompts() {
                                         <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
                                           Gerar
                                         </span>
-                                      </div>
-                                      {genPrompts.length > 0 ? <div className="space-y-2">
-                                          {genPrompts.map(prompt => <PromptMiniCard key={prompt.id} prompt={prompt} onEdit={() => openEditor(prompt)} />)}
-                                        </div> : <Tooltip>
+                                        <Tooltip>
                                           <TooltipTrigger asChild>
-                                            <span className="text-xs text-muted-foreground cursor-help flex items-center gap-1 py-2">
-                                              <HelpCircle className="h-3 w-3" />
-                                              Nenhum prompt de geração
-                                            </span>
+                                            <HelpCircle className="h-3 w-3 text-muted-foreground cursor-help" />
                                           </TooltipTrigger>
                                           <TooltipContent className="max-w-xs">
                                             <p>
-                                              Campos descritivos (história, exames, atividades) usam apenas
-                                              <strong> Regerar</strong> para extrair do PDF original.
-                                            </p>
-                                            <p className="mt-1">
-                                              Prompts de <strong>Gerar</strong> são usados em campos analíticos
-                                              (nexo causal, incapacidade) que combinam dados de outros campos.
+                                              Instrução para <strong>gerar conteúdo analítico</strong>.
+                                              Usado para criar textos combinando dados de outros campos.
                                             </p>
                                           </TooltipContent>
-                                        </Tooltip>}
+                                        </Tooltip>
+                                      </div>
+                                      {genPrompts.length > 0 ? <div className="space-y-2">
+                                          {genPrompts.map(prompt => <PromptMiniCard key={prompt.id} prompt={prompt} onEdit={() => openEditor(prompt)} />)}
+                                        </div> : <span className="text-xs text-muted-foreground italic py-2">
+                                          Nenhum prompt de geração
+                                        </span>}
                                     </div>
 
                                     {/* Coluna Regerar */}
@@ -853,6 +880,17 @@ export function DevPrompts() {
                                         <span className="text-sm font-medium text-blue-700 dark:text-blue-400">
                                           Regerar
                                         </span>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <HelpCircle className="h-3 w-3 text-muted-foreground cursor-help" />
+                                          </TooltipTrigger>
+                                          <TooltipContent className="max-w-xs">
+                                            <p>
+                                              Instrução para <strong>re-extrair do PDF</strong>.
+                                              Usado quando o usuário clica em "Regerar via PDF" no campo.
+                                            </p>
+                                          </TooltipContent>
+                                        </Tooltip>
                                       </div>
                                       {regenPrompts.length > 0 ? <div className="space-y-2">
                                           {regenPrompts.map(prompt => <PromptMiniCard key={prompt.id} prompt={prompt} onEdit={() => openEditor(prompt)} />)}
