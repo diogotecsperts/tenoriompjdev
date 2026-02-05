@@ -1,164 +1,284 @@
 
-# ✅ Plano Concluído
+# Plano: Sistema de Alertas e Documentacao para Gerenciamento de Prompts
 
-As seguintes correções de consistência foram implementadas:
-
-## 1. Nomes de Campos Alinhados
-- `section` nos prompts de Importar agora usam nomes UI-friendly idênticos ao editor
-- Exemplo: "ACIDENTE - EXTRAÇÃO DETALHADA" → "História do Acidente"
-- As regras de extração agora estão **dentro** do corpo do prompt, não no título
-
-## 2. Ordem Corrigida
-- Em "Dados do Acidente": Histórico Ocupacional (order 3) → História do Acidente (order 4)
-- Ordem alinhada com o editor (DadosAcidente.tsx) e com Regerar
-
-## 3. Classificação Corrigida
-- `prompt_import_vitima`: preliminares/dados-vitima → periciando/vitima ✓
-- `prompt_import_processo`: preliminares/dados-processo → preliminares/processo ✓
-
-## 4. UI Melhorada
-- PromptMiniCard agora exibe o `fieldKey` (ex: `historicoOcupacional`) em fonte monoespaçada
-- Facilita identificação inequívoca do campo
-
-## Próximo Passo
-Execute **"Sincronizar Metadados"** no DevPanel > Prompts IA para aplicar as mudanças ao banco de dados.
+## Objetivo
+Implementar tres funcionalidades que garantem integridade e facilitam a manutencao do sistema de prompts quando houver mudancas estruturais no laudo.
 
 ---
 
-## Plano Original (Referência)
+## Funcionalidade 1: Alerta Visual de Secoes Sem Prompts
 
-## O que eu encontrei (por que está confuso hoje)
+### O que sera feito
+Adicionar um banner de alerta no topo do DevPrompts que detecta automaticamente secoes da `LAUDO_STRUCTURE` que nao possuem nenhum prompt associado (nem Importar, nem Gerar, nem Regerar).
 
-### 1) Os “nomes” que aparecem na coluna **Importar** não são nomes de campos — são “títulos internos” do catálogo de importação
-- No seu caso, **o texto mostrado no card** vem do `description` salvo no banco (`system_config.description`), e **esse description é construído a partir de `DEFAULT_IMPORT_PROMPTS[...].section`** (arquivo `supabase/functions/_shared/build-import-prompt.ts`), via `seed-prompts`.
-- Só que nesses defaults eu vi coisas como:
-  - `section: 'ACIDENTE - EXTRAÇÃO DETALHADA OBRIGATÓRIA'`
-  - `section: 'AFASTAMENTOS'`
-  - `section: 'INFORMAÇÕES MÉDICAS - NEXO CAUSAL'`
-- Isso é ótimo como “título de capítulo” do prompt monolítico, mas **péssimo como nome de campo na UI**, porque não bate com:
-  - os labels do editor (`História do Acidente`, `Histórico Ocupacional`, etc.)
-  - os nomes que você já vê em **Regerar** (que estão mais próximos do “nome do campo”).
+### Comportamento
+- O sistema ira comparar as 21 secoes do `LAUDO_CARDS_STRUCTURE` com os prompts carregados do banco
+- Secoes com 0 prompts em todas as categorias serao listadas como "descobertas"
+- O alerta sera um card amarelo/warning com icone de atencao
+- Clicavel para expandir e ver detalhes
 
-Resultado: você vê “ACIDENTE - EXTRAÇÃO…” na Importação e “História do Acidente” no Regerar, parecendo que são coisas diferentes — quando na prática são o mesmo alvo.
+### Excecoes esperadas (nao serao alertas)
+- Secoes de `PROMPT_ONLY_CARDS` (Sistema, Globais, Impugnacao) - sao categorias especiais
+- Secoes que por design nao tem prompts automaticos (ex: `perito` que e preenchido manualmente)
 
----
-
-### 2) A ordem na seção “Dados do Acidente” está invertida entre Importar e Regerar
-Pelos dados atuais do banco:
-- Importar:
-  - `prompt_import_historiaAcidente` tem `order = 3`
-  - `prompt_import_historicoOcupacional` tem `order = 4`
-  -> portanto aparece primeiro “História do Acidente” (mesmo que com nome ruim), depois “Histórico Ocupacional”
-- Regerar:
-  - `prompt_regen_historicoOcupacional` tem `order = 1`
-  - `prompt_regen_historiaAcidente` tem `order = 2`
-  -> portanto aparece primeiro “Histórico Ocupacional”, depois “História do Acidente”
-
-E no editor (componente `src/components/laudo/sections/DadosAcidente.tsx`) a ordem é:
-1) Histórico Ocupacional  
-2) História do Acidente
-
-Ou seja: **Regerar está alinhado ao editor; Importar não**.
+### Localizacao na UI
+- Sera exibido logo abaixo dos cards de estatisticas (Total/Classificados/Nao Classificados)
+- Aparece apenas quando houver secoes descobertas
 
 ---
 
-### 3) Existe um problema real de “classificação” (cardId/sectionId) em pelo menos 2 prompts de Importar
-No `build-import-prompt.ts` e no `seed-prompts/index.ts`, os mapeamentos estão usando `sectionId` que **não existem** na `LAUDO_STRUCTURE`, por exemplo:
-- `prompt_import_vitima` está indo para `preliminares/dados-vitima` (mas no laudo-structure o correto é `periciando/vitima`)
-- `prompt_import_processo` está indo para `preliminares/dados-processo` (mas o correto é `preliminares/processo`)
+## Funcionalidade 2: Checklist Automatico por Tipo de Prompt
 
-Isso causa:
-- prompt cair como “órfão” (unclassified/orphaned) ou aparecer em lugar errado
-- perda de confiança na organização (com razão)
+### O que sera feito
+Criar um componente `CoverageChecklist` que mostra, para cada secao do laudo, um checklist visual do status de cobertura por tipo de prompt.
 
----
+### Estrutura do checklist
+Para cada secao exibira:
+```
+Secao: Dados do Acidente
+  [ ] Importar: 0 prompts
+  [x] Gerar: 0 prompts  
+  [x] Regerar: 2 prompts (Historico Ocupacional, Historia do Acidente)
+```
 
-## Confirmação: quais campos “não terem Importar / Gerar / Regerar” está correto?
+### Indicadores visuais
+- Verde (check): tem pelo menos 1 prompt do tipo
+- Vermelho (x): nao tem nenhum prompt do tipo
+- Cinza (traço): tipo nao aplicavel para esta secao
 
-Vou te dar a lógica do sistema (por design), usando o que está hoje no banco + como o editor funciona:
+### Logica de "tipo aplicavel"
+- **Importar**: aplicavel a secoes que recebem dados do PDF (vitima, acidente, anamnese, antecedentes, posto, laudos, exames, etc.)
+- **Gerar**: aplicavel a secoes analiticas (nexo, incapacidade, conclusao, referencias)
+- **Regerar**: aplicavel a secoes com campos de texto que tem botao de refresh no editor
 
-### A) Seções/campos que normalmente terão **Importar**, mas podem NÃO ter **Regerar**
-Motivo: o editor usa `Input/Select` simples sem botão “Regerar via PDF” (logo não existe prompt_regen para aquilo).
-- **Dados da Vítima** (Inputs/Selects): faz sentido ter Importar; Regerar não existe hoje porque não há botão no UI para esses campos.
-- **Dados do Processo** (Inputs): idem.
-- **Dados Funcionais do Posto** (cargo/datas): idem (são Inputs; só o textão “Ambiente e Atividades” tem botão Regerar).
+### Localizacao na UI
+- Sera um novo painel colapsavel na sidebar de navegacao (abaixo da navegacao atual)
+- Ou como uma nova aba "Cobertura" ao lado de "Classificados" e "Nao Classificados"
 
-Isso é coerente; o que precisa é: a UI deixar isso “óbvio” e a nomenclatura ficar idêntica aos campos.
-
-### B) Seções/campos que normalmente terão **Gerar**, mas podem NÃO ter **Importar**
-Motivo: são textos analíticos/sintéticos criados a partir do conjunto de dados, não “copiados” do PDF.
-- **Nexo Causal (Gerar)**: é análise; não é “extração literal”.
-- **Incapacidade (Gerar)**: análise.
-- **Referências Bibliográficas (Gerar)**: geração.
-- **Resumos (Gerar)**: geração.
-
-Também é coerente.
-
-### C) Seções/campos que podem ter **Regerar**, mas não necessariamente terão **Importar** (ou terão Importar indireto)
-Exemplo importante:
-- **Conclusão (campo conclusao_analise)** hoje aparece com **Regerar** (porque você consegue reextrair/reharmonizar do PDF), mas a importação inicial dele acontece **via resumo/geração**, não por um prompt_import dedicado do mesmo “campo”.
-Então: “não ter Importar” ali pode ser aceitável, mas também pode ser melhorado (opcional) criando um `prompt_gen_conclusao` ou mudando o pipeline. Isso é uma segunda etapa; primeiro vamos alinhar a organização.
-
----
-
-## Melhor forma de alinhar nomes e ordem (o que vou ajustar)
-
-### Objetivo prático
-1) Na tela Prompts IA, dentro de cada seção, **Importar / Gerar / Regerar precisam listar os mesmos “nomes de campos”**, quando estiverem falando do mesmo campo.
-2) A ordem dentro da seção deve acompanhar **a ordem do editor** (para você bater o olho e confiar).
-
-### Mudanças propostas (sem alterar comportamento de extração, só “organização + consistência”)
-1) **Renomear os “títulos” dos prompts de Importar** (as strings `DEFAULT_IMPORT_PROMPTS[...].section`) para virarem “nome do campo” (ex.: `História do Acidente`, `Histórico Ocupacional`, etc.).
-   - As regras “EXTRAÇÃO DETALHADA OBRIGATÓRIA” continuam, mas **dentro do corpo do prompt** (não no nome).
-2) **Trocar a ordem** de `prompt_import_historicoOcupacional` e `prompt_import_historiaAcidente` para ficar igual ao editor:
-   - `historicoOcupacional` antes
-   - `historiaAcidente` depois
-   - Mantendo números únicos globais, para não bagunçar a montagem do prompt modular.
-3) **Corrigir cardId/sectionId** (classificação) dos prompts de Importar para bater 100% com `src/lib/laudo-structure.ts`:
-   - `prompt_import_vitima` -> `periciando / vitima`
-   - `prompt_import_processo` -> `preliminares / processo`
-   - e revisar os demais para garantir que nenhum usa sectionId inexistente.
-4) **Ajustar descrições de Regerar** que estão genéricas e não refletem o label real do campo (ex.: no posto de trabalho, o Regen está como “Dados do Posto de Trabalho”, mas o campo é “Ambiente e Atividades Laborais”).
-5) **Melhoria de UX no DevPrompts**: exibir também o `prompt.id` (ou “fieldKey”) no mini-card, porque:
-   - mesmo com descrições alinhadas, o ID é o “identificador definitivo”
-   - isso elimina 90% da confusão quando houver qualquer dúvida.
+### Implementacao tecnica
+Criar um mapeamento estatico que define quais tipos de prompt sao esperados para cada secao:
+```typescript
+const EXPECTED_PROMPT_TYPES: Record<string, ('import' | 'gen' | 'regen')[]> = {
+  'processo': ['import'],
+  'vitima': ['import'],
+  'acidente': ['import', 'regen'],
+  'anamnese': ['import', 'regen'],
+  'nexo': ['import', 'gen'],
+  'conclusao': ['regen'],
+  // ...
+}
+```
 
 ---
 
-## Como vou “auditar” para garantir que não tem mais pontos cegos
+## Funcionalidade 3: Documentacao Inline no laudo-structure.ts
 
-Depois das correções, vou validar assim:
-1) Rodar uma listagem (via app) para checar **prompts órfãos** (cardId/sectionId que não existem na estrutura).
-2) Conferir seção por seção:
-   - se a seção tem campo com botão “Regerar via PDF” no editor, tem que existir `prompt_regen_*` correspondente.
-   - se a seção é preenchida no `ImportarAutosDialog` a partir do JSON extraído, tem que existir o `prompt_import_*` correspondente (quando aplicável).
-   - se a seção é analítica (resumos, nexo, incapacidade, referências), tem que existir `prompt_gen_*`.
-3) Confirmar que a ordem (campo `order`) dentro de cada tipo bate com o editor.
+### O que sera feito
+Expandir a documentacao existente no `laudo-structure.ts` com um guia passo-a-passo completo para adicionar novos campos.
+
+### Conteudo da documentacao
+
+```typescript
+/**
+ * =========================================
+ * GUIA: COMO ADICIONAR UM NOVO CAMPO/SECAO
+ * =========================================
+ * 
+ * PASSO 1: ADICIONAR A SECAO NESTA ESTRUTURA
+ * -------------------------------------------
+ * Localize o card apropriado em LAUDO_CARDS_STRUCTURE e adicione:
+ *   { id: "novo-campo", label: "Nome do Novo Campo" }
+ * 
+ * Convencoes de ID:
+ * - Use kebab-case para IDs compostos (ex: "exame-fisico")
+ * - Use nomes curtos e descritivos
+ * - O ID sera usado como referencia em todo o sistema
+ * 
+ * 
+ * PASSO 2: CRIAR O COMPONENTE DE FORMULARIO
+ * -------------------------------------------
+ * Arquivo: src/components/laudo/sections/NovoCampo.tsx
+ * 
+ * Template basico:
+ *   export function NovoCampo() {
+ *     const { laudo, updateLaudo, isLoading } = useLaudo();
+ *     return (
+ *       <LaudoTextareaAIField
+ *         label="Nome do Campo"
+ *         fieldName="nome_campo_banco"
+ *         promptKey="novoCampo"
+ *       />
+ *     );
+ *   }
+ * 
+ * 
+ * PASSO 3: REGISTRAR O COMPONENTE NO LAUDOEDITOR
+ * -----------------------------------------------
+ * Arquivo: src/pages/LaudoEditor.tsx
+ * 
+ * a) Importar o componente:
+ *    import { NovoCampo } from "@/components/laudo/sections/NovoCampo";
+ * 
+ * b) Adicionar ao renderSection():
+ *    case "novo-campo": return <NovoCampo />;
+ * 
+ * 
+ * PASSO 4: ADICIONAR PROMPT DE IMPORTACAO (se aplicavel)
+ * -------------------------------------------------------
+ * Arquivo: supabase/functions/_shared/build-import-prompt.ts
+ * 
+ * a) Adicionar ao DEFAULT_IMPORT_PROMPTS:
+ *    prompt_import_novoCampo: {
+ *      section: 'Nome do Campo',
+ *      order: XX,  // Proximo numero disponivel
+ *      prompt: `Instrucoes de extracao...`
+ *    }
+ * 
+ * b) Adicionar ao IMPORT_JSON_TEMPLATE a propriedade JSON correspondente
+ * 
+ * c) Adicionar mapeamento em seed-prompts/index.ts cardMapping:
+ *    prompt_import_novoCampo: { cardId: 'card-id', sectionId: 'novo-campo' }
+ * 
+ * 
+ * PASSO 5: ADICIONAR PROMPT DE REGENERACAO (se aplicavel)
+ * --------------------------------------------------------
+ * Arquivo: supabase/functions/seed-prompts/index.ts
+ * 
+ * Adicionar ao objeto regenPrompts:
+ *   prompt_regen_novoCampo: {
+ *     cardId: 'card-id',
+ *     sectionId: 'novo-campo',
+ *     description: 'Nome do Campo - Regerar via PDF',
+ *     order: XX,
+ *     prompt: `Instrucoes de regeneracao...`
+ *   }
+ * 
+ * 
+ * PASSO 6: ADICIONAR PROMPT DE GERACAO (se analitico)
+ * ----------------------------------------------------
+ * Arquivo: supabase/functions/seed-prompts/index.ts
+ * 
+ * Adicionar ao objeto genPrompts:
+ *   prompt_gen_novoCampo: {
+ *     cardId: 'card-id',
+ *     sectionId: 'novo-campo',
+ *     description: 'Nome do Campo',
+ *     order: XX,
+ *     prompt: `Instrucoes de geracao...`,
+ *     variables: ['var1', 'var2']  // Variaveis disponiveis
+ *   }
+ * 
+ * 
+ * PASSO 7: SINCRONIZAR NO DEVPANEL
+ * ---------------------------------
+ * 1. Acesse DevPanel > Prompts IA
+ * 2. Clique em "Verificar Atualizacoes"
+ * 3. Clique em "Sincronizar Labels (preserva conteudo)"
+ * 4. Confirme que o novo campo aparece na secao correta
+ * 
+ * 
+ * PASSO 8: TESTAR O FLUXO COMPLETO
+ * ---------------------------------
+ * a) Importacao: Upload de PDF e verificar se campo e preenchido
+ * b) Regeneracao: Clicar no botao de refresh e verificar resultado
+ * c) Geracao: Se analitico, verificar se gera corretamente
+ * d) Edicao de Prompt: Editar no DevPanel e testar novamente
+ * 
+ */
+```
 
 ---
 
-## Implementação (passo a passo)
-1) Atualizar `supabase/functions/_shared/build-import-prompt.ts`
-   - trocar nomes `section` dos defaults para “nome de campo” (UI-friendly)
-   - ajustar orders no bloco de defaults (especialmente “Dados do Acidente”)
-   - corrigir `getCardIdForPrompt` e `getSectionIdForPrompt` para usar IDs reais do `laudo-structure`
-2) Atualizar `supabase/functions/seed-prompts/index.ts`
-   - corrigir `cardMapping` de import prompts (vitima/processo e quaisquer outros)
-   - ajustar `description` dos prompts import/regen para ficarem equivalentes aos labels do editor
-3) Atualizar `src/components/dev-panel/DevPrompts.tsx`
-   - no `PromptMiniCard`, mostrar também o `prompt.id` (em fonte monoespaçada), para garantir identificação inequívoca
-4) Você executa “Sincronizar Metadados” no DevPanel (isso atualiza description/cardId/sectionId/order no banco preservando o texto que você já editou).
-5) Checklist final:
-   - Conferir “Dados do Acidente”: Importar e Regerar com mesmos nomes e mesma ordem
-   - Conferir “Dados da Vítima” e “Dados do Processo” aparecem na seção correta
-   - Conferir aba “Não classificados” sem prompts de importação que deveriam estar classificados
+## Arquivos a serem modificados
+
+### 1. src/lib/laudo-structure.ts
+- Adicionar documentacao completa no header do arquivo
+- Adicionar constante `EXPECTED_PROMPT_TYPES` para cobertura
+
+### 2. src/components/dev-panel/DevPrompts.tsx
+- Adicionar calculo de `uncoveredSections` (secoes sem prompts)
+- Adicionar componente `CoverageAlert` (banner de alerta)
+- Adicionar componente `CoverageChecklist` (checklist detalhado)
+- Integrar nova aba ou painel na UI
+
+### 3. Nenhum arquivo de backend precisa ser alterado
+- Toda a logica e de frontend, analisando os dados ja carregados
 
 ---
 
-## Observação importante (para manter confiança)
-Essas mudanças propostas são “seguras” porque:
-- não alteram a tabela do laudo
-- não mudam o *conteúdo* do prompt (apenas o “nome/label” e metadados de organização), exceto onde decidirmos mover “EXTRAÇÃO OBRIGATÓRIA” do título para dentro do texto (o que é até melhor)
-- usam a própria rotina de “sync_metadata” que preserva prompts customizados
+## Detalhes Tecnicos
 
-Se você aprovar, eu implemento essa correção de consistência e aí sim você pode começar a ajustar os prompts com confiança total na organização.
+### Calculo de secoes descobertas
+```typescript
+const uncoveredSections = useMemo(() => {
+  const results: { cardId: string; sectionId: string; label: string; cardLabel: string }[] = [];
+  
+  // Apenas LAUDO_CARDS_STRUCTURE (exclui PROMPT_ONLY_CARDS)
+  for (const card of LAUDO_CARDS_STRUCTURE) {
+    for (const section of card.sections) {
+      const count = getSectionPromptCount(card.id, section.id);
+      if (count === 0) {
+        results.push({
+          cardId: card.id,
+          sectionId: section.id,
+          label: section.label,
+          cardLabel: card.label
+        });
+      }
+    }
+  }
+  
+  return results;
+}, [groupedPrompts]);
+```
+
+### Checklist de tipos esperados
+```typescript
+const EXPECTED_PROMPT_TYPES: Record<string, ('import' | 'gen' | 'regen')[]> = {
+  // Preliminares
+  'perito': [],  // Preenchimento manual
+  'processo': ['import'],
+  'objetivo': [],  // Preenchimento manual
+  'documentos': [],  // Checkbox manual
+  
+  // Resumo dos Autos
+  'resumo': ['import', 'regen'],
+  'metodologia': [],  // Preenchimento manual
+  
+  // Periciando
+  'vitima': ['import'],
+  'acidente': ['import', 'regen'],
+  'anamnese': ['import', 'regen'],
+  'antecedentes': ['import', 'regen'],
+  
+  // Posto de Trabalho
+  'dados-posto': ['import', 'regen'],
+  
+  // Exame Clinico
+  'laudos': ['import', 'regen'],
+  'exames': ['import', 'regen'],
+  'exame-fisico': ['import', 'regen'],
+  
+  // Analise Tecnica
+  'descricao-doencas': ['import', 'gen', 'regen'],
+  'nexo': ['import', 'gen'],
+  'analise-incapacidade': ['import', 'gen'],
+  
+  // Conclusao
+  'conclusao': ['regen'],
+  'sequelas': ['import', 'regen'],
+  'quesitos': ['import'],
+  
+  // Referencias
+  'referencias': ['gen']
+};
+```
+
+---
+
+## Beneficios esperados
+
+1. **Visibilidade imediata**: Ao adicionar uma nova secao, o sistema alertara automaticamente que ela nao tem prompts
+2. **Checklist claro**: Saber exatamente quais tipos de prompt estao faltando para cada secao
+3. **Documentacao contextual**: Guia passo-a-passo no proprio codigo para evitar erros de implementacao
+4. **Prevencao de bugs**: Evitar situacoes onde um campo e adicionado mas nao tem prompt configurado
