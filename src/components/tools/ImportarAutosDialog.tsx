@@ -952,6 +952,25 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         // Continue anyway, the current token might still be valid
       }
 
+      // Buscar texto padrão da Metodologia Pericial do banco de dados
+      let metodologiaPadrao = '';
+      try {
+        const { data: metodologiaConfig } = await supabase
+          .from('system_config')
+          .select('value')
+          .eq('id', 'config_metodologia_padrao')
+          .single();
+        
+        if (metodologiaConfig?.value) {
+          const parsed = typeof metodologiaConfig.value === 'string' 
+            ? JSON.parse(metodologiaConfig.value) 
+            : metodologiaConfig.value;
+          metodologiaPadrao = parsed.texto || '';
+        }
+      } catch (err) {
+        console.warn('[createLaudo] Failed to fetch metodologia padrao:', err);
+      }
+
       const documentosArray = buildDocumentosArray(extractedData.documentos_checklist);
 
       const laudoData = {
@@ -1029,6 +1048,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         // Análise Conclusiva - mapear do resumo de incapacidade gerado pela IA
         conclusao_analise: extractedData.resumos_ia?.incapacidade || '',
         referencias_bibliograficas: extractedData.resumos_ia?.referencias_bibliograficas || '',
+        
+        // Campo fixo gerenciado via banco de dados (config_metodologia_padrao)
+        metodologia_pericial: metodologiaPadrao,
         
         anotacoes: extractedData.resumo ? `[Resumo extraído automaticamente]\n${extractedData.resumo}` : '',
         status: 'rascunho',
