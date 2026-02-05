@@ -1,17 +1,119 @@
 /**
- * Laudo Structure - Fonte única de verdade para a estrutura de cards/seções do laudo
+ * =========================================
+ * LAUDO STRUCTURE - FONTE ÚNICA DE VERDADE
+ * =========================================
  * 
- * Este módulo define a estrutura de navegação do LaudoEditor e é compartilhado
- * com a página de gerenciamento de prompts (DevPrompts) para garantir sincronização.
+ * Este módulo define a estrutura de cards/seções do laudo e é compartilhado
+ * por todo o sistema para garantir sincronização.
  * 
- * IMPORTANTE: Qualquer alteração aqui reflete automaticamente em:
- * - LaudoEditor (navegação e formulários)
- * - DevPrompts (organização de prompts por seção)
+ * ARQUIVOS QUE CONSOMEM ESTA ESTRUTURA:
+ * - src/pages/LaudoEditor.tsx (navegação e formulários)
+ * - src/components/dev-panel/DevPrompts.tsx (gerenciador de prompts)
  * 
- * Ao adicionar uma nova seção:
- * 1. Adicione o componente em src/components/laudo/sections/
- * 2. Adicione a seção aqui no card apropriado
- * 3. Os prompts relacionados serão auto-descobertos e classificados automaticamente
+ * =========================================
+ * GUIA: COMO ADICIONAR UM NOVO CAMPO/SEÇÃO
+ * =========================================
+ * 
+ * PASSO 1: ADICIONAR A SEÇÃO NESTA ESTRUTURA
+ * -------------------------------------------
+ * Localize o card apropriado em LAUDO_CARDS_STRUCTURE e adicione:
+ *   { id: "novo-campo", label: "Nome do Novo Campo" }
+ * 
+ * Convenções de ID:
+ * - Use kebab-case para IDs compostos (ex: "exame-fisico")
+ * - Use nomes curtos e descritivos
+ * - O ID será usado como referência em todo o sistema
+ * 
+ * 
+ * PASSO 2: CRIAR O COMPONENTE DE FORMULÁRIO
+ * -------------------------------------------
+ * Arquivo: src/components/laudo/sections/NovoCampo.tsx
+ * 
+ * Template básico:
+ *   export function NovoCampo() {
+ *     const { laudo, updateLaudo, isLoading } = useLaudo();
+ *     return (
+ *       <LaudoTextareaAIField
+ *         label="Nome do Campo"
+ *         fieldName="nome_campo_banco"
+ *         promptKey="novoCampo"
+ *       />
+ *     );
+ *   }
+ * 
+ * 
+ * PASSO 3: REGISTRAR O COMPONENTE NO LAUDOEDITOR
+ * -----------------------------------------------
+ * Arquivo: src/pages/LaudoEditor.tsx
+ * 
+ * a) Importar o componente:
+ *    import { NovoCampo } from "@/components/laudo/sections/NovoCampo";
+ * 
+ * b) Adicionar ao renderSection():
+ *    case "novo-campo": return <NovoCampo />;
+ * 
+ * 
+ * PASSO 4: ADICIONAR PROMPT DE IMPORTAÇÃO (se aplicável)
+ * -------------------------------------------------------
+ * Arquivo: supabase/functions/_shared/build-import-prompt.ts
+ * 
+ * a) Adicionar ao DEFAULT_IMPORT_PROMPTS:
+ *    prompt_import_novoCampo: {
+ *      section: 'Nome do Campo',
+ *      order: XX,  // Próximo número disponível
+ *      prompt: `Instruções de extração...`
+ *    }
+ * 
+ * b) Adicionar ao IMPORT_JSON_TEMPLATE a propriedade JSON correspondente
+ * 
+ * c) Adicionar mapeamento em seed-prompts/index.ts cardMapping:
+ *    prompt_import_novoCampo: { cardId: 'card-id', sectionId: 'novo-campo' }
+ * 
+ * 
+ * PASSO 5: ADICIONAR PROMPT DE REGENERAÇÃO (se aplicável)
+ * --------------------------------------------------------
+ * Arquivo: supabase/functions/seed-prompts/index.ts
+ * 
+ * Adicionar ao objeto regenPrompts:
+ *   prompt_regen_novoCampo: {
+ *     cardId: 'card-id',
+ *     sectionId: 'novo-campo',
+ *     description: 'Nome do Campo - Regerar via PDF',
+ *     order: XX,
+ *     prompt: `Instruções de regeneração...`
+ *   }
+ * 
+ * 
+ * PASSO 6: ADICIONAR PROMPT DE GERAÇÃO (se analítico)
+ * ----------------------------------------------------
+ * Arquivo: supabase/functions/seed-prompts/index.ts
+ * 
+ * Adicionar ao objeto genPrompts:
+ *   prompt_gen_novoCampo: {
+ *     cardId: 'card-id',
+ *     sectionId: 'novo-campo',
+ *     description: 'Nome do Campo',
+ *     order: XX,
+ *     prompt: `Instruções de geração...`,
+ *     variables: ['var1', 'var2']  // Variáveis disponíveis
+ *   }
+ * 
+ * 
+ * PASSO 7: SINCRONIZAR NO DEVPANEL
+ * ---------------------------------
+ * 1. Acesse DevPanel > Prompts IA
+ * 2. Clique em "Verificar Atualizações"
+ * 3. Clique em "Sincronizar labels (preserva conteúdo)"
+ * 4. Confirme que o novo campo aparece na seção correta
+ * 
+ * 
+ * PASSO 8: TESTAR O FLUXO COMPLETO
+ * ---------------------------------
+ * a) Importação: Upload de PDF e verificar se campo é preenchido
+ * b) Regeneração: Clicar no botão de refresh e verificar resultado
+ * c) Geração: Se analítico, verificar se gera corretamente
+ * d) Edição de Prompt: Editar no DevPanel e testar novamente
+ * 
  */
 
 import { LucideIcon } from "lucide-react";
@@ -41,6 +143,62 @@ export interface LaudoCardSimple {
   icon: LucideIcon;
   sections: { id: string; label: string }[];
 }
+
+// ============================================
+// TIPOS DE PROMPT ESPERADOS POR SEÇÃO
+// ============================================
+
+/**
+ * Mapeamento de quais tipos de prompt são esperados para cada seção.
+ * Usado pelo DevPrompts para exibir checklist de cobertura.
+ * 
+ * Tipos:
+ * - 'import': Extração inicial do PDF (processar-autos)
+ * - 'gen': Geração analítica (gerar-resumos)
+ * - 'regen': Regeneração via botão refresh (regerar-campo-pdf)
+ * 
+ * Seções com array vazio [] são preenchidas manualmente pelo usuário.
+ */
+export type PromptType = 'import' | 'gen' | 'regen';
+
+export const EXPECTED_PROMPT_TYPES: Record<string, PromptType[]> = {
+  // Preliminares
+  'perito': [],           // Preenchimento manual (dados do perfil)
+  'processo': ['import'], // Número do processo, vara, partes
+  'objetivo': [],         // Preenchimento manual
+  'documentos': [],       // Checkbox manual
+  
+  // Resumo dos Autos
+  'resumo': ['import', 'regen'],  // Petição inicial e contestação
+  'metodologia': [],              // Preenchimento manual
+  
+  // Periciando
+  'vitima': ['import'],           // Dados pessoais
+  'acidente': ['import', 'regen'], // Histórico ocupacional, história do acidente
+  'anamnese': ['import', 'regen'], // História atual, tratamentos
+  'antecedentes': ['import', 'regen'],
+  
+  // Posto de Trabalho
+  'dados-posto': ['import', 'regen'],
+  
+  // Exame Clínico
+  'laudos': ['import', 'regen'],
+  'exames': ['import', 'regen'],
+  'exame-fisico': ['import', 'regen'],
+  
+  // Análise Técnica
+  'descricao-doencas': ['import', 'gen', 'regen'],
+  'nexo': ['import', 'gen'],
+  'analise-incapacidade': ['import', 'gen'],
+  
+  // Conclusão
+  'conclusao': ['regen'],
+  'sequelas': ['import', 'regen'],
+  'quesitos': ['import'],
+  
+  // Referências
+  'referencias': ['gen'],
+};
 
 // ============================================
 // ESTRUTURA PRINCIPAL
