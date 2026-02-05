@@ -1,258 +1,136 @@
 
+## O que eu encontrei (por que está confuso hoje)
 
-# Análise Técnica Definitiva: Viabilidade da Opção A (Modularização Completa)
+### 1) Os “nomes” que aparecem na coluna **Importar** não são nomes de campos — são “títulos internos” do catálogo de importação
+- No seu caso, **o texto mostrado no card** vem do `description` salvo no banco (`system_config.description`), e **esse description é construído a partir de `DEFAULT_IMPORT_PROMPTS[...].section`** (arquivo `supabase/functions/_shared/build-import-prompt.ts`), via `seed-prompts`.
+- Só que nesses defaults eu vi coisas como:
+  - `section: 'ACIDENTE - EXTRAÇÃO DETALHADA OBRIGATÓRIA'`
+  - `section: 'AFASTAMENTOS'`
+  - `section: 'INFORMAÇÕES MÉDICAS - NEXO CAUSAL'`
+- Isso é ótimo como “título de capítulo” do prompt monolítico, mas **péssimo como nome de campo na UI**, porque não bate com:
+  - os labels do editor (`História do Acidente`, `Histórico Ocupacional`, etc.)
+  - os nomes que você já vê em **Regerar** (que estão mais próximos do “nome do campo”).
 
-## Arquitetura Atual - Compreensão Completa
-
-Após análise detalhada do código, identifiquei que o sistema de importação funciona em **3 fases distintas**:
-
----
-
-### Fase 1: Extração Visual (OCR) - `pdf-visual-extractor.ts`
-```text
-PDF Bruto → Gemini Vision → Texto Bruto (rawText)
-```
-- **Usa um prompt fixo** (`EXTRACTION_PROMPT`) de ~15 linhas
-- **Objetivo único**: transcrever TODO o texto do PDF (OCR puro)
-- **Não extrai campos estruturados** - apenas texto bruto
-
-### Fase 2: Preenchimento Estruturado - `processar-autos/index.ts`
-```text
-Texto Bruto → System Prompt (~400 linhas) → JSON Estruturado
-```
-- **Usa o `defaultSystemPrompt`** com instruções detalhadas por seção
-- **Este é o prompt monolítico** que define como extrair cada campo
-- Chamada feita via `callAI(aiConfig, systemPrompt, textoExtraído)`
-
-### Fase 3: Geração de Resumos - `gerarResumosIA()`
-```text
-JSON Estruturado → Prompts Individuais → Campos Analíticos
-```
-- **Já usa prompts modulares** via `getPromptForType()`
-- Campos: resumo_peticao, resumo_contestacao, descricao_doencas, nexo_causal, incapacidade, referencias
+Resultado: você vê “ACIDENTE - EXTRAÇÃO…” na Importação e “História do Acidente” no Regerar, parecendo que são coisas diferentes — quando na prática são o mesmo alvo.
 
 ---
 
-## A Questão Crítica: Concatenar ~20 Prompts
+### 2) A ordem na seção “Dados do Acidente” está invertida entre Importar e Regerar
+Pelos dados atuais do banco:
+- Importar:
+  - `prompt_import_historiaAcidente` tem `order = 3`
+  - `prompt_import_historicoOcupacional` tem `order = 4`
+  -> portanto aparece primeiro “História do Acidente” (mesmo que com nome ruim), depois “Histórico Ocupacional”
+- Regerar:
+  - `prompt_regen_historicoOcupacional` tem `order = 1`
+  - `prompt_regen_historiaAcidente` tem `order = 2`
+  -> portanto aparece primeiro “Histórico Ocupacional”, depois “História do Acidente”
 
-### Como Funciona Hoje (Linhas 1350-1355):
-```typescript
-const fillResult = await callAI(
-  aiConfig,
-  systemPrompt,  // ← O prompt monolítico de ~400 linhas
-  `Analise o seguinte texto... ${textForFilling}`,
-  { jsonMode: true }
-);
-```
+E no editor (componente `src/components/laudo/sections/DadosAcidente.tsx`) a ordem é:
+1) Histórico Ocupacional  
+2) História do Acidente
 
-### Como Funcionaria com Modularização:
-```typescript
-// Buscar cada prompt individual e concatenar
-const promptHistoricoOcupacional = await getPrompt('prompt_import_historicoOcupacional', DEFAULT);
-const promptHistoriaAcidente = await getPrompt('prompt_import_historiaAcidente', DEFAULT);
-const promptAnamnese = await getPrompt('prompt_import_historiaAtual', DEFAULT);
-// ... mais 15-20 prompts
-
-const systemPromptMontado = buildSystemPrompt({
-  header: promptHeader,            // Regras gerais (10 linhas)
-  jsonStructure: jsonTemplate,     // Template JSON (50 linhas)
-  fields: [
-    promptHistoricoOcupacional,    // ~15 linhas cada
-    promptHistoriaAcidente,
-    promptAnamnese,
-    // ... restante
-  ],
-  footer: promptFooter             // Instruções finais
-});
-```
+Ou seja: **Regerar está alinhado ao editor; Importar não**.
 
 ---
 
-## Avaliação Técnica Honesta
+### 3) Existe um problema real de “classificação” (cardId/sectionId) em pelo menos 2 prompts de Importar
+No `build-import-prompt.ts` e no `seed-prompts/index.ts`, os mapeamentos estão usando `sectionId` que **não existem** na `LAUDO_STRUCTURE`, por exemplo:
+- `prompt_import_vitima` está indo para `preliminares/dados-vitima` (mas no laudo-structure o correto é `periciando/vitima`)
+- `prompt_import_processo` está indo para `preliminares/dados-processo` (mas o correto é `preliminares/processo`)
 
-### Concatenar ~20 Prompts É Simples?
-
-**SIM, tecnicamente é trivial.** Exemplo de implementação:
-
-```typescript
-async function buildModularSystemPrompt(): Promise<string> {
-  const FIELD_PROMPTS = [
-    { id: 'prompt_import_historicoOcupacional', section: 'HISTÓRICO OCUPACIONAL' },
-    { id: 'prompt_import_historiaAcidente', section: 'HISTÓRIA DO ACIDENTE' },
-    { id: 'prompt_import_historiaAtual', section: 'ANAMNESE' },
-    // ... mais 15 campos
-  ];
-
-  const fieldInstructions = await Promise.all(
-    FIELD_PROMPTS.map(async ({ id, section }) => {
-      const prompt = await getPrompt(id, DEFAULT_FIELD_PROMPTS[id]);
-      return `### ${section}\n${prompt}`;
-    })
-  );
-
-  return `${HEADER_PROMPT}
-
-${JSON_STRUCTURE}
-
-=== INSTRUÇÕES POR CAMPO ===
-
-${fieldInstructions.join('\n\n')}
-
-${FOOTER_PROMPT}`;
-}
-```
-
-**Complexidade**: ~50 linhas de código. **Risco**: Baixo.
+Isso causa:
+- prompt cair como “órfão” (unclassified/orphaned) ou aparecer em lugar errado
+- perda de confiança na organização (com razão)
 
 ---
 
-### Riscos Reais Identificados
+## Confirmação: quais campos “não terem Importar / Gerar / Regerar” está correto?
 
-| Risco | Probabilidade | Impacto | Mitigação |
-|-------|---------------|---------|-----------|
-| Prompts concatenados ficam muito longos | Baixa | Baixo | Limite de tokens do Gemini é 1M+ |
-| Performance da busca de 20 prompts | Baixa | Baixo | Cache de 5 min já existe |
-| Prompt mal formatado quebra JSON | Média | Alto | Validação de estrutura antes de usar |
-| Mudança em 1 prompt afeta resultado de outro | Baixa | Médio | Testes unitários por campo |
+Vou te dar a lógica do sistema (por design), usando o que está hoje no banco + como o editor funciona:
 
-### Mitigação Robusta
+### A) Seções/campos que normalmente terão **Importar**, mas podem NÃO ter **Regerar**
+Motivo: o editor usa `Input/Select` simples sem botão “Regerar via PDF” (logo não existe prompt_regen para aquilo).
+- **Dados da Vítima** (Inputs/Selects): faz sentido ter Importar; Regerar não existe hoje porque não há botão no UI para esses campos.
+- **Dados do Processo** (Inputs): idem.
+- **Dados Funcionais do Posto** (cargo/datas): idem (são Inputs; só o textão “Ambiente e Atividades” tem botão Regerar).
 
-1. **Fallback automático**: Se qualquer prompt falhar, usar o monolítico atual
-2. **Validação de estrutura**: Verificar que cada prompt tem formato esperado
-3. **Log detalhado**: Registrar qual prompt foi usado em cada chamada
-4. **Modo híbrido temporário**: Manter ambos os caminhos durante transição
+Isso é coerente; o que precisa é: a UI deixar isso “óbvio” e a nomenclatura ficar idêntica aos campos.
 
----
+### B) Seções/campos que normalmente terão **Gerar**, mas podem NÃO ter **Importar**
+Motivo: são textos analíticos/sintéticos criados a partir do conjunto de dados, não “copiados” do PDF.
+- **Nexo Causal (Gerar)**: é análise; não é “extração literal”.
+- **Incapacidade (Gerar)**: análise.
+- **Referências Bibliográficas (Gerar)**: geração.
+- **Resumos (Gerar)**: geração.
 
-## Comparação Arquitetural
+Também é coerente.
 
-### Arquitetura Atual (Monolítica)
-```
-┌─────────────────────────────────────────────────────────┐
-│                   defaultSystemPrompt                    │
-│  ┌─────────────────────────────────────────────────────┐│
-│  │ Regras Gerais (40 linhas)                           ││
-│  │ Estrutura JSON (70 linhas)                          ││
-│  │ Instruções Vítima (10 linhas)                       ││
-│  │ Instruções Processo (10 linhas)                     ││
-│  │ Instruções Acidente (30 linhas)                     ││
-│  │ Instruções Histórico (60 linhas)                    ││
-│  │ ... mais 200 linhas ...                             ││
-│  └─────────────────────────────────────────────────────┘│
-│                   HARDCODED NO CÓDIGO                    │
-└─────────────────────────────────────────────────────────┘
-```
-
-### Arquitetura Proposta (Modular)
-```
-┌─────────────────────────────────────────────────────────┐
-│                    System Prompt Final                   │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐     │
-│  │prompt_header │ │ json_template│ │prompt_footer │     │
-│  └──────────────┘ └──────────────┘ └──────────────┘     │
-│                                                          │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐     │
-│  │ import_      │ │ import_      │ │ import_      │     │
-│  │ historico    │ │ anamnese     │ │ exames       │     │
-│  │ Ocupacional  │ │              │ │              │     │
-│  └──────────────┘ └──────────────┘ └──────────────┘     │
-│              ... EDITÁVEIS NO BANCO ...                  │
-└─────────────────────────────────────────────────────────┘
-```
+### C) Seções/campos que podem ter **Regerar**, mas não necessariamente terão **Importar** (ou terão Importar indireto)
+Exemplo importante:
+- **Conclusão (campo conclusao_analise)** hoje aparece com **Regerar** (porque você consegue reextrair/reharmonizar do PDF), mas a importação inicial dele acontece **via resumo/geração**, não por um prompt_import dedicado do mesmo “campo”.
+Então: “não ter Importar” ali pode ser aceitável, mas também pode ser melhorado (opcional) criando um `prompt_gen_conclusao` ou mudando o pipeline. Isso é uma segunda etapa; primeiro vamos alinhar a organização.
 
 ---
 
-## Resposta Direta às Suas Perguntas
+## Melhor forma de alinhar nomes e ordem (o que vou ajustar)
 
-### 1. "As desvantagens parecem tornar a aplicação impraticável?"
+### Objetivo prático
+1) Na tela Prompts IA, dentro de cada seção, **Importar / Gerar / Regerar precisam listar os mesmos “nomes de campos”**, quando estiverem falando do mesmo campo.
+2) A ordem dentro da seção deve acompanhar **a ordem do editor** (para você bater o olho e confiar).
 
-**NÃO.** As desvantagens são:
-- **Refatoração significativa**: Sim, mas é trabalho de 1 sessão, não semanas
-- **Concatenar ~20 prompts**: É código trivial (~50 linhas)
-
-### 2. "Vai funcionar tão bem quanto após a refatoração?"
-
-**SIM, potencialmente MELHOR.** Porque:
-- Cada campo terá instrução otimizada independentemente
-- Você poderá fazer A/B testing em campos específicos
-- Erros de extração serão mais fáceis de diagnosticar
-
-### 3. "Concatenar ~20 prompts vai me trazer problemas depois?"
-
-**NÃO, desde que:**
-- Mantenhamos fallback para o prompt monolítico
-- Adicionemos validação antes de usar prompts do banco
-- Documentemos a estrutura esperada de cada prompt
-
-### 4. "Cada campo terá independência total?"
-
-**SIM, 100%.** Você poderá:
-- Editar a instrução de extração do "Histórico Ocupacional" sem afetar "Anamnese"
-- Ver exatamente qual prompt está sendo usado em cada campo
-- Testar e otimizar campo por campo
+### Mudanças propostas (sem alterar comportamento de extração, só “organização + consistência”)
+1) **Renomear os “títulos” dos prompts de Importar** (as strings `DEFAULT_IMPORT_PROMPTS[...].section`) para virarem “nome do campo” (ex.: `História do Acidente`, `Histórico Ocupacional`, etc.).
+   - As regras “EXTRAÇÃO DETALHADA OBRIGATÓRIA” continuam, mas **dentro do corpo do prompt** (não no nome).
+2) **Trocar a ordem** de `prompt_import_historicoOcupacional` e `prompt_import_historiaAcidente` para ficar igual ao editor:
+   - `historicoOcupacional` antes
+   - `historiaAcidente` depois
+   - Mantendo números únicos globais, para não bagunçar a montagem do prompt modular.
+3) **Corrigir cardId/sectionId** (classificação) dos prompts de Importar para bater 100% com `src/lib/laudo-structure.ts`:
+   - `prompt_import_vitima` -> `periciando / vitima`
+   - `prompt_import_processo` -> `preliminares / processo`
+   - e revisar os demais para garantir que nenhum usa sectionId inexistente.
+4) **Ajustar descrições de Regerar** que estão genéricas e não refletem o label real do campo (ex.: no posto de trabalho, o Regen está como “Dados do Posto de Trabalho”, mas o campo é “Ambiente e Atividades Laborais”).
+5) **Melhoria de UX no DevPrompts**: exibir também o `prompt.id` (ou “fieldKey”) no mini-card, porque:
+   - mesmo com descrições alinhadas, o ID é o “identificador definitivo”
+   - isso elimina 90% da confusão quando houver qualquer dúvida.
 
 ---
 
-## Plano de Implementação Seguro
+## Como vou “auditar” para garantir que não tem mais pontos cegos
 
-### Passo 1: Criar os Prompts de Importação no Banco
-- Definir 18 prompts `prompt_import_{campo}` no `seed-prompts`
-- Cada um contendo a instrução específica do campo extraída do monolítico
-
-### Passo 2: Função de Montagem do System Prompt
-```typescript
-// supabase/functions/_shared/build-import-prompt.ts
-export async function buildModularImportPrompt(): Promise<string> {
-  // Buscar header, template JSON, footer (fixos ou editáveis)
-  // Buscar cada prompt de campo via getPrompt()
-  // Concatenar na ordem correta
-  // Validar estrutura final
-  // Retornar prompt completo
-}
-```
-
-### Passo 3: Integrar com Fallback
-```typescript
-async function getSystemPromptV2(): Promise<string> {
-  try {
-    const modular = await buildModularImportPrompt();
-    if (isValidSystemPrompt(modular)) {
-      console.log('[processar-autos] Using modular prompt');
-      return modular;
-    }
-  } catch (e) {
-    console.warn('[processar-autos] Modular build failed, using fallback');
-  }
-  return defaultSystemPrompt; // Fallback seguro
-}
-```
-
-### Passo 4: Atualizar DevPrompts para Mostrar
-- Cada `prompt_import_X` aparecerá como "Gerar" (✨) na seção correspondente
-- Ao lado do "Regerar" (🔄) que já existe
+Depois das correções, vou validar assim:
+1) Rodar uma listagem (via app) para checar **prompts órfãos** (cardId/sectionId que não existem na estrutura).
+2) Conferir seção por seção:
+   - se a seção tem campo com botão “Regerar via PDF” no editor, tem que existir `prompt_regen_*` correspondente.
+   - se a seção é preenchida no `ImportarAutosDialog` a partir do JSON extraído, tem que existir o `prompt_import_*` correspondente (quando aplicável).
+   - se a seção é analítica (resumos, nexo, incapacidade, referências), tem que existir `prompt_gen_*`.
+3) Confirmar que a ordem (campo `order`) dentro de cada tipo bate com o editor.
 
 ---
 
-## Conclusão Final
-
-**Recomendação: PROSSEGUIR COM OPÇÃO A**
-
-A implementação é:
-- **Tecnicamente viável**: Código simples, sem armadilhas
-- **Segura**: Fallback automático protege contra erros
-- **Benéfica**: Controle total sobre cada campo
-- **Maintainável**: Cada prompt é independente
-
-A única "desvantagem" real é o tempo de implementação (~2-3 mensagens), mas o resultado final será uma arquitetura significativamente melhor.
+## Implementação (passo a passo)
+1) Atualizar `supabase/functions/_shared/build-import-prompt.ts`
+   - trocar nomes `section` dos defaults para “nome de campo” (UI-friendly)
+   - ajustar orders no bloco de defaults (especialmente “Dados do Acidente”)
+   - corrigir `getCardIdForPrompt` e `getSectionIdForPrompt` para usar IDs reais do `laudo-structure`
+2) Atualizar `supabase/functions/seed-prompts/index.ts`
+   - corrigir `cardMapping` de import prompts (vitima/processo e quaisquer outros)
+   - ajustar `description` dos prompts import/regen para ficarem equivalentes aos labels do editor
+3) Atualizar `src/components/dev-panel/DevPrompts.tsx`
+   - no `PromptMiniCard`, mostrar também o `prompt.id` (em fonte monoespaçada), para garantir identificação inequívoca
+4) Você executa “Sincronizar Metadados” no DevPanel (isso atualiza description/cardId/sectionId/order no banco preservando o texto que você já editou).
+5) Checklist final:
+   - Conferir “Dados do Acidente”: Importar e Regerar com mesmos nomes e mesma ordem
+   - Conferir “Dados da Vítima” e “Dados do Processo” aparecem na seção correta
+   - Conferir aba “Não classificados” sem prompts de importação que deveriam estar classificados
 
 ---
 
-## Arquivos a Modificar
+## Observação importante (para manter confiança)
+Essas mudanças propostas são “seguras” porque:
+- não alteram a tabela do laudo
+- não mudam o *conteúdo* do prompt (apenas o “nome/label” e metadados de organização), exceto onde decidirmos mover “EXTRAÇÃO OBRIGATÓRIA” do título para dentro do texto (o que é até melhor)
+- usam a própria rotina de “sync_metadata” que preserva prompts customizados
 
-| Arquivo | Ação |
-|---------|------|
-| `supabase/functions/seed-prompts/index.ts` | Adicionar 18 prompts `prompt_import_{campo}` |
-| `supabase/functions/_shared/build-import-prompt.ts` | **NOVO** - Função de montagem modular |
-| `supabase/functions/processar-autos/index.ts` | Usar nova função de montagem com fallback |
-| `src/components/dev-panel/DevPrompts.tsx` | Exibir prompts de importação como "Gerar" (✨) |
-
+Se você aprovar, eu implemento essa correção de consistência e aí sim você pode começar a ajustar os prompts com confiança total na organização.
