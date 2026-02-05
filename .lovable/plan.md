@@ -1,176 +1,133 @@
 
 
-# Metodologia Pericial no DevPrompts - Visibilidade e Documentação
+# Correção: Metodologia Pericial na Ordem Correta do PDF
 
-## Contexto Atual
+## Problema Atual
 
-A **Metodologia Pericial** é um campo especial no sistema:
+O PDF gerado está assim:
 
-| Aspecto | Status Atual |
-|---------|--------------|
-| **Onde está armazenado** | Tabela `system_config`, ID: `config_metodologia_padrao` |
-| **Editável no laudo?** | Sim, via formulário + botão "Restaurar padrão" |
-| **Tem prompt de IA?** | Não - é texto padrão técnico-científico, não gerado |
-| **Aparece no DevPrompts?** | Apenas como item cinza na navegação (sem clique) |
-| **Aparece no PDF de backup?** | Não, pois não tem prompts associados |
+```
+BACKUP DE PROMPTS DE IA
+├── GUIA DE REFERÊNCIA ✓
+├── CAMPOS FIXOS (GERENCIADOS VIA BANCO DE DADOS)  ← AQUI É O PROBLEMA
+│   └── Metodologia Pericial (com destaque grande em âmbar)
+├── DADOS PRELIMINARES
+├── RESUMO DOS AUTOS
+│   └── Resumo dos Autos
+├── ...
+```
 
-## Objetivo
+## Solução
 
-Dar visibilidade adequada à Metodologia Pericial no DevPrompts, reconhecendo que é um campo gerenciado via banco de dados e não via prompts.
+Mover a Metodologia Pericial para dentro do fluxo normal, na posição correta:
+
+```
+BACKUP DE PROMPTS DE IA
+├── GUIA DE REFERÊNCIA ✓ (já menciona campos fixos - OK)
+├── DADOS PRELIMINARES
+│   └── ...
+├── RESUMO DOS AUTOS
+│   ├── Resumo dos Autos
+│   └── Metodologia Pericial [Campo Fixo - SQL]  ← CORRETO
+├── DADOS DO PERICIANDO
+│   └── ...
+```
 
 ---
 
-## Mudanças Propostas
+## Mudanças no Código
 
-### 1. Navegação - Item Clicável com Modal
+### Arquivo: `src/components/dev-panel/DevPrompts.tsx`
 
-**Arquivo:** `src/components/dev-panel/DevPrompts.tsx`
+#### 1. REMOVER a seção separada de Campos Fixos (linhas 561-604)
 
-Na navegação lateral, o item "Metodologia Pericial":
-- Terá um ícone de banco de dados (Database) ao lado
-- Tooltip ao passar o mouse: "Campo fixo - gerenciado via banco de dados"
-- Ao clicar: abre um modal exibindo:
-  - O texto atual da metodologia (buscado do `system_config`)
-  - Informativo explicando que é um campo técnico-científico padronizado
-  - Orientação de que alterações devem ser feitas via SQL
+Remover completamente o bloco que cria a seção "CAMPOS FIXOS (GERENCIADOS VIA BANCO DE DADOS)" antes do loop dos cards.
 
-```text
-+------------------------------------------+
-|  Metodologia Pericial [Database icon]    |
-|                                          |
-|  Este campo contém o texto padrão da     |
-|  metodologia pericial utilizada em       |
-|  todos os laudos.                        |
-|                                          |
-|  Como é alterado:                        |
-|  O texto é armazenado no banco de dados  |
-|  (tabela system_config). Para editar,    |
-|  acesse Cloud View > Run SQL.            |
-|                                          |
-|  +------------------------------------+  |
-|  | A perícia médica judicial foi      |  |
-|  | realizada segundo critérios...     |  |
-|  +------------------------------------+  |
-|                                          |
-|              [Fechar]                    |
-+------------------------------------------+
-```
+#### 2. MODIFICAR o loop de geração do PDF para incluir campos fixos na posição correta
 
-### 2. CoverageChecklist - Nova Categoria "Fixo"
-
-**Arquivo:** `src/components/dev-panel/CoverageChecklist.tsx`
-
-Adicionar indicador visual para campos fixos:
-- Ao invés de "(manual)", exibir "(fixo - SQL)" com ícone de Database
-- Tooltip explicando que é gerenciado via banco
-
-### 3. PDF de Backup - Incluir Seção Especial
-
-**Arquivo:** `src/components/dev-panel/DevPrompts.tsx` (função `exportToPDF`)
-
-Adicionar nova seção no guia de referência:
-
-```text
-CAMPOS FIXOS (system_config)
-Propósito: Textos padronizados que não variam entre laudos.
-Gerenciamento: Banco de dados (Cloud View > Run SQL).
-Campos: Metodologia Pericial
-```
-
-E ao iterar pelas seções, incluir a Metodologia Pericial mesmo sem prompts, marcando como "CAMPO FIXO" no PDF.
-
----
-
-## Detalhes Técnicos
-
-### Estado e Busca do Texto
+Dentro do loop que itera por `card.sections`, verificar se a seção atual é um campo fixo e renderizá-lo de forma integrada:
 
 ```tsx
-// Novo estado no DevPrompts.tsx
-const [metodologiaConfig, setMetodologiaConfig] = useState<{
-  texto: string;
-  updatedAt: string;
-} | null>(null);
-const [showMetodologiaModal, setShowMetodologiaModal] = useState(false);
-
-// Buscar na montagem (já existe lógica similar em MetodologiaPericial.tsx)
-useEffect(() => {
-  supabase
-    .from("system_config")
-    .select("value, updated_at")
-    .eq("id", "config_metodologia_padrao")
-    .single()
-    .then(({ data }) => {
-      if (data?.value) {
-        const parsed = typeof data.value === 'string' 
-          ? JSON.parse(data.value) 
-          : data.value;
-        setMetodologiaConfig({
-          texto: parsed.texto || '',
-          updatedAt: data.updated_at
-        });
-      }
-    });
-}, []);
-```
-
-### Identificação de Campos Fixos
-
-Adicionar em `laudo-structure.ts`:
-
-```ts
-// Campos que são gerenciados via system_config (não via prompts)
-export const FIXED_CONFIG_SECTIONS: Record<string, string> = {
-  'metodologia': 'config_metodologia_padrao',
-};
-```
-
-### Lógica de Navegação
-
-```tsx
-// No loop de seções na navegação
-const isFixedConfig = FIXED_CONFIG_SECTIONS[section.id];
-
-return (
-  <button
-    onClick={() => isFixedConfig 
-      ? setShowMetodologiaModal(true) 
-      : handleScrollToSection(section.id)
+for (const section of card.sections) {
+  const isFixedConfig = FIXED_CONFIG_SECTIONS[section.id];
+  const sectionPrompts = groupedPrompts[card.id]?.[section.id] || [];
+  
+  // Se é campo fixo, renderizar com indicador discreto
+  if (isFixedConfig) {
+    checkNewPage(50);
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.text(section.label, margin, yPos);
+    yPos += 6;
+    
+    // Indicador discreto de campo fixo
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100);
+    doc.text(`ID: ${isFixedConfig}  |  Tipo: Campo Fixo (SQL)`, margin, yPos);
+    yPos += 5;
+    if (metodologiaConfig?.updatedAt) {
+      doc.text(`Atualizado em: ${new Date(metodologiaConfig.updatedAt).toLocaleDateString("pt-BR")}`, margin, yPos);
+      yPos += 5;
     }
-    className={cn(
-      "w-full text-left px-2 py-1 rounded text-xs transition-colors flex items-center justify-between",
-      isActive ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
-      !isFixedConfig && sectionCount === 0 && "opacity-40"
-    )}
-  >
-    <span className="truncate flex items-center gap-1">
-      {section.label}
-      {isFixedConfig && <Database className="h-3 w-3 text-amber-500" />}
-    </span>
-    {sectionCount > 0 && (
-      <span className="text-[10px] bg-muted px-1 rounded">{sectionCount}</span>
-    )}
-  </button>
-);
+    doc.setTextColor(0);
+    yPos += 3;
+    
+    // Texto do campo
+    const metodologiaText = metodologiaConfig?.texto || "(Não carregado)";
+    const metodologiaLines = splitText(metodologiaText, contentWidth);
+    for (const line of metodologiaLines) {
+      checkNewPage(6);
+      doc.text(line, margin, yPos);
+      yPos += 5;
+    }
+    yPos += 8;
+    continue; // Próxima seção
+  }
+  
+  // Lógica existente para prompts normais
+  if (sectionPrompts.length === 0) continue;
+  // ...resto do código existente...
+}
 ```
 
 ---
 
-## Arquivos a Modificar
+## Resultado Visual no PDF
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/lib/laudo-structure.ts` | Adicionar `FIXED_CONFIG_SECTIONS` |
-| `src/components/dev-panel/DevPrompts.tsx` | Estado para metodologia, modal, navegação atualizada, PDF atualizado |
-| `src/components/dev-panel/CoverageChecklist.tsx` | Indicador "(fixo - SQL)" para campos fixos |
+```
+RESUMO DOS AUTOS (título azul)
+────────────────────────────────
+
+Resumo dos Autos
+ID: prompt_import_resumo  |  Tipo: Importar
+Atualizado em: 04/02/2025
+
+[conteúdo do prompt]
+
+────────────────────────────────
+
+Metodologia Pericial
+ID: config_metodologia_padrao  |  Tipo: Campo Fixo (SQL)
+Atualizado em: 04/02/2025
+
+A perícia médica judicial foi realizada segundo critérios
+técnicos e científicos reconhecidos na Medicina Legal...
+
+────────────────────────────────
+
+DADOS DO PERICIANDO (próximo card)
+```
+
+O indicador "Tipo: Campo Fixo (SQL)" diferencia sutilmente este campo dos demais (que mostram "Importar", "Gerar", etc.), mas sem o destaque exagerado em âmbar.
 
 ---
 
-## Resultado Esperado
+## Resumo das Alterações
 
-1. **Navegação**: "Metodologia Pericial" terá ícone de banco de dados e será clicável
-2. **Modal**: Ao clicar, exibe o texto atual com orientações
-3. **CoverageChecklist**: Mostra "(fixo - SQL)" ao invés de "(manual)"
-4. **PDF de Backup**: Inclui seção explicando campos fixos e lista a Metodologia
-5. **Documentação**: Fica claro que alterações devem ser feitas via SQL
+| Local | Ação |
+|-------|------|
+| Linhas 561-604 | REMOVER bloco inteiro "CAMPOS FIXOS (GERENCIADOS VIA BANCO)" |
+| Dentro do loop de sections (~linha 620) | ADICIONAR lógica para campos fixos integrados |
+| Guia de Referência (linhas 534-537) | MANTER como está (informativo OK) |
 
