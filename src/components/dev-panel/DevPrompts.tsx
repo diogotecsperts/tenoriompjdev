@@ -797,7 +797,7 @@ export function DevPrompts() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
-                    <div className="max-h-[50vh] overflow-y-auto">
+                    <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
                       <div className="p-2 space-y-1">
                         {LAUDO_STRUCTURE.map(card => {
                           const count = getCardPromptCount(card.id);
