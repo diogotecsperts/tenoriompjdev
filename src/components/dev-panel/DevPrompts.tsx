@@ -797,7 +797,7 @@ export function DevPrompts() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-0">
-                    <ScrollArea className="h-[calc(100vh-400px)]">
+                    <ScrollArea className="max-h-[50vh]">
                       <div className="p-2 space-y-1">
                         {LAUDO_STRUCTURE.map(card => {
                           const count = getCardPromptCount(card.id);
@@ -844,8 +844,7 @@ export function DevPrompts() {
 
             {/* Área de Conteúdo */}
             <div className="flex-1 min-w-0" ref={contentRef}>
-              <ScrollArea className="h-[calc(100vh-400px)]">
-                <div className="space-y-6 pr-4">
+                <div className="space-y-6">
                   {LAUDO_STRUCTURE.map(card => {
                     const count = getCardPromptCount(card.id);
                     const Icon = card.icon;
@@ -981,13 +980,12 @@ export function DevPrompts() {
                       </div>;
                   })}
                 </div>
-              </ScrollArea>
             </div>
           </div>
         </TabsContent>
 
         <TabsContent value="unclassified" className="mt-4">
-          <ScrollArea className="h-[calc(100vh-400px)]">
+          <ScrollArea className="max-h-[70vh]">
             {filteredUnclassified.length === 0 ? <Card>
                 <CardContent className="flex flex-col items-center justify-center py-12">
                   <CheckCircle2 className="h-12 w-12 text-primary mb-4" />
