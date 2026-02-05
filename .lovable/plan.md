@@ -1,108 +1,69 @@
 
 
-# Correção: Área Branca Cobrindo Metade da Tela no DevPrompts
+# Correção: Scroll do Card de Navegação Travado
 
-## Diagnóstico Completo
+## Problema Identificado
 
-Após análise detalhada, identifiquei que o problema **NÃO** é mais o `CoverageChecklist` (que já foi ajustado). O problema está na **estrutura de alturas fixas** que não se adaptam ao container pai.
+O `ScrollArea` na navegação lateral tem `max-h-[50vh]`, mas está dentro de um container `sticky`. O problema é que:
 
-### Arquitetura atual
+1. O `sticky` mantém o elemento fixo na viewport durante o scroll
+2. O `max-h-[50vh]` limita a altura máxima corretamente
+3. **MAS** o `ScrollArea` do Radix UI precisa de uma altura **definida** (não apenas máxima) para ativar o scroll interno
 
-```text
-DevPanel (h-screen)
-└── main (flex-1 overflow-auto)
-    └── div (p-6)
-        └── DevPrompts
-            ├── Header, Stats, Search... (altura variável)
-            └── Tabs
-                └── TabsContent "classified"
-                    └── div.flex
-                        ├── aside (w-64)
-                        │   └── div.sticky
-                        │       ├── Card (Navegação) - ScrollArea h-[calc(100vh-400px)]
-                        │       └── CoverageChecklist - max-h-[300px] ✓ OK
-                        └── div.flex-1 (Área de Conteúdo)
-                            └── ScrollArea h-[calc(100vh-400px)] ← PROBLEMA
-```
+### Por que `max-h` não funciona bem com ScrollArea
 
-### O problema
-A `ScrollArea` na linha 847 usa `h-[calc(100vh-400px)]`, que cria uma **altura fixa baseada na viewport**. Porém:
+O componente `ScrollArea` do Radix calcula se precisa mostrar scrollbar baseado na comparação entre a altura do container e a altura do conteúdo. Com `max-h`, o container pode crescer até o máximo, mas se o conteúdo for menor, não há altura fixa definida - isso confunde o cálculo.
 
-1. O DevPanel já tem seu próprio sistema de scroll (`main` com `overflow-auto`)
-2. A subtração de 400px não considera o padding (`p-6`) nem o Header/Stats/Search do DevPrompts
-3. Isso cria um "espaço morto" abaixo do ScrollArea que aparece como área branca
+## Solução
 
-### A solução
-Usar alturas **relativas ao container** em vez de **fixas à viewport**, permitindo que o conteúdo cresça naturalmente.
-
----
-
-## Mudanças Propostas
+Usar uma combinação de altura fixa com overflow controlado, ou usar `h-[50vh]` diretamente para garantir que o ScrollArea tenha uma altura definida para calcular o scroll.
 
 ### Arquivo: `src/components/dev-panel/DevPrompts.tsx`
 
-#### 1. Área de conteúdo principal (linha 847)
 ```tsx
-// Antes
-<ScrollArea className="h-[calc(100vh-400px)]">
+// Linha 800 - Antes
+<ScrollArea className="max-h-[50vh]">
 
-// Depois - Remove altura fixa, deixa o conteúdo fluir naturalmente
-<div className="space-y-6 pr-4">
-  {/* conteúdo sem ScrollArea wrapper */}
+// Depois - Usar altura definida com flex para adaptação
+<ScrollArea className="h-[50vh]">
+```
+
+Porém, para casos onde o conteúdo é menor que 50vh, isso criaria espaço vazio. A solução ideal é:
+
+```tsx
+// Solução otimizada - altura automática até um máximo, com scroll quando necessário
+<div className="max-h-[50vh] overflow-y-auto">
+  <div className="p-2 space-y-1">
+    {/* conteúdo */}
+  </div>
 </div>
 ```
 
-Alternativa se scroll for necessário:
-```tsx
-<ScrollArea className="max-h-[70vh]">
-```
-
-#### 2. Navegação lateral (linha 800)
-```tsx
-// Antes
-<ScrollArea className="h-[calc(100vh-400px)]">
-
-// Depois
-<ScrollArea className="max-h-[50vh]">
-```
-
-#### 3. Tab de não classificados (linha 990)
-```tsx
-// Antes
-<ScrollArea className="h-[calc(100vh-400px)]">
-
-// Depois
-<ScrollArea className="max-h-[70vh]">
-```
+**Remover o `ScrollArea`** e usar `overflow-y-auto` nativo do CSS, que funciona perfeitamente com `max-h`.
 
 ---
 
-## Abordagem Recomendada
+## Mudança Proposta
 
-A abordagem mais simples e eficaz é:
-
-1. **Remover o ScrollArea da área de conteúdo principal** (linha 847) - deixar o scroll do `main` do DevPanel controlar
-2. **Usar `max-h-*` em vez de `h-[calc...]`** nos ScrollAreas restantes
-
-Isso elimina conflitos de scroll aninhado e permite que o layout flua naturalmente.
+| Local | Antes | Depois |
+|-------|-------|--------|
+| Linha 800-836 | `<ScrollArea className="max-h-[50vh]">...</ScrollArea>` | `<div className="max-h-[50vh] overflow-y-auto">...</div>` |
 
 ---
 
-## Resumo das Alterações
+## Por que esta solução é melhor
 
-| Linha | Componente | Antes | Depois |
-|-------|------------|-------|--------|
-| 800 | Nav ScrollArea | `h-[calc(100vh-400px)]` | `max-h-[50vh]` |
-| 847 | Content ScrollArea | `h-[calc(100vh-400px)]` | Remover ScrollArea (usar div simples) |
-| 990 | Unclassified ScrollArea | `h-[calc(100vh-400px)]` | `max-h-[70vh]` |
+1. **Simplicidade**: CSS nativo `overflow-y-auto` funciona perfeitamente com `max-h`
+2. **Performance**: Menos overhead que o componente ScrollArea do Radix
+3. **Compatibilidade**: Funciona bem com `sticky` positioning
+4. **Responsividade**: Altura se adapta ao conteúdo até o máximo definido
 
 ---
 
 ## Resultado Esperado
 
-1. Área branca eliminada
-2. Todo o conteúdo visível e acessível
-3. Scroll suave controlado pelo container pai (DevPanel)
-4. Sidebar com scroll independente limitado a 50vh
-5. Layout responsivo que se adapta a diferentes tamanhos de tela
+1. O card de Navegação terá scroll interno funcional
+2. Todas as opções do índice serão acessíveis
+3. O sticky positioning continuará funcionando
+4. Sem área branca extra na página
 
