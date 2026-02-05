@@ -342,7 +342,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
       objetivoPericia: '',
       resumoPeticaoInicial: '',
       resumoContestacao: '',
-      metodologiaPericial: 'Este laudo foi elaborado com base no estudo das peças contidas nos autos do processo; exame pericial do(a) reclamante, conforme parâmetros técnicos utilizados pela especialidade de Medicina do Trabalho. Análise criteriosa e imparcial das informações coligidas durante a perícia e nos autos do processo, que é exigida pelo CÓDIGO DE ÉTICA MÉDICA (Res. CFM 2.217/2018), em seus artigos 93 e 98. A literatura especializada que serviu de embasamento técnico científico das conclusões está relacionada nas referências bibliográficas (ao final).',
+      metodologiaPericial: '', // Será preenchido pelo texto padrão do system_config
       dadosFuncionaisCargo: '',
       dadosFuncionaisAdmissao: '',
       dadosFuncionaisAfastamento: '',
