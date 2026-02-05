@@ -122,56 +122,63 @@
  // ============================================
  
  export const DEFAULT_IMPORT_PROMPTS: Record<string, { prompt: string; section: string; order: number }> = {
-   // Seção: Vítima
+  // ================================
+  // CARD: preliminares | SECTION: processo
+  // ================================
+  prompt_import_processo: {
+    section: 'Dados do Processo',
+    order: 1,
+    prompt: `Extraia os dados do processo judicial.
+Busque: Número completo do processo, vara, nomes das partes exatamente como aparecem nos autos.
+O reclamante é a parte autora (geralmente o trabalhador).
+A reclamada é a parte ré (geralmente a empresa).`
+  },
+  
+  // ================================
+  // CARD: periciando | SECTION: vitima
+  // ================================
    prompt_import_vitima: {
-     section: 'VÍTIMA',
-     order: 1,
+    section: 'Dados da Vítima',
+    order: 2,
      prompt: `Extraia todos os dados pessoais do periciando/reclamante.
  ATENÇÃO: "dominancia" é a MÃO DOMINANTE (destro, canhoto ou ambidestro), NÃO é gênero/sexo.
  Busque: nome completo, CPF, data de nascimento, profissão, escolaridade, dominância manual.`
    },
    
-   // Seção: Processo
-   prompt_import_processo: {
-     section: 'PROCESSO',
-     order: 2,
-     prompt: `Extraia os dados do processo judicial.
- Busque: Número completo do processo, vara, nomes das partes exatamente como aparecem nos autos.
- O reclamante é a parte autora (geralmente o trabalhador).
- A reclamada é a parte ré (geralmente a empresa).`
-   },
-   
-   // Seção: Acidente
-   prompt_import_historiaAcidente: {
-     section: 'ACIDENTE - EXTRAÇÃO DETALHADA OBRIGATÓRIA',
+  // ================================
+  // CARD: periciando | SECTION: acidente
+  // ================================
+  prompt_import_historicoOcupacional: {
+    section: 'Histórico Ocupacional',
      order: 3,
-     prompt: `Extraia e detalhe ao máximo a descrição do acidente/evento:
- - data: Data exata do evento traumático (YYYY-MM-DD)
- - descricao: TRANSCREVA INTEGRALMENTE a descrição do acidente/evento.
-   Inclua TODOS os detalhes: circunstâncias, local exato, horário aproximado, 
-   mecanismo da lesão, posição do trabalhador, testemunhas se mencionadas, 
-   atendimento inicial recebido, consequências imediatas.
-   MÍNIMO 2 parágrafos. NÃO RESUMA. Se houver descrição de CAT, copie-a integralmente.
- - local: Local completo onde ocorreu (setor, área, empresa)`
+    prompt: `**EXTRAÇÃO OBRIGATÓRIA** - Liste CRONOLOGICAMENTE todos os empregos anteriores com detalhes:
+- Nome da empresa, período de trabalho (início e término)
+- Cargo/função exercida em cada emprego
+- Atividades desenvolvidas em cada função
+- Exposição a riscos ocupacionais (ruído, vibração, produtos químicos, esforço físico)
+- Motivo da saída de cada emprego
+- Tempo total de exposição ocupacional
+MÍNIMO 2 parágrafos ou lista cronológica completa. Busque em CTPS, PPP, depoimentos.`
    },
    
-   // Seção: Histórico Ocupacional
-   prompt_import_historicoOcupacional: {
-     section: 'HISTÓRICO OCUPACIONAL',
+  prompt_import_historiaAcidente: {
+    section: 'História do Acidente',
      order: 4,
-     prompt: `Liste CRONOLOGICAMENTE todos os empregos anteriores com detalhes:
- - Nome da empresa, período de trabalho (início e término)
- - Cargo/função exercida em cada emprego
- - Atividades desenvolvidas em cada função
- - Exposição a riscos ocupacionais (ruído, vibração, produtos químicos, esforço físico)
- - Motivo da saída de cada emprego
- - Tempo total de exposição ocupacional
- MÍNIMO 2 parágrafos ou lista cronológica completa. Busque em CTPS, PPP, depoimentos.`
+    prompt: `**EXTRAÇÃO DETALHADA OBRIGATÓRIA** - Extraia e detalhe ao máximo a descrição do acidente/evento:
+- data: Data exata do evento traumático (YYYY-MM-DD)
+- descricao: TRANSCREVA INTEGRALMENTE a descrição do acidente/evento.
+  Inclua TODOS os detalhes: circunstâncias, local exato, horário aproximado, 
+  mecanismo da lesão, posição do trabalhador, testemunhas se mencionadas, 
+  atendimento inicial recebido, consequências imediatas.
+  MÍNIMO 2 parágrafos. NÃO RESUMA. Se houver descrição de CAT, copie-a integralmente.
+- local: Local completo onde ocorreu (setor, área, empresa)`
    },
    
-   // Seção: História Atual / Anamnese
+  // ================================
+  // CARD: periciando | SECTION: anamnese
+  // ================================
    prompt_import_historiaAtual: {
-     section: 'HISTÓRIA ATUAL / ANAMNESE',
+    section: 'Anamnese',
      order: 5,
      prompt: `Extraia TODAS as queixas relatadas pelo periciando com riqueza de detalhes:
  - Sintomas atuais, intensidade (escala de dor se mencionada)
@@ -187,7 +194,7 @@
    
    // Seção: Antecedentes
    prompt_import_antecedentes: {
-     section: 'ANTECEDENTES PATOLÓGICOS',
+    section: 'Antecedentes Patológicos',
      order: 6,
      prompt: `Liste TODAS as condições de saúde prévias, mesmo que não relacionadas:
  - Doenças crônicas (diabetes, hipertensão, cardiopatias, etc.)
@@ -202,7 +209,7 @@
    
    // Seção: Tratamentos
    prompt_import_tratamentos: {
-     section: 'TRATAMENTOS REALIZADOS',
+    section: 'Tratamentos Realizados',
      order: 7,
      prompt: `Liste TODOS os tratamentos realizados em formato estruturado:
  - Medicamentos utilizados (nome comercial/genérico, dose, período de uso, resposta)
@@ -217,7 +224,7 @@
    
    // Seção: Afastamentos
    prompt_import_afastamentos: {
-     section: 'AFASTAMENTOS',
+    section: 'Afastamentos do Trabalho',
      order: 8,
      prompt: `Liste TODOS os períodos de afastamento do trabalho com precisão:
  - Data de início e término de CADA afastamento
@@ -231,7 +238,7 @@
    
    // Seção: Posto de Trabalho
    prompt_import_postoTrabalho: {
-     section: 'POSTO DE TRABALHO',
+    section: 'Dados Funcionais do Posto',
      order: 9,
      prompt: `Extraia informações do cargo e posto de trabalho:
  - cargo_funcao: Cargo exato exercido pelo reclamante
@@ -242,7 +249,7 @@
    
    // Seção: Ambiente e Atividades Laborais
    prompt_import_ambienteAtividades: {
-     section: 'AMBIENTE E ATIVIDADES LABORAIS',
+    section: 'Ambiente e Atividades Laborais',
      order: 10,
      prompt: `AMBIENTE DE TRABALHO - DETALHAR:
  - Ambiente físico (interno/externo, coberto/descoberto, climatizado/não)
@@ -270,7 +277,7 @@
    
    // Seção: Laudos Médicos
    prompt_import_laudosMedicos: {
-     section: 'LAUDOS MÉDICOS',
+    section: 'Laudos Médicos',
      order: 11,
      prompt: `Extraia de CADA laudo/parecer médico presente nos autos:
  - Data do documento
@@ -292,7 +299,7 @@
    
    // Seção: Exames Complementares
    prompt_import_examesComplementares: {
-     section: 'EXAMES COMPLEMENTARES',
+    section: 'Exames Complementares',
      order: 12,
      prompt: `Liste CADA exame separadamente com estrutura:
  - Tipo de exame (Radiografia, Ressonância Magnética, Tomografia, EMG, Laboratoriais, etc.)
@@ -306,7 +313,7 @@
    
    // Seção: Exame Físico
    prompt_import_exameFisico: {
-     section: 'EXAME FÍSICO',
+    section: 'Exame Físico',
      order: 13,
      prompt: `Se houver descrição de exame físico realizado (em laudos médicos, perícias anteriores), extraia:
  - Estado geral do periciando
@@ -322,7 +329,7 @@
    
    // Seção: CIDs
    prompt_import_cids: {
-     section: 'INFORMAÇÕES MÉDICAS - CIDs',
+    section: 'CIDs Mencionados',
      order: 14,
      prompt: `EXTRAIA ABSOLUTAMENTE TODOS os códigos CID-10 mencionados no documento.
  Procure em: laudos médicos, atestados, receitas, CAT, decisões do INSS, perícias anteriores.
@@ -332,7 +339,7 @@
    
    // Seção: Incapacidade
    prompt_import_incapacidade: {
-     section: 'INFORMAÇÕES MÉDICAS - INCAPACIDADE',
+    section: 'Incapacidade Alegada',
      order: 15,
      prompt: `Extraia informações sobre incapacidade:
  - incapacidade_alegada: Descreva detalhadamente o tipo de incapacidade mencionada nos autos.
@@ -349,7 +356,7 @@
    
    // Seção: Nexo Causal
    prompt_import_nexoCausal: {
-     section: 'INFORMAÇÕES MÉDICAS - NEXO CAUSAL',
+    section: 'Nexo Causal Sugerido',
      order: 16,
      prompt: `Retorne o tipo de nexo causal baseado nas evidências documentais:
  - "direto" → se CAT foi emitida e aceita, ou se há nexo claramente estabelecido
@@ -362,7 +369,7 @@
    
    // Seção: Avaliação de Sequelas
    prompt_import_sequelas: {
-     section: 'AVALIAÇÃO DE SEQUELAS',
+    section: 'Avaliação de Sequelas',
      order: 17,
      prompt: `Busque informações sobre sequelas permanentes:
  
@@ -381,9 +388,9 @@
    
    // Seção: Quesitos
    prompt_import_quesitos: {
-     section: 'QUESITOS - EXTRAÇÃO INTEGRAL OBRIGATÓRIA',
+    section: 'Quesitos',
      order: 18,
-     prompt: `Os quesitos são perguntas técnicas formuladas pelo Juízo e pelas partes para serem respondidas pelo perito.
+    prompt: `**EXTRAÇÃO INTEGRAL OBRIGATÓRIA** - Os quesitos são perguntas técnicas formuladas pelo Juízo e pelas partes para serem respondidas pelo perito.
  É ABSOLUTAMENTE ESSENCIAL extrair TODOS os quesitos INTEGRALMENTE, pois são a base do laudo pericial.
  
  QUESITOS DO JUÍZO:
@@ -408,7 +415,7 @@
    
    // Seção: Textos Brutos
    prompt_import_textosBrutos: {
-     section: 'TEXTOS BRUTOS',
+    section: 'Petição Inicial e Contestação',
      order: 19,
      prompt: `Copie os textos completos quando disponíveis:
  - peticao_inicial: Copie o TEXTO COMPLETO da petição inicial (a íntegra ou o máximo possível)
@@ -418,7 +425,7 @@
    
    // Seção: Resumo
    prompt_import_resumo: {
-     section: 'RESUMO',
+    section: 'Resumo do Caso',
      order: 20,
      prompt: `Elabore uma síntese breve do caso para identificação rápida (máximo 300 caracteres).
  Inclua: nome do reclamante, doença/lesão principal, empresa reclamada.`
@@ -427,10 +434,10 @@
  
  // Lista ordenada de prompts para concatenação
  const IMPORT_PROMPT_ORDER = [
-   'prompt_import_vitima',
    'prompt_import_processo',
-   'prompt_import_historiaAcidente',
+  'prompt_import_vitima',
    'prompt_import_historicoOcupacional',
+  'prompt_import_historiaAcidente',
    'prompt_import_historiaAtual',
    'prompt_import_antecedentes',
    'prompt_import_tratamentos',
@@ -561,7 +568,7 @@
   */
  function getCardIdForPrompt(promptId: string): string {
    const mapping: Record<string, string> = {
-     prompt_import_vitima: 'preliminares',
+    prompt_import_vitima: 'periciando',
      prompt_import_processo: 'preliminares',
      prompt_import_historiaAcidente: 'periciando',
      prompt_import_historicoOcupacional: 'periciando',
@@ -590,8 +597,8 @@
   */
  function getSectionIdForPrompt(promptId: string): string {
    const mapping: Record<string, string> = {
-     prompt_import_vitima: 'dados-vitima',
-     prompt_import_processo: 'dados-processo',
+    prompt_import_vitima: 'vitima',
+    prompt_import_processo: 'processo',
      prompt_import_historiaAcidente: 'acidente',
      prompt_import_historicoOcupacional: 'acidente',
      prompt_import_historiaAtual: 'anamnese',

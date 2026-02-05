@@ -15,8 +15,8 @@ function buildImportPrompts(): Record<string, { prompt: string; cardId: string; 
   const importPrompts: Record<string, { prompt: string; cardId: string; sectionId: string; description: string; order: number }> = {};
   
   const cardMapping: Record<string, { cardId: string; sectionId: string }> = {
-    prompt_import_vitima: { cardId: 'preliminares', sectionId: 'dados-vitima' },
-    prompt_import_processo: { cardId: 'preliminares', sectionId: 'dados-processo' },
+    prompt_import_vitima: { cardId: 'periciando', sectionId: 'vitima' },
+    prompt_import_processo: { cardId: 'preliminares', sectionId: 'processo' },
     prompt_import_historiaAcidente: { cardId: 'periciando', sectionId: 'acidente' },
     prompt_import_historicoOcupacional: { cardId: 'periciando', sectionId: 'acidente' },
     prompt_import_historiaAtual: { cardId: 'periciando', sectionId: 'anamnese' },
@@ -45,7 +45,7 @@ function buildImportPrompts(): Record<string, { prompt: string; cardId: string; 
       importPrompts[promptId] = {
         cardId: mapping.cardId,
         sectionId: mapping.sectionId,
-        description: `${defaultData.section} - Importar do PDF`,
+        description: `${defaultData.section}`,
         order: defaultData.order,
         prompt: defaultData.prompt
       };
@@ -232,7 +232,7 @@ EXTRAIA DATAS EXATAS. Liste todos os afastamentos identificados.`
   prompt_regen_descricaoAtividadesLaborais: {
     cardId: 'posto-trabalho',
     sectionId: 'dados-posto',
-    description: 'Dados do Posto de Trabalho - Regerar via PDF',
+    description: 'Ambiente e Atividades Laborais',
     order: 1,
     prompt: `Extraia e detalhe o "Ambiente de Trabalho" e as "Atividades Laborais" do documento.
 

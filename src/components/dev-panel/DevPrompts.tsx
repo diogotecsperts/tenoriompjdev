@@ -1160,6 +1160,17 @@ function PromptMiniCard({
 }: PromptMiniCardProps) {
   const promptType = getPromptType(prompt.id);
   const hasVariables = (prompt.variables?.length || 0) > 0;
+  
+  // Extrair o fieldKey do ID do prompt (ex: prompt_import_historicoOcupacional -> historicoOcupacional)
+  const getFieldKey = (id: string): string => {
+    const parts = id.split('_');
+    if (parts.length >= 3) {
+      return parts.slice(2).join('_');
+    }
+    return id;
+  };
+  const fieldKey = getFieldKey(prompt.id);
+  
   return <div className="border rounded-lg p-3 hover:bg-muted/50 transition-colors cursor-pointer group" onClick={onEdit}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
@@ -1183,6 +1194,11 @@ function PromptMiniCard({
           {prompt.description && <p className="text-xs text-foreground mt-1 line-clamp-1">
               {prompt.description}
             </p>}
+          
+          {/* Field Key identificador técnico */}
+          <code className="text-[10px] text-muted-foreground bg-muted/50 px-1 rounded font-mono mt-1 inline-block">
+            {fieldKey}
+          </code>
 
           {prompt.updatedAt && <div className="flex items-center gap-1 mt-1 text-[10px] text-muted-foreground">
               <Clock className="h-2.5 w-2.5" />
