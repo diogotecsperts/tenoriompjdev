@@ -558,55 +558,13 @@ export function DevPrompts() {
        doc.line(margin, yPos, pageWidth - margin, yPos);
        yPos += 10;
 
-      // Seção de Campos Fixos
-      checkNewPage(80);
-      doc.setFontSize(14);
-      doc.setFont("helvetica", "bold");
-      doc.setTextColor(245, 158, 11); // Amber
-      doc.text("CAMPOS FIXOS (GERENCIADOS VIA BANCO DE DADOS)", margin, yPos);
-      yPos += 3;
-      doc.setDrawColor(245, 158, 11);
-      doc.line(margin, yPos, pageWidth - margin, yPos);
-      yPos += 10;
-      doc.setTextColor(0);
-
-      // Metodologia Pericial
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.text("Metodologia Pericial", margin, yPos);
-      yPos += 6;
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(100);
-      doc.text("ID: config_metodologia_padrao  |  Tipo: Campo Fixo (SQL)", margin, yPos);
-      yPos += 5;
-      if (metodologiaConfig?.updatedAt) {
-        doc.text(`Atualizado em: ${new Date(metodologiaConfig.updatedAt).toLocaleDateString("pt-BR")}`, margin, yPos);
-        yPos += 5;
-      }
-      doc.setTextColor(0);
-      yPos += 3;
-      doc.setFont("helvetica", "italic");
-      doc.text("Texto técnico-científico padronizado que segue critérios médico-legais.", margin, yPos);
-      yPos += 7;
-      doc.setFont("helvetica", "normal");
-      
-      const metodologiaText = metodologiaConfig?.texto || "(Não carregado)";
-      const metodologiaLines = splitText(metodologiaText, contentWidth);
-      for (const line of metodologiaLines) {
-        checkNewPage(6);
-        doc.text(line, margin, yPos);
-        yPos += 5;
-      }
-      yPos += 8;
-      doc.setDrawColor(220);
-      doc.line(margin, yPos - 4, pageWidth - margin, yPos - 4);
-      yPos += 10;
-
       // Iterar por cada card na ordem do laudo
       for (const card of LAUDO_STRUCTURE) {
+        // Verificar se card tem prompts OU campos fixos
         const cardPrompts = Object.values(groupedPrompts[card.id] || {}).flat();
-        if (cardPrompts.length === 0) continue;
+        const hasFixedSections = card.sections.some(s => FIXED_CONFIG_SECTIONS[s.id]);
+        if (cardPrompts.length === 0 && !hasFixedSections) continue;
+        
         checkNewPage(25);
         doc.setFontSize(14);
         doc.setFont("helvetica", "bold");
@@ -617,9 +575,49 @@ export function DevPrompts() {
         doc.line(margin, yPos, pageWidth - margin, yPos);
         yPos += 10;
         doc.setTextColor(0);
+        
         for (const section of card.sections) {
+          const isFixedConfig = FIXED_CONFIG_SECTIONS[section.id];
           const sectionPrompts = groupedPrompts[card.id]?.[section.id] || [];
+          
+          // Renderizar campo fixo na posição correta
+          if (isFixedConfig) {
+            checkNewPage(50);
+            doc.setFontSize(11);
+            doc.setFont("helvetica", "bold");
+            doc.text(section.label, margin, yPos);
+            yPos += 6;
+            
+            // Indicador discreto de campo fixo
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(100);
+            doc.text(`ID: ${isFixedConfig}  |  Tipo: Campo Fixo (SQL)`, margin, yPos);
+            yPos += 5;
+            if (metodologiaConfig?.updatedAt) {
+              doc.text(`Atualizado em: ${new Date(metodologiaConfig.updatedAt).toLocaleDateString("pt-BR")}`, margin, yPos);
+              yPos += 5;
+            }
+            doc.setTextColor(0);
+            yPos += 3;
+            
+            // Texto do campo
+            const fixedText = metodologiaConfig?.texto || "(Não carregado)";
+            const fixedLines = splitText(fixedText, contentWidth);
+            for (const line of fixedLines) {
+              checkNewPage(6);
+              doc.text(line, margin, yPos);
+              yPos += 5;
+            }
+            yPos += 8;
+            doc.setDrawColor(220);
+            doc.line(margin, yPos - 4, pageWidth - margin, yPos - 4);
+            continue; // Próxima seção
+          }
+          
+          // Lógica existente para prompts normais
           if (sectionPrompts.length === 0) continue;
+          
           for (const prompt of sectionPrompts) {
             checkNewPage(50);
             doc.setFontSize(11);
