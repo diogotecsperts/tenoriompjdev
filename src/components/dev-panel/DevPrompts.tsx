@@ -18,6 +18,8 @@ import { cn } from "@/lib/utils";
 import { PromptEditor } from "./PromptEditor";
 import { LAUDO_CARDS_STRUCTURE, PROMPT_ONLY_CARDS } from "@/lib/laudo-structure";
 import { useScrollSpy } from "@/hooks/useScrollSpy";
+import { CoverageAlert } from "./CoverageAlert";
+import { CoverageChecklist } from "./CoverageChecklist";
 
 // ============================================
 // TIPOS
@@ -705,6 +707,9 @@ export function DevPrompts() {
         </Card>
       </div>
 
+      {/* Coverage Alert */}
+      <CoverageAlert prompts={prompts} />
+
       {/* Search */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -778,6 +783,9 @@ export function DevPrompts() {
                   </CardContent>
                 </Card>
               </div>
+              
+              {/* Coverage Checklist */}
+              <CoverageChecklist prompts={prompts} />
             </aside>
 
             {/* Área de Conteúdo */}
