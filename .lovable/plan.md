@@ -1,58 +1,128 @@
 
 
-# Correção do Cabeçalho e Numeração de Página do DOCX
+# Correção Completa: Cabeçalho, Numeração e Transparência do DOCX
 
 ## Problemas Identificados
 
-### 1. Numeração de Página Invisível
-O texto "Página X de XX" desapareceu porque:
-- A imagem do rodapé está em modo **floating** sem `behindDocument`, o que significa que ela fica **na frente** do texto
-- O parágrafo da numeração está sendo adicionado **após** a imagem, mas como a imagem é flutuante e cobre tudo, a numeração fica escondida por baixo
+### 1. Cabeçalho Mal Posicionado
+**No PDF:**
+- `yPos = 2` (2mm do topo)
+- `xPos = 8` (8mm da esquerda = centralizado com 8mm de margem em cada lado)
+- Largura: `PAGE.width - 16` = 194mm
 
-**Solução**: A numeração precisa ser posicionada de forma que fique **sobre** a imagem do rodapé. No Word, isso é conseguido usando posicionamento relativo no mesmo parágrafo da imagem ou usando um TextBox.
+**No DOCX atual:**
+- A imagem está apenas `AlignmentType.CENTER` mas o header tem margens internas que empurram a imagem
+- Sem controle de posição vertical (fica abaixo)
+- Margem superior da página está em `32mm` (excessivo)
 
-### 2. Cabeçalho Mal Posicionado e Incorreto
+### 2. Numeração de Página Muito Baixa
+**No PDF:**
+- Posição: `PAGE.height - 5` = 5mm da borda inferior
+- Centralizado horizontalmente
 
-Comparativo PDF vs DOCX atual:
+**No DOCX atual:**
+- `spacing: { before: 0 }` coloca a numeração no topo do footer container
+- Mas o footer container inicia onde a margem bottom termina, não na borda da página
 
-| Aspecto | PDF | DOCX Atual |
-|---------|-----|------------|
-| Largura da imagem | `PAGE.width - 16` = 194mm | 793 pixels (~210mm, largura total) |
-| Posição X | `xPos = 8` (centralizado com margens) | Usando `alignment: CENTER` mas com largura total |
-| Aparência | Centralizado com margens visuais | Parece esticado e mal posicionado |
+### 3. Transparência nas Imagens
+O problema de "transparência" pode ter duas causas:
+1. **Compressão/Qualidade**: A biblioteca `docx` pode estar aplicando compressão
+2. **Blending Mode**: Quando `behindDocument: true`, há interação com layers
 
-**Problema raiz**: O cabeçalho no DOCX está usando 793 pixels (largura total A4), quando deveria usar um valor proporcional a 194mm (igual ao PDF), e o parágrafo precisa estar corretamente centralizado.
+---
+
+## Análise Detalhada do PDF
+
+```text
+┌─────────────────────────────┐ ← 0mm (topo)
+│         ╔═══════╗           │ ← yPos = 2mm (cabeçalho começa)
+│         ║HEADER ║ (194mm)   │
+│         ╚═══════╝           │ ← headerBottomY ≈ 45mm
+│   ↑ 8mm         ↑ 8mm       │ ← margens laterais
+│         CONTEÚDO            │
+│            ...              │
+│         ╔═══════╗           │ ← footerTopY ≈ 270mm
+│ ← 0mm   ║FOOTER ║ (210mm) → │ ← Edge-to-edge
+│         ╚═══════╝           │
+│      "Página X de XX"       │ ← PAGE.height - 5 = 292mm
+└─────────────────────────────┘ ← 297mm (base)
+```
 
 ---
 
 ## Solução Técnica
 
-### Correção 1: Cabeçalho com Dimensões Corretas
+### Correção 1: Cabeçalho com Posicionamento Floating
 
-No PDF, o cabeçalho usa:
-- `imgWidth = PAGE.width - 16` = 210 - 16 = **194mm**
-- Isso equivale a: `194 / 210 * 793 ≈ 733 pixels`
+Para replicar o PDF exatamente, precisamos usar **floating** no cabeçalho também, com:
+- Posição horizontal: 8mm da borda esquerda (em EMUs)
+- Posição vertical: 2mm do topo da página (em EMUs)
+- Largura: 733 pixels (194mm)
 
 ```typescript
-// Largura do cabeçalho (igual ao PDF: PAGE.width - 16mm = 194mm)
-// Proporção: 194/210 = 0.924
-const HEADER_WIDTH_RATIO = 0.924;
-const headerWidth = Math.round(A4_WIDTH_PIXELS * HEADER_WIDTH_RATIO); // ~733 pixels
+// Conversão: 1mm = 914400/25.4 ≈ 36000 EMUs
+const MM_TO_EMU = 36000;
+
+new ImageRun({
+  data: headerImageBuffer,
+  transformation: {
+    width: headerWidth,  // 733 pixels
+    height: headerHeight,
+  },
+  floating: {
+    horizontalPosition: {
+      relative: HorizontalPositionRelativeFrom.PAGE,
+      offset: 8 * MM_TO_EMU,  // 8mm da esquerda (como no PDF)
+    },
+    verticalPosition: {
+      relative: VerticalPositionRelativeFrom.PAGE,
+      offset: 2 * MM_TO_EMU,  // 2mm do topo (como no PDF)
+    },
+    wrap: { type: TextWrappingType.NONE },
+    behindDocument: true,
+  },
+  type: "png",
+})
 ```
 
-### Correção 2: Numeração de Página Sobre a Imagem
+### Correção 2: Numeração de Página Posicionada
 
-Para que a numeração fique visível sobre a imagem flutuante, temos duas opções:
+Para a numeração ficar 5mm acima da borda inferior (como no PDF), precisamos usar posicionamento absoluto:
 
-**Opção A (Mais simples)**: Manter `behindDocument: true` na imagem do rodapé
-- Isso faz a imagem ficar por trás de qualquer texto
-- A numeração aparecerá normalmente sobre ela
-- Mas já temos margem de segurança suficiente para o texto do documento não tocar
+```typescript
+// Posição vertical da numeração = 292mm do topo = PAGE.height - 5
+// Em EMUs: 292 * 36000 = 10,512,000 EMUs
 
-**Opção B (Mais robusta)**: Usar posicionamento negativo na numeração
-- Usar `spacing: { before: -X }` para "subir" a numeração sobre a imagem
+new Paragraph({
+  frame: {
+    position: {
+      x: 0,
+      y: 292 * MM_TO_EMU,  // 5mm da borda inferior
+    },
+    width: A4_WIDTH_PIXELS,
+    anchor: {
+      horizontal: FrameAnchorType.PAGE,
+      vertical: FrameAnchorType.PAGE,
+    },
+  },
+  children: [...],
+  alignment: AlignmentType.CENTER,
+})
+```
 
-Recomendo a **Opção A** - reativar `behindDocument: true` já que a margem de segurança de 12mm está funcionando.
+Alternativamente, usar `spacing: { before: X }` negativo para "subir" a numeração sobre a imagem.
+
+### Correção 3: Margem Superior do Header
+
+Reduzir a margem `header` da página para permitir que a imagem fique mais próxima do topo:
+
+```typescript
+margin: {
+  top: "2mm",      // Espaço mínimo (cabeçalho é floating)
+  header: "0mm",   // Header na borda superior
+  ...
+}
+```
 
 ---
 
@@ -60,55 +130,109 @@ Recomendo a **Opção A** - reativar `behindDocument: true` já que a margem de 
 
 ### Arquivo: `src/utils/generateLaudoDOCX.ts`
 
-**1. Ajustar largura do cabeçalho (linhas 669-670)**
+**1. Adicionar constante de conversão para EMUs**
 
 ```typescript
-// ANTES:
-const headerWidth = A4_WIDTH_PIXELS;
-
-// DEPOIS:
-// Largura do cabeçalho = 194mm (igual ao PDF: PAGE.width - 16)
-// Proporção em relação à largura total: 194/210 = 0.924
-const HEADER_WIDTH_RATIO = 0.924;
-const headerWidth = Math.round(A4_WIDTH_PIXELS * HEADER_WIDTH_RATIO); // ~733 pixels
+// 1mm = 914400 / 25.4 ≈ 36000 EMUs (English Metric Units)
+const MM_TO_EMU = 36000;
 ```
 
-**2. Reativar behindDocument no rodapé (linha 726)**
+**2. Modificar o cabeçalho para usar floating (linhas ~686-701)**
 
 ```typescript
-// ANTES:
-// Removido behindDocument: true para imagem ficar sobre qualquer texto
-
-// DEPOIS:
-behindDocument: true, // Imagem fica por trás - numeração aparece sobre ela
+if (headerImageBuffer) {
+  headerContent = [
+    new Paragraph({
+      children: [
+        new ImageRun({
+          data: headerImageBuffer,
+          transformation: {
+            width: headerWidth,  // ~733 pixels (194mm)
+            height: headerHeight,
+          },
+          floating: {
+            horizontalPosition: {
+              relative: HorizontalPositionRelativeFrom.PAGE,
+              offset: 8 * MM_TO_EMU,  // 8mm da esquerda (como PDF)
+            },
+            verticalPosition: {
+              relative: VerticalPositionRelativeFrom.PAGE,
+              offset: 2 * MM_TO_EMU,  // 2mm do topo (como PDF)
+            },
+            wrap: {
+              type: TextWrappingType.NONE,
+            },
+            behindDocument: true,  // Fica por trás do conteúdo
+          },
+          type: "png",
+        }),
+      ],
+    }),
+  ];
+}
 ```
 
-**3. Ajustar espaçamento da numeração (linha 747)**
+**3. Ajustar posição da numeração (linhas ~739-752)**
+
+Calcular a altura da área do footer e posicionar a numeração 5mm da borda:
 
 ```typescript
-// ANTES:
-spacing: { before: 200 },
+// A numeração deve ficar 5mm acima da borda inferior (como no PDF)
+// Como a imagem está behindDocument e cobre ~27mm, precisamos posicionar a numeração
+// sobre ela usando spacing negativo ou frame positioning
 
-// DEPOIS:
-spacing: { before: 0 }, // Numeração fica no topo do footer
+footerContent.push(
+  new Paragraph({
+    children: [
+      new TextRun({
+        children: ["Página ", PageNumber.CURRENT, " de ", PageNumber.TOTAL_PAGES],
+        size: FONT.sizeSmall,
+        color: "FFFFFF",
+        font: FONT.name,
+      }),
+    ],
+    alignment: AlignmentType.CENTER,
+    // Usar margem negativa para subir a numeração sobre a imagem
+    // A altura do footer container é ~footerHeightMm, queremos ficar 5mm da borda
+    spacing: { 
+      before: Math.round((footerHeightMm - 5) * 20 * 2),  // twips (1mm ≈ 40 twips)
+    },
+  })
+);
+```
+
+**4. Ajustar margens da página (linhas ~759-765)**
+
+```typescript
+margin: {
+  top: "45mm",                    // Altura do cabeçalho + margem segurança
+  bottom: `${bottomMarginMm}mm`,  // Dinâmico
+  left: "20mm",
+  right: "15mm",
+  header: "0mm",                  // Header na borda (imagem floating)
+  footer: "0mm",                  // Footer na borda (imagem floating)
+},
 ```
 
 ---
 
 ## Resumo das Alterações
 
-| Local | Alteração | Efeito |
-|-------|-----------|--------|
-| Linha 669 | Usar `HEADER_WIDTH_RATIO = 0.924` para calcular `headerWidth` | Cabeçalho com 733px (~194mm) como no PDF |
-| Linha 726 | Reativar `behindDocument: true` | Imagem do rodapé fica por trás da numeração |
-| Linha 747 | Mudar `before: 200` para `before: 0` | Numeração fica melhor posicionada |
+| Problema | Solução | Arquivo/Linha |
+|----------|---------|---------------|
+| Cabeçalho à direita | Usar floating com `offset: 8mm` horizontal | ~686-701 |
+| Cabeçalho muito abaixo | Usar floating com `offset: 2mm` vertical | ~686-701 |
+| Cabeçalho transparente | Adicionar `behindDocument: true` no header | ~686-701 |
+| Numeração muito baixa | Ajustar `spacing.before` para posicionar sobre a imagem | ~739-752 |
+| Transparência geral | Verificar se as imagens PNG têm fundo opaco | N/A |
 
 ---
 
 ## Resultado Esperado
 
 Após as correções:
-- **Cabeçalho**: Centralizado com margens visuais iguais ao PDF (~8mm de cada lado)
-- **Rodapé**: Banner edge-to-edge com "Página X de XX" em branco visível sobre ele
-- **Texto do documento**: Mantém a margem de segurança de 12mm acima do rodapé
+- **Cabeçalho**: Exatamente como no PDF - 8mm das bordas laterais, 2mm do topo
+- **Rodapé**: Edge-to-edge como já está funcionando
+- **Numeração**: Centralizada, aproximadamente 5mm da borda inferior (sobre o banner)
+- **Aparência**: Imagens sólidas sem efeito de transparência
 
