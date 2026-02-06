@@ -13,6 +13,10 @@ import {
   HeadingLevel,
   convertInchesToTwip,
   SectionType,
+  HorizontalPositionRelativeFrom,
+  VerticalPositionRelativeFrom,
+  VerticalPositionAlign,
+  TextWrappingType,
 } from "docx";
 import { saveAs } from "file-saver";
 import { LaudoData } from "@/contexts/LaudoContext";
@@ -680,38 +684,54 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
     ];
   }
 
-  // Preparar footer com imagem e numeração de página
+  // Preparar footer com imagem edge-to-edge e numeração sobreposta
   let footerContent: Paragraph[] = [];
+  
   if (footerImageBuffer) {
+    // Imagem flutuante posicionada na borda inferior da página
     footerContent = [
       new Paragraph({
         children: [
           new ImageRun({
             data: footerImageBuffer,
             transformation: {
-              width: footerWidth,
+              width: 595,  // Largura A4 em pontos (210mm)
               height: footerHeight,
+            },
+            floating: {
+              horizontalPosition: {
+                relative: HorizontalPositionRelativeFrom.PAGE,
+                offset: 0,
+              },
+              verticalPosition: {
+                relative: VerticalPositionRelativeFrom.PAGE,
+                align: VerticalPositionAlign.BOTTOM,
+              },
+              wrap: {
+                type: TextWrappingType.NONE,
+              },
+              behindDocument: true,
             },
             type: "png",
           }),
         ],
-        alignment: AlignmentType.CENTER,
       }),
     ];
   }
   
-  // Adicionar numeração de página
+  // Numeração de página posicionada sobre a imagem do rodapé
   footerContent.push(
     new Paragraph({
       children: [
         new TextRun({
           children: ["Página ", PageNumber.CURRENT, " de ", PageNumber.TOTAL_PAGES],
           size: FONT.sizeSmall,
-          color: COLORS.muted,
+          color: "FFFFFF", // Branco para contraste sobre o banner
           font: FONT.name,
         }),
       ],
       alignment: AlignmentType.CENTER,
+      spacing: { before: 200 }, // Espaçamento para posicionar sobre a imagem
     })
   );
 
@@ -722,9 +742,10 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
           page: {
             margin: {
               top: convertInchesToTwip(1.2),
-              bottom: convertInchesToTwip(1),
+              bottom: convertInchesToTwip(0.5), // Reduzido para acomodar footer edge-to-edge
               left: convertInchesToTwip(0.79), // ~20mm
               right: convertInchesToTwip(0.59), // ~15mm
+              footer: convertInchesToTwip(0.3), // Footer mais próximo da borda
             },
           },
         },
