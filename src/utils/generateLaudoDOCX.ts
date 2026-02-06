@@ -18,6 +18,10 @@ import {
   VerticalPositionAlign,
   TextWrappingType,
 } from "docx";
+
+// Conversão de milímetros para EMUs (English Metric Units)
+// 1 inch = 914400 EMUs, 1 inch = 25.4mm, então 1mm ≈ 36000 EMUs
+const MM_TO_EMU = 36000;
 import { saveAs } from "file-saver";
 import { LaudoData } from "@/contexts/LaudoContext";
 
@@ -680,7 +684,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   // Margem inferior = altura do rodapé + margem de segurança (igual ao PDF)
   const bottomMarginMm = footerHeightMm + FOOTER_SAFETY_MARGIN_MM;
 
-  // Preparar header
+  // Preparar header com posicionamento flutuante (como no PDF: 8mm da esquerda, 2mm do topo)
   let headerContent: Paragraph[] = [];
   if (headerImageBuffer) {
     headerContent = [
@@ -692,10 +696,23 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
               width: headerWidth,
               height: headerHeight,
             },
+            floating: {
+              horizontalPosition: {
+                relative: HorizontalPositionRelativeFrom.PAGE,
+                offset: 8 * MM_TO_EMU,  // 8mm da esquerda (como no PDF: xPos = 8)
+              },
+              verticalPosition: {
+                relative: VerticalPositionRelativeFrom.PAGE,
+                offset: 2 * MM_TO_EMU,  // 2mm do topo (como no PDF: yPos = 2)
+              },
+              wrap: {
+                type: TextWrappingType.NONE,
+              },
+              behindDocument: false,  // Imagem fica na frente para evitar transparência
+            },
             type: "png",
           }),
         ],
-        alignment: AlignmentType.CENTER,
       }),
     ];
   }
@@ -726,7 +743,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
               wrap: {
                 type: TextWrappingType.NONE,
               },
-              behindDocument: true, // Imagem fica por trás - numeração aparece sobre ela
+              behindDocument: false, // Imagem fica na frente para evitar transparência
             },
             type: "png",
           }),
@@ -736,6 +753,10 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
   
   // Numeração de página posicionada sobre a imagem do rodapé
+  // No PDF está a 5mm da borda inferior, calculamos o spacing adequado
+  // footerHeightMm - 5mm = distância do topo do footer até a posição da numeração
+  const pageNumberSpacingTwips = Math.round((footerHeightMm - 8) * 20 * 2); // ~8mm da borda inferior
+  
   footerContent.push(
     new Paragraph({
       children: [
@@ -747,7 +768,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
         }),
       ],
       alignment: AlignmentType.CENTER,
-      spacing: { before: 0 }, // Numeração fica no topo do footer
+      spacing: { before: pageNumberSpacingTwips },
     })
   );
 
@@ -757,11 +778,12 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
         properties: {
           page: {
             margin: {
-              top: "32mm",                      // Espaço para cabeçalho
+              top: "45mm",                      // Espaço para cabeçalho (imagem floating + margem)
               bottom: `${bottomMarginMm}mm`,    // Dinâmico: altura rodapé + 12mm segurança
               left: "20mm",                     // Igual ao PDF
               right: "15mm",                    // Igual ao PDF
-              footer: "0mm",                    // Footer na borda inferior
+              header: "0mm",                    // Header na borda (imagem floating)
+              footer: "0mm",                    // Footer na borda (imagem floating)
             },
           },
         },
