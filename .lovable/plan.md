@@ -1,47 +1,58 @@
 
 
-# Correção do Rodapé DOCX - Margem de Segurança e Transparência
+# Correção do Cabeçalho e Numeração de Página do DOCX
 
 ## Problemas Identificados
 
-### 1. Texto Sobrepondo o Rodapé
-O conteúdo do documento está entrando na área do rodapé porque as margens não estão configuradas adequadamente para manter a distância de segurança.
+### 1. Numeração de Página Invisível
+O texto "Página X de XX" desapareceu porque:
+- A imagem do rodapé está em modo **floating** sem `behindDocument`, o que significa que ela fica **na frente** do texto
+- O parágrafo da numeração está sendo adicionado **após** a imagem, mas como a imagem é flutuante e cobre tudo, a numeração fica escondida por baixo
 
-**No PDF:**
-- `FOOTER_SAFETY_MARGIN = 12mm` - 12mm de margem acima do rodapé
-- O `contentEndY` é calculado como `footerTopY - 12mm`
+**Solução**: A numeração precisa ser posicionada de forma que fique **sobre** a imagem do rodapé. No Word, isso é conseguido usando posicionamento relativo no mesmo parágrafo da imagem ou usando um TextBox.
 
-**No DOCX atual:**
-- `bottom: convertInchesToTwip(0.5)` = ~12.7mm - parece adequado
-- `footer: convertInchesToTwip(0.3)` = ~7.6mm - muito próximo da borda
+### 2. Cabeçalho Mal Posicionado e Incorreto
 
-O problema é que a margem `bottom` define onde o texto **pode** ir, mas o footer com imagem flutuante `behindDocument: true` fica **por trás** do conteúdo. Quando o rodapé tem altura de ~30-40mm (altura do banner), o texto pode entrar nessa área.
+Comparativo PDF vs DOCX atual:
 
-### 2. Aparência "Transparente" do Rodapé
-A imagem está corretamente posicionada, mas como está configurada como `behindDocument: true`, ela fica por trás de qualquer texto que entre na área do footer, criando a impressão de transparência.
+| Aspecto | PDF | DOCX Atual |
+|---------|-----|------------|
+| Largura da imagem | `PAGE.width - 16` = 194mm | 793 pixels (~210mm, largura total) |
+| Posição X | `xPos = 8` (centralizado com margens) | Usando `alignment: CENTER` mas com largura total |
+| Aparência | Centralizado com margens visuais | Parece esticado e mal posicionado |
+
+**Problema raiz**: O cabeçalho no DOCX está usando 793 pixels (largura total A4), quando deveria usar um valor proporcional a 194mm (igual ao PDF), e o parágrafo precisa estar corretamente centralizado.
 
 ---
 
 ## Solução Técnica
 
-### A) Aumentar Margem Inferior do Conteúdo
+### Correção 1: Cabeçalho com Dimensões Corretas
 
-No PDF, usamos `FOOTER_SAFETY_MARGIN = 12mm` de distância entre o último texto e o topo do banner do rodapé. 
+No PDF, o cabeçalho usa:
+- `imgWidth = PAGE.width - 16` = 210 - 16 = **194mm**
+- Isso equivale a: `194 / 210 * 793 ≈ 733 pixels`
 
-A margem `bottom` no DOCX deve considerar:
-1. A altura do banner do rodapé (que vamos calcular dinamicamente)
-2. + 12mm de margem de segurança adicional
-
-```text
-A4 = 297mm de altura
-Altura estimada do banner de rodapé ≈ 27mm (baseado na proporção)
-Margem de segurança = 12mm
-Margem bottom ideal = altura_banner + 12mm ≈ 39mm ≈ 1.5 inches
+```typescript
+// Largura do cabeçalho (igual ao PDF: PAGE.width - 16mm = 194mm)
+// Proporção: 194/210 = 0.924
+const HEADER_WIDTH_RATIO = 0.924;
+const headerWidth = Math.round(A4_WIDTH_PIXELS * HEADER_WIDTH_RATIO); // ~733 pixels
 ```
 
-### B) Usar Valores em Milímetros (mais legíveis)
+### Correção 2: Numeração de Página Sobre a Imagem
 
-A biblioteca `docx` aceita strings como `"12mm"`, `"39mm"` diretamente nas margens. Isso torna o código mais claro e alinhado com a lógica do PDF.
+Para que a numeração fique visível sobre a imagem flutuante, temos duas opções:
+
+**Opção A (Mais simples)**: Manter `behindDocument: true` na imagem do rodapé
+- Isso faz a imagem ficar por trás de qualquer texto
+- A numeração aparecerá normalmente sobre ela
+- Mas já temos margem de segurança suficiente para o texto do documento não tocar
+
+**Opção B (Mais robusta)**: Usar posicionamento negativo na numeração
+- Usar `spacing: { before: -X }` para "subir" a numeração sobre a imagem
+
+Recomendo a **Opção A** - reativar `behindDocument: true` já que a margem de segurança de 12mm está funcionando.
 
 ---
 
@@ -49,102 +60,55 @@ A biblioteca `docx` aceita strings como `"12mm"`, `"39mm"` diretamente nas marge
 
 ### Arquivo: `src/utils/generateLaudoDOCX.ts`
 
-**1. Adicionar constante de margem de segurança (similar ao PDF)**
-
-Na seção de constantes (após linha 38):
+**1. Ajustar largura do cabeçalho (linhas 669-670)**
 
 ```typescript
-// Margens de segurança (equivalente ao PDF)
-const FOOTER_SAFETY_MARGIN_MM = 12; // 12mm acima do banner do rodapé
+// ANTES:
+const headerWidth = A4_WIDTH_PIXELS;
+
+// DEPOIS:
+// Largura do cabeçalho = 194mm (igual ao PDF: PAGE.width - 16)
+// Proporção em relação à largura total: 194/210 = 0.924
+const HEADER_WIDTH_RATIO = 0.924;
+const headerWidth = Math.round(A4_WIDTH_PIXELS * HEADER_WIDTH_RATIO); // ~733 pixels
 ```
 
-**2. Calcular margem bottom dinamicamente**
-
-Após calcular `footerHeight` (linha 669):
+**2. Reativar behindDocument no rodapé (linha 726)**
 
 ```typescript
-// Converter altura do footer de pixels para mm
-// A4: 793 pixels = 210mm, então 1 pixel ≈ 0.265mm
-const footerHeightMm = Math.round(footerHeight * 0.265);
+// ANTES:
+// Removido behindDocument: true para imagem ficar sobre qualquer texto
 
-// Margem inferior = altura do rodapé + margem de segurança
-const bottomMarginMm = footerHeightMm + FOOTER_SAFETY_MARGIN_MM;
+// DEPOIS:
+behindDocument: true, // Imagem fica por trás - numeração aparece sobre ela
 ```
 
-**3. Aplicar margens corrigidas na seção**
-
-Alterar as margens da página (linhas 747-754):
+**3. Ajustar espaçamento da numeração (linha 747)**
 
 ```typescript
-margin: {
-  top: "32mm",          // ~1.26 inches (espaço para cabeçalho)
-  bottom: `${bottomMarginMm}mm`, // Dinâmico: altura rodapé + 12mm segurança
-  left: "20mm",         // Igual ao PDF
-  right: "15mm",        // Igual ao PDF
-  footer: "0mm",        // Footer na borda inferior
-},
+// ANTES:
+spacing: { before: 200 },
+
+// DEPOIS:
+spacing: { before: 0 }, // Numeração fica no topo do footer
 ```
-
-**4. Garantir que a imagem fique sobre o conteúdo (não transparente)**
-
-Remover `behindDocument: true` para que a imagem do rodapé **cubra** qualquer texto que porventura ainda chegue perto:
-
-```typescript
-floating: {
-  horizontalPosition: {
-    relative: HorizontalPositionRelativeFrom.PAGE,
-    offset: 0,
-  },
-  verticalPosition: {
-    relative: VerticalPositionRelativeFrom.PAGE,
-    align: VerticalPositionAlign.BOTTOM,
-  },
-  wrap: {
-    type: TextWrappingType.NONE,
-  },
-  // REMOVIDO: behindDocument: true
-},
-```
-
-**Alternativa mais segura**: Manter `behindDocument: true` mas garantir que a margem seja grande o suficiente para que o texto nunca alcance a área do banner.
 
 ---
 
 ## Resumo das Alterações
 
-| Local | Alteração | Impacto |
-|-------|-----------|---------|
-| Após linha 38 | Adicionar `FOOTER_SAFETY_MARGIN_MM = 12` | Constante de segurança |
-| Linha 669-670 | Calcular `footerHeightMm` e `bottomMarginMm` | Margem dinâmica |
-| Linhas 747-754 | Usar margens em `mm` com valor calculado | Texto nunca toca o rodapé |
+| Local | Alteração | Efeito |
+|-------|-----------|--------|
+| Linha 669 | Usar `HEADER_WIDTH_RATIO = 0.924` para calcular `headerWidth` | Cabeçalho com 733px (~194mm) como no PDF |
+| Linha 726 | Reativar `behindDocument: true` | Imagem do rodapé fica por trás da numeração |
+| Linha 747 | Mudar `before: 200` para `before: 0` | Numeração fica melhor posicionada |
 
 ---
 
-## Valores Finais Esperados
+## Resultado Esperado
 
-Para um banner de rodapé com ~27mm de altura:
-- `footerHeightMm` ≈ 27mm
-- `bottomMarginMm` = 27 + 12 = 39mm
-- Isso garante que o texto do documento termine **pelo menos 12mm acima** do topo do banner
-
----
-
-## Comparativo
-
-```text
-+------------------------+------------+------------+
-| Parâmetro              | PDF        | DOCX Novo  |
-+------------------------+------------+------------+
-| Margem segurança       | 12mm       | 12mm       |
-| Altura banner rodapé   | ~27mm      | ~27mm      |
-| Distância texto→banner | 12mm       | 12mm       |
-| Margem bottom total    | dinâmica   | ~39mm      |
-+------------------------+------------+------------+
-```
-
----
-
-## Observação sobre Transparência
-
-A imagem do banner PNG do rodapé (arquivo `public/timbrado-rodape.png`) deve ter fundo opaco. Se a imagem original tiver fundo transparente, ela mostrará o conteúdo por baixo mesmo quando bem posicionada. Se isso ainda ocorrer após as correções de margem, será necessário verificar o arquivo PNG original.
+Após as correções:
+- **Cabeçalho**: Centralizado com margens visuais iguais ao PDF (~8mm de cada lado)
+- **Rodapé**: Banner edge-to-edge com "Página X de XX" em branco visível sobre ele
+- **Texto do documento**: Mantém a margem de segurança de 12mm acima do rodapé
 
