@@ -1,199 +1,143 @@
 
-# Correções na Exportação DOCX
+# Correção do Rodapé DOCX - Banner Edge-to-Edge
 
-## Problemas Identificados
+## Problema Identificado
 
-### 1. Formato Padrão Errado
-O estado inicial do `exportFormat` usa `'pdf'` como fallback:
-```typescript
-// Linha 253 de LaudoEditor.tsx
-const [exportFormat, setExportFormat] = useState<'pdf' | 'docx'>(() => {
-  return (localStorage.getItem('laudo-export-format') as 'pdf' | 'docx') || 'pdf';
-  //                                                                        ^^^^
-});
+Analisando a imagem fornecida, o banner do rodapé está encostando na borda esquerda, mas não se estende até a borda direita da página. Isso acontece porque:
+
+1. **Unidades incorretas**: O `offset` na biblioteca `docx` usa EMUs (English Metric Units), não pontos
+2. **Largura da imagem insuficiente**: 595 pontos de largura não cobre toda a página quando combinado com posicionamento flutuante
+3. **Conversão de unidades**: 1 inch = 914400 EMUs, e a página A4 tem 210mm de largura
+
+## Cálculos Necessários
+
+```text
+A4 Largura = 210mm = 8.27 inches
+1 inch = 914400 EMUs
+Largura total em EMUs = 8.27 × 914400 = 7,562,088 EMUs
+
+Para transformation (pixels):
+1 ponto = 0.75 pixels (conforme documentação)
+Largura A4 em pontos = 595.28 pts
+Largura em pixels = 595.28 / 0.75 ≈ 793 pixels
 ```
-
-### 2. Rodapé DOCX com Problemas Visuais
-
-Analisando as imagens fornecidas:
-
-| Aspecto | PDF (Correto) | DOCX (Problema) |
-|---------|---------------|-----------------|
-| Banner | Encaixa nas bordas | Não encaixa nas extremidades |
-| "Página X de XX" | Dentro do banner, centralizado | Abaixo do banner, fora |
-
-**Causa raiz:** No PDF, o texto "Página X de XX" é desenhado diretamente sobre a imagem do rodapé usando coordenadas absolutas. No DOCX, a imagem e o texto são elementos separados em parágrafos distintos no Footer.
-
----
 
 ## Solução Técnica
 
-### Correção 1: Alterar Formato Padrão para DOCX
-
-Modificar o fallback de `'pdf'` para `'docx'`:
-
-```typescript
-const [exportFormat, setExportFormat] = useState<'pdf' | 'docx'>(() => {
-  return (localStorage.getItem('laudo-export-format') as 'pdf' | 'docx') || 'docx';
-});
-```
-
-### Correção 2: Rodapé DOCX Profissional
-
-A solução envolve três ajustes na biblioteca `docx`:
-
-**A) Imagem de rodapé edge-to-edge:**
-- Usar `floating` positioning com `HorizontalPositionRelativeFrom.PAGE`
-- Definir `wrap: none` para a imagem não empurrar o texto
-- Usar margem negativa no parágrafo para compensar as margens da página
-
-**B) Numeração de página sobre a imagem:**
-- Colocar a numeração no mesmo parágrafo do rodapé usando posicionamento absoluto
-- Alternativamente, criar um campo de texto posicionado sobre a imagem
-
-**C) Abordagem mais robusta (recomendada):**
-- Remover a numeração de página separada
-- Usar `PositionalTab` ou posicionamento absoluto para colocar o texto sobre a imagem
-- Configurar o footer com margem mínima e a imagem em modo floating
-
----
-
-## Implementação Detalhada
-
-### Arquivo: `src/pages/LaudoEditor.tsx`
-
-**Linha 253** - Alterar fallback:
-```typescript
-// ANTES
-|| 'pdf';
-
-// DEPOIS
-|| 'docx';
-```
-
 ### Arquivo: `src/utils/generateLaudoDOCX.ts`
 
-**Linhas 683-716** - Refatorar criação do footer:
+**Mudança 1**: Usar dimensões em pixels corretas para a imagem
+
+O problema principal é que `transformation.width` usa pixels, não pontos. Devemos usar a largura total da página A4 em pixels.
 
 ```typescript
-// Preparar footer com imagem edge-to-edge e numeração sobreposta
-let footerContent: Paragraph[] = [];
-
-if (footerImageBuffer) {
-  // Calcular largura total da página A4 em EMUs (English Metric Units)
-  // A4 = 210mm, margens = ~20mm esquerda + ~15mm direita = 35mm
-  // Para edge-to-edge, precisamos compensar as margens
-  const pageWidthEmu = 595 * 9525; // pontos para EMU
-  
-  footerContent = [
-    new Paragraph({
-      children: [
-        new ImageRun({
-          data: footerImageBuffer,
-          transformation: {
-            width: 595,  // Largura A4 em pontos
-            height: footerHeight,
-          },
-          floating: {
-            horizontalPosition: {
-              relative: HorizontalPositionRelativeFrom.PAGE,
-              offset: 0,
-            },
-            verticalPosition: {
-              relative: VerticalPositionRelativeFrom.PAGE,
-              align: VerticalPositionAlign.BOTTOM,
-            },
-            wrap: {
-              type: TextWrappingType.NONE,
-            },
-            behindDocument: true,
-          },
-          type: "png",
-        }),
-      ],
-    }),
-    // Numeração de página posicionada sobre a imagem
-    new Paragraph({
-      children: [
-        new TextRun({
-          children: ["Página ", PageNumber.CURRENT, " de ", PageNumber.TOTAL_PAGES],
-          size: FONT.sizeSmall,
-          color: "FFFFFF", // Branco para contraste sobre o banner
-          font: FONT.name,
-        }),
-      ],
-      alignment: AlignmentType.CENTER,
-      spacing: { before: 0 },
-    }),
-  ];
-}
+// Largura A4 em pixels (595 pontos × 1.333... = ~793 pixels)
+// Mas na prática, a biblioteca aceita valores em pontos que são convertidos
+const A4_WIDTH_PIXELS = Math.round(595 * 1.333); // ~793 pixels
 ```
 
-**Configuração de margens da seção:**
+**Mudança 2**: Garantir que a imagem ocupe toda a largura usando a proporção correta
+
+O footer precisa manter a proporção original da imagem PNG, mas esticando para a largura total da página. Como a imagem original do timbrado já foi desenhada para ocupar toda a largura, devemos calcular corretamente.
+
+**Mudança 3**: Verificar se `offset: 0` realmente posiciona na borda
+
+Quando usamos `relative: PAGE` e `offset: 0`, a imagem deve começar exatamente na borda esquerda. O problema pode ser que a largura especificada não é suficiente.
+
+## Código Corrigido
+
 ```typescript
-properties: {
-  page: {
-    margin: {
-      top: convertInchesToTwip(1.2),
-      bottom: convertInchesToTwip(0.4), // Reduzir para acomodar imagem
-      left: convertInchesToTwip(0.79),
-      right: convertInchesToTwip(0.59),
-      footer: convertInchesToTwip(0.2), // Footer mais próximo da borda
-    },
+// Constantes de conversão
+const POINTS_TO_PIXELS = 1.333; // 1 ponto = 1.333 pixels
+const A4_WIDTH_MM = 210;
+const A4_WIDTH_POINTS = 595.28;
+const A4_WIDTH_PIXELS = Math.round(A4_WIDTH_POINTS * POINTS_TO_PIXELS); // 793
+
+// No cálculo das dimensões do footer
+const footerWidthPixels = A4_WIDTH_PIXELS; // Largura total da página
+const footerHeightPixels = Math.round(footerWidthPixels * (footerDimensions.height / footerDimensions.width));
+
+// Na criação do ImageRun
+new ImageRun({
+  data: footerImageBuffer,
+  transformation: {
+    width: footerWidthPixels,  // 793 pixels (largura total A4)
+    height: footerHeightPixels,
   },
+  floating: {
+    horizontalPosition: {
+      relative: HorizontalPositionRelativeFrom.PAGE,
+      offset: 0, // Começa na borda esquerda
+    },
+    verticalPosition: {
+      relative: VerticalPositionRelativeFrom.PAGE,
+      align: VerticalPositionAlign.BOTTOM,
+    },
+    wrap: {
+      type: TextWrappingType.NONE,
+    },
+    behindDocument: true,
+  },
+  type: "png",
+})
+```
+
+## Alteração Detalhada
+
+### Linhas 661-665 - Ajustar cálculo de dimensões
+
+Antes:
+```typescript
+const headerWidth = 595;
+const headerHeight = Math.round(headerWidth * (headerDimensions.height / headerDimensions.width));
+const footerWidth = 595;
+const footerHeight = Math.round(footerWidth * (footerDimensions.height / footerDimensions.width));
+```
+
+Depois:
+```typescript
+// Constante de conversão: a biblioteca docx usa pixels internamente
+// A4 em pontos = 595.28, em pixels = 595.28 * 1.333 ≈ 793
+const A4_WIDTH_PIXELS = 793;
+
+const headerWidth = A4_WIDTH_PIXELS;
+const headerHeight = Math.round(headerWidth * (headerDimensions.height / headerDimensions.width));
+const footerWidth = A4_WIDTH_PIXELS;
+const footerHeight = Math.round(footerWidth * (footerDimensions.height / footerDimensions.width));
+```
+
+### Linhas 697-699 - Usar a largura correta
+
+Antes:
+```typescript
+transformation: {
+  width: 595,  // Largura A4 em pontos (210mm)
+  height: footerHeight,
 },
 ```
 
-### Imports Adicionais Necessários
-
+Depois:
 ```typescript
-import {
-  // ... imports existentes ...
-  HorizontalPositionRelativeFrom,
-  VerticalPositionRelativeFrom,
-  VerticalPositionAlign,
-  TextWrappingType,
-} from "docx";
+transformation: {
+  width: footerWidth,  // Largura total A4 em pixels
+  height: footerHeight,
+},
 ```
-
----
 
 ## Resumo das Alterações
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `LaudoEditor.tsx` | Mudar fallback de `'pdf'` para `'docx'` (1 linha) |
-| `generateLaudoDOCX.ts` | Adicionar imports de posicionamento (~4 imports) |
-| `generateLaudoDOCX.ts` | Refatorar criação do footer com floating image (~40 linhas) |
-| `generateLaudoDOCX.ts` | Ajustar margens da página para footer edge-to-edge (~3 linhas) |
+| Local | Alteração |
+|-------|-----------|
+| Linha 662 | Criar constante `A4_WIDTH_PIXELS = 793` |
+| Linhas 663-666 | Usar `A4_WIDTH_PIXELS` para headerWidth e footerWidth |
+| Linha 698 | Usar variável `footerWidth` em vez de valor fixo 595 |
 
----
+## Observação Importante
 
-## Detalhes Técnicos
+A documentação da biblioteca `docx` indica que `transformation.width` e `transformation.height` estão em **pixels**, que correspondem a aproximadamente `pontos × 1.333`. Por isso, usar 595 (pontos) resulta em uma imagem menor do que o esperado.
 
-### Por que a imagem não encaixa nas bordas?
+## Impacto
 
-No DOCX atual, a imagem está usando posicionamento inline (padrão). Isso significa que ela respeita as margens da página definidas na seção. Para que a imagem "sangre" até as bordas como no PDF, é necessário:
-
-1. Usar `floating` positioning em vez de inline
-2. Posicionar relativo à `PAGE` (não à margem)
-3. Definir `offset: 0` para começar exatamente na borda
-
-### Por que a numeração ficou abaixo da imagem?
-
-No código atual, a numeração é um parágrafo separado adicionado após a imagem:
-```typescript
-// Código atual - PROBLEMA
-footerContent.push(
-  new Paragraph({ ... imagem ... }),
-  new Paragraph({ ... "Página X de XX" ... }), // ← Fica abaixo!
-);
-```
-
-No PDF, o texto é desenhado diretamente sobre a imagem em coordenadas absolutas. No DOCX, precisamos simular isso com positioning absoluto ou margem negativa para "subir" o texto sobre a imagem.
-
-### Solução Alternativa (se floating não funcionar bem)
-
-Se o posicionamento floating apresentar problemas em diferentes versões do Word, uma alternativa é:
-1. Manter a imagem inline mas com margens negativas no parágrafo
-2. Usar um Table invisível no footer para posicionar elementos
+- O cabeçalho também será ajustado para a largura correta
+- O rodapé se estenderá de borda a borda como no PDF
+- A numeração de página em branco ficará sobreposta ao banner
