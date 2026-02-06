@@ -1,143 +1,150 @@
 
-# Correção do Rodapé DOCX - Banner Edge-to-Edge
 
-## Problema Identificado
+# Correção do Rodapé DOCX - Margem de Segurança e Transparência
 
-Analisando a imagem fornecida, o banner do rodapé está encostando na borda esquerda, mas não se estende até a borda direita da página. Isso acontece porque:
+## Problemas Identificados
 
-1. **Unidades incorretas**: O `offset` na biblioteca `docx` usa EMUs (English Metric Units), não pontos
-2. **Largura da imagem insuficiente**: 595 pontos de largura não cobre toda a página quando combinado com posicionamento flutuante
-3. **Conversão de unidades**: 1 inch = 914400 EMUs, e a página A4 tem 210mm de largura
+### 1. Texto Sobrepondo o Rodapé
+O conteúdo do documento está entrando na área do rodapé porque as margens não estão configuradas adequadamente para manter a distância de segurança.
 
-## Cálculos Necessários
+**No PDF:**
+- `FOOTER_SAFETY_MARGIN = 12mm` - 12mm de margem acima do rodapé
+- O `contentEndY` é calculado como `footerTopY - 12mm`
 
-```text
-A4 Largura = 210mm = 8.27 inches
-1 inch = 914400 EMUs
-Largura total em EMUs = 8.27 × 914400 = 7,562,088 EMUs
+**No DOCX atual:**
+- `bottom: convertInchesToTwip(0.5)` = ~12.7mm - parece adequado
+- `footer: convertInchesToTwip(0.3)` = ~7.6mm - muito próximo da borda
 
-Para transformation (pixels):
-1 ponto = 0.75 pixels (conforme documentação)
-Largura A4 em pontos = 595.28 pts
-Largura em pixels = 595.28 / 0.75 ≈ 793 pixels
-```
+O problema é que a margem `bottom` define onde o texto **pode** ir, mas o footer com imagem flutuante `behindDocument: true` fica **por trás** do conteúdo. Quando o rodapé tem altura de ~30-40mm (altura do banner), o texto pode entrar nessa área.
+
+### 2. Aparência "Transparente" do Rodapé
+A imagem está corretamente posicionada, mas como está configurada como `behindDocument: true`, ela fica por trás de qualquer texto que entre na área do footer, criando a impressão de transparência.
+
+---
 
 ## Solução Técnica
 
+### A) Aumentar Margem Inferior do Conteúdo
+
+No PDF, usamos `FOOTER_SAFETY_MARGIN = 12mm` de distância entre o último texto e o topo do banner do rodapé. 
+
+A margem `bottom` no DOCX deve considerar:
+1. A altura do banner do rodapé (que vamos calcular dinamicamente)
+2. + 12mm de margem de segurança adicional
+
+```text
+A4 = 297mm de altura
+Altura estimada do banner de rodapé ≈ 27mm (baseado na proporção)
+Margem de segurança = 12mm
+Margem bottom ideal = altura_banner + 12mm ≈ 39mm ≈ 1.5 inches
+```
+
+### B) Usar Valores em Milímetros (mais legíveis)
+
+A biblioteca `docx` aceita strings como `"12mm"`, `"39mm"` diretamente nas margens. Isso torna o código mais claro e alinhado com a lógica do PDF.
+
+---
+
+## Implementação Detalhada
+
 ### Arquivo: `src/utils/generateLaudoDOCX.ts`
 
-**Mudança 1**: Usar dimensões em pixels corretas para a imagem
+**1. Adicionar constante de margem de segurança (similar ao PDF)**
 
-O problema principal é que `transformation.width` usa pixels, não pontos. Devemos usar a largura total da página A4 em pixels.
+Na seção de constantes (após linha 38):
 
 ```typescript
-// Largura A4 em pixels (595 pontos × 1.333... = ~793 pixels)
-// Mas na prática, a biblioteca aceita valores em pontos que são convertidos
-const A4_WIDTH_PIXELS = Math.round(595 * 1.333); // ~793 pixels
+// Margens de segurança (equivalente ao PDF)
+const FOOTER_SAFETY_MARGIN_MM = 12; // 12mm acima do banner do rodapé
 ```
 
-**Mudança 2**: Garantir que a imagem ocupe toda a largura usando a proporção correta
+**2. Calcular margem bottom dinamicamente**
 
-O footer precisa manter a proporção original da imagem PNG, mas esticando para a largura total da página. Como a imagem original do timbrado já foi desenhada para ocupar toda a largura, devemos calcular corretamente.
-
-**Mudança 3**: Verificar se `offset: 0` realmente posiciona na borda
-
-Quando usamos `relative: PAGE` e `offset: 0`, a imagem deve começar exatamente na borda esquerda. O problema pode ser que a largura especificada não é suficiente.
-
-## Código Corrigido
+Após calcular `footerHeight` (linha 669):
 
 ```typescript
-// Constantes de conversão
-const POINTS_TO_PIXELS = 1.333; // 1 ponto = 1.333 pixels
-const A4_WIDTH_MM = 210;
-const A4_WIDTH_POINTS = 595.28;
-const A4_WIDTH_PIXELS = Math.round(A4_WIDTH_POINTS * POINTS_TO_PIXELS); // 793
+// Converter altura do footer de pixels para mm
+// A4: 793 pixels = 210mm, então 1 pixel ≈ 0.265mm
+const footerHeightMm = Math.round(footerHeight * 0.265);
 
-// No cálculo das dimensões do footer
-const footerWidthPixels = A4_WIDTH_PIXELS; // Largura total da página
-const footerHeightPixels = Math.round(footerWidthPixels * (footerDimensions.height / footerDimensions.width));
-
-// Na criação do ImageRun
-new ImageRun({
-  data: footerImageBuffer,
-  transformation: {
-    width: footerWidthPixels,  // 793 pixels (largura total A4)
-    height: footerHeightPixels,
-  },
-  floating: {
-    horizontalPosition: {
-      relative: HorizontalPositionRelativeFrom.PAGE,
-      offset: 0, // Começa na borda esquerda
-    },
-    verticalPosition: {
-      relative: VerticalPositionRelativeFrom.PAGE,
-      align: VerticalPositionAlign.BOTTOM,
-    },
-    wrap: {
-      type: TextWrappingType.NONE,
-    },
-    behindDocument: true,
-  },
-  type: "png",
-})
+// Margem inferior = altura do rodapé + margem de segurança
+const bottomMarginMm = footerHeightMm + FOOTER_SAFETY_MARGIN_MM;
 ```
 
-## Alteração Detalhada
+**3. Aplicar margens corrigidas na seção**
 
-### Linhas 661-665 - Ajustar cálculo de dimensões
+Alterar as margens da página (linhas 747-754):
 
-Antes:
 ```typescript
-const headerWidth = 595;
-const headerHeight = Math.round(headerWidth * (headerDimensions.height / headerDimensions.width));
-const footerWidth = 595;
-const footerHeight = Math.round(footerWidth * (footerDimensions.height / footerDimensions.width));
-```
-
-Depois:
-```typescript
-// Constante de conversão: a biblioteca docx usa pixels internamente
-// A4 em pontos = 595.28, em pixels = 595.28 * 1.333 ≈ 793
-const A4_WIDTH_PIXELS = 793;
-
-const headerWidth = A4_WIDTH_PIXELS;
-const headerHeight = Math.round(headerWidth * (headerDimensions.height / headerDimensions.width));
-const footerWidth = A4_WIDTH_PIXELS;
-const footerHeight = Math.round(footerWidth * (footerDimensions.height / footerDimensions.width));
-```
-
-### Linhas 697-699 - Usar a largura correta
-
-Antes:
-```typescript
-transformation: {
-  width: 595,  // Largura A4 em pontos (210mm)
-  height: footerHeight,
+margin: {
+  top: "32mm",          // ~1.26 inches (espaço para cabeçalho)
+  bottom: `${bottomMarginMm}mm`, // Dinâmico: altura rodapé + 12mm segurança
+  left: "20mm",         // Igual ao PDF
+  right: "15mm",        // Igual ao PDF
+  footer: "0mm",        // Footer na borda inferior
 },
 ```
 
-Depois:
+**4. Garantir que a imagem fique sobre o conteúdo (não transparente)**
+
+Remover `behindDocument: true` para que a imagem do rodapé **cubra** qualquer texto que porventura ainda chegue perto:
+
 ```typescript
-transformation: {
-  width: footerWidth,  // Largura total A4 em pixels
-  height: footerHeight,
+floating: {
+  horizontalPosition: {
+    relative: HorizontalPositionRelativeFrom.PAGE,
+    offset: 0,
+  },
+  verticalPosition: {
+    relative: VerticalPositionRelativeFrom.PAGE,
+    align: VerticalPositionAlign.BOTTOM,
+  },
+  wrap: {
+    type: TextWrappingType.NONE,
+  },
+  // REMOVIDO: behindDocument: true
 },
 ```
+
+**Alternativa mais segura**: Manter `behindDocument: true` mas garantir que a margem seja grande o suficiente para que o texto nunca alcance a área do banner.
+
+---
 
 ## Resumo das Alterações
 
-| Local | Alteração |
-|-------|-----------|
-| Linha 662 | Criar constante `A4_WIDTH_PIXELS = 793` |
-| Linhas 663-666 | Usar `A4_WIDTH_PIXELS` para headerWidth e footerWidth |
-| Linha 698 | Usar variável `footerWidth` em vez de valor fixo 595 |
+| Local | Alteração | Impacto |
+|-------|-----------|---------|
+| Após linha 38 | Adicionar `FOOTER_SAFETY_MARGIN_MM = 12` | Constante de segurança |
+| Linha 669-670 | Calcular `footerHeightMm` e `bottomMarginMm` | Margem dinâmica |
+| Linhas 747-754 | Usar margens em `mm` com valor calculado | Texto nunca toca o rodapé |
 
-## Observação Importante
+---
 
-A documentação da biblioteca `docx` indica que `transformation.width` e `transformation.height` estão em **pixels**, que correspondem a aproximadamente `pontos × 1.333`. Por isso, usar 595 (pontos) resulta em uma imagem menor do que o esperado.
+## Valores Finais Esperados
 
-## Impacto
+Para um banner de rodapé com ~27mm de altura:
+- `footerHeightMm` ≈ 27mm
+- `bottomMarginMm` = 27 + 12 = 39mm
+- Isso garante que o texto do documento termine **pelo menos 12mm acima** do topo do banner
 
-- O cabeçalho também será ajustado para a largura correta
-- O rodapé se estenderá de borda a borda como no PDF
-- A numeração de página em branco ficará sobreposta ao banner
+---
+
+## Comparativo
+
+```text
++------------------------+------------+------------+
+| Parâmetro              | PDF        | DOCX Novo  |
++------------------------+------------+------------+
+| Margem segurança       | 12mm       | 12mm       |
+| Altura banner rodapé   | ~27mm      | ~27mm      |
+| Distância texto→banner | 12mm       | 12mm       |
+| Margem bottom total    | dinâmica   | ~39mm      |
++------------------------+------------+------------+
+```
+
+---
+
+## Observação sobre Transparência
+
+A imagem do banner PNG do rodapé (arquivo `public/timbrado-rodape.png`) deve ter fundo opaco. Se a imagem original tiver fundo transparente, ela mostrará o conteúdo por baixo mesmo quando bem posicionada. Se isso ainda ocorrer após as correções de margem, será necessário verificar o arquivo PNG original.
+
