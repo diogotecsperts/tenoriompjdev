@@ -1,188 +1,199 @@
 
-# ✅ IMPLEMENTADO: Exportação DOCX para Laudos
+# Correções na Exportação DOCX
 
-## Resumo Executivo
+## Problemas Identificados
 
-**Viabilidade: ALTA** - A exportação DOCX é perfeitamente implantável e pode replicar praticamente todas as características visuais do PDF atual, incluindo cabeçalhos, rodapés com imagens PNG, tabulações, estilos de texto e formatação profissional.
-
----
-
-## Análise Técnica
-
-### Biblioteca Recomendada: `docx` (npm)
-
-| Aspecto | Suporte |
-|---------|---------|
-| Cabeçalho com imagem PNG | Sim - ImageRun em Header |
-| Rodapé com imagem PNG | Sim - ImageRun em Footer |
-| Numeração de páginas | Sim - PageNumber element |
-| Texto justificado | Sim - AlignmentType.BOTH |
-| Títulos com sublinhado | Sim - borders em Paragraph |
-| Negrito, itálico | Sim - TextRun com bold/italic |
-| Cores personalizadas | Sim - shading e color props |
-| Campos label:valor | Sim - múltiplos TextRun |
-| Margens customizadas | Sim - margins em Section |
-| Listas numeradas | Sim - numbering support |
-| TypeScript | Sim - tipos incluídos |
-| Funciona no browser | Sim - file-saver para download |
-
-### Comparativo de Capacidades
-
-```text
-+------------------------+--------+--------+
-| Recurso                | PDF    | DOCX   |
-+------------------------+--------+--------+
-| Cabeçalho PNG          | Sim    | Sim    |
-| Rodapé PNG             | Sim    | Sim    |
-| Paginação auto         | Sim    | Word   |
-| Texto justificado      | Manual | Nativo |
-| Edição pós-export      | Não    | Sim    |
-| Fidelidade visual      | 100%   | ~95%   |
-+------------------------+--------+--------+
-```
-
-### Diferenças Importantes
-
-1. **Paginação**: No PDF controlamos manualmente onde quebrar página. No DOCX o Word calcula automaticamente - isso é uma **vantagem** pois se adapta a diferentes tamanhos de papel.
-
-2. **Justificação**: No PDF implementamos justificação manual. No DOCX é nativo e melhor.
-
-3. **Fontes**: O DOCX usa fontes do sistema do usuário. Recomendo usar fontes universais (Arial, Times New Roman).
-
----
-
-## Proposta de Interface
-
-### Componente: DropdownMenu com Switch
-
-```text
-┌─────────────────────────────────────┐
-│  [Baixar em PDF ▼] [🔀]            │
-└─────────────────────────────────────┘
-         │
-         ▼ (ao clicar na seta ou texto)
-    ┌──────────────────┐
-    │  📄 Baixar PDF   │
-    │  📝 Baixar DOCX  │
-    └──────────────────┘
-```
-
-**Funcionamento:**
-- Botão principal mostra formato atual: "Baixar em PDF" ou "Baixar em DOCX"
-- Switch à direita alterna o formato padrão (persiste em localStorage)
-- Clicar no texto executa download no formato atual
-- Seta opcional abre dropdown com ambas opções
-
----
-
-## Plano de Implementação
-
-### Etapa 1: Instalar Dependências
-
-```bash
-npm install docx file-saver
-npm install -D @types/file-saver
-```
-
-### Etapa 2: Criar Gerador DOCX
-
-**Arquivo:** `src/utils/generateLaudoDOCX.ts`
-
-Estrutura espelhada ao `generateLaudoPDF.ts`:
-
-1. Carregar imagens do timbrado como base64 (mesma função existente)
-2. Criar Document com:
-   - Header contendo ImageRun do cabeçalho PNG
-   - Footer contendo ImageRun do rodapé PNG + PageNumber
-   - Sections com todo o conteúdo
-3. Aplicar estilos equivalentes:
-   - Títulos de seção: azul #1B3665, negrito, com linha abaixo
-   - Parágrafos: justificados, tamanho 10pt
-   - Campos label:valor: label em negrito
-4. Usar Packer.toBlob() + saveAs() para download
-
-### Etapa 3: Modificar UI do LaudoEditor
-
-**Arquivo:** `src/pages/LaudoEditor.tsx` (linha ~805)
-
-Substituir o botão simples por um componente com dropdown:
-
-```tsx
+### 1. Formato Padrão Errado
+O estado inicial do `exportFormat` usa `'pdf'` como fallback:
+```typescript
+// Linha 253 de LaudoEditor.tsx
 const [exportFormat, setExportFormat] = useState<'pdf' | 'docx'>(() => {
   return (localStorage.getItem('laudo-export-format') as 'pdf' | 'docx') || 'pdf';
+  //                                                                        ^^^^
 });
+```
 
-// Persistir preferência
-useEffect(() => {
-  localStorage.setItem('laudo-export-format', exportFormat);
-}, [exportFormat]);
+### 2. Rodapé DOCX com Problemas Visuais
 
-// Funções de export
-const handleExportPDF = async () => { /* código existente */ };
-const handleExportDOCX = async () => { /* novo código */ };
+Analisando as imagens fornecidas:
 
-const handleExport = () => {
-  if (exportFormat === 'pdf') handleExportPDF();
-  else handleExportDOCX();
-};
+| Aspecto | PDF (Correto) | DOCX (Problema) |
+|---------|---------------|-----------------|
+| Banner | Encaixa nas bordas | Não encaixa nas extremidades |
+| "Página X de XX" | Dentro do banner, centralizado | Abaixo do banner, fora |
 
-// UI
-<div className="flex items-center">
-  <Button 
-    variant="outline" 
-    size="sm" 
-    onClick={handleExport}
-    className="rounded-r-none"
-  >
-    <FileText className="h-4 w-4 sm:mr-2" />
-    <span className="hidden sm:inline">
-      Baixar em {exportFormat.toUpperCase()}
-    </span>
-  </Button>
-  <Button
-    variant="outline"
-    size="sm"
-    onClick={() => setExportFormat(prev => prev === 'pdf' ? 'docx' : 'pdf')}
-    className="rounded-l-none border-l-0 px-2"
-  >
-    <RefreshCw className="h-3 w-3" />
-  </Button>
-</div>
+**Causa raiz:** No PDF, o texto "Página X de XX" é desenhado diretamente sobre a imagem do rodapé usando coordenadas absolutas. No DOCX, a imagem e o texto são elementos separados em parágrafos distintos no Footer.
+
+---
+
+## Solução Técnica
+
+### Correção 1: Alterar Formato Padrão para DOCX
+
+Modificar o fallback de `'pdf'` para `'docx'`:
+
+```typescript
+const [exportFormat, setExportFormat] = useState<'pdf' | 'docx'>(() => {
+  return (localStorage.getItem('laudo-export-format') as 'pdf' | 'docx') || 'docx';
+});
+```
+
+### Correção 2: Rodapé DOCX Profissional
+
+A solução envolve três ajustes na biblioteca `docx`:
+
+**A) Imagem de rodapé edge-to-edge:**
+- Usar `floating` positioning com `HorizontalPositionRelativeFrom.PAGE`
+- Definir `wrap: none` para a imagem não empurrar o texto
+- Usar margem negativa no parágrafo para compensar as margens da página
+
+**B) Numeração de página sobre a imagem:**
+- Colocar a numeração no mesmo parágrafo do rodapé usando posicionamento absoluto
+- Alternativamente, criar um campo de texto posicionado sobre a imagem
+
+**C) Abordagem mais robusta (recomendada):**
+- Remover a numeração de página separada
+- Usar `PositionalTab` ou posicionamento absoluto para colocar o texto sobre a imagem
+- Configurar o footer com margem mínima e a imagem em modo floating
+
+---
+
+## Implementação Detalhada
+
+### Arquivo: `src/pages/LaudoEditor.tsx`
+
+**Linha 253** - Alterar fallback:
+```typescript
+// ANTES
+|| 'pdf';
+
+// DEPOIS
+|| 'docx';
+```
+
+### Arquivo: `src/utils/generateLaudoDOCX.ts`
+
+**Linhas 683-716** - Refatorar criação do footer:
+
+```typescript
+// Preparar footer com imagem edge-to-edge e numeração sobreposta
+let footerContent: Paragraph[] = [];
+
+if (footerImageBuffer) {
+  // Calcular largura total da página A4 em EMUs (English Metric Units)
+  // A4 = 210mm, margens = ~20mm esquerda + ~15mm direita = 35mm
+  // Para edge-to-edge, precisamos compensar as margens
+  const pageWidthEmu = 595 * 9525; // pontos para EMU
+  
+  footerContent = [
+    new Paragraph({
+      children: [
+        new ImageRun({
+          data: footerImageBuffer,
+          transformation: {
+            width: 595,  // Largura A4 em pontos
+            height: footerHeight,
+          },
+          floating: {
+            horizontalPosition: {
+              relative: HorizontalPositionRelativeFrom.PAGE,
+              offset: 0,
+            },
+            verticalPosition: {
+              relative: VerticalPositionRelativeFrom.PAGE,
+              align: VerticalPositionAlign.BOTTOM,
+            },
+            wrap: {
+              type: TextWrappingType.NONE,
+            },
+            behindDocument: true,
+          },
+          type: "png",
+        }),
+      ],
+    }),
+    // Numeração de página posicionada sobre a imagem
+    new Paragraph({
+      children: [
+        new TextRun({
+          children: ["Página ", PageNumber.CURRENT, " de ", PageNumber.TOTAL_PAGES],
+          size: FONT.sizeSmall,
+          color: "FFFFFF", // Branco para contraste sobre o banner
+          font: FONT.name,
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 0 },
+    }),
+  ];
+}
+```
+
+**Configuração de margens da seção:**
+```typescript
+properties: {
+  page: {
+    margin: {
+      top: convertInchesToTwip(1.2),
+      bottom: convertInchesToTwip(0.4), // Reduzir para acomodar imagem
+      left: convertInchesToTwip(0.79),
+      right: convertInchesToTwip(0.59),
+      footer: convertInchesToTwip(0.2), // Footer mais próximo da borda
+    },
+  },
+},
+```
+
+### Imports Adicionais Necessários
+
+```typescript
+import {
+  // ... imports existentes ...
+  HorizontalPositionRelativeFrom,
+  VerticalPositionRelativeFrom,
+  VerticalPositionAlign,
+  TextWrappingType,
+} from "docx";
 ```
 
 ---
 
-## Arquivos Afetados
+## Resumo das Alterações
 
-| Arquivo | Tipo | Descrição |
-|---------|------|-----------|
-| `package.json` | Modificar | Adicionar `docx` e `file-saver` |
-| `src/utils/generateLaudoDOCX.ts` | Criar | Novo gerador DOCX (~400 linhas) |
-| `src/pages/LaudoEditor.tsx` | Modificar | Adicionar dropdown de formato |
-| `generateLaudoPDF.ts` | Manter | Zero alterações |
-
----
-
-## Garantias de Segurança
-
-- O código de exportação PDF existente **não será alterado**
-- O novo gerador DOCX será um arquivo **completamente separado**
-- As funções compartilhadas (carregamento de imagens, formatação de datas) serão **extraídas para um módulo comum** se necessário
-- O botão de PDF continuará funcionando exatamente como antes
+| Arquivo | Alteração |
+|---------|-----------|
+| `LaudoEditor.tsx` | Mudar fallback de `'pdf'` para `'docx'` (1 linha) |
+| `generateLaudoDOCX.ts` | Adicionar imports de posicionamento (~4 imports) |
+| `generateLaudoDOCX.ts` | Refatorar criação do footer com floating image (~40 linhas) |
+| `generateLaudoDOCX.ts` | Ajustar margens da página para footer edge-to-edge (~3 linhas) |
 
 ---
 
-## Limitações Conhecidas
+## Detalhes Técnicos
 
-1. **Posicionamento pixel-perfect**: DOCX não permite controle absoluto como PDF, mas para laudos textuais não é problema
-2. **Fontes**: Usuário precisa ter a fonte instalada (usaremos Arial/Calibri universais)
-3. **Tamanho de arquivo**: DOCX tende a ser maior que PDF quando contém imagens
+### Por que a imagem não encaixa nas bordas?
 
----
+No DOCX atual, a imagem está usando posicionamento inline (padrão). Isso significa que ela respeita as margens da página definidas na seção. Para que a imagem "sangre" até as bordas como no PDF, é necessário:
 
-## Estimativa de Esforço
+1. Usar `floating` positioning em vez de inline
+2. Posicionar relativo à `PAGE` (não à margem)
+3. Definir `offset: 0` para começar exatamente na borda
 
-- **Gerador DOCX**: ~400 linhas de código
-- **Modificação UI**: ~50 linhas
-- **Testes**: Validar visual em Word, LibreOffice, Google Docs
+### Por que a numeração ficou abaixo da imagem?
 
+No código atual, a numeração é um parágrafo separado adicionado após a imagem:
+```typescript
+// Código atual - PROBLEMA
+footerContent.push(
+  new Paragraph({ ... imagem ... }),
+  new Paragraph({ ... "Página X de XX" ... }), // ← Fica abaixo!
+);
+```
+
+No PDF, o texto é desenhado diretamente sobre a imagem em coordenadas absolutas. No DOCX, precisamos simular isso com positioning absoluto ou margem negativa para "subir" o texto sobre a imagem.
+
+### Solução Alternativa (se floating não funcionar bem)
+
+Se o posicionamento floating apresentar problemas em diferentes versões do Word, uma alternativa é:
+1. Manter a imagem inline mas com margens negativas no parágrafo
+2. Usar um Table invisível no footer para posicionar elementos
