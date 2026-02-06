@@ -26,7 +26,9 @@ import {
   CheckCircle,
   RotateCcw,
   BookOpen,
-  Briefcase
+  Briefcase,
+  FileDown,
+  ArrowLeftRight
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/hooks/use-toast";
@@ -53,6 +55,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Progress } from "@/components/ui/progress";
 import { useLaudoProgress } from "@/hooks/useLaudoProgress";
 import { generateLaudoPDF, validateLaudoForPDF } from "@/utils/generateLaudoPDF";
+import { generateLaudoDOCX, validateLaudoForDOCX } from "@/utils/generateLaudoDOCX";
 import { AIInfoModal } from "@/components/laudo/AIInfoModal";
 import { supabase } from "@/integrations/supabase/client";
 import ReactMarkdown from "react-markdown";
@@ -245,6 +248,16 @@ export default function LaudoEditor() {
   // Progress tracking
   const progress = useLaudoProgress(currentLaudo);
   
+  // Export format state with localStorage persistence
+  const [exportFormat, setExportFormat] = useState<'pdf' | 'docx'>(() => {
+    return (localStorage.getItem('laudo-export-format') as 'pdf' | 'docx') || 'pdf';
+  });
+  
+  // Persist export format to localStorage
+  useEffect(() => {
+    localStorage.setItem('laudo-export-format', exportFormat);
+  }, [exportFormat]);
+  
   // View mode state with localStorage persistence
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const stored = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
@@ -372,10 +385,9 @@ export default function LaudoEditor() {
     }
   };
 
-  const handlePrint = async () => {
+  const handleExportPDF = async () => {
     if (!currentLaudo) return;
     
-    // Validate required fields
     const validation = validateLaudoForPDF(currentLaudo);
     
     if (!validation.valid) {
@@ -400,6 +412,44 @@ export default function LaudoEditor() {
         title: "Erro ao gerar PDF",
         description: "Ocorreu um erro ao gerar o documento. Tente novamente.",
       });
+    }
+  };
+
+  const handleExportDOCX = async () => {
+    if (!currentLaudo) return;
+    
+    const validation = validateLaudoForDOCX(currentLaudo);
+    
+    if (!validation.valid) {
+      toast({
+        variant: "destructive",
+        title: "Campos obrigatórios não preenchidos",
+        description: `Preencha: ${validation.missingFields.join(", ")}`,
+      });
+      return;
+    }
+    
+    try {
+      await generateLaudoDOCX(currentLaudo);
+      toast({
+        title: "DOCX gerado com sucesso",
+        description: "O laudo foi baixado para seu dispositivo.",
+      });
+    } catch (error) {
+      console.error("Erro ao gerar DOCX:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao gerar DOCX",
+        description: "Ocorreu um erro ao gerar o documento. Tente novamente.",
+      });
+    }
+  };
+
+  const handleExport = () => {
+    if (exportFormat === 'pdf') {
+      handleExportPDF();
+    } else {
+      handleExportDOCX();
     }
   };
 
@@ -802,10 +852,37 @@ export default function LaudoEditor() {
                 )}
               </Button>
               
-              <Button variant="outline" size="sm" onClick={handlePrint}>
-                <Printer className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Gerar PDF</span>
-              </Button>
+              {/* Export Button with Format Toggle */}
+              <div className="flex items-center">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleExport}
+                  className="rounded-r-none border-r-0"
+                >
+                  <FileDown className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">
+                    Baixar em {exportFormat.toUpperCase()}
+                  </span>
+                </Button>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setExportFormat(prev => prev === 'pdf' ? 'docx' : 'pdf')}
+                        className="rounded-l-none px-2"
+                      >
+                        <ArrowLeftRight className="h-3 w-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Alternar para {exportFormat === 'pdf' ? 'DOCX' : 'PDF'}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
               <Button size="sm" onClick={handleSave}>
                 <Save className="h-4 w-4 sm:mr-2" />
                 <span className="hidden sm:inline">Salvar</span>
