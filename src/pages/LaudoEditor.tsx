@@ -248,9 +248,9 @@ export default function LaudoEditor() {
   // Progress tracking
   const progress = useLaudoProgress(currentLaudo);
   
-  // Export format state with localStorage persistence
+  // Export format state with localStorage persistence (default: docx)
   const [exportFormat, setExportFormat] = useState<'pdf' | 'docx'>(() => {
-    return (localStorage.getItem('laudo-export-format') as 'pdf' | 'docx') || 'pdf';
+    return (localStorage.getItem('laudo-export-format') as 'pdf' | 'docx') || 'docx';
   });
   
   // Persist export format to localStorage
