@@ -659,9 +659,13 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   // ========== CRIAR DOCUMENTO ==========
   
   // Calcular dimensões proporcionais das imagens
-  const headerWidth = 595; // A4 em pontos
+  // A biblioteca docx usa pixels internamente para transformation
+  // A4 em pontos = 595.28, em pixels = 595.28 * 1.333 ≈ 793
+  const A4_WIDTH_PIXELS = 793;
+  
+  const headerWidth = A4_WIDTH_PIXELS;
   const headerHeight = Math.round(headerWidth * (headerDimensions.height / headerDimensions.width));
-  const footerWidth = 595;
+  const footerWidth = A4_WIDTH_PIXELS;
   const footerHeight = Math.round(footerWidth * (footerDimensions.height / footerDimensions.width));
 
   // Preparar header
@@ -695,7 +699,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
           new ImageRun({
             data: footerImageBuffer,
             transformation: {
-              width: 595,  // Largura A4 em pontos (210mm)
+              width: footerWidth,  // Largura total A4 em pixels (793)
               height: footerHeight,
             },
             floating: {
