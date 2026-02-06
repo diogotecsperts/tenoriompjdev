@@ -663,10 +663,19 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   // A4 em pontos = 595.28, em pixels = 595.28 * 1.333 ≈ 793
   const A4_WIDTH_PIXELS = 793;
   
+  // Margem de segurança entre texto e rodapé (igual ao PDF)
+  const FOOTER_SAFETY_MARGIN_MM = 12;
+  
   const headerWidth = A4_WIDTH_PIXELS;
   const headerHeight = Math.round(headerWidth * (headerDimensions.height / headerDimensions.width));
   const footerWidth = A4_WIDTH_PIXELS;
   const footerHeight = Math.round(footerWidth * (footerDimensions.height / footerDimensions.width));
+  
+  // Converter altura do footer de pixels para mm (A4: 793 pixels = 210mm, 1 pixel ≈ 0.265mm)
+  const footerHeightMm = Math.round(footerHeight * 0.265);
+  
+  // Margem inferior = altura do rodapé + margem de segurança (igual ao PDF)
+  const bottomMarginMm = footerHeightMm + FOOTER_SAFETY_MARGIN_MM;
 
   // Preparar header
   let headerContent: Paragraph[] = [];
@@ -714,7 +723,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
               wrap: {
                 type: TextWrappingType.NONE,
               },
-              behindDocument: true,
+              // Removido behindDocument: true para imagem ficar sobre qualquer texto
             },
             type: "png",
           }),
@@ -745,11 +754,11 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
         properties: {
           page: {
             margin: {
-              top: convertInchesToTwip(1.2),
-              bottom: convertInchesToTwip(0.5), // Reduzido para acomodar footer edge-to-edge
-              left: convertInchesToTwip(0.79), // ~20mm
-              right: convertInchesToTwip(0.59), // ~15mm
-              footer: convertInchesToTwip(0.3), // Footer mais próximo da borda
+              top: "32mm",                      // Espaço para cabeçalho
+              bottom: `${bottomMarginMm}mm`,    // Dinâmico: altura rodapé + 12mm segurança
+              left: "20mm",                     // Igual ao PDF
+              right: "15mm",                    // Igual ao PDF
+              footer: "0mm",                    // Footer na borda inferior
             },
           },
         },
