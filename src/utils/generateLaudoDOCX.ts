@@ -666,7 +666,10 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   // Margem de segurança entre texto e rodapé (igual ao PDF)
   const FOOTER_SAFETY_MARGIN_MM = 12;
   
-  const headerWidth = A4_WIDTH_PIXELS;
+  // Largura do cabeçalho = 194mm (igual ao PDF: PAGE.width - 16)
+  // Proporção em relação à largura total: 194/210 = 0.924
+  const HEADER_WIDTH_RATIO = 0.924;
+  const headerWidth = Math.round(A4_WIDTH_PIXELS * HEADER_WIDTH_RATIO); // ~733 pixels
   const headerHeight = Math.round(headerWidth * (headerDimensions.height / headerDimensions.width));
   const footerWidth = A4_WIDTH_PIXELS;
   const footerHeight = Math.round(footerWidth * (footerDimensions.height / footerDimensions.width));
@@ -723,7 +726,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
               wrap: {
                 type: TextWrappingType.NONE,
               },
-              // Removido behindDocument: true para imagem ficar sobre qualquer texto
+              behindDocument: true, // Imagem fica por trás - numeração aparece sobre ela
             },
             type: "png",
           }),
@@ -744,7 +747,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
         }),
       ],
       alignment: AlignmentType.CENTER,
-      spacing: { before: 200 }, // Espaçamento para posicionar sobre a imagem
+      spacing: { before: 0 }, // Numeração fica no topo do footer
     })
   );
 
