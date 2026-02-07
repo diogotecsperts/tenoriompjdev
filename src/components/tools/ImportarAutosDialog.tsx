@@ -1723,7 +1723,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                             <Eye className="h-3 w-3" />
                             <span className="text-muted-foreground">OCR:</span>
                             <span className="font-medium">
-                              {ocrConfig.provider === 'mistral-ocr' ? 'Mistral OCR' : `Gemini ${formatModelName(ocrConfig.model)}`}
+                              {ocrConfig.provider === 'mistral' ? 'Mistral OCR' : `Gemini ${formatModelName(ocrConfig.model)}`}
                             </span>
                           </Badge>
                         )}
