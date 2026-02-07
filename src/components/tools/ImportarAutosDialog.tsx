@@ -288,7 +288,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         const { data: configData } = await supabase
           .from('system_config')
           .select('id, value')
-          .in('id', ['default_ai_provider', 'default_ai_model', 'max_pdf_size_mb', 'phase1_ocr_provider', 'phase1_gemini_model']);
+          .in('id', ['default_ai_provider', 'default_ai_model', 'max_pdf_size_mb', 'phase1_ocr_provider', 'phase1_gemini_model', 'import_strategy', 'pdf_ai_provider', 'pdf_ai_model']);
 
         if (configData && configData.length > 0) {
           const config: Record<string, any> = {};
@@ -302,9 +302,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           
           setAiConfig({ provider, model });
           
-          // OCR config (GLOBAL - for all users)
-          const ocrProvider = config.phase1_ocr_provider || 'gemini';
-          const ocrModel = config.phase1_gemini_model || 'gemini-2.0-flash';
+          // OCR config - based on import strategy (GLOBAL for all users)
+          const importStrategy = config.import_strategy || 'single_pass';
+          let ocrProvider: string;
+          let ocrModel: string;
+          
+          if (importStrategy === 'two_phase') {
+            // Two-phase mode: use phase1_ocr_provider
+            ocrProvider = config.phase1_ocr_provider || 'gemini';
+            ocrModel = config.phase1_gemini_model || 'gemini-2.0-flash';
+          } else {
+            // Single-pass mode: use pdf_ai_provider
+            ocrProvider = config.pdf_ai_provider || 'gemini';
+            ocrModel = config.pdf_ai_model || 'gemini-2.0-flash';
+          }
           setOcrConfig({ provider: ocrProvider, model: ocrModel });
           
           // Set max PDF size if configured (handle both string and number values)
@@ -1723,7 +1734,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                             <Eye className="h-3 w-3" />
                             <span className="text-muted-foreground">OCR:</span>
                             <span className="font-medium">
-                              {ocrConfig.provider === 'mistral' ? 'Mistral OCR' : `Gemini ${formatModelName(ocrConfig.model)}`}
+                              {ocrConfig.provider === 'mistral' || ocrConfig.provider === 'mistral-ocr' ? 'Mistral OCR' : `Gemini ${formatModelName(ocrConfig.model)}`}
                             </span>
                           </Badge>
                         )}
