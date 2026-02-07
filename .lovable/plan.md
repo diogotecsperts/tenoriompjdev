@@ -1,65 +1,98 @@
 
-# Correção do Bug: Exibição do Provedor de OCR no Modal de Importação
+# Correção do Bug: Modal de Importação Lendo Configuração Errada de OCR
 
-## Problema Identificado
+## Diagnóstico Confirmado
 
-O modal de importação está mostrando "OCR: Gemini gemini-3-flash-preview" mesmo quando o Mistral está selecionado como provedor de OCR padrão.
+### O Problema Real
+O sistema tem **duas configurações separadas** para o provedor de OCR, mas o modal de importação só lê uma delas:
 
-### Causa Raiz: Inconsistência de Valores
+| Configuração | Valor no Banco | Modo | Usado pelo Modal? |
+|--------------|----------------|------|-------------------|
+| `pdf_ai_provider` | `"mistral-ocr"` ✅ | single_pass | ❌ NÃO |
+| `phase1_ocr_provider` | `"gemini"` | two_phase | ✅ SIM (bug) |
 
-| Local | Valor Usado para Mistral |
-|-------|--------------------------|
-| DevSettings (salva no banco) | `"mistral"` |
-| ImportarAutosDialog (verifica) | `"mistral-ocr"` ❌ |
+**Você configurou corretamente o Mistral** na seção "Extração de PDF", salvando em `pdf_ai_provider`.
+**Mas o modal lê** `phase1_ocr_provider`, que ainda tem o valor antigo "gemini".
 
-A verificação na linha 1726 usa `'mistral-ocr'`, mas o DevSettings salva `'mistral'`:
-
-```typescript
-// Bug atual - condição nunca é verdadeira para Mistral
-{ocrConfig.provider === 'mistral-ocr' ? 'Mistral OCR' : ...}
-```
-
-### Verificação no Banco de Dados
-
-Dados atuais:
-- `phase1_ocr_provider`: `"gemini"` 
-- `phase1_gemini_model`: `"gemini-3-flash-preview"`
-
-O sistema está corretamente usando Gemini porque esse é o valor configurado. Se você selecionou Mistral, o valor deveria ser `"mistral"`.
+### Causa Raiz
+O `ImportarAutosDialog.tsx` foi codificado para ler apenas `phase1_ocr_provider`, ignorando completamente `pdf_ai_provider` que é usado no modo single_pass.
 
 ---
 
 ## Solução
 
-Alinhar a verificação no ImportarAutosDialog com os valores que o DevSettings salva.
+O modal deve ler a configuração correta baseada na estratégia de importação ativa:
+
+- Se `import_strategy === "single_pass"` → usar `pdf_ai_provider` e `pdf_ai_model`
+- Se `import_strategy === "two_phase"` → usar `phase1_ocr_provider` e `phase1_gemini_model`
 
 ### Arquivo: `src/components/tools/ImportarAutosDialog.tsx`
 
-**Linha 1726** - Corrigir a verificação do provider:
+**1. Adicionar `import_strategy` e `pdf_ai_provider` à query (linha ~291)**
 
 ```typescript
-// ANTES (bug):
-{ocrConfig.provider === 'mistral-ocr' ? 'Mistral OCR' : `Gemini ${formatModelName(ocrConfig.model)}`}
+.in('id', [
+  'default_ai_provider', 
+  'default_ai_model', 
+  'max_pdf_size_mb', 
+  'phase1_ocr_provider', 
+  'phase1_gemini_model',
+  'import_strategy',      // NOVO
+  'pdf_ai_provider',      // NOVO
+  'pdf_ai_model'          // NOVO
+]);
+```
 
-// DEPOIS (corrigido):
-{ocrConfig.provider === 'mistral' ? 'Mistral OCR' : `Gemini ${formatModelName(ocrConfig.model)}`}
+**2. Modificar a lógica de OCR config (linhas ~305-308)**
+
+```typescript
+// Determine OCR config based on import strategy
+const importStrategy = config.import_strategy || 'single_pass';
+
+let ocrProvider: string;
+let ocrModel: string;
+
+if (importStrategy === 'two_phase') {
+  // Two-phase mode: use phase1_ocr_provider
+  ocrProvider = config.phase1_ocr_provider || 'gemini';
+  ocrModel = config.phase1_gemini_model || 'gemini-2.0-flash';
+} else {
+  // Single-pass mode: use pdf_ai_provider
+  ocrProvider = config.pdf_ai_provider || 'gemini';
+  ocrModel = config.pdf_ai_model || 'gemini-2.0-flash';
+}
+
+setOcrConfig({ provider: ocrProvider, model: ocrModel });
+```
+
+**3. Ajustar a exibição do badge (linha ~1723-1726)**
+
+O badge precisa tratar os dois valores de provider:
+- `"mistral-ocr"` (usado em pdf_ai_provider)
+- `"mistral"` (usado em phase1_ocr_provider)
+
+```typescript
+{ocrConfig.provider === 'mistral' || ocrConfig.provider === 'mistral-ocr' 
+  ? 'Mistral OCR' 
+  : `Gemini ${formatModelName(ocrConfig.model)}`}
 ```
 
 ---
 
-## Verificação Adicional Recomendada
+## Resumo das Alterações
 
-Se após a correção ainda mostrar Gemini, confirme no DevPanel que:
-1. O `Provedor de OCR` está selecionado como "Mistral OCR"
-2. Você clicou em "Salvar Configurações" após a mudança
-3. Não houve erro ao salvar (cheque o toast de confirmação)
+| Local | Alteração |
+|-------|-----------|
+| Query (linha ~291) | Adicionar `import_strategy`, `pdf_ai_provider`, `pdf_ai_model` |
+| Lógica OCR (linhas ~305-308) | Verificar estratégia e ler configuração correta |
+| Badge display (linha ~1723) | Aceitar tanto `"mistral"` quanto `"mistral-ocr"` |
 
 ---
 
-## Resumo
+## Resultado Esperado
 
-| O que corrigir | Onde | De | Para |
-|----------------|------|----|----|
-| String de comparação | Linha 1726 | `'mistral-ocr'` | `'mistral'` |
+Após a correção:
+- No modo **single_pass**: Modal lerá `pdf_ai_provider` = `"mistral-ocr"` → Mostrará **"OCR: Mistral OCR"** ✓
+- No modo **two_phase**: Modal lerá `phase1_ocr_provider` → Mostrará o que estiver configurado lá
 
-Essa é uma correção simples de uma linha que resolve o bug de exibição.
+O Mistral voltará a funcionar corretamente em ambos os modos, como estava antes.
