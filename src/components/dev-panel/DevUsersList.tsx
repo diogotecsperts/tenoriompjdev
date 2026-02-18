@@ -78,6 +78,21 @@ export function DevUsersList() {
     fetchUsers();
   }, []);
 
+  const getProviderLabel = (provider: string): string => {
+    const labels: Record<string, string> = {
+      openrouter: "OpenRouter",
+      gemini: "Google Gemini",
+      openai: "OpenAI",
+      claude: "Anthropic Claude",
+      groq: "Groq",
+      deepseek: "DeepSeek",
+      mistral: "Mistral",
+      "mistral-ocr": "Mistral OCR",
+      lovable: "IA Integrada (backup)",
+    };
+    return labels[provider] || provider;
+  };
+
   const fetchUsers = async () => {
     setLoading(true);
     try {
@@ -113,7 +128,7 @@ export function DevUsersList() {
         const userRoles = roles?.filter((r) => r.user_id === profile.id).map((r) => r.role) || [];
         return {
           ...profile,
-          ai_provider: userSettings?.ai_provider || "lovable",
+          ai_provider: userSettings?.ai_provider || "openrouter",
           ai_model: userSettings?.ai_model || "google/gemini-3-flash-preview",
           ai_requests_used: userSettings?.ai_requests_used || 0,
           monthly_ai_limit: userSettings?.monthly_ai_limit || 100,
@@ -347,10 +362,8 @@ export function DevUsersList() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge 
-                        variant={user.ai_provider === "lovable" ? "default" : "secondary"}
-                      >
-                        {user.ai_provider}
+                      <Badge variant="secondary">
+                        {getProviderLabel(user.ai_provider || "openrouter")}
                       </Badge>
                     </TableCell>
                     <TableCell>
