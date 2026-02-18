@@ -131,14 +131,19 @@ export async function extractWithMistralOCR(
       const errorText = await ocrResponse.text();
       lastError = errorText;
       
-      // Check if it's a "file not found" error (code 3001) - worth retrying
-      if (ocrResponse.status === 404 && errorText.includes('3001') && attempt < maxRetries) {
-        console.log(`[mistral-ocr] File not ready yet, retry ${attempt}/${maxRetries}...`);
-        await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
+      // Check if it's a transient error worth retrying
+      const isFileNotReady = ocrResponse.status === 404 && errorText.includes('3001');
+      const isServerError = ocrResponse.status === 500 || ocrResponse.status === 503 || errorText.includes('3700');
+
+      if ((isFileNotReady || isServerError) && attempt < maxRetries) {
+        const waitMs = 2000 * attempt; // Exponential backoff: 2s → 4s → 6s
+        const reason = isFileNotReady ? 'file-not-ready(3001)' : 'server-error(3700)';
+        console.log(`[mistral-ocr] Transient error (${reason}), retry ${attempt}/${maxRetries} in ${waitMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, waitMs));
         continue;
       }
-      
-      // Other errors - don't retry
+
+      // Non-transient error or retries exhausted - don't retry further
       throw new Error(`Mistral OCR failed (${ocrResponse.status}): ${errorText}`);
     }
     
