@@ -1,98 +1,98 @@
 
-# Correção do Bug: Modal de Importação Lendo Configuração Errada de OCR
+# Sincronização: Configuração Global de IA → Tela de Usuários
 
-## Diagnóstico Confirmado
+## O Problema
 
-### O Problema Real
-O sistema tem **duas configurações separadas** para o provedor de OCR, mas o modal de importação só lê uma delas:
+Existem dois sistemas paralelos que nunca se conversaram:
 
-| Configuração | Valor no Banco | Modo | Usado pelo Modal? |
-|--------------|----------------|------|-------------------|
-| `pdf_ai_provider` | `"mistral-ocr"` ✅ | single_pass | ❌ NÃO |
-| `phase1_ocr_provider` | `"gemini"` | two_phase | ✅ SIM (bug) |
+| Sistema | Onde fica | Valor atual |
+|---------|-----------|-------------|
+| Configuração Global (DevPanel > Configurações) | Tabela `system_config` | `openrouter` ✅ |
+| Configuração por Usuário (DevPanel > Usuários) | Tabela `user_settings` | `lovable` ❌ |
 
-**Você configurou corretamente o Mistral** na seção "Extração de PDF", salvando em `pdf_ai_provider`.
-**Mas o modal lê** `phase1_ocr_provider`, que ainda tem o valor antigo "gemini".
+O banco criou todos os usuários com `ai_provider = 'lovable'` porque esse era o DEFAULT da coluna. Esse valor nunca foi sincronizado com o que você configurou no DevPanel.
 
-### Causa Raiz
-O `ImportarAutosDialog.tsx` foi codificado para ler apenas `phase1_ocr_provider`, ignorando completamente `pdf_ai_provider` que é usado no modo single_pass.
+## O que será feito
 
----
+### 1. Migração SQL — corrigir o DEFAULT da coluna e dados existentes
 
-## Solução
+Alterar o default da coluna `ai_provider` na tabela `user_settings` de `'lovable'` para `'gemini'` (provider seguro e real), e atualizar os registros existentes que ainda têm `'lovable'` para refletir o provider global atual (`openrouter`):
 
-O modal deve ler a configuração correta baseada na estratégia de importação ativa:
+```sql
+-- Corrigir default da coluna
+ALTER TABLE user_settings ALTER COLUMN ai_provider SET DEFAULT 'gemini';
 
-- Se `import_strategy === "single_pass"` → usar `pdf_ai_provider` e `pdf_ai_model`
-- Se `import_strategy === "two_phase"` → usar `phase1_ocr_provider` e `phase1_gemini_model`
-
-### Arquivo: `src/components/tools/ImportarAutosDialog.tsx`
-
-**1. Adicionar `import_strategy` e `pdf_ai_provider` à query (linha ~291)**
-
-```typescript
-.in('id', [
-  'default_ai_provider', 
-  'default_ai_model', 
-  'max_pdf_size_mb', 
-  'phase1_ocr_provider', 
-  'phase1_gemini_model',
-  'import_strategy',      // NOVO
-  'pdf_ai_provider',      // NOVO
-  'pdf_ai_model'          // NOVO
-]);
+-- Atualizar usuários existentes com 'lovable' para o provider global atual
+UPDATE user_settings 
+SET ai_provider = 'openrouter',
+    ai_model = 'google/gemini-3-flash-preview'
+WHERE ai_provider = 'lovable';
 ```
 
-**2. Modificar a lógica de OCR config (linhas ~305-308)**
+### 2. `DevUsersList.tsx` — corrigir fallback e exibição
 
+**Linha 116** — Trocar fallback de `"lovable"` para `"gemini"`:
 ```typescript
-// Determine OCR config based on import strategy
-const importStrategy = config.import_strategy || 'single_pass';
-
-let ocrProvider: string;
-let ocrModel: string;
-
-if (importStrategy === 'two_phase') {
-  // Two-phase mode: use phase1_ocr_provider
-  ocrProvider = config.phase1_ocr_provider || 'gemini';
-  ocrModel = config.phase1_gemini_model || 'gemini-2.0-flash';
-} else {
-  // Single-pass mode: use pdf_ai_provider
-  ocrProvider = config.pdf_ai_provider || 'gemini';
-  ocrModel = config.pdf_ai_model || 'gemini-2.0-flash';
-}
-
-setOcrConfig({ provider: ocrProvider, model: ocrModel });
+ai_provider: userSettings?.ai_provider || "gemini",
 ```
 
-**3. Ajustar a exibição do badge (linha ~1723-1726)**
-
-O badge precisa tratar os dois valores de provider:
-- `"mistral-ocr"` (usado em pdf_ai_provider)
-- `"mistral"` (usado em phase1_ocr_provider)
-
+**Linha 353** — Adicionar função de mapeamento para exibir nome legível no badge (nunca mostrar o valor bruto):
 ```typescript
-{ocrConfig.provider === 'mistral' || ocrConfig.provider === 'mistral-ocr' 
-  ? 'Mistral OCR' 
-  : `Gemini ${formatModelName(ocrConfig.model)}`}
+const getProviderLabel = (provider: string): string => {
+  const labels: Record<string, string> = {
+    openrouter: "OpenRouter",
+    gemini: "Google Gemini",
+    openai: "OpenAI",
+    claude: "Anthropic Claude",
+    groq: "Groq",
+    deepseek: "DeepSeek",
+    mistral: "Mistral",
+    "mistral-ocr": "Mistral OCR",
+    lovable: "IA Integrada (backup)", // nunca deve aparecer normalmente
+  };
+  return labels[provider] || provider;
+};
 ```
 
----
+Substituir `{user.ai_provider}` por `{getProviderLabel(user.ai_provider)}` no badge da tabela.
 
-## Resumo das Alterações
+### 3. `DevUserSettings.tsx` — corrigir estado inicial e fallbacks
 
-| Local | Alteração |
-|-------|-----------|
-| Query (linha ~291) | Adicionar `import_strategy`, `pdf_ai_provider`, `pdf_ai_model` |
-| Lógica OCR (linhas ~305-308) | Verificar estratégia e ler configuração correta |
-| Badge display (linha ~1723) | Aceitar tanto `"mistral"` quanto `"mistral-ocr"` |
+**Linha 113** — Trocar default do formulário:
+```typescript
+const DEFAULT_SETTINGS: UserSettings = {
+  ai_provider: "gemini", // era "lovable"
+  ...
+};
+```
 
----
+**Linha 170** — Trocar fallback no `fetchSettings`:
+```typescript
+ai_provider: data.ai_provider || "gemini", // era "lovable"
+```
 
-## Resultado Esperado
+**Linha 50** — Renomear label para deixar claro que é backup:
+```typescript
+{ id: "lovable", name: "IA Integrada (backup)", requiresKey: false },
+```
 
-Após a correção:
-- No modo **single_pass**: Modal lerá `pdf_ai_provider` = `"mistral-ocr"` → Mostrará **"OCR: Mistral OCR"** ✓
-- No modo **two_phase**: Modal lerá `phase1_ocr_provider` → Mostrará o que estiver configurado lá
+## O que NÃO muda
 
-O Mistral voltará a funcionar corretamente em ambos os modos, como estava antes.
+A tela de usuários continua permitindo configuração individual por usuário — isso é útil para você no futuro, por exemplo, para dar a um usuário específico uma API key própria ou um limite diferente. A diferença é que agora o **ponto de partida** será o provider real (openrouter), não "lovable".
+
+## Resultado esperado
+
+| Situação | Antes | Depois |
+|----------|-------|--------|
+| Badge "Provider IA" na tabela | Mostra "lovable" | Mostra "OpenRouter" |
+| Formulário de edição de usuário | Abre com "IA Integrada" selecionado | Abre com "OpenRouter" selecionado |
+| Novos usuários criados futuramente | Nascem com "lovable" | Nascem com "gemini" |
+| Usuários existentes no banco | Têm "lovable" salvo | Serão atualizados para "openrouter" via migration |
+
+## Arquivos alterados
+
+| Arquivo | Tipo de mudança |
+|---------|----------------|
+| Migration SQL | Alterar DEFAULT + UPDATE dados existentes |
+| `src/components/dev-panel/DevUsersList.tsx` | Fallback + mapeamento de label no badge |
+| `src/components/dev-panel/DevUserSettings.tsx` | DEFAULT_SETTINGS + fallback + label do provider |
