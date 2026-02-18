@@ -1,57 +1,54 @@
 
-# Plano Completo: Sincronização + Aviso Visual + Botão "Sincronizar com Global"
+# Execução Definitiva: Sincronização Global de IA + Aviso Visual + Botão Sincronizar
 
-## Estado atual confirmado
+## Por que parou antes
 
-- Banco de dados: `default_ai_provider = "openrouter"`, `default_ai_model = "google/gemini-3-flash-preview"` na tabela `system_config`
-- Tabela `user_settings`: coluna `ai_provider` ainda tem `DEFAULT 'lovable'`  
-- `DevUserSettings.tsx` linha 50: label ainda `"IA Integrada"` (sem "backup")
-- `DevUserSettings.tsx` linha 113: `DEFAULT_SETTINGS.ai_provider = "lovable"`
-- `DevUserSettings.tsx` linha 170: fallback `|| "lovable"`
-- `DevUsersList.tsx` linha 116: fallback `|| "lovable"`
-- `DevUsersList.tsx` linha 353: exibe `{user.ai_provider}` bruto
+O sistema estava em "modo leitura" (plan mode) quando tentou executar. Isso impediu qualquer alteração de arquivo. Desta vez, ao aprovar, a execução começa imediatamente.
 
 ---
 
-## O que será feito (plano integrado)
+## O que será alterado (3 partes, sequência exata)
 
-### Parte 1 — Migração SQL
+### Parte 1 — Banco de dados: 2 comandos SQL
 
-```sql
--- Trocar default da coluna para provider real
-ALTER TABLE user_settings ALTER COLUMN ai_provider SET DEFAULT 'gemini';
+**Comando 1** — Trocar o DEFAULT da coluna `ai_provider` de `'lovable'` para `'gemini'`:
+- Efeito: novos usuários criados futuramente não nascem mais com "lovable"
 
--- Atualizar usuários existentes que têm 'lovable' para o provider global atual
-UPDATE user_settings 
-SET ai_provider = 'openrouter',
-    ai_model = 'google/gemini-3-flash-preview'
-WHERE ai_provider = 'lovable' OR ai_provider IS NULL;
+**Comando 2** — Atualizar os registros existentes:
+- Todos os usuários que têm `ai_provider = 'lovable'` serão atualizados para `openrouter` (o provider configurado globalmente no DevPanel) com modelo `google/gemini-3-flash-preview`
+
+---
+
+### Parte 2 — `src/components/dev-panel/DevUserSettings.tsx`: 6 mudanças
+
+**Linha 18** — Adicionar `Info` e `RefreshCw` ao import do lucide-react:
+```typescript
+import { Loader2, Shield, Info, RefreshCw } from "lucide-react";
 ```
 
----
-
-### Parte 2 — `DevUserSettings.tsx`: 5 mudanças
-
-**2a. Linha 50** — Label do provider lovable:
+**Linha 50** — Renomear label do provider lovable para deixar claro que é backup:
 ```typescript
 { id: "lovable", name: "IA Integrada (backup)", requiresKey: false },
 ```
 
-**2b. Linha 113** — DEFAULT_SETTINGS:
+**Linha 113** — Trocar DEFAULT_SETTINGS para não abrir com "lovable":
 ```typescript
-ai_provider: "gemini", // era "lovable"
+ai_provider: "openrouter",
 ```
 
-**2c. Linha 170** — Fallback no fetchSettings:
-```typescript
-ai_provider: data.ai_provider || "gemini", // era "lovable"
-```
-
-**2d. Botão "Sincronizar com Global"** — Nova função + estado que busca as configs do `system_config` e as aplica no formulário do usuário:
-
+**Linha 141** — Adicionar estado `syncing` após o estado `saving`:
 ```typescript
 const [syncing, setSyncing] = useState(false);
+```
 
+**Linha 170** — Trocar fallback no fetchSettings:
+```typescript
+ai_provider: data.ai_provider || "openrouter",
+```
+
+**Linhas 352-356** — Inserir aviso visual + botão "Sincronizar com Global" entre o `<Separator />` e o `<h3>` de "Configurações de IA". Também adicionar a função `handleSyncWithGlobal` antes do `return`:
+
+```typescript
 const handleSyncWithGlobal = async () => {
   setSyncing(true);
   try {
@@ -67,7 +64,7 @@ const handleSyncWithGlobal = async () => {
 
     setSettings(prev => ({
       ...prev,
-      ai_provider: config.default_ai_provider || "gemini",
+      ai_provider: config.default_ai_provider || "openrouter",
       ai_model: config.default_ai_model || "google/gemini-3-flash-preview",
     }));
 
@@ -83,11 +80,10 @@ const handleSyncWithGlobal = async () => {
 };
 ```
 
-**2e. Aviso visual + botão** — Inserir logo acima da seção "Configurações de IA" (linha ~354), antes do `<h3>`:
-
+E o bloco visual:
 ```tsx
 {/* Aviso de hierarquia + botão Sincronizar */}
-<div className="flex items-start justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/20 p-3">
+<div className="flex items-start justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/20 p-3 mb-2">
   <div className="flex items-start gap-2">
     <Info className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
     <p className="text-xs text-amber-700 dark:text-amber-300">
@@ -107,18 +103,16 @@ const handleSyncWithGlobal = async () => {
 </div>
 ```
 
-Adicionar `Info` e `RefreshCw` ao import de `lucide-react` (linha 18).
-
 ---
 
-### Parte 3 — `DevUsersList.tsx`: 3 mudanças
+### Parte 3 — `src/components/dev-panel/DevUsersList.tsx`: 3 mudanças
 
-**3a. Linha 116** — Fallback no merge de perfis:
+**Linha 116** — Trocar fallback no merge de perfis:
 ```typescript
-ai_provider: userSettings?.ai_provider || "gemini",
+ai_provider: userSettings?.ai_provider || "openrouter",
 ```
 
-**3b. Antes da função `fetchUsers`** — Adicionar função de mapeamento de label:
+**Antes da função `fetchUsers` (linha ~85)** — Adicionar função de mapeamento de labels legíveis:
 ```typescript
 const getProviderLabel = (provider: string): string => {
   const labels: Record<string, string> = {
@@ -136,14 +130,14 @@ const getProviderLabel = (provider: string): string => {
 };
 ```
 
-**3c. Linhas 350-354** — Substituir badge bruto:
+**Linhas 350-354** — Substituir badge bruto pelo badge com label mapeado:
 ```tsx
-// ANTES:
+// ANTES (mostra "lovable" bruto):
 <Badge variant={user.ai_provider === "lovable" ? "default" : "secondary"}>
   {user.ai_provider}
 </Badge>
 
-// DEPOIS:
+// DEPOIS (mostra "OpenRouter", "Google Gemini", etc.):
 <Badge variant="secondary">
   {getProviderLabel(user.ai_provider)}
 </Badge>
@@ -151,24 +145,16 @@ const getProviderLabel = (provider: string): string => {
 
 ---
 
-## Resultado visual final
+## Resultado final
 
-O modal de edição de usuário ficará assim na seção de IA:
-
-```text
-┌─────────────────────────────────────────────────────────┐
-│ ⚠ Configurações individuais substituem as configurações  │
-│   globais do DevPanel para este usuário.    [↺ Sincronizar com Global] │
-└─────────────────────────────────────────────────────────┘
-
-Configurações de IA
-  Provider de IA: [OpenRouter        ▼]   Modelo: [gemini-3-flash ▼]
-```
-
-E na tabela de usuários, a coluna "Provider IA" mostrará:
-- `"OpenRouter"` em vez de `"openrouter"`
-- `"Google Gemini"` em vez de `"gemini"`
-- Nunca mais `"lovable"` em texto visível
+| Situação | Antes | Depois |
+|----------|-------|--------|
+| Badge na tabela de usuários | Mostra "lovable" | Mostra "OpenRouter" |
+| Formulário de edição ao abrir | Abre com "IA Integrada" selecionado | Abre com "OpenRouter" selecionado |
+| Usuários existentes no banco | `ai_provider = 'lovable'` | Atualizados para `openrouter` |
+| Novos usuários futuros | Nascem com `lovable` | Nascem com `gemini` |
+| Aviso visual no modal de edição | Não existe | Box âmbar explicando hierarquia + botão Sincronizar |
+| Botão "Sincronizar com Global" | Não existe | Copia provider e modelo do `system_config` para o formulário |
 
 ---
 
@@ -176,6 +162,6 @@ E na tabela de usuários, a coluna "Provider IA" mostrará:
 
 | Arquivo | Mudanças |
 |---------|----------|
-| Migration SQL | `ALTER DEFAULT` + `UPDATE` dados existentes |
-| `src/components/dev-panel/DevUserSettings.tsx` | Label backup + DEFAULT_SETTINGS + fallback + aviso visual + botão Sincronizar |
-| `src/components/dev-panel/DevUsersList.tsx` | Fallback + `getProviderLabel` + badge mapeado |
+| Banco de dados (SQL direto) | ALTER DEFAULT + UPDATE dados existentes |
+| `src/components/dev-panel/DevUserSettings.tsx` | Import + label backup + DEFAULT + fallback + função sync + UI âmbar |
+| `src/components/dev-panel/DevUsersList.tsx` | Fallback + getProviderLabel + badge mapeado |
