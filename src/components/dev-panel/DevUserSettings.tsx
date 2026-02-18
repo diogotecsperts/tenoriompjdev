@@ -15,7 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
-import { Loader2, Shield } from "lucide-react";
+import { Loader2, Shield, Info, RefreshCw } from "lucide-react";
 
 interface DevUserSettingsProps {
   userId: string;
@@ -47,7 +47,7 @@ interface RolesState {
 }
 
 const AI_PROVIDERS = [
-  { id: "lovable", name: "IA Integrada", requiresKey: false },
+  { id: "lovable", name: "IA Integrada (backup)", requiresKey: false },
   { id: "openai", name: "OpenAI", requiresKey: true },
   { id: "gemini", name: "Google Gemini", requiresKey: true },
   { id: "claude", name: "Anthropic Claude", requiresKey: true },
@@ -110,7 +110,7 @@ const AI_MODELS: Record<string, { id: string; name: string }[]> = {
 };
 
 const DEFAULT_SETTINGS: UserSettings = {
-  ai_provider: "lovable",
+  ai_provider: "openrouter",
   ai_model: "google/gemini-3-flash-preview",
   ai_temperature: 0.7,
   ai_max_tokens: 4096,
@@ -139,6 +139,7 @@ export function DevUserSettings({
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -167,7 +168,7 @@ export function DevUserSettings({
 
       if (data) {
         setSettings({
-          ai_provider: data.ai_provider || "lovable",
+          ai_provider: data.ai_provider || "openrouter",
           ai_model: data.ai_model || "google/gemini-3-flash-preview",
           ai_temperature: Number(data.ai_temperature) || 0.7,
           ai_max_tokens: data.ai_max_tokens || 4096,
@@ -290,6 +291,36 @@ export function DevUserSettings({
     setSettings({ ...settings, ai_requests_used: 0 });
   };
 
+  const handleSyncWithGlobal = async () => {
+    setSyncing(true);
+    try {
+      const { data, error } = await supabase
+        .from("system_config")
+        .select("id, value")
+        .in("id", ["default_ai_provider", "default_ai_model"]);
+
+      if (error) throw error;
+
+      const config: Record<string, string> = {};
+      data?.forEach((row) => { config[row.id] = row.value as string; });
+
+      setSettings(prev => ({
+        ...prev,
+        ai_provider: config.default_ai_provider || "openrouter",
+        ai_model: config.default_ai_model || "google/gemini-3-flash-preview",
+      }));
+
+      toast({
+        title: "Sincronizado",
+        description: "Provider e modelo copiados das configurações globais. Clique em Salvar para aplicar.",
+      });
+    } catch (error) {
+      toast({ variant: "destructive", title: "Erro", description: "Falha ao buscar configurações globais" });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const selectedProvider = AI_PROVIDERS.find((p) => p.id === settings.ai_provider);
   const availableModels = AI_MODELS[settings.ai_provider] || [];
 
@@ -350,6 +381,26 @@ export function DevUserSettings({
       </div>
 
       <Separator />
+
+      {/* Aviso de hierarquia + botão Sincronizar */}
+      <div className="flex items-start justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/20 p-3 mb-2">
+        <div className="flex items-start gap-2">
+          <Info className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            Configurações individuais <strong>substituem</strong> as configurações globais do DevPanel para este usuário.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleSyncWithGlobal}
+          disabled={syncing}
+          className="shrink-0 text-xs h-7 border-amber-300 hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900/30"
+        >
+          {syncing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+          Sincronizar com Global
+        </Button>
+      </div>
 
       {/* AI Provider */}
       <div className="space-y-4">
