@@ -28,7 +28,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { supabase } from "@/integrations/supabase/client";
-import { Search, Settings, RefreshCw, User, Trash2, AlertTriangle, Loader2 } from "lucide-react";
+import { Search, Settings, RefreshCw, User, Trash2, AlertTriangle, Loader2, CheckCircle2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/hooks/use-toast";
 import { DevUserSettings } from "./DevUserSettings";
@@ -74,9 +74,65 @@ export function DevUsersList() {
   const [userDataCount, setUserDataCount] = useState<UserDataCount | null>(null);
   const [loadingDataCount, setLoadingDataCount] = useState(false);
 
+  // Sync all state
+  const [syncAllDialogOpen, setSyncAllDialogOpen] = useState(false);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [globalConfig, setGlobalConfig] = useState<{ provider: string; model: string } | null>(null);
+
   useEffect(() => {
     fetchUsers();
+    fetchGlobalConfig();
   }, []);
+
+  const fetchGlobalConfig = async () => {
+    const { data } = await supabase
+      .from("system_config")
+      .select("id, value")
+      .in("id", ["default_ai_provider", "default_ai_model"]);
+    const cfg: Record<string, string> = {};
+    data?.forEach(row => { cfg[row.id] = row.value as string; });
+    setGlobalConfig({
+      provider: cfg.default_ai_provider || "openrouter",
+      model: cfg.default_ai_model || "google/gemini-3-flash-preview",
+    });
+  };
+
+  const isUserSynced = (user: UserWithSettings): boolean => {
+    if (!globalConfig) return true;
+    return (
+      user.ai_provider === globalConfig.provider &&
+      user.ai_model === globalConfig.model
+    );
+  };
+
+  const handleSyncAll = async () => {
+    if (!globalConfig) return;
+    setSyncingAll(true);
+    try {
+      const userIds = users.map(u => u.id);
+      const { error } = await supabase
+        .from("user_settings")
+        .upsert(
+          userIds.map(uid => ({
+            user_id: uid,
+            ai_provider: globalConfig.provider,
+            ai_model: globalConfig.model,
+          })),
+          { onConflict: "user_id" }
+        );
+      if (error) throw error;
+      toast({
+        title: "Todos sincronizados",
+        description: `${userIds.length} usuário(s) atualizados para ${getProviderLabel(globalConfig.provider)}.`,
+      });
+      setSyncAllDialogOpen(false);
+      fetchUsers();
+    } catch (error) {
+      toast({ variant: "destructive", title: "Erro", description: "Falha ao sincronizar usuários" });
+    } finally {
+      setSyncingAll(false);
+    }
+  };
 
   const getProviderLabel = (provider: string): string => {
     const labels: Record<string, string> = {
@@ -289,10 +345,20 @@ export function DevUsersList() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-foreground">Usuários</h1>
-        <Button variant="outline" size="sm" onClick={fetchUsers}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Atualizar
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => { fetchGlobalConfig(); setSyncAllDialogOpen(true); }}
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Sincronizar Todos
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchUsers}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Atualizar
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -362,9 +428,22 @@ export function DevUsersList() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary">
-                        {getProviderLabel(user.ai_provider || "openrouter")}
-                      </Badge>
+                      <div className="flex flex-col gap-1">
+                        <Badge variant="secondary">
+                          {getProviderLabel(user.ai_provider || "openrouter")}
+                        </Badge>
+                        {isUserSynced(user) ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-primary/70">
+                            <CheckCircle2 className="h-3 w-3" />
+                            Sincronizado
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            <AlertTriangle className="h-3 w-3" />
+                            Customizado
+                          </span>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="text-sm">
@@ -488,6 +567,51 @@ export function DevUsersList() {
                 </>
               ) : (
                 "Excluir Usuário"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Sync All Confirmation Dialog */}
+      <AlertDialog open={syncAllDialogOpen} onOpenChange={setSyncAllDialogOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5 text-primary" />
+              Sincronizar Todos os Usuários
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  Esta ação irá aplicar as configurações globais de IA para <strong>todos os {users.length} usuários</strong>:
+                </p>
+                <div className="bg-muted p-3 rounded-lg space-y-1 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Provider: </span>
+                    <strong className="text-foreground">{getProviderLabel(globalConfig?.provider || "openrouter")}</strong>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Modelo: </span>
+                    <strong className="text-foreground">{globalConfig?.model || "google/gemini-3-flash-preview"}</strong>
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Configurações personalizadas individuais serão sobrescritas. Esta ação não pode ser desfeita automaticamente.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={syncingAll}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleSyncAll} disabled={syncingAll}>
+              {syncingAll ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Sincronizando...
+                </>
+              ) : (
+                "Confirmar Sincronização"
               )}
             </AlertDialogAction>
           </AlertDialogFooter>
