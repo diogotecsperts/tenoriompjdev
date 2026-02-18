@@ -1,160 +1,232 @@
 
-# Execução Definitiva: Sincronização Global de IA + Aviso Visual + Botão Sincronizar
+# Botão "Sincronizar Todos" + Indicador Visual de Sincronização
 
-## Por que parou antes
+## Diagnóstico: o que já existe vs. o que falta
 
-O sistema estava em "modo leitura" (plan mode) quando tentou executar. Isso impediu qualquer alteração de arquivo. Desta vez, ao aprovar, a execução começa imediatamente.
+| Funcionalidade | Status |
+|----------------|--------|
+| Badge com nome amigável do provider | Implementado |
+| Aviso âmbar no modal individual | Implementado |
+| Botão "Sincronizar com Global" no modal individual | Implementado |
+| **Botão "Sincronizar Todos" no cabeçalho** | Faltando |
+| **Indicador visual por linha (sincronizado/customizado)** | Faltando |
 
----
-
-## O que será alterado (3 partes, sequência exata)
-
-### Parte 1 — Banco de dados: 2 comandos SQL
-
-**Comando 1** — Trocar o DEFAULT da coluna `ai_provider` de `'lovable'` para `'gemini'`:
-- Efeito: novos usuários criados futuramente não nascem mais com "lovable"
-
-**Comando 2** — Atualizar os registros existentes:
-- Todos os usuários que têm `ai_provider = 'lovable'` serão atualizados para `openrouter` (o provider configurado globalmente no DevPanel) com modelo `google/gemini-3-flash-preview`
+Configuração global atual confirmada no banco: `openrouter` + `google/gemini-3-flash-preview`.
 
 ---
 
-### Parte 2 — `src/components/dev-panel/DevUserSettings.tsx`: 6 mudanças
+## O que será feito — somente `DevUsersList.tsx`
 
-**Linha 18** — Adicionar `Info` e `RefreshCw` ao import do lucide-react:
+### Mudança 1 — Estado e lógica do "Sincronizar Todos"
+
+Adicionar 3 novos estados após os existentes:
+
 ```typescript
-import { Loader2, Shield, Info, RefreshCw } from "lucide-react";
+const [syncAllDialogOpen, setSyncAllDialogOpen] = useState(false);
+const [syncingAll, setSyncingAll] = useState(false);
+const [globalConfig, setGlobalConfig] = useState<{ provider: string; model: string } | null>(null);
 ```
 
-**Linha 50** — Renomear label do provider lovable para deixar claro que é backup:
+Adicionar função `fetchGlobalConfig` que busca `default_ai_provider` e `default_ai_model` do `system_config`:
+
 ```typescript
-{ id: "lovable", name: "IA Integrada (backup)", requiresKey: false },
+const fetchGlobalConfig = async () => {
+  const { data } = await supabase
+    .from("system_config")
+    .select("id, value")
+    .in("id", ["default_ai_provider", "default_ai_model"]);
+  const cfg: Record<string, string> = {};
+  data?.forEach(row => { cfg[row.id] = row.value as string; });
+  setGlobalConfig({
+    provider: cfg.default_ai_provider || "openrouter",
+    model: cfg.default_ai_model || "google/gemini-3-flash-preview",
+  });
+};
 ```
 
-**Linha 113** — Trocar DEFAULT_SETTINGS para não abrir com "lovable":
-```typescript
-ai_provider: "openrouter",
-```
-
-**Linha 141** — Adicionar estado `syncing` após o estado `saving`:
-```typescript
-const [syncing, setSyncing] = useState(false);
-```
-
-**Linha 170** — Trocar fallback no fetchSettings:
-```typescript
-ai_provider: data.ai_provider || "openrouter",
-```
-
-**Linhas 352-356** — Inserir aviso visual + botão "Sincronizar com Global" entre o `<Separator />` e o `<h3>` de "Configurações de IA". Também adicionar a função `handleSyncWithGlobal` antes do `return`:
+Adicionar `handleSyncAll` que faz upsert em massa para todos os usuários:
 
 ```typescript
-const handleSyncWithGlobal = async () => {
-  setSyncing(true);
+const handleSyncAll = async () => {
+  if (!globalConfig) return;
+  setSyncingAll(true);
   try {
-    const { data, error } = await supabase
-      .from("system_config")
-      .select("id, value")
-      .in("id", ["default_ai_provider", "default_ai_model"]);
-
+    // Buscar todos os user_ids dos perfis
+    const userIds = users.map(u => u.id);
+    
+    // Upsert em batch: aplicar provider e model global para todos
+    const { error } = await supabase
+      .from("user_settings")
+      .upsert(
+        userIds.map(uid => ({
+          user_id: uid,
+          ai_provider: globalConfig.provider,
+          ai_model: globalConfig.model,
+        })),
+        { onConflict: "user_id" }
+      );
+    
     if (error) throw error;
-
-    const config: Record<string, string> = {};
-    data?.forEach((row) => { config[row.id] = row.value as string; });
-
-    setSettings(prev => ({
-      ...prev,
-      ai_provider: config.default_ai_provider || "openrouter",
-      ai_model: config.default_ai_model || "google/gemini-3-flash-preview",
-    }));
-
+    
     toast({
-      title: "Sincronizado",
-      description: "Provider e modelo copiados das configurações globais. Clique em Salvar para aplicar.",
+      title: "Todos sincronizados",
+      description: `${userIds.length} usuário(s) atualizados para ${getProviderLabel(globalConfig.provider)}.`,
     });
+    setSyncAllDialogOpen(false);
+    fetchUsers(); // Recarregar tabela
   } catch (error) {
-    toast({ variant: "destructive", title: "Erro", description: "Falha ao buscar configurações globais" });
+    toast({ variant: "destructive", title: "Erro", description: "Falha ao sincronizar usuários" });
   } finally {
-    setSyncing(false);
+    setSyncingAll(false);
   }
 };
 ```
 
-E o bloco visual:
+Chamar `fetchGlobalConfig` dentro do `useEffect` junto com `fetchUsers`.
+
+---
+
+### Mudança 2 — Indicador visual por linha (sincronizado/customizado)
+
+Adicionar função auxiliar `isUserSynced` que compara o provider/model do usuário com o global:
+
+```typescript
+const isUserSynced = (user: UserWithSettings): boolean => {
+  if (!globalConfig) return true; // sem dados, assume sincronizado
+  return (
+    user.ai_provider === globalConfig.provider &&
+    user.ai_model === globalConfig.model
+  );
+};
+```
+
+Na coluna "Provider IA" da tabela, adicionar abaixo do badge existente um indicador pequeno:
+
 ```tsx
-{/* Aviso de hierarquia + botão Sincronizar */}
-<div className="flex items-start justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/20 p-3 mb-2">
-  <div className="flex items-start gap-2">
-    <Info className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-    <p className="text-xs text-amber-700 dark:text-amber-300">
-      Configurações individuais <strong>substituem</strong> as configurações globais do DevPanel para este usuário.
-    </p>
+<TableCell>
+  <div className="flex flex-col gap-1">
+    <Badge variant="secondary">
+      {getProviderLabel(user.ai_provider || "openrouter")}
+    </Badge>
+    {!isUserSynced(user) && (
+      <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+        <AlertTriangle className="h-3 w-3" />
+        Customizado
+      </span>
+    )}
+    {isUserSynced(user) && (
+      <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+        <CheckCircle2 className="h-3 w-3" />
+        Sincronizado
+      </span>
+    )}
   </div>
+</TableCell>
+```
+
+Adicionar `CheckCircle2` ao import do `lucide-react` (linha 31).
+
+---
+
+### Mudança 3 — Botão "Sincronizar Todos" no cabeçalho
+
+No cabeçalho da página (onde já existe o botão "Atualizar"), adicionar o novo botão ao lado:
+
+```tsx
+<div className="flex items-center gap-2">
   <Button
     variant="outline"
     size="sm"
-    onClick={handleSyncWithGlobal}
-    disabled={syncing}
-    className="shrink-0 text-xs h-7 border-amber-300 hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900/30"
+    onClick={() => { fetchGlobalConfig(); setSyncAllDialogOpen(true); }}
   >
-    {syncing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1" />}
-    Sincronizar com Global
+    <RefreshCw className="h-4 w-4 mr-2" />
+    Sincronizar Todos
+  </Button>
+  <Button variant="outline" size="sm" onClick={fetchUsers}>
+    <RefreshCw className="h-4 w-4 mr-2" />
+    Atualizar
   </Button>
 </div>
 ```
 
 ---
 
-### Parte 3 — `src/components/dev-panel/DevUsersList.tsx`: 3 mudanças
+### Mudança 4 — Diálogo de confirmação do "Sincronizar Todos"
 
-**Linha 116** — Trocar fallback no merge de perfis:
-```typescript
-ai_provider: userSettings?.ai_provider || "openrouter",
-```
+Adicionar um novo `AlertDialog` ao final do componente (antes do fechamento do `return`):
 
-**Antes da função `fetchUsers` (linha ~85)** — Adicionar função de mapeamento de labels legíveis:
-```typescript
-const getProviderLabel = (provider: string): string => {
-  const labels: Record<string, string> = {
-    openrouter: "OpenRouter",
-    gemini: "Google Gemini",
-    openai: "OpenAI",
-    claude: "Anthropic Claude",
-    groq: "Groq",
-    deepseek: "DeepSeek",
-    mistral: "Mistral",
-    "mistral-ocr": "Mistral OCR",
-    lovable: "IA Integrada (backup)",
-  };
-  return labels[provider] || provider;
-};
-```
-
-**Linhas 350-354** — Substituir badge bruto pelo badge com label mapeado:
 ```tsx
-// ANTES (mostra "lovable" bruto):
-<Badge variant={user.ai_provider === "lovable" ? "default" : "secondary"}>
-  {user.ai_provider}
-</Badge>
-
-// DEPOIS (mostra "OpenRouter", "Google Gemini", etc.):
-<Badge variant="secondary">
-  {getProviderLabel(user.ai_provider)}
-</Badge>
+<AlertDialog open={syncAllDialogOpen} onOpenChange={setSyncAllDialogOpen}>
+  <AlertDialogContent className="max-w-md">
+    <AlertDialogHeader>
+      <AlertDialogTitle className="flex items-center gap-2">
+        <RefreshCw className="h-5 w-5 text-primary" />
+        Sincronizar Todos os Usuários
+      </AlertDialogTitle>
+      <AlertDialogDescription asChild>
+        <div className="space-y-3">
+          <p>Esta ação irá aplicar as configurações globais de IA para <strong>todos os {users.length} usuários</strong>:</p>
+          <div className="bg-muted p-3 rounded-lg space-y-1 text-sm">
+            <div><span className="text-muted-foreground">Provider:</span> <strong>{getProviderLabel(globalConfig?.provider || "openrouter")}</strong></div>
+            <div><span className="text-muted-foreground">Modelo:</span> <strong>{globalConfig?.model || "google/gemini-3-flash-preview"}</strong></div>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Configurações personalizadas individuais serão sobrescritas. Esta ação não pode ser desfeita automaticamente.
+          </p>
+        </div>
+      </AlertDialogDescription>
+    </AlertDialogHeader>
+    <AlertDialogFooter>
+      <AlertDialogCancel disabled={syncingAll}>Cancelar</AlertDialogCancel>
+      <AlertDialogAction onClick={handleSyncAll} disabled={syncingAll}>
+        {syncingAll ? (
+          <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Sincronizando...</>
+        ) : (
+          "Confirmar Sincronização"
+        )}
+      </AlertDialogAction>
+    </AlertDialogFooter>
+  </AlertDialogContent>
+</AlertDialog>
 ```
 
 ---
 
-## Resultado final
+## Resultado visual final
 
-| Situação | Antes | Depois |
-|----------|-------|--------|
-| Badge na tabela de usuários | Mostra "lovable" | Mostra "OpenRouter" |
-| Formulário de edição ao abrir | Abre com "IA Integrada" selecionado | Abre com "OpenRouter" selecionado |
-| Usuários existentes no banco | `ai_provider = 'lovable'` | Atualizados para `openrouter` |
-| Novos usuários futuros | Nascem com `lovable` | Nascem com `gemini` |
-| Aviso visual no modal de edição | Não existe | Box âmbar explicando hierarquia + botão Sincronizar |
-| Botão "Sincronizar com Global" | Não existe | Copia provider e modelo do `system_config` para o formulário |
+```text
+CABEÇALHO DA PÁGINA:
+[↺ Sincronizar Todos]  [↺ Atualizar]
+
+CABEÇALHO DO CARD:
+Lista de Usuários (3)              [buscar...]
+
+TABELA — Coluna "Provider IA":
+┌─────────────────────┐
+│ [OpenRouter]        │  ← provider atual do usuário
+│ ✓ Sincronizado      │  ← verde se bate com o global
+└─────────────────────┘
+
+┌─────────────────────┐
+│ [Google Gemini]     │  ← provider diferente do global
+│ ⚠ Customizado       │  ← âmbar se for diferente
+└─────────────────────┘
+
+DIÁLOGO "Sincronizar Todos":
+┌─────────────────────────────────────────────────┐
+│ ↺ Sincronizar Todos os Usuários                 │
+│                                                 │
+│ Esta ação irá aplicar as configurações globais  │
+│ de IA para todos os 3 usuários:                 │
+│                                                 │
+│  Provider: OpenRouter                           │
+│  Modelo: google/gemini-3-flash-preview          │
+│                                                 │
+│ Configurações personalizadas serão sobrescritas │
+│                                                 │
+│         [Cancelar]  [Confirmar Sincronização]   │
+└─────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -162,6 +234,4 @@ const getProviderLabel = (provider: string): string => {
 
 | Arquivo | Mudanças |
 |---------|----------|
-| Banco de dados (SQL direto) | ALTER DEFAULT + UPDATE dados existentes |
-| `src/components/dev-panel/DevUserSettings.tsx` | Import + label backup + DEFAULT + fallback + função sync + UI âmbar |
-| `src/components/dev-panel/DevUsersList.tsx` | Fallback + getProviderLabel + badge mapeado |
+| `src/components/dev-panel/DevUsersList.tsx` | + Import `CheckCircle2` + estados `syncAllDialogOpen`, `syncingAll`, `globalConfig` + `fetchGlobalConfig` + `handleSyncAll` + `isUserSynced` + botão no cabeçalho + indicador por linha + AlertDialog de confirmação |
