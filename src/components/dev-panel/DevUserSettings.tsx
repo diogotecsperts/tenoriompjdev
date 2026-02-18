@@ -383,11 +383,11 @@ export function DevUserSettings({
       <Separator />
 
       {/* Aviso de hierarquia + botão Sincronizar */}
-      <div className="flex items-start justify-between gap-4 rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-800/50 dark:bg-amber-950/20 p-3 mb-2">
+      <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-muted/40 p-3 mb-2">
         <div className="flex items-start gap-2">
-          <Info className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-          <p className="text-xs text-amber-700 dark:text-amber-300">
-            Configurações individuais <strong>substituem</strong> as configurações globais do DevPanel para este usuário.
+          <Info className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+          <p className="text-xs text-muted-foreground">
+            Configurações individuais <strong className="text-foreground">substituem</strong> as configurações globais do DevPanel para este usuário.
           </p>
         </div>
         <Button
@@ -395,7 +395,7 @@ export function DevUserSettings({
           size="sm"
           onClick={handleSyncWithGlobal}
           disabled={syncing}
-          className="shrink-0 text-xs h-7 border-amber-300 hover:bg-amber-100 dark:border-amber-700 dark:hover:bg-amber-900/30"
+          className="shrink-0 text-xs h-7"
         >
           {syncing ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <RefreshCw className="h-3 w-3 mr-1" />}
           Sincronizar com Global
