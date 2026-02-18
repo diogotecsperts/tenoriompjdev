@@ -2060,6 +2060,9 @@ async function processarPDFBackground(
             } else {
               throw new Error('No PDF input available for Mistral OCR');
             }
+
+            // Preserve bytes reference so Gemini fallback has data if Mistral fails
+            const pdfBytesBackup = bytesForMistral;
             
             let mistralRawText = '';
             let mistralPageCount = 0;
@@ -2180,15 +2183,20 @@ async function processarPDFBackground(
           } catch (mistralError) {
             console.error('[processar-autos] Mistral OCR failed:', mistralError);
             await logWarn('processar-autos', `Mistral OCR falhou: ${mistralError instanceof Error ? mistralError.message : 'Erro'}`, jobId);
-            
+
+            // Restore bytes so Gemini fallback has data to work with
+            if (!pdfBytes && pdfBytesBackup) {
+              pdfBytes = pdfBytesBackup;
+              console.log('[processar-autos] PDF bytes restored for Gemini fallback');
+            }
+
             // Check if fallback is also Mistral - if so, fall through to Gemini
             if (pdfFallbackProvider === 'mistral-ocr') {
-              console.log('[processar-autos] Fallback is also Mistral OCR, using Gemini as final fallback...');
-            } else if (pdfFallbackProvider === 'mistral-ocr') {
-              // Retry with Mistral but this shouldn't happen
-              throw mistralError;
+              console.log('[processar-autos] Fallback is also Mistral OCR, falling through to Gemini...');
+            } else {
+              console.log('[processar-autos] Falling through to Gemini fallback flow...');
             }
-            // Fall through to original flow
+            // Fall through to original flow (if !extractedData block below)
           }
         }
       }
