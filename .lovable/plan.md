@@ -1,95 +1,83 @@
 
-# Avaliação e Plano — Modo Debug nos Geradores DOCX e PDF
+# Plano — Correção da Tabulação Estranha no DOCX com Justificação
 
-## Diagnóstico do Estado Atual
+## Diagnóstico Completo da Causa Raiz
 
-Após leitura integral de ambos os arquivos, o estado é:
+O problema é **100% identificado e documentado na especificação OOXML**. Não é um bug do gerador — é um comportamento padrão do Word com justificação que exige uma configuração explícita para ser desativado.
 
-**`generateLaudoDOCX.ts` (916 linhas):**
-- `sanitizeMarkdown` na linha 68 — função pura, sem side effects
-- `isFieldEmpty` na linha 60 — função pura, sem side effects
-- `createParagraphs` na linha 213 — ponto central de consumo dos campos longos
-- A função principal `generateLaudoDOCX` começa na linha ~300 e consome `laudo.*` via `isFieldEmpty` + `createParagraphs` / `createLabeledField`
+### O que acontece tecnicamente
 
-**`generateLaudoPDF.ts` (955 linhas):**
-- `sanitizeMarkdown` na linha 81 — mesma estrutura
-- `isFieldEmpty` na linha 73 — mesma estrutura
-- `addParagraph` na linha 223 — função central que já chama `sanitizeMarkdown` internamente
+Quando o `createParagraphs` divide o texto em blocos por `\n\n` e, dentro de cada bloco, usa `TextRun({ break: 1 })` para representar quebras simples (`\n`), o documento DOCX resultante contém internamente o equivalente ao **Shift+Enter** (soft line break) do Word.
 
----
+O comportamento padrão do Word ao encontrar um parágrafo justificado com soft line breaks é: **expandir cada linha incompleta até a margem direita**, distribuindo os espaços entre as palavras. Isso produz exatamente o efeito visto nas imagens — linhas com palavras separadas por espaços enormes.
 
-## Viabilidade: ALTA — Zero Risco
+O PDF não tem esse problema porque o mecanismo de layout do jsPDF opera pixel a pixel e não segue a lógica OOXML de "justificar linhas que terminam em Shift+Enter".
 
-As duas sugestões são implementáveis com segurança total porque:
+### Prova Técnica (OOXML Spec)
 
-1. **Controladas por flag de ambiente** — o debug usa `import.meta.env.DEV` (variável nativa do Vite que é `true` apenas em desenvolvimento local e nunca em produção). Não requer flag manual, configuração adicional ou parâmetro na função.
+A especificação Office Open XML define o elemento `<w:doNotExpandShiftReturn>` com a descrição exata:
 
-2. **Zero impacto em produção** — em build de produção (`npm run build`), o Vite remove automaticamente código morto dentro de `if (import.meta.env.DEV)` via tree-shaking. O bundle final não conterá os logs.
+> "Specifies whether applications should fully justify the contents of incomplete lines which end in a soft line break when the parent paragraph is fully justified."
 
-3. **Zero impacto na lógica** — os logs são inseridos como observadores passivos. Nenhuma variável de estado, nenhum retorno de função, nenhuma ordem de execução é alterada.
+Quando esse elemento está **ausente** (comportamento padrão), o Word justifica essas linhas. Quando está **presente**, o Word trata essas linhas como alinhadas à esquerda dentro do parágrafo justificado — o comportamento correto.
 
-4. **Não duplica processamento** — o debug captura o valor original ANTES de sanitizar e o resultado DEPOIS, sem chamar `sanitizeMarkdown` duas vezes (captura o resultado já computado).
+### Disponibilidade na Biblioteca
+
+Verificado diretamente em `node_modules/docx/dist/index.d.ts`:
+
+- Linha 925: `readonly doNotExpandShiftReturn?: boolean;` — disponível em `ICompatibilityOptions`
+- Linha 1435: `readonly compatibility?: ICompatibilityOptions;` — disponível em `IPropertiesOptions` (passado ao `new Document({...})`)
+
+**Conclusão: a correção é aplicada em uma única linha do Document constructor, sem alterar nenhuma lógica existente.**
 
 ---
 
 ## O que Será Implementado
 
-### Operação A — `debugField` em `generateLaudoDOCX.ts`
+### Operação Única — Adicionar `compatibility.doNotExpandShiftReturn` ao `Document`
 
-Uma função utilitária de debug inserida logo após `isFieldEmpty` (linha 65), ativa somente em `DEV`:
+No arquivo `src/utils/generateLaudoDOCX.ts`, na criação do `new Document({...})` que começa na linha 897, adicionar:
 
 ```typescript
-const debugField = (fieldName: string, value: string | null | undefined): void => {
-  if (!import.meta.env.DEV) return;
-  const empty = isFieldEmpty(value);
-  const original = (value ?? "").substring(0, 100);
-  const sanitized = empty ? "[SUPRIMIDO]" : sanitizeMarkdown(value!).substring(0, 100);
-  console.group(`[DOCX DEBUG] ${fieldName}`);
-  console.log("Original :", original || "(vazio)");
-  console.log("Sanitized:", sanitized);
-  console.log("isEmpty  :", empty);
-  console.groupEnd();
-};
+const doc = new Document({
+  compatibility: {
+    doNotExpandShiftReturn: true,  // ← ÚNICA MUDANÇA
+  },
+  sections: [
+    {
+      // ... resto sem alteração
+    },
+  ],
+});
 ```
 
-Esta função será chamada em **todos os campos longos** da função principal — nos pontos onde `isFieldEmpty` já é chamado, adicionando `debugField("nomeDoCampo", laudo.campo)` logo abaixo, sem alterar nenhuma lógica.
-
-Campos cobertos pelo debug no DOCX:
-- `resumoPeticaoInicial`, `resumoContestacao`, `metodologiaPericial`
-- `descricaoTecnicaDoencas`, `nexoCausalJustificativa`
-- `analiseIncapacidadeLaboral`, `conclusaoAnalise`
-- `laudosMedicos`, `examesComplementares`
-- `processoVara`, `processoNumero`, `reclamante`, `reclamada`
-
-### Operação B — `debugField` em `generateLaudoPDF.ts`
-
-Mesma função `debugField` inserida após `isFieldEmpty` (linha 78), com prefixo `[PDF DEBUG]`. O PDF usa `addParagraph` como ponto central que já chama `sanitizeMarkdown` internamente, então os logs serão inseridos nos pontos de chamada da função principal, analogamente ao DOCX.
-
-### Saída Visual no Console (exemplo)
-
-```
-[DOCX DEBUG] resumoPeticaoInicial
-  Original : ### 1. DEMANDAS CRÍTICAS\n*   **Capacidade de Resistência à Fadiga:** Nece...
-  Sanitized: 1. DEMANDAS CRÍTICAS\nCAPACIDADE DE RESISTÊNCIA À FADIGA: Nece...
-  isEmpty  : false
-
-[DOCX DEBUG] conclusaoAnalise
-  Original : [INSERIR CID/DOENÇA, EX: SÍNDROME DO TÚNEL DO CARPO...]
-  Sanitized: [SUPRIMIDO]
-  isEmpty  : true
-```
+Isso insere `<w:compat><w:doNotExpandShiftReturn/></w:compat>` no XML do documento, instruindo o Word (e LibreOffice) a não justificar linhas que terminam em soft line break.
 
 ---
 
-## Escopo dos Arquivos
+## Por que esta é a Abordagem Correta
+
+Foram consideradas e descartadas alternativas menos seguras:
+
+| Alternativa | Problema |
+|---|---|
+| Trocar `AlignmentType.BOTH` por `AlignmentType.LEFT` | Elimina a justificação — visual inferior para documentos jurídicos |
+| Quebrar por `\n` em parágrafos separados em vez de `break: 1` | Exigiria reescrever `createParagraphs` inteiramente, quebraria o espaçamento entre parágrafos e eliminaria o recuo visual das quebras simples dentro de um mesmo bloco |
+| Usar `DISTRIBUTE` como tipo de alinhamento | Distribui letras individualmente — pior resultado visual |
+| Pós-processar o XML do DOCX para remover `w:br` | Frágil, requer parse de XML, alto risco de regressão |
+
+A abordagem de `doNotExpandShiftReturn` é a solução **oficial OOXML** para exatamente este problema — documentada na especificação e disponível na versão instalada da biblioteca.
+
+---
+
+## Escopo da Mudança
 
 | Arquivo | Mudança |
 |---|---|
-| `src/utils/generateLaudoDOCX.ts` | Adicionar função `debugField` + chamadas nos campos longos |
-| `src/utils/generateLaudoPDF.ts` | Adicionar função `debugField` + chamadas nos campos longos |
+| `src/utils/generateLaudoDOCX.ts` | Adicionar `compatibility: { doNotExpandShiftReturn: true }` ao `new Document({})` |
 
-- Nenhuma migração de banco
-- Nenhuma edge function
-- Nenhum prompt alterado
-- Nenhuma dependência nova
-- Zero impacto em produção (Vite elimina `import.meta.env.DEV` no build)
+- Nenhuma alteração nas funções `createParagraphs`, `createParagraph`, `sanitizeMarkdown`, `isFieldEmpty` ou `debugField`
+- Zero impacto no gerador de PDF
+- Zero impacto nas correções implementadas nas sessões anteriores
+- Nenhuma migração de banco, edge function ou dependência nova
+- Compatível com Word 2007+, Word 365 e LibreOffice Writer
