@@ -25,7 +25,7 @@
  1. NÃO RESUMA. Extraia o MÁXIMO de detalhes disponíveis no documento.
  2. Campos de texto descritivo devem ter NO MÍNIMO 3 parágrafos quando a informação existir.
  3. Use linguagem técnica MÉDICO-LEGAL apropriada para laudos periciais trabalhistas.
- 4. Estruture as informações em tópicos/listas quando apropriado para maior clareza.
+ 4. Use APENAS texto plano nas respostas. Separe itens com quebras de linha. NUNCA use formatação Markdown (asteriscos, negritos, bullets) dentro dos valores JSON.
  5. Extraia APENAS o que está EXPLÍCITO no documento - não invente informações.
  6. Campos não encontrados = "" (string vazia) ou [] (array vazio).
  7. Datas no formato: YYYY-MM-DD
@@ -151,7 +151,7 @@ A reclamada é a parte ré (geralmente a empresa).`
   prompt_import_historicoOcupacional: {
     section: 'Histórico Ocupacional',
      order: 3,
-    prompt: `**EXTRAÇÃO OBRIGATÓRIA** - Liste CRONOLOGICAMENTE todos os empregos anteriores com detalhes:
+    prompt: `EXTRAÇÃO OBRIGATÓRIA - Liste CRONOLOGICAMENTE todos os empregos anteriores com detalhes:
 - Nome da empresa, período de trabalho (início e término)
 - Cargo/função exercida em cada emprego
 - Atividades desenvolvidas em cada função
@@ -164,7 +164,7 @@ MÍNIMO 2 parágrafos ou lista cronológica completa. Busque em CTPS, PPP, depoi
   prompt_import_historiaAcidente: {
     section: 'História do Acidente',
      order: 4,
-    prompt: `**EXTRAÇÃO DETALHADA OBRIGATÓRIA** - Extraia e detalhe ao máximo a descrição do acidente/evento:
+    prompt: `EXTRAÇÃO DETALHADA OBRIGATÓRIA - Extraia e detalhe ao máximo a descrição do acidente/evento:
 - data: Data exata do evento traumático (YYYY-MM-DD)
 - descricao: TRANSCREVA INTEGRALMENTE a descrição do acidente/evento.
   Inclua TODOS os detalhes: circunstâncias, local exato, horário aproximado, 
@@ -219,7 +219,7 @@ MÍNIMO 2 parágrafos ou lista cronológica completa. Busque em CTPS, PPP, depoi
  - Acompanhamento especializado (especialidade, frequência, conduta)
  - Procedimentos invasivos (infiltrações, bloqueios, etc.)
  - Uso de órteses ou próteses
- ESTRUTURE em lista quando possível. Seja específico com datas e resultados.`
+ Separe cada tratamento com uma quebra de linha. Seja específico com datas e resultados.`
    },
    
    // Seção: Afastamentos
@@ -288,13 +288,15 @@ MÍNIMO 2 parágrafos ou lista cronológica completa. Busque em CTPS, PPP, depoi
  - Recomendações e restrições médicas
  - Limitações funcionais apontadas
  - Prognóstico se mencionado
- ESTRUTURE por documento. Liste cada laudo separadamente.
- Exemplo de formato esperado:
- "**Laudo Dr. [Nome] - [Especialidade] (DD/MM/AAAA):**
- - Diagnósticos: [listar com CIDs]
- - Conclusões: [descrever]
- - Recomendações: [descrever]
- - Limitações: [listar]"`
+  ESTRUTURE por documento. Liste cada laudo separadamente usando texto plano.
+  Exemplo de formato esperado:
+  LAUDO 1
+  Data: DD/MM/AAAA
+  Médico: Dr. Nome - Especialidade
+  Diagnósticos: listar com CIDs
+  Conclusões: descrever
+  Recomendações: descrever
+  Limitações: descrever`
    },
    
    // Seção: Exames Complementares
@@ -307,8 +309,13 @@ MÍNIMO 2 parágrafos ou lista cronológica completa. Busque em CTPS, PPP, depoi
  - Região/área examinada
  - Resultados e achados principais
  - Conclusão do laudo do exame
- Exemplo: "**RNM Coluna Lombar (15/03/2023):** Protrusão discal L4-L5, abaulamento discal L5-S1, estenose foraminal à direita."
- NÃO RESUMA. Liste todos os achados de cada exame.`
+  Exemplo de formato esperado (texto plano):
+  EXAME 1
+  Tipo e Região: RNM Coluna Lombar
+  Data: 15/03/2023
+  Resultados: Protrusão discal L4-L5, abaulamento discal L5-S1, estenose foraminal à direita.
+  Conclusão: descrever
+  NÃO RESUMA. Liste todos os achados de cada exame.`
    },
    
    // Seção: Exame Físico
@@ -390,7 +397,7 @@ MÍNIMO 2 parágrafos ou lista cronológica completa. Busque em CTPS, PPP, depoi
    prompt_import_quesitos: {
     section: 'Quesitos',
      order: 18,
-    prompt: `**EXTRAÇÃO INTEGRAL OBRIGATÓRIA** - Os quesitos são perguntas técnicas formuladas pelo Juízo e pelas partes para serem respondidas pelo perito.
+    prompt: `EXTRAÇÃO INTEGRAL OBRIGATÓRIA - Os quesitos são perguntas técnicas formuladas pelo Juízo e pelas partes para serem respondidas pelo perito.
  É ABSOLUTAMENTE ESSENCIAL extrair TODOS os quesitos INTEGRALMENTE, pois são a base do laudo pericial.
  
  QUESITOS DO JUÍZO:
