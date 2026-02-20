@@ -1074,16 +1074,17 @@ const results = {
   const hasHistoryContext = !!contexto.historiaAtual || !!contexto.historiaAcidente || !!contexto.historicoOcupacional;
   const hasMedicalContext = !!contexto.cids || !!contexto.examesComplementares || !!contexto.laudosMedicos || !!contexto.lesoesDescritas;
 
+  // PRIORITY ORDER: Most critical summaries first, least critical last
+  // If the function crashes mid-way, the most important summaries are already saved
   const summariesToGenerate: Array<{ tipo: string; shouldGenerate: boolean; step: string; progress: number }> = [
-    { tipo: 'resumo_peticao', shouldGenerate: !!contexto.peticaoInicial, step: 'Gerando resumo da petição inicial...', progress: 45 },
-    { tipo: 'resumo_contestacao', shouldGenerate: !!contexto.contestacao, step: 'Gerando resumo da contestação...', progress: 55 },
-    // descricao_doencas: gerar se tiver CIDs, ou se tiver histórico ou dados médicos relevantes
-    { tipo: 'descricao_doencas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando descrição técnica das doenças...', progress: 65 },
-    // nexo_causal: gerar se tiver qualquer contexto relevante
-    { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Analisando nexo causal...', progress: 75 },
-    // incapacidade: gerar se tiver CIDs, exames, histórico ou dados médicos
-    { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares || hasHistoryContext || hasMedicalContext, step: 'Analisando incapacidade laboral...', progress: 85 },
-    // referencias_bibliograficas: gerar se tiver qualquer contexto relevante
+    // PRIORITY 1: Technical-scientific summaries (most important)
+    { tipo: 'descricao_doencas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando descrição técnica das doenças...', progress: 50 },
+    { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Analisando nexo causal...', progress: 60 },
+    { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares || hasHistoryContext || hasMedicalContext, step: 'Analisando incapacidade laboral...', progress: 70 },
+    // PRIORITY 2: Case summaries
+    { tipo: 'resumo_peticao', shouldGenerate: !!contexto.peticaoInicial, step: 'Gerando resumo da petição inicial...', progress: 80 },
+    { tipo: 'resumo_contestacao', shouldGenerate: !!contexto.contestacao, step: 'Gerando resumo da contestação...', progress: 85 },
+    // PRIORITY 3: Least critical (database has default value for this field)
     { tipo: 'referencias_bibliograficas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando referências bibliográficas...', progress: 92 }
   ];
 
@@ -1154,6 +1155,27 @@ const results = {
       if (tipo in results) {
         (results as any)[tipo] = result.text;
         summariesGenerated++;
+        
+        // PROGRESSIVE SAVE: Persist partial results after each successful summary
+        // If the function crashes on the next summary, these results are preserved
+        try {
+          await supabaseAdmin
+            .from('import_jobs')
+            .update({ 
+              result: { 
+                partial: true, 
+                resumos_parciais: { ...results },
+                summariesGenerated,
+                lastCompletedSummary: tipo,
+                updatedAt: new Date().toISOString()
+              },
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', jobId);
+          console.log(`[gerarResumosIA] Progressive save: ${summariesGenerated} summaries saved after ${tipo}`);
+        } catch (saveError) {
+          console.warn(`[gerarResumosIA] Failed to save partial results:`, saveError);
+        }
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
@@ -1405,6 +1427,13 @@ async function processarChunkedPDFBackground(
 
     let extractedData = ensureValidStructure(parsedResult);
     console.log('[processar-autos-chunked] Data structured successfully');
+
+    // MEMORY: Free large objects no longer needed for summary generation
+    // @ts-ignore - intentional null assignment for memory relief
+    textForFilling = null;
+    // @ts-ignore
+    parsedResult = null;
+    console.log('[processar-autos-chunked] MEMORY: Freed extraction text before summaries');
 
     // PHASE 3: Generate AI summaries
     timings.summaries.start = Date.now();
@@ -2596,6 +2625,12 @@ async function processarPDFBackground(
       console.warn("[processar-autos] Response was truncated due to max tokens limit");
     }
     console.log("[processar-autos] Successfully extracted data from PDF");
+
+    // MEMORY: Free large objects no longer needed for summary generation
+    // visionResult holds the full OCR/extraction text - can be very large
+    // @ts-ignore - intentional null assignment for memory relief
+    visionResult = null;
+    console.log('[processar-autos] MEMORY: Freed visionResult before summaries');
 
     // Generate AI summaries with progress updates
     console.log("[processar-autos] Starting AI summary generation...");
