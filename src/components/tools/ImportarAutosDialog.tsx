@@ -274,6 +274,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   }>>([]);
   const [currentUploadingPart, setCurrentUploadingPart] = useState(0);
 
+  // Cancel confirmation state
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+
   // Check if user is developer and fetch AI config
   useEffect(() => {
     const checkDeveloperAndFetchConfig = async () => {
@@ -1147,6 +1150,33 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     }
   };
 
+  // Forced cancel during active processing — stops polling and resets all state to idle
+  const handleForcedCancel = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    setShowCancelConfirm(false);
+    setProcessingStep("idle");
+    setAnalysisStep("");
+    setAnalysisProgress(0);
+    setIsSplitting(false);
+    networkErrorCountRef.current = 0;
+    setIsReconnecting(false);
+    setIsJobStale(false);
+    lastJobUpdateRef.current = null;
+    staleCheckCountRef.current = 0;
+    setIsSlowAI(false);
+    setSlowSteps([]);
+    setStepsStatus(PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' })));
+    lastStepIdRef.current = null;
+    toast({
+      variant: "destructive",
+      title: "Importação cancelada",
+      description: "O processo foi interrompido. Você pode selecionar outro arquivo.",
+    });
+  };
+
   const handleClose = () => {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
@@ -1179,6 +1209,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     // Reset network error tracking
     networkErrorCountRef.current = 0;
     setIsReconnecting(false);
+    // Reset cancel confirmation
+    setShowCancelConfirm(false);
     // Reset client-side splitting state
     setIsSplitting(false);
     setSplitProgress(0);
@@ -1627,7 +1659,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         if (!isOpen && isProcessingActive) {
           toast({
             title: "Processamento em andamento",
-            description: "Aguarde a conclusão ou use 'Cancelar' para interromper.",
+            description: "Use o botão 'Cancelar importação' abaixo para interromper.",
           });
           return;
         }
@@ -1827,6 +1859,48 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               <p className="text-xs text-center text-muted-foreground">
                 Processamento local para evitar erros de memória no servidor.
               </p>
+
+              {/* Cancel button during splitting */}
+              {!showCancelConfirm ? (
+                <div className="pt-1 flex justify-center">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowCancelConfirm(true)}
+                    className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 text-xs gap-1.5"
+                  >
+                    <XCircle className="h-3.5 w-3.5" />
+                    Cancelar importação
+                  </Button>
+                </div>
+              ) : (
+                <Alert className="border-destructive/50 bg-destructive/10">
+                  <AlertTriangle className="h-4 w-4 text-destructive" />
+                  <AlertTitle className="text-destructive">Cancelar importação?</AlertTitle>
+                  <AlertDescription className="text-destructive/80">
+                    O processamento em andamento será perdido. Você precisará iniciar uma nova importação.
+                  </AlertDescription>
+                  <div className="flex gap-2 mt-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowCancelConfirm(false)}
+                      className="text-xs"
+                    >
+                      Continuar processando
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleForcedCancel}
+                      className="text-xs"
+                    >
+                      <XCircle className="h-3.5 w-3.5 mr-1" />
+                      Confirmar cancelamento
+                    </Button>
+                  </div>
+                </Alert>
+              )}
             </div>
           )}
 
@@ -2054,6 +2128,48 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   {analysisProgress}% concluído
                 </p>
               </div>
+
+              {/* Cancel button during analyzing */}
+              {!showCancelConfirm ? (
+                <div className="pt-1 flex justify-center">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowCancelConfirm(true)}
+                    className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 text-xs gap-1.5"
+                  >
+                    <XCircle className="h-3.5 w-3.5" />
+                    Cancelar importação
+                  </Button>
+                </div>
+              ) : (
+                <Alert className="border-destructive/50 bg-destructive/10">
+                  <AlertTriangle className="h-4 w-4 text-destructive" />
+                  <AlertTitle className="text-destructive">Cancelar importação?</AlertTitle>
+                  <AlertDescription className="text-destructive/80">
+                    O processamento em andamento será perdido. Você precisará iniciar uma nova importação.
+                  </AlertDescription>
+                  <div className="flex gap-2 mt-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowCancelConfirm(false)}
+                      className="text-xs"
+                    >
+                      Continuar processando
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleForcedCancel}
+                      className="text-xs"
+                    >
+                      <XCircle className="h-3.5 w-3.5 mr-1" />
+                      Confirmar cancelamento
+                    </Button>
+                  </div>
+                </Alert>
+              )}
             </div>
           )}
 
