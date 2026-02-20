@@ -15,8 +15,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Timeout for individual summary generation (2 minutes)
-const SUMMARY_TIMEOUT_MS = 120000;
+// Timeout for individual summary generation (90 seconds)
+const SUMMARY_TIMEOUT_MS = 90000;
 
 // Constants for PDF processing limits
 const GEMINI_PROCESSING_LIMIT = 45_000_000; // 45MB - max size for single Gemini call
@@ -995,7 +995,8 @@ async function gerarResumosIA(
   extractedData: any, 
   supabaseAdmin: any, 
   jobId: string,
-  userId: string
+  userId: string,
+  functionStartTime?: number
 ): Promise<{
   resumos: {
     resumo_peticao: string;
@@ -1099,6 +1100,24 @@ const results = {
   // Generate summaries sequentially with progress updates
   for (const { tipo, shouldGenerate, step, progress } of summariesToGenerate) {
     if (!shouldGenerate) continue;
+
+    // Check remaining time budget (600s wall_clock_limit)
+    if (functionStartTime) {
+      const WALL_CLOCK_LIMIT_MS = 600_000;
+      const SAFETY_MARGIN_MS = 30_000; // 30s margin to finalize
+      const elapsed = Date.now() - functionStartTime;
+      const remaining = WALL_CLOCK_LIMIT_MS - elapsed;
+
+      if (remaining < SAFETY_MARGIN_MS) {
+        console.warn(`[gerarResumosIA] Time budget exhausted (${Math.round(elapsed/1000)}s elapsed). Skipping remaining summaries.`);
+        await logWarn('processar-autos', 
+          `Orcamento de tempo esgotado apos ${Math.round(elapsed/1000)}s. Resumos restantes pulados.`, 
+          jobId, { skipped: tipo, elapsed: Math.round(elapsed/1000) }
+        );
+        summaryErrors.push(`${tipo}: Tempo limite da funcao atingido`);
+        break;
+      }
+    }
 
     try {
       // Update progress with step_id for frontend tracking
@@ -1397,7 +1416,9 @@ async function processarChunkedPDFBackground(
       updated_at: new Date().toISOString()
     }).eq('id', jobId);
 
-    const resumosResult = await gerarResumosIA(extractedData, supabaseAdmin, jobId, userId);
+    startHeartbeat('AI summary generation (chunked)');
+    const resumosResult = await gerarResumosIA(extractedData, supabaseAdmin, jobId, userId, timings.total.start);
+    stopHeartbeat();
     
     timings.summaries.end = Date.now();
     
@@ -2193,6 +2214,12 @@ async function processarPDFBackground(
             console.error('[processar-autos] Mistral OCR failed:', mistralError);
             await logWarn('processar-autos', `Mistral OCR falhou: ${mistralError instanceof Error ? mistralError.message : 'Erro'}`, jobId);
 
+            // Update current_step so frontend detects fallback
+            await supabaseAdmin.from('import_jobs').update({ 
+              current_step: 'Mistral OCR falhou, usando Gemini como fallback...',
+              updated_at: new Date().toISOString()
+            }).eq('id', jobId);
+
             // Restore bytes so Gemini fallback has data to work with
             if (!pdfBytes && pdfBytesBackup) {
               pdfBytes = pdfBytesBackup;
@@ -2576,7 +2603,9 @@ async function processarPDFBackground(
     // Start summaries timing
     timings.summaries.start = Date.now();
     
-    const resumosResult = await gerarResumosIA(extractedData, supabaseAdmin, jobId, userId);
+    startHeartbeat('AI summary generation');
+    const resumosResult = await gerarResumosIA(extractedData, supabaseAdmin, jobId, userId, timings.total.start);
+    stopHeartbeat();
     
     // End summaries timing
     timings.summaries.end = Date.now();

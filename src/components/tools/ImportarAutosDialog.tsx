@@ -1986,6 +1986,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                     {formatProviderName(aiConfig.provider)} • {formatModelName(aiConfig.model)}
                   </Badge>
                 )}
+
+                {/* Fallback Indicator - Shown when OCR provider falls back */}
+                {analysisStep && (
+                  analysisStep.toLowerCase().includes('fallback') || 
+                  analysisStep.toLowerCase().includes('falhou')
+                ) && (
+                  <Badge 
+                    variant="outline" 
+                    className="mt-2 text-xs flex items-center gap-1.5 border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    IA de fallback assumiu
+                  </Badge>
+                )}
               </div>
               
               {/* Lista de etapas */}
