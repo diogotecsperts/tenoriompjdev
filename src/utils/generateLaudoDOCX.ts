@@ -45,14 +45,15 @@ const FONT = {
 
 // Padrões que indicam campo técnico/vazio que NÃO deve aparecer no documento
 const PLACEHOLDER_PATTERNS = [
-  /^\[.+\]/,               // [INSERIR algo] ou [VARA] etc
-  /^erro\s*cr[ií]tico/i,   // "erro crítico: ..."
-  /^aguardando/i,           // "aguardando..."
+  /\[INSERIR/i,              // [INSERIR algo] em qualquer posição
+  /\[.{3,}\]/,              // [qualquer placeholder] de 3+ chars
+  /^erro\s*cr[ií]tico/i,    // "erro crítico: ..."
+  /^aguardando/i,            // "aguardando..."
   /^undefined$/i,
   /^null$/i,
   /^n\/a$/i,
-  /^-{2,}$/,               // só traços
-  /^erro:/i,               // "Erro: ..."
+  /^-{2,}$/,                // só traços
+  /^erro:/i,                // "Erro: ..."
 ];
 
 // Verifica se o campo está vazio ou contém conteúdo inválido/técnico
@@ -705,10 +706,10 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
       alignment: AlignmentType.CENTER,
       spacing: { after: 80 },
     }),
-    new Paragraph({
+    ...((!isFieldEmpty(laudo.peritoNome)) ? [new Paragraph({
       children: [
         new TextRun({
-          text: laudo.peritoNome?.toUpperCase() || "MÉDICO PERITO",
+          text: laudo.peritoNome!.toUpperCase(),
           bold: true,
           size: FONT.sizeTitle,
           color: COLORS.text,
@@ -717,15 +718,15 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
       ],
       alignment: AlignmentType.CENTER,
       spacing: { after: 40 },
-    })
+    })] : [])
   );
 
-  if (laudo.peritoEspecialidade) {
+  if (!isFieldEmpty(laudo.peritoEspecialidade)) {
     paragraphs.push(
       new Paragraph({
         children: [
           new TextRun({
-            text: laudo.peritoEspecialidade,
+            text: laudo.peritoEspecialidade!,
             size: FONT.sizeDefault,
             color: COLORS.text,
             font: FONT.name,
@@ -737,7 +738,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
     );
   }
 
-  if (laudo.peritoCRM) {
+  if (!isFieldEmpty(laudo.peritoCRM)) {
     paragraphs.push(
       new Paragraph({
         children: [
