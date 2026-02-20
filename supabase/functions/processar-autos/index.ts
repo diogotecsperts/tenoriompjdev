@@ -2626,8 +2626,12 @@ async function processarPDFBackground(
     }
     console.log("[processar-autos] Successfully extracted data from PDF");
 
-    // Save finishReason before freeing memory
+    // Save all visionResult metadata before freeing memory
     const visionFinishReason = visionResult?.finishReason || 'STOP';
+    const visionProvider = visionResult?.provider || 'unknown';
+    const visionUsedFallback = visionResult?.usedFallback || false;
+    const visionOriginalProvider = visionResult?.originalProvider;
+    const visionFallbackReason = visionResult?.fallbackReason;
     // MEMORY: Free large objects no longer needed for summary generation
     // visionResult holds the full OCR/extraction text - can be very large
     // @ts-ignore - intentional null assignment for memory relief
@@ -2685,12 +2689,12 @@ async function processarPDFBackground(
       } : null,
       aiUsage: {
         pdfExtraction: {
-          provider: visionResult?.provider || 'unknown',
+          provider: visionProvider,
           model: modelUsed,
           durationMs: pdfExtractionDuration,
-          usedFallback: visionResult?.usedFallback || false,
-          originalProvider: visionResult?.originalProvider,
-          fallbackReason: visionResult?.fallbackReason,
+          usedFallback: visionUsedFallback,
+          originalProvider: visionOriginalProvider,
+          fallbackReason: visionFallbackReason,
           strategy: usesTwoPhase ? 'two_phase' : 'single_pass'
         },
         summaries: {
