@@ -1179,15 +1179,55 @@ const results = {
       }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
-      console.error(`[gerarResumosIA] Error generating ${tipo}:`, error);
-      summaryErrors.push(`${tipo}: ${errorMsg}`);
+      const isTimeout = errorMsg.includes('Timeout');
       
-      // Log error to backend_logs for visibility in DevPanel
-      await logError('processar-autos', `Falha ao gerar ${tipo}: ${errorMsg}`, jobId, { 
-        tipo, 
-        provider: aiConfig.provider, 
-        model: aiConfig.model 
-      });
+      // Retry once with extended timeout for timeout errors (covers slow providers like GLM-5)
+      if (isTimeout) {
+        console.warn(`[gerarResumosIA] Timeout on ${tipo}, retrying with extended timeout (180s)...`);
+        await supabaseAdmin
+          .from('import_jobs')
+          .update({ 
+            current_step: `Tentando novamente ${tipo} (timeout)...`,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', jobId);
+        
+        try {
+          const retryPrompt = await getPromptForType(tipo, contexto);
+          const retryTimeout = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error(`Retry timeout após 180s`)), 180_000);
+          });
+          const retryResult = await Promise.race([
+            callAI(aiConfig, summarySystemPrompt, retryPrompt, {
+              promptType: tipo, userId
+            }),
+            retryTimeout
+          ]);
+          
+          console.log(`[gerarResumosIA] Retry succeeded for ${tipo}`);
+          if (tipo in results) {
+            (results as any)[tipo] = retryResult.text;
+            summariesGenerated++;
+            // Progressive save after retry success
+            try {
+              await supabaseAdmin.from('import_jobs').update({ 
+                result: { partial: true, resumos_parciais: { ...results }, summariesGenerated, lastCompletedSummary: tipo, updatedAt: new Date().toISOString() },
+                updated_at: new Date().toISOString()
+              }).eq('id', jobId);
+              console.log(`[gerarResumosIA] Progressive save after retry: ${summariesGenerated} summaries saved after ${tipo}`);
+            } catch {}
+          }
+        } catch (retryError) {
+          const retryMsg = retryError instanceof Error ? retryError.message : 'Erro no retry';
+          console.error(`[gerarResumosIA] Retry also failed for ${tipo}:`, retryMsg);
+          summaryErrors.push(`${tipo}: ${errorMsg} (retry: ${retryMsg})`);
+          await logError('processar-autos', `Falha ao gerar ${tipo}: ${errorMsg} (retry falhou)`, jobId, { tipo, provider: aiConfig.provider, model: aiConfig.model });
+        }
+      } else {
+        console.error(`[gerarResumosIA] Error generating ${tipo}:`, error);
+        summaryErrors.push(`${tipo}: ${errorMsg}`);
+        await logError('processar-autos', `Falha ao gerar ${tipo}: ${errorMsg}`, jobId, { tipo, provider: aiConfig.provider, model: aiConfig.model });
+      }
     }
   }
 
