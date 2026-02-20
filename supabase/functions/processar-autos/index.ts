@@ -2036,8 +2036,10 @@ async function processarPDFBackground(
           console.warn('[processar-autos] Mistral key not found, falling back to Gemini');
           await logWarn('processar-autos', 'MISTRAL_API_KEY não configurada, usando Gemini como fallback', jobId);
         } else {
-          try {
-            await supabaseAdmin.from('import_jobs').update({ 
+           // Declared outside try/catch so catch can access it if Mistral fails
+           let pdfBytesBackup: Uint8Array | null = null;
+           try {
+             await supabaseAdmin.from('import_jobs').update({
               current_step: 'Extraindo texto com Mistral OCR (Elite)...',
               updated_at: new Date().toISOString()
             }).eq('id', jobId);
@@ -2069,7 +2071,7 @@ async function processarPDFBackground(
             }
 
             // Preserve bytes reference so Gemini fallback has data if Mistral fails
-            const pdfBytesBackup = bytesForMistral;
+            pdfBytesBackup = bytesForMistral;
             
             let mistralRawText = '';
             let mistralPageCount = 0;
