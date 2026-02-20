@@ -895,6 +895,9 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   );
 
   const doc = new Document({
+    compatibility: {
+      doNotExpandShiftReturn: true, // Evita justificação de linhas que terminam em soft line break (Shift+Enter / w:br)
+    },
     sections: [
       {
         properties: {
