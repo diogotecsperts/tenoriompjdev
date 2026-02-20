@@ -32,7 +32,7 @@ const defaultSystemPrompt = `Você é um perito médico especialista em medicina
 1. NÃO RESUMA. Extraia o MÁXIMO de detalhes disponíveis no documento.
 2. Campos de texto descritivo devem ter NO MÍNIMO 3 parágrafos quando a informação existir.
 3. Use linguagem técnica MÉDICO-LEGAL apropriada para laudos periciais trabalhistas.
-4. Estruture as informações em tópicos/listas quando apropriado para maior clareza.
+4. Use APENAS texto plano nas respostas. Separe itens com quebras de linha. NUNCA use formatação Markdown (asteriscos, negritos, bullets) dentro dos valores JSON.
 5. Extraia APENAS o que está EXPLÍCITO no documento - não invente informações.
 6. Campos não encontrados = "" (string vazia) ou [] (array vazio).
 7. Datas no formato: YYYY-MM-DD
@@ -182,7 +182,7 @@ const defaultSystemPrompt = `Você é um perito médico especialista em medicina
         - Acompanhamento especializado (especialidade, frequência, conduta)
         - Procedimentos invasivos (infiltrações, bloqueios, etc.)
         - Uso de órteses ou próteses
-        ESTRUTURE em lista quando possível. Seja específico com datas e resultados.
+        Separe cada tratamento com uma quebra de linha. Seja específico com datas e resultados.
 
    5.5. afastamentos:
         Liste TODOS os períodos de afastamento do trabalho com precisão:
@@ -206,13 +206,15 @@ const defaultSystemPrompt = `Você é um perito médico especialista em medicina
         - Recomendações e restrições médicas
         - Limitações funcionais apontadas
         - Prognóstico se mencionado
-        ESTRUTURE por documento. Liste cada laudo separadamente.
-        Exemplo de formato esperado:
-        "**Laudo Dr. [Nome] - [Especialidade] (DD/MM/AAAA):**
-        - Diagnósticos: [listar com CIDs]
-        - Conclusões: [descrever]
-        - Recomendações: [descrever]
-        - Limitações: [listar]"
+         ESTRUTURE por documento. Liste cada laudo separadamente usando texto plano.
+         Exemplo de formato esperado:
+         LAUDO 1
+         Data: DD/MM/AAAA
+         Médico: Dr. Nome - Especialidade
+         Diagnósticos: listar com CIDs
+         Conclusões: descrever
+         Recomendações: descrever
+         Limitações: descrever
 
    6.2. exames_complementares:
         Liste CADA exame separadamente com estrutura:
@@ -221,7 +223,12 @@ const defaultSystemPrompt = `Você é um perito médico especialista em medicina
         - Região/área examinada
         - Resultados e achados principais
         - Conclusão do laudo do exame
-        Exemplo: "**RNM Coluna Lombar (15/03/2023):** Protrusão discal L4-L5, abaulamento discal L5-S1, estenose foraminal à direita."
+         Exemplo de formato esperado (texto plano):
+         EXAME 1
+         Tipo e Região: RNM Coluna Lombar
+         Data: 15/03/2023
+         Resultados: Protrusão discal L4-L5, abaulamento discal L5-S1, estenose foraminal à direita.
+         Conclusão: descrever
         NÃO RESUMA. Liste todos os achados de cada exame.
 
    6.3. lesoes_descritas:
