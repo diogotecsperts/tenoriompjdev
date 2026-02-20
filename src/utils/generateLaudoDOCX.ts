@@ -43,14 +43,47 @@ const FONT = {
 
 // ========== FUNÇÕES AUXILIARES ==========
 
-// Sanitiza markdown convertendo **texto** e __texto__ para CAIXA ALTA
+// Padrões que indicam campo técnico/vazio que NÃO deve aparecer no documento
+const PLACEHOLDER_PATTERNS = [
+  /^\[.+\]/,               // [INSERIR algo] ou [VARA] etc
+  /^erro\s*cr[ií]tico/i,   // "erro crítico: ..."
+  /^aguardando/i,           // "aguardando..."
+  /^undefined$/i,
+  /^null$/i,
+  /^n\/a$/i,
+  /^-{2,}$/,               // só traços
+  /^erro:/i,               // "Erro: ..."
+];
+
+// Verifica se o campo está vazio ou contém conteúdo inválido/técnico
+const isFieldEmpty = (value: string | null | undefined): boolean => {
+  if (!value) return true;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return true;
+  return PLACEHOLDER_PATTERNS.some(pattern => pattern.test(trimmed));
+};
+
+// Sanitiza markdown — converte formatação para texto plano estruturado
 const sanitizeMarkdown = (text: string): string => {
   if (!text) return "";
   return text
-    .replace(/\*\*(.+?)\*\*/g, (_, p1) => p1.toUpperCase())
-    .replace(/__(.+?)__/g, (_, p1) => p1.toUpperCase())
-    .replace(/\*(.+?)\*/g, '$1')
-    .replace(/_(.+?)_/g, '$1');
+    // 1. Headings: ### Título → Título
+    .replace(/^#{1,6}\s+/gm, '')
+    // 2. Bold multi-linha → CAIXA ALTA (flag 's' para dotAll)
+    .replace(/\*\*(.+?)\*\*/gs, (_, p1) => p1.toUpperCase())
+    .replace(/__(.+?)__/gs, (_, p1) => p1.toUpperCase())
+    // 3. Bullets com asterisco no início de linha: "* item" → "item"
+    .replace(/^\*\s+/gm, '')
+    // 4. Itálico simples (após remover bullets)
+    .replace(/\*(.+?)\*/gs, '$1')
+    .replace(/_(.+?)_/gs, '$1')
+    // 5. Linhas separadoras: --- ou *** sozinhos numa linha
+    .replace(/^[-*]{3,}\s*$/gm, '')
+    // 6. Backtick code: `código` → código
+    .replace(/`(.+?)`/g, '$1')
+    // 7. Normalizar quebras de linha múltiplas
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 };
 
 const formatDate = (dateString: string): string => {
@@ -155,7 +188,7 @@ const createSubtitle = (title: string): Paragraph => {
   });
 };
 
-// Cria parágrafo justificado
+// Cria parágrafo justificado (para campos curtos/simples)
 const createParagraph = (text: string): Paragraph => {
   if (!text) return new Paragraph({});
   
@@ -172,6 +205,50 @@ const createParagraph = (text: string): Paragraph => {
     ],
     alignment: AlignmentType.BOTH,
     spacing: { after: 120 },
+  });
+};
+
+// Cria múltiplos parágrafos para campos longos — divide por \n\n e trata cada bloco
+const createParagraphs = (text: string): Paragraph[] => {
+  if (isFieldEmpty(text)) return [];
+  const sanitized = sanitizeMarkdown(text);
+  const blocks = sanitized.split('\n\n').filter(b => b.trim().length > 0);
+
+  return blocks.map(block => {
+    const lines = block.split('\n');
+    // Linha única em CAIXA ALTA sem pontuação final → subtítulo interno
+    const isSingleLineTitle =
+      lines.length === 1 &&
+      block.length < 80 &&
+      !block.endsWith('.') &&
+      !block.endsWith(',') &&
+      block === block.toUpperCase();
+
+    if (isSingleLineTitle) {
+      return createSubtitle(block);
+    }
+
+    // Quebras simples dentro do parágrafo → TextRun com break
+    const textRuns = lines.flatMap((line, i) => {
+      const runs: (TextRun)[] = [
+        new TextRun({
+          text: line,
+          size: FONT.sizeDefault,
+          color: COLORS.text,
+          font: FONT.name,
+        }),
+      ];
+      if (i < lines.length - 1) {
+        runs.push(new TextRun({ break: 1 }));
+      }
+      return runs;
+    });
+
+    return new Paragraph({
+      children: textRuns,
+      alignment: AlignmentType.BOTH,
+      spacing: { after: 120 },
+    });
   });
 };
 
@@ -240,7 +317,8 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   } catch { /* usa padrão */ }
 
   // ========== ENDEREÇAMENTO JUDICIAL ==========
-  paragraphs.push(
+  // Operação D: sem fallbacks literais — campos vazios simplesmente não aparecem
+  const judicialParagraphs: Paragraph[] = [
     new Paragraph({
       children: [
         new TextRun({
@@ -253,132 +331,143 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
       ],
       spacing: { before: 400, after: 80 },
     }),
-    new Paragraph({
-      children: [
-        new TextRun({
-          text: laudo.processoVara?.toUpperCase() || "[VARA]",
-          bold: true,
-          size: FONT.sizeSubtitle,
-          color: COLORS.text,
-          font: FONT.name,
-        }),
-      ],
-      spacing: { after: 300 },
-    }),
-    createLabeledField("Processo nº", laudo.processoNumero || "[NÚMERO]"),
-    createLabeledField("Reclamante", laudo.reclamante || "[RECLAMANTE]"),
-    createLabeledField("Reclamada", laudo.reclamada || "[RECLAMADA]"),
-    new Paragraph({ spacing: { after: 300 } })
-  );
+  ];
+  if (!isFieldEmpty(laudo.processoVara)) {
+    judicialParagraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: laudo.processoVara!.toUpperCase(),
+            bold: true,
+            size: FONT.sizeSubtitle,
+            color: COLORS.text,
+            font: FONT.name,
+          }),
+        ],
+        spacing: { after: 300 },
+      })
+    );
+  }
+  if (!isFieldEmpty(laudo.processoNumero)) judicialParagraphs.push(createLabeledField("Processo nº", laudo.processoNumero!));
+  if (!isFieldEmpty(laudo.reclamante)) judicialParagraphs.push(createLabeledField("Reclamante", laudo.reclamante!));
+  if (!isFieldEmpty(laudo.reclamada)) judicialParagraphs.push(createLabeledField("Reclamada", laudo.reclamada!));
+  judicialParagraphs.push(new Paragraph({ spacing: { after: 300 } }));
+  paragraphs.push(...judicialParagraphs);
 
   // ========== 1. OBJETIVO DA PERÍCIA ==========
-  if (laudo.objetivoPericia) {
+  if (!isFieldEmpty(laudo.objetivoPericia)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. OBJETIVO DA PERÍCIA`),
-      createParagraph(laudo.objetivoPericia)
+      ...createParagraphs(laudo.objetivoPericia!)
     );
     sectionNumber++;
   }
 
   // ========== 2. ASSISTENTES TÉCNICOS ==========
-  if (laudo.assistenteTecnicoReclamante || laudo.assistenteTecnicoReclamada) {
+  if (!isFieldEmpty(laudo.assistenteTecnicoReclamante) || !isFieldEmpty(laudo.assistenteTecnicoReclamada)) {
     paragraphs.push(createSectionTitle(`${sectionNumber}. ASSISTENTES TÉCNICOS`));
-    if (laudo.assistenteTecnicoReclamante) {
-      paragraphs.push(createLabeledField("Assistente do Reclamante", laudo.assistenteTecnicoReclamante));
+    if (!isFieldEmpty(laudo.assistenteTecnicoReclamante)) {
+      paragraphs.push(createLabeledField("Assistente do Reclamante", laudo.assistenteTecnicoReclamante!));
     }
-    if (laudo.assistenteTecnicoReclamada) {
-      paragraphs.push(createLabeledField("Assistente da Reclamada", laudo.assistenteTecnicoReclamada));
+    if (!isFieldEmpty(laudo.assistenteTecnicoReclamada)) {
+      paragraphs.push(createLabeledField("Assistente da Reclamada", laudo.assistenteTecnicoReclamada!));
     }
     sectionNumber++;
   }
 
   // ========== 3. IDENTIFICAÇÃO DO PERICIANDO ==========
   paragraphs.push(createSectionTitle(`${sectionNumber}. IDENTIFICAÇÃO DO PERICIANDO`));
-  paragraphs.push(createLabeledField("Nome", laudo.vitimaName || laudo.reclamante || ""));
-  if (laudo.vitimaNascimento) {
-    paragraphs.push(createLabeledField("Data de Nascimento", `${formatDate(laudo.vitimaNascimento)} (${calculateAge(laudo.vitimaNascimento)})`));
+  const nomePericiando = laudo.vitimaName || laudo.reclamante || "";
+  if (!isFieldEmpty(nomePericiando)) paragraphs.push(createLabeledField("Nome", nomePericiando));
+  if (!isFieldEmpty(laudo.vitimaNascimento)) {
+    paragraphs.push(createLabeledField("Data de Nascimento", `${formatDate(laudo.vitimaNascimento!)} (${calculateAge(laudo.vitimaNascimento!)})`));
   }
-  paragraphs.push(createLabeledField("Profissão", laudo.vitimaProfissao || ""));
-  paragraphs.push(createLabeledField("Escolaridade", laudo.vitimaEscolaridade || ""));
-  paragraphs.push(createLabeledField("Dominância", laudo.vitimaDominancia || ""));
+  if (!isFieldEmpty(laudo.vitimaProfissao)) paragraphs.push(createLabeledField("Profissão", laudo.vitimaProfissao!));
+  if (!isFieldEmpty(laudo.vitimaEscolaridade)) paragraphs.push(createLabeledField("Escolaridade", laudo.vitimaEscolaridade!));
+  if (!isFieldEmpty(laudo.vitimaDominancia)) paragraphs.push(createLabeledField("Dominância", laudo.vitimaDominancia!));
   sectionNumber++;
 
   // ========== 4. RESUMO DA PETIÇÃO INICIAL ==========
-  if (laudo.resumoPeticaoInicial) {
+  if (!isFieldEmpty(laudo.resumoPeticaoInicial)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. RESUMO DA PETIÇÃO INICIAL`),
-      createParagraph(laudo.resumoPeticaoInicial)
+      ...createParagraphs(laudo.resumoPeticaoInicial!)
     );
     sectionNumber++;
   }
 
   // ========== 5. RESUMO DA CONTESTAÇÃO ==========
-  if (laudo.resumoContestacao) {
+  if (!isFieldEmpty(laudo.resumoContestacao)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. RESUMO DA CONTESTAÇÃO`),
-      createParagraph(laudo.resumoContestacao)
+      ...createParagraphs(laudo.resumoContestacao!)
     );
     sectionNumber++;
   }
 
   // ========== 6. METODOLOGIA PERICIAL ==========
-  if (laudo.metodologiaPericial) {
+  if (!isFieldEmpty(laudo.metodologiaPericial)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. METODOLOGIA PERICIAL`),
-      createParagraph(laudo.metodologiaPericial)
+      ...createParagraphs(laudo.metodologiaPericial!)
     );
     sectionNumber++;
   }
 
   // ========== 7. DADOS DO POSTO DE TRABALHO ==========
-  const hasDadosPosto = laudo.dadosFuncionaisCargo || laudo.descricaoAtividadesLaborais;
+  const hasDadosPosto = !isFieldEmpty(laudo.dadosFuncionaisCargo) || !isFieldEmpty(laudo.descricaoAtividadesLaborais);
   if (hasDadosPosto) {
     paragraphs.push(createSectionTitle(`${sectionNumber}. DADOS DO POSTO DE TRABALHO`));
-    if (laudo.dadosFuncionaisCargo) {
-      paragraphs.push(createLabeledField("Cargo/Função", laudo.dadosFuncionaisCargo));
+    if (!isFieldEmpty(laudo.dadosFuncionaisCargo)) {
+      paragraphs.push(createLabeledField("Cargo/Função", laudo.dadosFuncionaisCargo!));
     }
-    if (laudo.dadosFuncionaisAdmissao) {
-      paragraphs.push(createLabeledField("Data de Admissão", formatDate(laudo.dadosFuncionaisAdmissao)));
+    if (!isFieldEmpty(laudo.dadosFuncionaisAdmissao)) {
+      paragraphs.push(createLabeledField("Data de Admissão", formatDate(laudo.dadosFuncionaisAdmissao!)));
     }
-    if (laudo.dadosFuncionaisAfastamento) {
-      paragraphs.push(createLabeledField("Data de Afastamento", formatDate(laudo.dadosFuncionaisAfastamento)));
+    if (!isFieldEmpty(laudo.dadosFuncionaisAfastamento)) {
+      paragraphs.push(createLabeledField("Data de Afastamento", formatDate(laudo.dadosFuncionaisAfastamento!)));
     }
-    if (laudo.descricaoAtividadesLaborais) {
+    if (!isFieldEmpty(laudo.descricaoAtividadesLaborais)) {
       paragraphs.push(
         createSubtitle("Ambiente e Atividades Laborais:"),
-        createParagraph(laudo.descricaoAtividadesLaborais)
+        ...createParagraphs(laudo.descricaoAtividadesLaborais!)
       );
     }
     sectionNumber++;
   }
 
   // ========== 8. ANAMNESE ==========
-  paragraphs.push(createSectionTitle(`${sectionNumber}. ANAMNESE`));
-  if (laudo.dataAcidente) {
-    paragraphs.push(createLabeledField("Data do Acidente/Evento", formatDate(laudo.dataAcidente)));
+  const hasAnamnese = !isFieldEmpty(laudo.dataAcidente) || !isFieldEmpty(laudo.historiaAcidente) ||
+    !isFieldEmpty(laudo.historicoOcupacional) || !isFieldEmpty(laudo.historiaAtual) ||
+    !isFieldEmpty(laudo.tratamentos) || !isFieldEmpty(laudo.afastamentos);
+  if (hasAnamnese) {
+    paragraphs.push(createSectionTitle(`${sectionNumber}. ANAMNESE`));
+    if (!isFieldEmpty(laudo.dataAcidente)) {
+      paragraphs.push(createLabeledField("Data do Acidente/Evento", formatDate(laudo.dataAcidente!)));
+    }
+    if (!isFieldEmpty(laudo.historiaAcidente)) {
+      paragraphs.push(createSubtitle("Descrição do Acidente:"), ...createParagraphs(laudo.historiaAcidente!));
+    }
+    if (!isFieldEmpty(laudo.historicoOcupacional)) {
+      paragraphs.push(createSubtitle("Histórico Ocupacional:"), ...createParagraphs(laudo.historicoOcupacional!));
+    }
+    if (!isFieldEmpty(laudo.historiaAtual)) {
+      paragraphs.push(createSubtitle("Queixas Atuais:"), ...createParagraphs(laudo.historiaAtual!));
+    }
+    if (!isFieldEmpty(laudo.tratamentos)) {
+      paragraphs.push(createSubtitle("Tratamentos Realizados:"), ...createParagraphs(laudo.tratamentos!));
+    }
+    if (!isFieldEmpty(laudo.afastamentos)) {
+      paragraphs.push(createSubtitle("Afastamentos:"), ...createParagraphs(laudo.afastamentos!));
+    }
+    sectionNumber++;
   }
-  if (laudo.historiaAcidente) {
-    paragraphs.push(createSubtitle("Descrição do Acidente:"), createParagraph(laudo.historiaAcidente));
-  }
-  if (laudo.historicoOcupacional) {
-    paragraphs.push(createSubtitle("Histórico Ocupacional:"), createParagraph(laudo.historicoOcupacional));
-  }
-  if (laudo.historiaAtual) {
-    paragraphs.push(createSubtitle("Queixas Atuais:"), createParagraph(laudo.historiaAtual));
-  }
-  if (laudo.tratamentos) {
-    paragraphs.push(createSubtitle("Tratamentos Realizados:"), createParagraph(laudo.tratamentos));
-  }
-  if (laudo.afastamentos) {
-    paragraphs.push(createSubtitle("Afastamentos:"), createParagraph(laudo.afastamentos));
-  }
-  sectionNumber++;
 
   // ========== 9. ANTECEDENTES PATOLÓGICOS ==========
-  if (laudo.antecedentes) {
+  if (!isFieldEmpty(laudo.antecedentes)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. ANTECEDENTES PATOLÓGICOS`),
-      createParagraph(laudo.antecedentes)
+      ...createParagraphs(laudo.antecedentes!)
     );
     sectionNumber++;
   }
@@ -391,169 +480,173 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 11. LAUDOS MÉDICOS APRESENTADOS ==========
-  if (laudo.laudosMedicos) {
+  if (!isFieldEmpty(laudo.laudosMedicos)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. LAUDOS MÉDICOS APRESENTADOS`),
-      createParagraph(laudo.laudosMedicos)
+      ...createParagraphs(laudo.laudosMedicos!)
     );
     sectionNumber++;
   }
 
   // ========== 12. EXAMES COMPLEMENTARES ==========
-  if (laudo.examesComplementares) {
+  if (!isFieldEmpty(laudo.examesComplementares)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. EXAMES COMPLEMENTARES`),
-      createParagraph(laudo.examesComplementares)
+      ...createParagraphs(laudo.examesComplementares!)
     );
     sectionNumber++;
   }
 
   // ========== 13. EXAME FÍSICO ==========
-  if (laudo.exameFisico) {
+  if (!isFieldEmpty(laudo.exameFisico)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. EXAME FÍSICO`),
-      createParagraph(laudo.exameFisico)
+      ...createParagraphs(laudo.exameFisico!)
     );
     sectionNumber++;
   }
 
   // ========== 14. DESCRIÇÃO TÉCNICA DAS DOENÇAS ==========
-  if (laudo.descricaoTecnicaDoencas) {
+  if (!isFieldEmpty(laudo.descricaoTecnicaDoencas)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. DESCRIÇÃO TÉCNICA DAS DOENÇAS`),
-      createParagraph(laudo.descricaoTecnicaDoencas)
+      ...createParagraphs(laudo.descricaoTecnicaDoencas!)
     );
     sectionNumber++;
   }
 
   // ========== 15. NEXO CAUSAL ==========
-  paragraphs.push(createSectionTitle(`${sectionNumber}. NEXO CAUSAL`));
-  if (laudo.nexoCausalTipo) {
-    const nexoMap: Record<string, string> = {
-      "direto": "Nexo Causal Direto",
-      "concausa": "Concausa",
-      "agravamento": "Agravamento de Condição Preexistente",
-      "inexistente": "Nexo Causal Inexistente",
-    };
-    paragraphs.push(createLabeledField("Tipo de Nexo", nexoMap[laudo.nexoCausalTipo] || laudo.nexoCausalTipo));
+  const hasNexo = !isFieldEmpty(laudo.nexoCausalTipo) || !isFieldEmpty(laudo.nexoCausalJustificativa);
+  if (hasNexo) {
+    paragraphs.push(createSectionTitle(`${sectionNumber}. NEXO CAUSAL`));
+    if (!isFieldEmpty(laudo.nexoCausalTipo)) {
+      const nexoMap: Record<string, string> = {
+        "direto": "Nexo Causal Direto",
+        "concausa": "Concausa",
+        "agravamento": "Agravamento de Condição Preexistente",
+        "inexistente": "Nexo Causal Inexistente",
+      };
+      paragraphs.push(createLabeledField("Tipo de Nexo", nexoMap[laudo.nexoCausalTipo!] || laudo.nexoCausalTipo!));
+    }
+    if (!isFieldEmpty(laudo.nexoCausalJustificativa)) {
+      paragraphs.push(createSubtitle("Justificativa:"), ...createParagraphs(laudo.nexoCausalJustificativa!));
+    }
+    sectionNumber++;
   }
-  if (laudo.nexoCausalJustificativa) {
-    paragraphs.push(createSubtitle("Justificativa:"), createParagraph(laudo.nexoCausalJustificativa));
-  }
-  sectionNumber++;
 
   // ========== 16. ANÁLISE DA INCAPACIDADE LABORAL ==========
-  if (laudo.analiseIncapacidadeLaboral) {
+  if (!isFieldEmpty(laudo.analiseIncapacidadeLaboral)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. ANÁLISE DA INCAPACIDADE LABORAL`),
-      createParagraph(laudo.analiseIncapacidadeLaboral)
+      ...createParagraphs(laudo.analiseIncapacidadeLaboral!)
     );
     sectionNumber++;
   }
 
   // ========== 17. AVALIAÇÃO DE SEQUELAS ==========
-  const hasSequelas = laudo.tabelaSUSEP || laudo.danoEstetico || laudo.auxilioTerceiros;
+  const hasSequelas = !isFieldEmpty(laudo.tabelaSUSEP) || !isFieldEmpty(laudo.danoEstetico) || !isFieldEmpty(laudo.auxilioTerceiros);
   if (hasSequelas) {
     paragraphs.push(createSectionTitle(`${sectionNumber}. AVALIAÇÃO DE SEQUELAS`));
-    if (laudo.tabelaSUSEP) {
-      paragraphs.push(createLabeledField("Tabela SUSEP", laudo.tabelaSUSEP));
+    if (!isFieldEmpty(laudo.tabelaSUSEP)) {
+      paragraphs.push(createLabeledField("Tabela SUSEP", laudo.tabelaSUSEP!));
     }
-    if (laudo.danoEstetico) {
-      paragraphs.push(createLabeledField("Dano Estético", laudo.danoEstetico));
+    if (!isFieldEmpty(laudo.danoEstetico)) {
+      paragraphs.push(createLabeledField("Dano Estético", laudo.danoEstetico!));
     }
-    if (laudo.auxilioTerceiros) {
-      paragraphs.push(createLabeledField("Auxílio de Terceiros", laudo.auxilioTerceiros));
+    if (!isFieldEmpty(laudo.auxilioTerceiros)) {
+      paragraphs.push(createLabeledField("Auxílio de Terceiros", laudo.auxilioTerceiros!));
     }
     sectionNumber++;
   }
 
   // ========== 18. DISCUSSÃO E ANÁLISE ==========
-  if (laudo.conclusaoAnalise) {
+  if (!isFieldEmpty(laudo.conclusaoAnalise)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. DISCUSSÃO E ANÁLISE`),
-      createParagraph(laudo.conclusaoAnalise)
+      ...createParagraphs(laudo.conclusaoAnalise!)
     );
     sectionNumber++;
   }
 
   // ========== 19. CONCLUSÃO ==========
-  paragraphs.push(createSectionTitle(`${sectionNumber}. CONCLUSÃO`));
-  if (laudo.conclusaoCID) {
-    paragraphs.push(createLabeledField("CID-10 Sugerido", laudo.conclusaoCID));
-  }
-  if (laudo.conclusaoIncapacidade) {
-    const incapacidadeText = laudo.conclusaoIncapacidade === "sim" ? "Sim" : "Não";
-    paragraphs.push(createLabeledField("Há Incapacidade", incapacidadeText));
-  }
-  if (laudo.conclusaoStatus) {
-    const statusMap: Record<string, string> = {
-      "total_temporaria": "Incapacidade Total Temporária",
-      "parcial_temporaria": "Incapacidade Parcial Temporária",
-      "total_permanente": "Incapacidade Total Permanente",
-      "parcial_permanente": "Incapacidade Parcial Permanente",
-      "ausencia": "Ausência de Incapacidade Laboral",
-      "temporaria_total": "Incapacidade Temporária Total",
-      "temporaria_parcial": "Incapacidade Temporária Parcial",
-      "permanente_total": "Incapacidade Permanente Total",
-      "permanente_parcial": "Incapacidade Permanente Parcial",
-    };
-    
-    let statusText = "";
-    try {
-      const parsed = JSON.parse(laudo.conclusaoStatus);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        statusText = parsed.map(v => statusMap[v] || v).join("; ");
+  const hasConclusao = !isFieldEmpty(laudo.conclusaoCID) || !isFieldEmpty(laudo.conclusaoIncapacidade) ||
+    !isFieldEmpty(laudo.conclusaoStatus) || !isFieldEmpty(laudo.conclusaoDestino) || !isFieldEmpty(laudo.conclusaoJustificativa);
+  if (hasConclusao) {
+    paragraphs.push(createSectionTitle(`${sectionNumber}. CONCLUSÃO`));
+    if (!isFieldEmpty(laudo.conclusaoCID)) {
+      paragraphs.push(createLabeledField("CID-10 Sugerido", laudo.conclusaoCID!));
+    }
+    if (!isFieldEmpty(laudo.conclusaoIncapacidade)) {
+      const incapacidadeText = laudo.conclusaoIncapacidade === "sim" ? "Sim" : "Não";
+      paragraphs.push(createLabeledField("Há Incapacidade", incapacidadeText));
+    }
+    if (!isFieldEmpty(laudo.conclusaoStatus)) {
+      const statusMap: Record<string, string> = {
+        "total_temporaria": "Incapacidade Total Temporária",
+        "parcial_temporaria": "Incapacidade Parcial Temporária",
+        "total_permanente": "Incapacidade Total Permanente",
+        "parcial_permanente": "Incapacidade Parcial Permanente",
+        "ausencia": "Ausência de Incapacidade Laboral",
+        "temporaria_total": "Incapacidade Temporária Total",
+        "temporaria_parcial": "Incapacidade Temporária Parcial",
+        "permanente_total": "Incapacidade Permanente Total",
+        "permanente_parcial": "Incapacidade Permanente Parcial",
+      };
+      let statusText = "";
+      try {
+        const parsed = JSON.parse(laudo.conclusaoStatus!);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          statusText = parsed.map(v => statusMap[v] || v).join("; ");
+        }
+      } catch {
+        statusText = statusMap[laudo.conclusaoStatus!] || laudo.conclusaoStatus!;
       }
-    } catch {
-      statusText = statusMap[laudo.conclusaoStatus] || laudo.conclusaoStatus;
+      if (statusText) {
+        paragraphs.push(createLabeledField("Tipo(s) de Incapacidade", statusText));
+      }
     }
-    
-    if (statusText) {
-      paragraphs.push(createLabeledField("Tipo(s) de Incapacidade", statusText));
+    if (!isFieldEmpty(laudo.conclusaoDestino)) {
+      const destinoMap: Record<string, string> = {
+        "alta": "Alta Médica",
+        "tratamento": "Continuidade de Tratamento",
+        "reabilitacao": "Reabilitação Profissional",
+        "aposentadoria": "Aposentadoria por Invalidez",
+      };
+      paragraphs.push(createLabeledField("Destino Sugerido", destinoMap[laudo.conclusaoDestino!] || laudo.conclusaoDestino!));
     }
+    if (!isFieldEmpty(laudo.conclusaoJustificativa)) {
+      paragraphs.push(createSubtitle("Justificativa:"), ...createParagraphs(laudo.conclusaoJustificativa!));
+    }
+    sectionNumber++;
   }
-  if (laudo.conclusaoDestino) {
-    const destinoMap: Record<string, string> = {
-      "alta": "Alta Médica",
-      "tratamento": "Continuidade de Tratamento",
-      "reabilitacao": "Reabilitação Profissional",
-      "aposentadoria": "Aposentadoria por Invalidez",
-    };
-    paragraphs.push(createLabeledField("Destino Sugerido", destinoMap[laudo.conclusaoDestino] || laudo.conclusaoDestino));
-  }
-  if (laudo.conclusaoJustificativa) {
-    paragraphs.push(createSubtitle("Justificativa:"), createParagraph(laudo.conclusaoJustificativa));
-  }
-  sectionNumber++;
 
   // ========== 20. RESPOSTAS AOS QUESITOS ==========
-  const hasQuesitos = laudo.quesitosJuizo || laudo.quesitosReclamante || laudo.quesitosReclamada;
+  const hasQuesitos = !isFieldEmpty(laudo.quesitosJuizo) || !isFieldEmpty(laudo.quesitosReclamante) || !isFieldEmpty(laudo.quesitosReclamada);
   if (hasQuesitos) {
     paragraphs.push(createSectionTitle(`${sectionNumber}. RESPOSTAS AOS QUESITOS`));
     let subSection = 1;
-    
-    if (laudo.quesitosJuizo) {
+    if (!isFieldEmpty(laudo.quesitosJuizo)) {
       paragraphs.push(createSubtitle(`${sectionNumber}.${subSection} Quesitos do Juízo`));
-      paragraphs.push(createParagraph(formatQuesitos(laudo.quesitosJuizo)));
+      paragraphs.push(createParagraph(formatQuesitos(laudo.quesitosJuizo!)));
       subSection++;
     }
-    if (laudo.quesitosReclamante) {
+    if (!isFieldEmpty(laudo.quesitosReclamante)) {
       paragraphs.push(createSubtitle(`${sectionNumber}.${subSection} Quesitos do Reclamante`));
-      paragraphs.push(createParagraph(formatQuesitos(laudo.quesitosReclamante)));
+      paragraphs.push(createParagraph(formatQuesitos(laudo.quesitosReclamante!)));
       subSection++;
     }
-    if (laudo.quesitosReclamada) {
+    if (!isFieldEmpty(laudo.quesitosReclamada)) {
       paragraphs.push(createSubtitle(`${sectionNumber}.${subSection} Quesitos da Reclamada`));
-      paragraphs.push(createParagraph(formatQuesitos(laudo.quesitosReclamada)));
+      paragraphs.push(createParagraph(formatQuesitos(laudo.quesitosReclamada!)));
     }
     sectionNumber++;
   }
 
   // ========== 21. REFERÊNCIAS BIBLIOGRÁFICAS ==========
-  if (laudo.referenciasBibliograficas) {
+  if (!isFieldEmpty(laudo.referenciasBibliograficas)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. REFERÊNCIAS BIBLIOGRÁFICAS`),
-      createParagraph(laudo.referenciasBibliograficas)
+      ...createParagraphs(laudo.referenciasBibliograficas!)
     );
     sectionNumber++;
   }
