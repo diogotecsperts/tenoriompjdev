@@ -77,6 +77,20 @@ const isFieldEmpty = (value: string | null | undefined): boolean => {
   return PLACEHOLDER_PATTERNS.some(pattern => pattern.test(trimmed));
 };
 
+// ========== DEBUG MODE (apenas em desenvolvimento — eliminado no build de produção) ==========
+// Uso: debugField("nomeDoCampo", laudo.campo) — imprime original, sanitizado e isEmpty
+const debugField = (fieldName: string, value: string | null | undefined): void => {
+  if (!import.meta.env.DEV) return;
+  const empty = isFieldEmpty(value);
+  const original = (value ?? "").substring(0, 200);
+  const sanitized = empty ? "[SUPRIMIDO]" : sanitizeMarkdown(value!).substring(0, 200);
+  console.group(`[PDF DEBUG] ${fieldName}`);
+  console.log("Original :", original || "(vazio)");
+  console.log("Sanitized:", sanitized);
+  console.log("isEmpty  :", empty);
+  console.groupEnd();
+};
+
 // Sanitiza markdown — converte formatação para texto plano estruturado
 const sanitizeMarkdown = (text: string): string => {
   if (!text) return "";
@@ -559,6 +573,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   sectionNumber++;
   
   // 4. RESUMO DA PETIÇÃO INICIAL
+  debugField("resumoPeticaoInicial", laudo.resumoPeticaoInicial);
   if (!isFieldEmpty(laudo.resumoPeticaoInicial)) {
     const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.resumoPeticaoInicial!);
     y = ensureSpace(doc, y, Math.min(sectionHeight, 40));
@@ -568,6 +583,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 5. RESUMO DA CONTESTAÇÃO
+  debugField("resumoContestacao", laudo.resumoContestacao);
   if (!isFieldEmpty(laudo.resumoContestacao)) {
     const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.resumoContestacao!);
     y = ensureSpace(doc, y, Math.min(sectionHeight, 40));
@@ -577,6 +593,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 6. METODOLOGIA PERICIAL
+  debugField("metodologiaPericial", laudo.metodologiaPericial);
   if (!isFieldEmpty(laudo.metodologiaPericial)) {
     const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.metodologiaPericial!);
     y = ensureSpace(doc, y, Math.min(sectionHeight, 40));
@@ -671,6 +688,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 11. LAUDOS MÉDICOS APRESENTADOS
+  debugField("laudosMedicos", laudo.laudosMedicos);
   if (!isFieldEmpty(laudo.laudosMedicos)) {
     const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.laudosMedicos!);
     y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
@@ -680,6 +698,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 12. EXAMES COMPLEMENTARES
+  debugField("examesComplementares", laudo.examesComplementares);
   if (!isFieldEmpty(laudo.examesComplementares)) {
     const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.examesComplementares!);
     y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
@@ -689,6 +708,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 13. EXAME FÍSICO
+  debugField("exameFisico", laudo.exameFisico);
   if (!isFieldEmpty(laudo.exameFisico)) {
     const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.exameFisico!);
     y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
@@ -698,6 +718,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 14. DESCRIÇÃO TÉCNICA DAS DOENÇAS
+  debugField("descricaoTecnicaDoencas", laudo.descricaoTecnicaDoencas);
   if (!isFieldEmpty(laudo.descricaoTecnicaDoencas)) {
     const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.descricaoTecnicaDoencas!);
     y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
@@ -707,6 +728,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 15. NEXO CAUSAL
+  debugField("nexoCausalJustificativa", laudo.nexoCausalJustificativa);
   const hasNexo = !isFieldEmpty(laudo.nexoCausalTipo) || !isFieldEmpty(laudo.nexoCausalJustificativa);
   if (hasNexo) {
     let sectionHeight = SECTION_TITLE_HEIGHT;
@@ -732,6 +754,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 16. ANÁLISE DA INCAPACIDADE LABORAL
+  debugField("analiseIncapacidadeLaboral", laudo.analiseIncapacidadeLaboral);
   if (!isFieldEmpty(laudo.analiseIncapacidadeLaboral)) {
     const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.analiseIncapacidadeLaboral!);
     y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
@@ -757,6 +780,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 18. DISCUSSÃO E ANÁLISE
+  debugField("conclusaoAnalise", laudo.conclusaoAnalise);
   if (!isFieldEmpty(laudo.conclusaoAnalise)) {
     const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.conclusaoAnalise!);
     y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
