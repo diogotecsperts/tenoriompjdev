@@ -2626,6 +2626,8 @@ async function processarPDFBackground(
     }
     console.log("[processar-autos] Successfully extracted data from PDF");
 
+    // Save finishReason before freeing memory
+    const visionFinishReason = visionResult?.finishReason || 'STOP';
     // MEMORY: Free large objects no longer needed for summary generation
     // visionResult holds the full OCR/extraction text - can be very large
     // @ts-ignore - intentional null assignment for memory relief
@@ -2700,7 +2702,7 @@ async function processarPDFBackground(
         },
         totalDurationMs: totalDuration
       },
-      truncated: visionResult?.finishReason === "MAX_TOKENS"
+      truncated: visionFinishReason === "MAX_TOKENS"
     };
 
     // Update attempt record with success
@@ -2711,7 +2713,7 @@ async function processarPDFBackground(
           status: 'completed',
           result: {
             summariesCount: resumosResult.aiInfo.summariesGenerated,
-            truncated: visionResult.finishReason === "MAX_TOKENS",
+            truncated: visionFinishReason === "MAX_TOKENS",
             model: modelUsed,
             totalDurationMs: totalDuration
           },
