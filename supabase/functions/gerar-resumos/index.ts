@@ -385,6 +385,12 @@ const promptMapping: Record<string, { promptId: string; cardId: string; sectionI
 
 const defaultSystemPrompt = 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.';
 
+// Tipos que DEVEM usar Markdown (renderizados em painéis dedicados com react-markdown)
+const TIPOS_COM_MARKDOWN_INTENCIONAL = new Set(['sugestoes_pericia', 'aprimorar_texto']);
+
+// Regra de formatação injetada no system prompt para tipos que vão para o corpo do laudo
+const REGRA_FORMATACAO_PLAIN_TEXT = ' REGRA DE FORMATAÇÃO OBRIGATÓRIA: Retorne APENAS texto plano. É estritamente proibido usar formatação Markdown (sem negritos com asteriscos, sem títulos com #, sem listas com * ou -). Use CAIXA ALTA para títulos de seção e quebras de linha simples para separar blocos de conteúdo.';
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -455,7 +461,7 @@ serve(async (req) => {
     console.log(`[gerar-resumos] Gerando resumo do tipo: ${tipo} (promptId: ${mapping.promptId})`);
 
     // Buscar system prompt via prompt-manager
-    const systemPrompt = await getPrompt(
+    const baseSystemPrompt = await getPrompt(
       'prompt_system_gerar_resumos',
       defaultSystemPrompt,
       {},
@@ -466,6 +472,14 @@ serve(async (req) => {
         sectionId: '_gerar_resumos'
       }
     );
+
+    // Injetar regra de plain text apenas para tipos que vão para o corpo do laudo
+    // Tipos com Markdown intencional (renderizado via react-markdown em painéis dedicados) ficam isentos
+    const systemPrompt = TIPOS_COM_MARKDOWN_INTENCIONAL.has(tipo)
+      ? baseSystemPrompt
+      : baseSystemPrompt + REGRA_FORMATACAO_PLAIN_TEXT;
+
+    console.log(`[gerar-resumos] Formatação plain text: ${!TIPOS_COM_MARKDOWN_INTENCIONAL.has(tipo) ? 'ATIVA' : 'ISENTA (markdown intencional)'}`);
 
     try {
       const result = await callAI(aiConfig, systemPrompt, prompt, {
