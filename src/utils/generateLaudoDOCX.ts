@@ -64,6 +64,20 @@ const isFieldEmpty = (value: string | null | undefined): boolean => {
   return PLACEHOLDER_PATTERNS.some(pattern => pattern.test(trimmed));
 };
 
+// ========== DEBUG MODE (apenas em desenvolvimento — eliminado no build de produção) ==========
+// Uso: debugField("nomeDoСampo", laudo.campo) — imprime original, sanitizado e isEmpty
+const debugField = (fieldName: string, value: string | null | undefined): void => {
+  if (!import.meta.env.DEV) return;
+  const empty = isFieldEmpty(value);
+  const original = (value ?? "").substring(0, 200);
+  const sanitized = empty ? "[SUPRIMIDO]" : sanitizeMarkdown(value!).substring(0, 200);
+  console.group(`[DOCX DEBUG] ${fieldName}`);
+  console.log("Original :", original || "(vazio)");
+  console.log("Sanitized:", sanitized);
+  console.log("isEmpty  :", empty);
+  console.groupEnd();
+};
+
 // Sanitiza markdown — converte formatação para texto plano estruturado
 const sanitizeMarkdown = (text: string): string => {
   if (!text) return "";
@@ -333,6 +347,10 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
       spacing: { before: 400, after: 80 },
     }),
   ];
+  debugField("processoVara", laudo.processoVara);
+  debugField("processoNumero", laudo.processoNumero);
+  debugField("reclamante", laudo.reclamante);
+  debugField("reclamada", laudo.reclamada);
   if (!isFieldEmpty(laudo.processoVara)) {
     judicialParagraphs.push(
       new Paragraph({
@@ -389,6 +407,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   sectionNumber++;
 
   // ========== 4. RESUMO DA PETIÇÃO INICIAL ==========
+  debugField("resumoPeticaoInicial", laudo.resumoPeticaoInicial);
   if (!isFieldEmpty(laudo.resumoPeticaoInicial)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. RESUMO DA PETIÇÃO INICIAL`),
@@ -398,6 +417,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 5. RESUMO DA CONTESTAÇÃO ==========
+  debugField("resumoContestacao", laudo.resumoContestacao);
   if (!isFieldEmpty(laudo.resumoContestacao)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. RESUMO DA CONTESTAÇÃO`),
@@ -407,6 +427,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 6. METODOLOGIA PERICIAL ==========
+  debugField("metodologiaPericial", laudo.metodologiaPericial);
   if (!isFieldEmpty(laudo.metodologiaPericial)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. METODOLOGIA PERICIAL`),
@@ -481,6 +502,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 11. LAUDOS MÉDICOS APRESENTADOS ==========
+  debugField("laudosMedicos", laudo.laudosMedicos);
   if (!isFieldEmpty(laudo.laudosMedicos)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. LAUDOS MÉDICOS APRESENTADOS`),
@@ -490,6 +512,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 12. EXAMES COMPLEMENTARES ==========
+  debugField("examesComplementares", laudo.examesComplementares);
   if (!isFieldEmpty(laudo.examesComplementares)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. EXAMES COMPLEMENTARES`),
@@ -499,6 +522,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 13. EXAME FÍSICO ==========
+  debugField("exameFisico", laudo.exameFisico);
   if (!isFieldEmpty(laudo.exameFisico)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. EXAME FÍSICO`),
@@ -508,6 +532,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 14. DESCRIÇÃO TÉCNICA DAS DOENÇAS ==========
+  debugField("descricaoTecnicaDoencas", laudo.descricaoTecnicaDoencas);
   if (!isFieldEmpty(laudo.descricaoTecnicaDoencas)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. DESCRIÇÃO TÉCNICA DAS DOENÇAS`),
@@ -517,6 +542,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 15. NEXO CAUSAL ==========
+  debugField("nexoCausalJustificativa", laudo.nexoCausalJustificativa);
   const hasNexo = !isFieldEmpty(laudo.nexoCausalTipo) || !isFieldEmpty(laudo.nexoCausalJustificativa);
   if (hasNexo) {
     paragraphs.push(createSectionTitle(`${sectionNumber}. NEXO CAUSAL`));
@@ -536,6 +562,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 16. ANÁLISE DA INCAPACIDADE LABORAL ==========
+  debugField("analiseIncapacidadeLaboral", laudo.analiseIncapacidadeLaboral);
   if (!isFieldEmpty(laudo.analiseIncapacidadeLaboral)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. ANÁLISE DA INCAPACIDADE LABORAL`),
@@ -561,6 +588,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 18. DISCUSSÃO E ANÁLISE ==========
+  debugField("conclusaoAnalise", laudo.conclusaoAnalise);
   if (!isFieldEmpty(laudo.conclusaoAnalise)) {
     paragraphs.push(
       createSectionTitle(`${sectionNumber}. DISCUSSÃO E ANÁLISE`),
