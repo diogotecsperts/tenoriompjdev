@@ -139,13 +139,19 @@ PARA CADA LAUDO, EXTRAIA:
 - Limitações funcionais apontadas
 - Prognóstico (se mencionado)
 
-ESTRUTURE ASSIM:
-**Laudo Dr. [Nome] - [Especialidade] (DD/MM/AAAA):**
-- Diagnósticos: [listar com CIDs]
-- Conclusões: [descrever]
-- Recomendações: [descrever]
-- Limitações: [listar]
+ESTRUTURE ASSIM (sem negrito, sem traços, sem asteriscos):
+LAUDO 1
+Data: [DD/MM/AAAA]
+Médico: [Nome] - [Especialidade]
+Diagnósticos: [listar com CIDs]
+Conclusões: [descrever]
+Recomendações: [descrever]
+Limitações: [listar]
 
+LAUDO 2
+[repita a estrutura para cada laudo]
+
+NÃO use marcadores markdown (asteriscos, negrito, traços, bullets).
 Liste CADA laudo separadamente. NÃO resuma.`,
 
   examesComplementares: `Extraia TODOS os "Exames Complementares" do documento.
@@ -157,13 +163,18 @@ PARA CADA EXAME, EXTRAIA:
 - TODOS os achados e resultados
 - Conclusão do laudo do exame
 
-ESTRUTURE ASSIM:
-**[Tipo do Exame] - [Região] (DD/MM/AAAA):**
-[Descrição completa dos achados]
+ESTRUTURE ASSIM (sem negrito, sem traços, sem asteriscos):
+EXAME 1
+Tipo: [Tipo do Exame]
+Região: [Região examinada]
+Data: [DD/MM/AAAA]
+Achados: [Descrição completa dos achados]
 Conclusão: [conclusão do exame]
 
-Exemplo: "**RNM Coluna Lombar (15/03/2023):** Retificação da lordose lombar. Protrusão discal L4-L5 com contato radicular. Abaulamento discal difuso L5-S1. Estenose foraminal bilateral."
+EXAME 2
+[repita a estrutura para cada exame]
 
+NÃO use marcadores markdown (asteriscos, negrito, traços, bullets).
 NÃO resuma. Liste TODOS os achados de cada exame.`,
 
   exameFisico: `Extraia as informações do "Exame Físico" realizadas no periciando.
@@ -511,7 +522,7 @@ serve(async (req) => {
           
           const result = await callAI(
             aiConfig,
-            'Você é um assistente especializado em extração de dados de documentos médicos e jurídicos. Extraia apenas as informações solicitadas, sem inventar dados.',
+            'Você é um assistente especializado em extração de dados de documentos médicos e jurídicos. Extraia apenas as informações solicitadas, sem inventar dados. REGRA DE FORMATAÇÃO ESTRITA: Retorne APENAS texto plano. É terminantemente proibido o uso de formatação Markdown na sua resposta (sem negritos, sem asteriscos, sem marcações de código). Use apenas quebras de linha para separar as informações.',
             `${specificPrompt}\n\nConteúdo relevante do documento:\n${relevantChunk}`,
             { promptType: `regerar_${fieldKey}` }
           );
@@ -648,7 +659,7 @@ serve(async (req) => {
 
     const result = await callAI(
       aiConfig,
-      'Você é um assistente especializado em extração de dados de documentos médicos e jurídicos. Extraia apenas as informações solicitadas, sem inventar dados.',
+      'Você é um assistente especializado em extração de dados de documentos médicos e jurídicos. Extraia apenas as informações solicitadas, sem inventar dados. REGRA DE FORMATAÇÃO ESTRITA: Retorne APENAS texto plano. É terminantemente proibido o uso de formatação Markdown na sua resposta (sem negritos, sem asteriscos, sem marcações de código). Use apenas quebras de linha para separar as informações.',
       `${fieldPrompt}\n\nConteúdo do documento:\n${pdfContent}`,
       { promptType: `regerar_${fieldKey}` }
     );
