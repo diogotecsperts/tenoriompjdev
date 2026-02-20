@@ -58,14 +58,15 @@ let pageLayout: PageLayout = { ...DEFAULT_LAYOUT };
 
 // Padrões que indicam campo técnico/vazio que NÃO deve aparecer no documento
 const PLACEHOLDER_PATTERNS = [
-  /^\[.+\]/,               // [INSERIR algo] ou [VARA] etc
-  /^erro\s*cr[ií]tico/i,   // "erro crítico: ..."
-  /^aguardando/i,           // "aguardando..."
+  /\[INSERIR/i,              // [INSERIR algo] em qualquer posição
+  /\[.{3,}\]/,              // [qualquer placeholder] de 3+ chars
+  /^erro\s*cr[ií]tico/i,    // "erro crítico: ..."
+  /^aguardando/i,            // "aguardando..."
   /^undefined$/i,
   /^null$/i,
   /^n\/a$/i,
-  /^-{2,}$/,               // só traços
-  /^erro:/i,               // "Erro: ..."
+  /^-{2,}$/,                // só traços
+  /^erro:/i,                // "Erro: ..."
 ];
 
 // Verifica se o campo está vazio ou contém conteúdo inválido/técnico
@@ -509,27 +510,27 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   y = addJudicialAddress(doc, laudo, y);
   
   // 1. OBJETIVO DA PERÍCIA
-  if (laudo.objetivoPericia) {
-    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.objetivoPericia);
+  if (!isFieldEmpty(laudo.objetivoPericia)) {
+    const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.objetivoPericia!);
     y = ensureSpace(doc, y, Math.min(sectionHeight, 40));
     y = addSectionTitle(doc, `${sectionNumber}. OBJETIVO DA PERÍCIA`, y);
-    y = addParagraph(doc, laudo.objetivoPericia, y);
+    y = addParagraph(doc, laudo.objetivoPericia!, y);
     sectionNumber++;
   }
   
   // 2. ASSISTENTES TÉCNICOS
-  if (laudo.assistenteTecnicoReclamante || laudo.assistenteTecnicoReclamada) {
+  if (!isFieldEmpty(laudo.assistenteTecnicoReclamante) || !isFieldEmpty(laudo.assistenteTecnicoReclamada)) {
     let sectionHeight = SECTION_TITLE_HEIGHT;
-    if (laudo.assistenteTecnicoReclamante) sectionHeight += measureLabeledFieldHeight(doc, "Assistente do Reclamante", laudo.assistenteTecnicoReclamante);
-    if (laudo.assistenteTecnicoReclamada) sectionHeight += measureLabeledFieldHeight(doc, "Assistente da Reclamada", laudo.assistenteTecnicoReclamada);
+    if (!isFieldEmpty(laudo.assistenteTecnicoReclamante)) sectionHeight += measureLabeledFieldHeight(doc, "Assistente do Reclamante", laudo.assistenteTecnicoReclamante!);
+    if (!isFieldEmpty(laudo.assistenteTecnicoReclamada)) sectionHeight += measureLabeledFieldHeight(doc, "Assistente da Reclamada", laudo.assistenteTecnicoReclamada!);
     
     y = ensureSpace(doc, y, Math.min(sectionHeight, 30));
     y = addSectionTitle(doc, `${sectionNumber}. ASSISTENTES TÉCNICOS`, y);
-    if (laudo.assistenteTecnicoReclamante) {
-      y = addLabeledField(doc, "Assistente do Reclamante", laudo.assistenteTecnicoReclamante, y);
+    if (!isFieldEmpty(laudo.assistenteTecnicoReclamante)) {
+      y = addLabeledField(doc, "Assistente do Reclamante", laudo.assistenteTecnicoReclamante!, y);
     }
-    if (laudo.assistenteTecnicoReclamada) {
-      y = addLabeledField(doc, "Assistente da Reclamada", laudo.assistenteTecnicoReclamada, y);
+    if (!isFieldEmpty(laudo.assistenteTecnicoReclamada)) {
+      y = addLabeledField(doc, "Assistente da Reclamada", laudo.assistenteTecnicoReclamada!, y);
     }
     y += 5;
     sectionNumber++;
@@ -537,21 +538,23 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // 3. IDENTIFICAÇÃO DO PERICIANDO
   {
+    const nomePericiando = laudo.vitimaName || laudo.reclamante || "";
     let sectionHeight = SECTION_TITLE_HEIGHT;
-    sectionHeight += measureLabeledFieldHeight(doc, "Nome", laudo.vitimaName || laudo.reclamante || "");
-    if (laudo.vitimaNascimento) sectionHeight += measureLabeledFieldHeight(doc, "Data de Nascimento", `${formatDate(laudo.vitimaNascimento)} (${calculateAge(laudo.vitimaNascimento)})`);
-    sectionHeight += measureLabeledFieldHeight(doc, "Profissão", laudo.vitimaProfissao || "");
+    if (!isFieldEmpty(nomePericiando)) sectionHeight += measureLabeledFieldHeight(doc, "Nome", nomePericiando);
+    if (!isFieldEmpty(laudo.vitimaNascimento)) sectionHeight += measureLabeledFieldHeight(doc, "Data de Nascimento", `${formatDate(laudo.vitimaNascimento!)} (${calculateAge(laudo.vitimaNascimento!)})`);
+    if (!isFieldEmpty(laudo.vitimaProfissao)) sectionHeight += measureLabeledFieldHeight(doc, "Profissão", laudo.vitimaProfissao!);
     
     y = ensureSpace(doc, y, Math.min(sectionHeight, 40));
   }
   y = addSectionTitle(doc, `${sectionNumber}. IDENTIFICAÇÃO DO PERICIANDO`, y);
-  y = addLabeledField(doc, "Nome", laudo.vitimaName || laudo.reclamante, y);
-  if (laudo.vitimaNascimento) {
-    y = addLabeledField(doc, "Data de Nascimento", `${formatDate(laudo.vitimaNascimento)} (${calculateAge(laudo.vitimaNascimento)})`, y);
+  const nomePericiandoPDF = laudo.vitimaName || laudo.reclamante || "";
+  if (!isFieldEmpty(nomePericiandoPDF)) y = addLabeledField(doc, "Nome", nomePericiandoPDF, y);
+  if (!isFieldEmpty(laudo.vitimaNascimento)) {
+    y = addLabeledField(doc, "Data de Nascimento", `${formatDate(laudo.vitimaNascimento!)} (${calculateAge(laudo.vitimaNascimento!)})`, y);
   }
-  y = addLabeledField(doc, "Profissão", laudo.vitimaProfissao, y);
-  y = addLabeledField(doc, "Escolaridade", laudo.vitimaEscolaridade, y);
-  y = addLabeledField(doc, "Dominância", laudo.vitimaDominancia, y);
+  if (!isFieldEmpty(laudo.vitimaProfissao)) y = addLabeledField(doc, "Profissão", laudo.vitimaProfissao!, y);
+  if (!isFieldEmpty(laudo.vitimaEscolaridade)) y = addLabeledField(doc, "Escolaridade", laudo.vitimaEscolaridade!, y);
+  if (!isFieldEmpty(laudo.vitimaDominancia)) y = addLabeledField(doc, "Dominância", laudo.vitimaDominancia!, y);
   y += 5;
   sectionNumber++;
   
@@ -895,16 +898,18 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   y += 8;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(12);
-  doc.text(laudo.peritoNome?.toUpperCase() || "MÉDICO PERITO", 105, y, { align: "center" });
+  if (!isFieldEmpty(laudo.peritoNome)) {
+    doc.text(laudo.peritoNome!.toUpperCase(), 105, y, { align: "center" });
+  }
   
   y += 6;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  if (laudo.peritoEspecialidade) {
-    doc.text(laudo.peritoEspecialidade, 105, y, { align: "center" });
+  if (!isFieldEmpty(laudo.peritoEspecialidade)) {
+    doc.text(laudo.peritoEspecialidade!, 105, y, { align: "center" });
     y += 5;
   }
-  if (laudo.peritoCRM) {
+  if (!isFieldEmpty(laudo.peritoCRM)) {
     doc.text(`CRM: ${laudo.peritoCRM}`, 105, y, { align: "center" });
   }
   
