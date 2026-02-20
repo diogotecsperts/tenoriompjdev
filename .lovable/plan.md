@@ -1,140 +1,192 @@
 
+# Plano Definitivo — Correção Completa do Gerador DOCX/PDF
 
-# Avaliação de Viabilidade — 6 Sugestões Analisadas
+## Diagnóstico Final (após leitura integral dos dois geradores)
 
----
-
-## Estado Confirmado Após Leitura do Código
-
-Antes de avaliar as sugestões, o diagnóstico do estado atual após as sessões anteriores:
-
-**REGEN (`regerar-campo-pdf/index.ts`):**
-- Camada 1 (banco): CORRIGIDA
-- Camada 2 (system prompt nos dois `callAI`): CORRIGIDA (linhas 525 e 662)
-- Camada 3 (fallbacks `fieldPrompts`): CORRIGIDA (`laudosMedicos` e `examesComplementares` em formato plano)
-
-**GERAR (`gerar-resumos/index.ts`):**
-- O system prompt é `prompt_system_gerar_resumos` buscado dinamicamente via `getPrompt()` — sem instrução de plain text
-- O fallback `defaultSystemPrompt` (linha 386) diz: "Você é um perito médico especialista..." — sem qualquer regra de formatação
-- Os prompts `sugestoes_pericia` e `referencias_bibliograficas` **instruem Markdown explicitamente** (`##`, `###`, marcadores `-`)
-- A interpolação das variáveis usa `${ctx.variavel}` no fallback hardcoded — funciona corretamente
-- Os prompts do banco usam `\${variavel}` — interpolados corretamente pelo `getPrompt()`
+Existem **4 problemas técnicos distintos** no `generateLaudoDOCX.ts` (e parcialmente no `generateLaudoPDF.ts`):
 
 ---
 
-## Sugestão 1 — "Restaurar Prompt Individual" dentro do PromptEditor
+### Problema 1 — `sanitizeMarkdown` com regex incompleta (CRÍTICO)
 
-**Viabilidade: ALTA. Totalmente segura, zero risco de regressão.**
+A função atual (linha 47–54 do DOCX, linha 61–68 do PDF) usa regex **sem flags globais adequadas**:
 
-O `seed-prompts/index.ts` já contém o objeto `regenPrompts` com os defaults hardcoded de todos os prompts REGEN, e o frontend já tem infraestrutura de `invoke('seed-prompts', { action: 'seed' })`. Falta apenas uma ação `restore_single` na edge function que restaure apenas um `prompt_id` específico.
+```typescript
+.replace(/\*\*(.+?)\*\*/g, ...)  // não cruza quebras de linha (sem flag 's')
+.replace(/\*(.+?)\*/g, '$1')     // não remove bullet "* " no início de linha
+```
 
-**Como implementar:**
-- **`seed-prompts/index.ts`:** Adicionar um branch `action === 'restore_single'` que receba `{ promptId }` no body, busque o default em `regenPrompts`, `genPrompts` ou `systemPrompts`, e faça um `UPSERT` apenas para aquele ID
-- **`PromptEditor.tsx`:** Adicionar botão "Restaurar Padrão" com AlertDialog de confirmação, que chama a nova action. Fica ao lado do botão "Reverter" atual
-
-**Riscos:** Nenhum. Operação isolada por ID. Não afeta outros prompts.
-
----
-
-## Sugestão 2 — Diff Visual no DevPanel (banco vs. código)
-
-**Viabilidade: ALTA. Implementável 100% no frontend, sem edge function.**
-
-O frontend já carrega todos os prompts do banco em `prompts` (estado do `DevPrompts.tsx`). Os defaults hardcoded estão no `seed-prompts/index.ts` (backend), então precisariam ser expostos via edge function. O approach mais limpo é adicionar a action `get_defaults` ao `seed-prompts` que retorna o mapa de prompts padrão, e o frontend faz a comparação linha a linha ou exibe ambos lado a lado.
-
-**Como implementar:**
-- **`seed-prompts/index.ts`:** Adicionar `action === 'get_defaults'` que retorna `{ ...regenPrompts, ...genPrompts, ...systemPrompts }` com apenas o campo `prompt` de cada um
-- **`PromptEditor.tsx`:** Adicionar uma aba "Diff vs. Padrão" dentro do editor. Ao abrir, faz `invoke('seed-prompts', { action: 'get_defaults', promptId })` e exibe dois painéis: banco (editável) à esquerda e código (read-only) à direita. Diferenças destacadas com `bg-yellow-100` nas linhas divergentes
-
-**Riscos:** Baixo. Operação read-only. O único cuidado é que prompts de IMPORT dependem de `DEFAULT_IMPORT_PROMPTS` importado de `build-import-prompt.ts` — essa dependência já existe na edge function, então será coberta automaticamente.
+O que **não é tratado**:
+- `### Título` → chega literal com as `#`
+- `* item de lista` no início de linha → permanece com asterisco
+- `**texto\ncom quebra**` → o `.+?` sem flag `s` não captura o bloco multi-linha
+- Linhas separadoras `---` e `***`
 
 ---
 
-## Sugestão 3 — System Prompt Global de Formatação no REGEN
+### Problema 2 — `createParagraph` cria **um único bloco de texto** para campos multi-parágrafo (CRÍTICO)
 
-**Viabilidade: CONCLUÍDA. Esta sugestão JÁ foi implementada.**
+Quando o campo tem múltiplos parágrafos separados por `\n\n`, tudo vai para um único `Paragraph` do docx com `\n\n` literal no meio — resultando em um bloco contínuo sem separação visual correta.
 
-Conforme o diff da sessão anterior e a leitura confirmada do código atual (linhas 525 e 662 do `regerar-campo-pdf/index.ts`), ambos os pontos de chamada `callAI` já contêm a `REGRA DE FORMATAÇÃO ESTRITA` completa. Esta sugestão está 100% resolvida e não requer nenhuma ação adicional.
+```typescript
+const createParagraph = (text: string): Paragraph => {
+  return new Paragraph({
+    children: [new TextRun({ text: sanitizedText })], // tudo junto
+  });
+};
+```
 
----
-
-## Sugestão 4 — Camadas 2 e 3 do REGEN
-
-**Viabilidade: CONCLUÍDA. Esta sugestão JÁ foi implementada.**
-
-Ambas as camadas foram corrigidas na última sessão. O código atual confirma:
-- Linha 525: system prompt com regra de formatação estrita (caminho bucket)
-- Linha 662: system prompt com regra de formatação estrita (caminho fallback/cache)
-- Linhas 139-181: `fieldPrompts.laudosMedicos` e `fieldPrompts.examesComplementares` em formato plano sem asteriscos
-
-Nenhuma ação necessária.
+Campos afetados: `conclusaoAnalise`, `nexoCausalJustificativa`, `analiseIncapacidadeLaboral`, `resumoPeticaoInicial`, `descricaoTecnicaDoencas`, `laudosMedicos`, `examesComplementares`.
 
 ---
 
-## Sugestão 5 e 6 — Auditoria dos `prompt_gen_*` (Nexo Causal, Incapacidade, Interpolação)
+### Problema 3 — Campos com placeholder `[INSERIR...]` chegam no documento (CRÍTICO para uso médico)
 
-**Viabilidade: ALTA para auditoria. Correção requer atenção cirúrgica.**
+A regra solicitada é **clara**: campo vazio ou com conteúdo de placeholder deve sair **invisível** do DOCX/PDF. Hoje:
 
-Após leitura do `gerar-resumos/index.ts` e do `seed-prompts/index.ts`, o diagnóstico completo é:
-
-**Interpolação de variáveis — FUNCIONANDO CORRETAMENTE**
-
-O `getPrompt()` do `prompt-manager.ts` interpola `${variavel}` do banco. Os fallbacks no `gerar-resumos` usam `${ctx.variavel}` nativo do template literal TypeScript. O mapeamento de contexto (linhas 423-441) cobre todas as variáveis. Não há falha de interpolação.
-
-**Análises técnicas (nexo, incapacidade) — SÓLIDAS, sem Markdown contaminante**
-
-- `prompt_gen_nexo_causal` (banco/seed): usa critérios de Bradford-Hill e Simonin. Não contém asteriscos. Retorno esperado é texto analítico contínuo
-- `prompt_gen_incapacidade` (banco/seed): usa 5 seções com CAIXA ALTA para títulos (`"- Use CAIXA ALTA para títulos de seção"`, linha 236) — esta é a instrução correta para texto de laudo
-- `prompt_gen_incapacidade` (fallback hardcoded no `gerar-resumos`): instrução análoga, sem asteriscos
-
-**Problema real identificado — `sugestoes_pericia`**
-
-O prompt `sugestoes_pericia` (tanto no banco quanto no fallback) instrui explicitamente `##`, `###` e marcadores `-`. Mas este é um caso **intencional e aceitável**: sugestões são exibidas em um painel dedicado (`AIInfoModal`) que usa `react-markdown` para renderizar o Markdown, não no corpo do laudo. Portanto, o Markdown aqui é correto e não polui o editor.
-
-**Problema real identificado — `referencias_bibliograficas`**
-
-O prompt de referências usa `1-`, `2-` como numeração — isso é texto plano, não Markdown. Correto.
-
-**Problema real identificado — `gerar-resumos` não tem camada de formatação global**
-
-Ao contrário do REGEN, o `gerar-resumos` usa `prompt_system_gerar_resumos` como system prompt — mas esse prompt não contém instrução de plain text. O fallback (linha 386) também não contém. Isso significa que nexo causal e incapacidade poderiam receber Markdown se a IA decidir incluí-lo. Os prompts individuais têm proteção parcial (`"Não use markdown com asteriscos"` no `incapacidade`), mas não sistêmica.
+- O gerador verifica `if (laudo.campo)` — correto para campos nulos
+- Mas **não filtra** texto como `[INSERIR CID...]`, `Erro crítico:`, `Aguardando...`, `null`, `undefined` em string
+- Também **não há verificação** de texto muito curto sem sentido médico real
 
 ---
 
-## O que Será Implementado
+### Problema 4 — Endereçamento judicial usa `"[VARA]"`, `"[NÚMERO]"`, `"[RECLAMANTE]"` como fallback literal no documento
 
-Com base na análise, 3 e 4 já estão prontas. Serão implementadas as 3 restantes com uma correção de segurança identificada na auditoria:
+Na linha 259–270 do DOCX, campos com valor `null` viram literalmente `[VARA]`, `[NÚMERO]` etc. no documento final — o mesmo problema conceitual: placeholder visível.
 
-### Operação A — Botão "Restaurar Padrão" no PromptEditor
+---
 
-**Arquivo:** `supabase/functions/seed-prompts/index.ts`
-- Adicionar `action === 'restore_single'` que recebe `promptId` no body, localiza o default nos objetos internos e faz UPSERT apenas para esse ID
+## O que será implementado
 
-**Arquivo:** `src/components/dev-panel/PromptEditor.tsx`
-- Adicionar botão "Restaurar Padrão" com ícone `RotateCcw` no header do dialog, protegido por `AlertDialog` de confirmação
-- Ao confirmar, chama `invoke('seed-prompts', { action: 'restore_single', promptId: prompt.id })`, exibe toast de sucesso e chama `onSaved()`
+### Operação A — `sanitizeMarkdown` robusta (ambos os geradores)
 
-### Operação B — Diff Visual no PromptEditor
+Nova versão com todas as coberturas:
 
-**Arquivo:** `supabase/functions/seed-prompts/index.ts`
-- Adicionar `action === 'get_defaults'` que aceita `promptId` opcional. Se passado, retorna apenas o default daquele ID; se não passado, retorna todos
+```typescript
+const sanitizeMarkdown = (text: string): string => {
+  if (!text) return "";
+  return text
+    // 1. Headings: ### Título → Título
+    .replace(/^#{1,6}\s+/gm, '')
+    // 2. Bold multi-linha: **texto** → TEXTO (flag 's' para dotAll)
+    .replace(/\*\*(.+?)\*\*/gs, (_, p1) => p1.toUpperCase())
+    .replace(/__(.+?)__/gs, (_, p1) => p1.toUpperCase())
+    // 3. Bullets com asterisco no início de linha: "* item" → "item"
+    .replace(/^\*\s+/gm, '')
+    // 4. Itálico simples (após remover bullets para não confundir)
+    .replace(/\*(.+?)\*/gs, '$1')
+    .replace(/_(.+?)_/gs, '$1')
+    // 5. Linhas separadoras: --- ou *** sozinhos numa linha
+    .replace(/^[-*]{3,}\s*$/gm, '')
+    // 6. Backtick code: `código` → código
+    .replace(/`(.+?)`/g, '$1')
+    // 7. Normalizar quebras de linha múltiplas
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
+```
 
-**Arquivo:** `src/components/dev-panel/PromptEditor.tsx`
-- Adicionar aba "Diff vs. Padrão" dentro do `ScrollArea`. Ao clicar, faz fetch do default e exibe dois blocos `<pre>` lado a lado: "Banco (atual)" e "Código (padrão)". Linhas divergentes recebem `bg-amber-500/10`. Se os textos forem idênticos, exibe badge verde "Idêntico ao padrão"
+**Onde aplicar:** `generateLaudoDOCX.ts` E `generateLaudoPDF.ts` (ambos têm a mesma função vulnerável).
 
-### Operação C — Camada Global de Formatação no GERAR (nova descoberta)
+---
 
-**Arquivo:** `supabase/functions/gerar-resumos/index.ts`
-- Atualizar `defaultSystemPrompt` (linha 386) para incluir instrução condicional: apenas prompts que NÃO são `sugestoes_pericia` e NÃO são `aprimorar_texto` recebem a regra de plain text. Sugestões e aprimoramento são casos especiais onde Markdown é intencional
-- Implementação: criar variável `formattingRule` baseada no `tipo` e concatenar ao system prompt antes de chamar `callAI`
+### Operação B — `createParagraphs` (plural) para campos longos no DOCX
+
+Nova função que divide por `\n\n` e trata cada parágrafo individualmente:
+
+```typescript
+const createParagraphs = (text: string): Paragraph[] => {
+  if (!text) return [];
+  const sanitized = sanitizeMarkdown(text);
+  const blocks = sanitized.split('\n\n').filter(b => b.trim());
+  
+  return blocks.map(block => {
+    // Linhas únicas curtas sem pontuação final = subtítulo interno
+    const lines = block.split('\n');
+    const isSingleLineTitle = lines.length === 1 && 
+      block.length < 80 && 
+      !block.endsWith('.') && 
+      !block.endsWith(',') &&
+      block === block.toUpperCase(); // só vira subtítulo se for caixa alta
+    
+    if (isSingleLineTitle) {
+      return createSubtitle(block);
+    }
+    
+    // Quebras simples dentro do parágrafo → TextRun com break
+    const textRuns = lines.flatMap((line, i) => {
+      const runs: TextRun[] = [new TextRun({
+        text: line,
+        size: FONT.sizeDefault,
+        color: COLORS.text,
+        font: FONT.name,
+      })];
+      if (i < lines.length - 1) {
+        runs.push(new TextRun({ break: 1 }));
+      }
+      return runs;
+    });
+    
+    return new Paragraph({
+      children: textRuns,
+      alignment: AlignmentType.BOTH,
+      spacing: { after: 120 },
+    });
+  });
+};
+```
+
+Esta função substitui `createParagraph` nos campos de texto longo.
+
+---
+
+### Operação C — Filtro de placeholder e conteúdo inválido
+
+Função `isFieldEmpty` que detecta campos que **não devem aparecer no documento**:
+
+```typescript
+const PLACEHOLDER_PATTERNS = [
+  /^\[.+\]$/,              // [INSERIR algo]
+  /^erro\s*cr[ií]tico/i,  // "erro critico: ..."
+  /^aguardando/i,          // "aguardando..."
+  /^undefined$/i,
+  /^null$/i,
+  /^n\/a$/i,
+  /^-+$/,                  // só traços
+];
+
+const isFieldEmpty = (value: string | null | undefined): boolean => {
+  if (!value) return true;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return true;
+  return PLACEHOLDER_PATTERNS.some(pattern => pattern.test(trimmed));
+};
+```
+
+Esta função substitui todos os `if (laudo.campo)` no gerador — agora `if (!isFieldEmpty(laudo.campo))`.
+
+---
+
+### Operação D — Remover fallbacks literais do endereçamento judicial
+
+Linhas 259–270 do DOCX: remover os `|| "[VARA]"`, `|| "[NÚMERO]"`, `|| "[RECLAMANTE]"`, `|| "[RECLAMADA]"`. Se o campo estiver vazio, o label simplesmente não aparece — igual ao comportamento de todos os outros campos do documento.
 
 ---
 
 ## Escopo dos Arquivos
 
-- `supabase/functions/seed-prompts/index.ts`: novas actions `restore_single` e `get_defaults`
-- `src/components/dev-panel/PromptEditor.tsx`: botão de restaurar e aba de diff
-- `supabase/functions/gerar-resumos/index.ts`: formatação seletiva no system prompt
+| Arquivo | Operações |
+|---|---|
+| `src/utils/generateLaudoDOCX.ts` | A + B + C + D (todas) |
+| `src/utils/generateLaudoPDF.ts` | A + C (sanitização e filtro de placeholder) |
 
-Deploy obrigatório de `seed-prompts` e `gerar-resumos` após as alterações.
+Nenhuma migração de banco. Nenhuma edge function. Nenhum prompt alterado.
 
+---
+
+## Garantias de Segurança
+
+- **Zero regressão:** Nenhum campo que hoje aparece corretamente será suprimido — `isFieldEmpty` só bloqueia valores literalmente problemáticos
+- **Compatibilidade:** `createParagraphs` é aditiva — a função `createParagraph` singular continua existindo para campos curtos como labels e datas
+- **Ambos os formatos:** PDF e DOCX recebem o mesmo `sanitizeMarkdown` e `isFieldEmpty` — garantindo paridade de comportamento entre os dois
+- **Dados legados:** Campos com Markdown gerado antes das proteções de IA serem ativadas serão limpos em tempo de exportação, sem precisar alterar o banco
