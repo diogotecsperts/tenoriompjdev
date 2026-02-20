@@ -1,99 +1,106 @@
 
-## Auditoria e Correção dos Prompts de Regeneração (REGEN)
+## Diagnóstico: O que foi feito e o que ainda está pendente
 
-### Contexto Técnico para o Gemini
+### Status Atual — 3 Camadas de Proteção, Apenas 1 Corrigida
 
-**Diferença arquitetural crítica entre IMPORT e REGEN:**
-
-O sistema de IMPORT (`processar-autos`) possui uma camada de proteção global em `supabase/functions/_shared/build-import-prompt.ts` que injeta um header/footer de formatação em torno de todos os prompts individuais. Isso significa que, mesmo que um prompt import individual contenha exemplos em Markdown, o wrapper global pode mitigar parcialmente o efeito.
-
-O sistema de REGEN (`regerar-campo-pdf/index.ts`) **não possui esse wrapper global**. O system prompt fixo usado em ambos os caminhos de execução (bucket e fallback) é apenas: `"Você é um assistente especializado em extração de dados de documentos médicos e jurídicos. Extraia apenas as informações solicitadas, sem inventar dados."` — sem nenhuma instrução de formato. Isso torna cada prompt REGEN individualmente a única barreira contra Markdown.
+O sistema REGEN possui **três camadas** de defesa contra Markdown. A auditoria anterior corrigiu apenas a primeira. As duas camadas mais profundas ainda estão vulneráveis.
 
 ---
 
-### Diagnóstico por Prompt (do banco de dados)
+### Camada 1 — Prompts no Banco de Dados (system_config) — CORRIGIDA
 
-**RISCO ALTO — Requer correção cirúrgica imediata:**
+Todas as 5 operações cirúrgicas foram executadas via `jsonb_set`:
+- `prompt_regen_laudosMedicos`: reestruturado para formato plano (LAUDO 1 / Data / Médico)
+- `prompt_regen_examesComplementares`: removidos templates bold e exemplo `**RNM...**`
+- `prompt_regen_afastamentos`, `auxilioTerceiros`, `danoEstetico`: trava `NÃO use marcadores markdown` adicionada ao final
 
-- `prompt_regen_laudosMedicos`: Contém exemplos explícitos de saída em Markdown: `**Laudo Dr. [Nome] - [Especialidade] (DD/MM/AAAA):**` com sub-bullets `- Diagnósticos:`, `- Conclusões:`. É um molde de saída em negrito que o modelo copiará fielmente.
-
-- `prompt_regen_examesComplementares`: Contém `**[Tipo do Exame] - [Região] (DD/MM/AAAA):**` e um exemplo real de saída: `"**RNM Coluna Lombar (15/03/2023):**"` — duplo vetor de risco: template + exemplo concreto.
-
-**RISCO MÉDIO — Presença de bullets instrutivos que podem contaminar saída:**
-
-- `prompt_regen_afastamentos`: Usa `*` (asteriscos como bullets) nos sub-itens de tipos de benefício (B31, B91, etc.). Com Mistral como fallback, há risco real de esses asteriscos serem interpretados como formatação Markdown na saída.
-
-- `prompt_regen_auxilioTerceiros`: Usa `*` nos sub-itens das AVDs (Alimentar-se, Vestir-se, etc.). A saída final é pedida em prosa, mas os bullets instrutivos podem contaminar.
-
-- `prompt_regen_danoEstetico`: Usa `-` na seção de classificação. A saída é pedida em prosa, mas os tracejados na instrução são um vetor.
-
-**RISCO BAIXO — Sem Markdown confirmado, mas na lista de vigilância:**
-
-- `prompt_regen_antecedentes`, `prompt_regen_historiaAtual`, `prompt_regen_historicoOcupacional`, `prompt_regen_historiaAcidente`, `prompt_regen_tratamentos`, `prompt_regen_conclusaoAnalise`, `prompt_regen_tabelaSUSEP`, `prompt_regen_exameFisico`, `prompt_regen_descricaoAtividadesLaborais`, `prompt_regen_quesitosJuizo`, `prompt_regen_quesitosReclamante`, `prompt_regen_quesitosReclamada` — Contêm bullets como instruções lógicas de extração (o que é correto), mas sem exemplos de saída formatada. Receberão apenas a trava de segurança no final.
+Esse é o caminho padrão de execução — quando a função vai ao banco via `getPrompt()` para recuperar o prompt customizado.
 
 ---
 
-### Concordância/Discordância com as Recomendações do Gemini
+### Camada 2 — System Prompt da Edge Function (hardcoded no `callAI`) — PENDENTE
 
-**Concordo integralmente:**
-- A recomendação de auditar os prompts REGEN é correta e necessária.
-- A identificação de que `laudosMedicos` e `examesComplementares` são os mais urgentes está alinhada com o que encontrei no banco.
-- A observação preventiva sobre prompts com "LISTE em formato estruturado" é válida — risco real especialmente com Mistral.
+**Esta é exatamente a recomendação que o Gemini indicou e que ainda NÃO foi implementada.**
 
-**Discordância técnica em um ponto (informação interna):**
-- O Gemini tratou REGEN e IMPORT como equivalentes em termos de exposição. Eles não são. IMPORT tem proteção sistêmica via wrapper global; REGEN não tem. Isso eleva a prioridade dos prompts REGEN em relação ao que foi avaliado. O risco dos REGENs é estruturalmente maior.
+Há dois pontos de chamada `callAI` na função, ambos com o mesmo system prompt vulnerável:
+
+**Linha 514** (caminho bucket / two-phase):
+```
+'Você é um assistente especializado em extração de dados de documentos médicos e jurídicos. Extraia apenas as informações solicitadas, sem inventar dados.'
+```
+
+**Linha 651** (caminho fallback / cache):
+```
+'Você é um assistente especializado em extração de dados de documentos médicos e jurídicos. Extraia apenas as informações solicitadas, sem inventar dados.'
+```
+
+Nenhum dos dois contém qualquer instrução de formatação. Esta é a "Camada 2" recomendada pelo Gemini que ainda não foi criada.
 
 ---
 
-### O que será feito (5 operações cirúrgicas no banco)
+### Camada 3 — Fallback Hardcoded (`fieldPrompts` no próprio arquivo) — PENDENTE
 
-**Operação 1 — `prompt_regen_laudosMedicos` (ALTO)**
-Substituir o bloco `ESTRUTURE ASSIM: **Laudo Dr. [Nome]...**` por formato plano:
+Existe um objeto `fieldPrompts` no código (linhas 39–360) que atua como fallback quando `getPrompt()` falha ao consultar o banco. Dois deles ainda contêm Markdown explícito:
+
+**Linha 143–148** (`laudosMedicos` — fallback):
+```
+ESTRUTURE ASSIM:
+**Laudo Dr. [Nome] - [Especialidade] (DD/MM/AAAA):**
+- Diagnósticos: [listar com CIDs]
+- Conclusões: [descrever]
+```
+
+**Linha 161–165** (`examesComplementares` — fallback):
+```
+**[Tipo do Exame] - [Região] (DD/MM/AAAA):**
+...
+Exemplo: "**RNM Coluna Lombar (15/03/2023):**..."
+```
+
+Os prompts do banco foram corrigidos, mas se por algum motivo a consulta ao `system_config` falhar (timeout, erro de rede, chave não encontrada), a função cai silenciosamente nesse fallback — que ainda está com Markdown.
+
+---
+
+### O que será feito (2 operações no código)
+
+**Operação A — Atualizar o system prompt nos dois pontos de chamada `callAI`**
+
+Substituir a string atual pelos dois `callAI` (linhas 512–516 e 649–653) para:
+
+```typescript
+'Você é um assistente especializado em extração de dados de documentos médicos e jurídicos. Extraia apenas as informações solicitadas, sem inventar dados. REGRA DE FORMATAÇÃO ESTRITA: Retorne APENAS texto plano. É terminantemente proibido o uso de formatação Markdown (sem negritos, sem asteriscos, sem marcações de código). Use apenas quebras de linha para separar as informações.'
+```
+
+Isso cria a "Camada 2" sistêmica equivalente ao wrapper do IMPORT.
+
+**Operação B — Corrigir os dois fallbacks hardcoded vulneráveis**
+
+Substituir os blocos Markdown dos prompts `laudosMedicos` (linhas 142–148) e `examesComplementares` (linhas 160–166) no objeto `fieldPrompts` pelo mesmo formato plano já aplicado no banco:
+
 ```
 ESTRUTURE ASSIM (sem negrito, sem traços, sem asteriscos):
 LAUDO 1
 Data: [DD/MM/AAAA]
 Médico: [Nome] - [Especialidade]
 Diagnósticos: [listar com CIDs]
-Conclusões: [descrever]
-Recomendações: [descrever]
-Limitações: [descrever]
-
+...
 NÃO use marcadores markdown (asteriscos, negrito, traços, bullets).
 ```
 
-**Operação 2 — `prompt_regen_examesComplementares` (ALTO)**
-Substituir o bloco `ESTRUTURE ASSIM: **[Tipo do Exame]...**` e o exemplo concreto com `**RNM...**` por:
-```
-ESTRUTURE ASSIM (sem negrito, sem traços, sem asteriscos):
-EXAME 1
-Tipo: [tipo e região]
-Data: [DD/MM/AAAA]
-Achados: [descrição completa]
-Conclusão: [conclusão do exame]
-
-NÃO use marcadores markdown (asteriscos, negrito, traços, bullets).
-```
-
-**Operação 3 — `prompt_regen_afastamentos` (MÉDIO)**
-Adicionar ao final: `NÃO use marcadores markdown (asteriscos ou traços) na resposta.`
-
-**Operação 4 — `prompt_regen_auxilioTerceiros` (MÉDIO)**
-Adicionar ao final: `NÃO use marcadores markdown (asteriscos ou traços) na resposta.`
-
-**Operação 5 — `prompt_regen_danoEstetico` (MÉDIO)**
-Adicionar ao final: `NÃO use marcadores markdown (asteriscos ou traços) na resposta.`
-
 ---
 
-### O que NÃO será alterado e por quê
+### Resumo do Estado Pós-Implementação
 
-Os prompts de risco baixo (antecedentes, historiaAtual, historicoOcupacional, etc.) contêm bullets exclusivamente como **instruções de raciocínio para a IA** (o que buscar, onde olhar), não como moldes de saída. Alterar esses bullets quebraria a clareza instrucional sem ganho de segurança proporcional. Eles permanecem na lista de vigilância para correção se houver reclamação de campo específico.
+```text
++---------------------------+------------------+------------------+
+| Camada                    | Antes desta PR   | Após esta PR     |
++---------------------------+------------------+------------------+
+| 1. Prompts no banco (DB)  | CORRIGIDA        | CORRIGIDA        |
+| 2. System prompt callAI   | VULNERAVEL       | CORRIGIDA        |
+| 3. Fallback hardcoded     | VULNERAVEL       | CORRIGIDA        |
++---------------------------+------------------+------------------+
+```
 
-Os prompts de quesitos (`quesitosJuizo`, `quesitosReclamante`, `quesitosReclamada`) usam numeração (1. 2. 3.) que é intencional — os quesitos originais já vêm numerados do processo judicial e devem ser preservados literalmente.
+Após esta implementação, o pipeline REGEN terá proteção equivalente ao IMPORT: mesmo que um prompt individual falhe ou contenha Markdown, o system prompt da edge function bloqueará a formatação antes de chegar ao editor. E mesmo que o banco falhe, o fallback hardcoded também estará limpo.
 
----
-
-### Arquitetura Técnica das Alterações
-
-Todas as alterações serão feitas diretamente no banco via `jsonb_set` (mesmo método usado nas correções IMPORT), modificando apenas o campo `prompt` dentro do JSONB sem tocar em `cardId`, `sectionId`, `order`, `createdAt` ou outros metadados. Nenhum arquivo de código será alterado.
+**Escopo:** Apenas `supabase/functions/regerar-campo-pdf/index.ts`. Nenhuma migração de banco necessária.
