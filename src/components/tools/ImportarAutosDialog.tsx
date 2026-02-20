@@ -262,6 +262,14 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const lastJobUpdateRef = useRef<string | null>(null);
   const staleCheckCountRef = useRef(0);
   const STALE_THRESHOLD_POLLS = 100; // 100 polls * 3s = 300 segundos (5 min) sem update = stale
+  
+  // Partial results recovery state (for stale/crashed jobs)
+  const [partialResults, setPartialResults] = useState<{
+    partial: boolean;
+    resumos_parciais: Record<string, string>;
+    summariesGenerated: number;
+    lastCompletedSummary: string;
+  } | null>(null);
 
   // Client-side PDF splitting state (NEW for large PDFs)
   const [isSplitting, setIsSplitting] = useState(false);
@@ -608,6 +616,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         if (staleCheckCountRef.current >= STALE_THRESHOLD_POLLS && !isJobStale) {
           console.warn('[ImportarAutosDialog] Job appears stale - no updates for 5+ minutes');
           setIsJobStale(true);
+          
+          // Check if the job has partial results we can recover
+          if (data.result && data.result.partial && data.result.resumos_parciais) {
+            console.log(`[ImportarAutosDialog] Found partial results: ${data.result.summariesGenerated} summaries`);
+            setPartialResults(data.result);
+          }
         }
       } else {
         // Reset counter when we see an update
@@ -1150,6 +1164,70 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     }
   };
 
+  // Handle using partial results from a stale/crashed job
+  const handleUsePartialResults = (partial: NonNullable<typeof partialResults>) => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    
+    // Build a minimal ExtractedData with the partial summaries injected
+    const partialResumosIA = {
+      resumo_peticao: partial.resumos_parciais?.resumo_peticao || '',
+      resumo_contestacao: partial.resumos_parciais?.resumo_contestacao || '',
+      descricao_doencas: partial.resumos_parciais?.descricao_doencas || '',
+      nexo_causal: partial.resumos_parciais?.nexo_causal || '',
+      incapacidade: partial.resumos_parciais?.incapacidade || '',
+      referencias_bibliograficas: partial.resumos_parciais?.referencias_bibliograficas || '',
+    };
+    
+    // If we already have extractedData from checkJobStatus, use it
+    // Otherwise create a minimal structure (user will need to fill manually)
+    if (extractedData) {
+      setExtractedData({
+        ...extractedData,
+        resumos_ia: partialResumosIA
+      });
+    } else {
+      // Create empty structure with just the summaries
+      const emptyData: ExtractedData = {
+        vitima: { nome: '', cpf: '', data_nascimento: '', profissao: '', escolaridade: '', dominancia: '' },
+        processo: { numero: '', vara: '', reclamante: '', reclamada: '' },
+        acidente: { data: '', descricao: '', local: '' },
+        documentos_checklist: { cat: false, prontuario: false, receitas: false, exames: false, laudos_anteriores: false, atestados: false, outros: [] },
+        historico: { historia_atual: '', historico_ocupacional: '', antecedentes_patologicos: '', tratamentos_realizados: '', afastamentos: '' },
+        posto_trabalho: { cargo_funcao: '', data_admissao: '', data_afastamento: '', descricao_ambiente: '', descricao_atividades: '' },
+        exame_clinico: { laudos_medicos: '', exames_complementares: '', lesoes_descritas: '', exame_fisico: '' },
+        informacoes_medicas: { cids_mencionados: [], incapacidade_alegada: '', nexo_sugerido: '', tipo_incapacidade: '' },
+        avaliacao_sequelas: { tabela_susep: '', dano_estetico: '', auxilio_terceiros: '' },
+        quesitos: { juizo: '', reclamante: '', reclamada: '' },
+        textos_brutos: { peticao_inicial: '', contestacao: '' },
+        resumos_ia: partialResumosIA,
+        resumo: ''
+      };
+      setExtractedData(emptyData);
+    }
+    
+    // Determine which summaries failed
+    const allTypes = ['descricao_doencas', 'nexo_causal', 'incapacidade', 'resumo_peticao', 'resumo_contestacao', 'referencias_bibliograficas'];
+    const failed = allTypes.filter(t => !partial.resumos_parciais?.[t]);
+    if (failed.length > 0) {
+      setPartialFailures({
+        failedSummaries: failed,
+        errors: Object.fromEntries(failed.map(f => [f, 'Job interrompido antes da geração']))
+      });
+    }
+    
+    setProcessingStep("preview");
+    setIsJobStale(false);
+    setPartialResults(null);
+    
+    toast({
+      title: `${partial.summariesGenerated} resumos recuperados`,
+      description: `Dados parciais recuperados. ${failed.length > 0 ? `${failed.length} seção(ões) precisarão ser geradas manualmente.` : ''}`,
+    });
+  };
+
   // Forced cancel during active processing — stops polling and resets all state to idle
   const handleForcedCancel = () => {
     if (pollingRef.current) {
@@ -1206,6 +1284,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setIsJobStale(false);
     lastJobUpdateRef.current = null;
     staleCheckCountRef.current = 0;
+    setPartialResults(null);
     // Reset network error tracking
     networkErrorCountRef.current = 0;
     setIsReconnecting(false);
@@ -2083,16 +2162,36 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   </AlertTitle>
                   <AlertDescription className="text-orange-600/80 dark:text-orange-400/80">
                     <p>O processamento não teve atualizações nos últimos 5 minutos.</p>
+                    {partialResults && (
+                      <p className="text-sm mt-1 font-medium text-green-600 dark:text-green-400">
+                        ✓ {partialResults.summariesGenerated} de 6 resumos foram salvos antes da parada.
+                      </p>
+                    )}
                     <p className="text-sm mt-1">
-                      Isso pode indicar que o servidor está sobrecarregado ou o modelo de IA está lento.
+                      {partialResults 
+                        ? 'Você pode usar os resumos já gerados ou continuar esperando.'
+                        : 'Isso pode indicar que o servidor está sobrecarregado ou o modelo de IA está lento.'
+                      }
                     </p>
                     <div className="flex gap-2 mt-3">
+                      {partialResults && (
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleUsePartialResults(partialResults)}
+                          className="text-xs border-green-500/50 bg-green-500/10 text-green-700 dark:text-green-400 hover:bg-green-500/20"
+                        >
+                          <CheckCircle2 className="h-3 w-3 mr-1" />
+                          Usar {partialResults.summariesGenerated} resumos gerados
+                        </Button>
+                      )}
                       <Button 
                         variant="outline" 
                         size="sm"
                         onClick={() => {
                           staleCheckCountRef.current = 0;
                           setIsJobStale(false);
+                          setPartialResults(null);
                         }}
                         className="text-xs"
                       >
