@@ -1208,16 +1208,18 @@ serve(async (req) => {
       );
     }
 
-    // Parse request body for action
+    // Parse request body for action + extra params
     let action = 'seed'; // default action
+    let promptId: string | undefined;
     try {
       const body = await req.json();
       action = body?.action || 'seed';
+      promptId = body?.promptId;
     } catch {
       // No body or invalid JSON, use default action
     }
 
-    console.log(`[seed-prompts] Action: ${action}`);
+    console.log(`[seed-prompts] Action: ${action}${promptId ? `, promptId: ${promptId}` : ''}`);
 
     // Handle check_updates action
     if (action === 'check_updates') {
@@ -1237,6 +1239,91 @@ serve(async (req) => {
       
       return new Response(
         JSON.stringify({ success: true, ...results }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Handle restore_single action — restaura apenas UM prompt para o default do código
+    if (action === 'restore_single') {
+      if (!promptId) {
+        return new Response(
+          JSON.stringify({ error: 'promptId is required for restore_single' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      const allDefaults = getAllPromptsMap();
+      const defaultConfig = allDefaults[promptId];
+      
+      if (!defaultConfig) {
+        return new Response(
+          JSON.stringify({ error: `No default found for promptId: ${promptId}` }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      const restoredValue = {
+        id: promptId,
+        prompt: defaultConfig.prompt,
+        description: defaultConfig.description,
+        cardId: defaultConfig.cardId,
+        sectionId: defaultConfig.sectionId,
+        order: defaultConfig.order,
+        variables: defaultConfig.variables,
+        isClassified: true,
+        updatedAt: new Date().toISOString()
+      };
+      
+      const { error: upsertError } = await supabase
+        .from('system_config')
+        .upsert({
+          id: promptId,
+          value: restoredValue,
+          description: defaultConfig.description,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' });
+      
+      if (upsertError) {
+        console.error(`[seed-prompts] Error restoring ${promptId}:`, upsertError);
+        return new Response(
+          JSON.stringify({ error: `Failed to restore prompt: ${upsertError.message}` }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      console.log(`[seed-prompts] Restored single prompt: ${promptId}`);
+      return new Response(
+        JSON.stringify({ success: true, promptId, restored: restoredValue }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Handle get_defaults action — retorna o(s) prompt(s) padrão do código
+    if (action === 'get_defaults') {
+      const allDefaults = getAllPromptsMap();
+      
+      if (promptId) {
+        // Retornar apenas o default de um prompt específico
+        const defaultConfig = allDefaults[promptId];
+        if (!defaultConfig) {
+          return new Response(
+            JSON.stringify({ error: `No default found for promptId: ${promptId}` }),
+            { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        return new Response(
+          JSON.stringify({ success: true, promptId, defaultPrompt: defaultConfig.prompt }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      // Retornar todos os defaults (apenas campo prompt de cada um)
+      const defaults: Record<string, string> = {};
+      for (const [id, config] of Object.entries(allDefaults)) {
+        defaults[id] = config.prompt;
+      }
+      return new Response(
+        JSON.stringify({ success: true, defaults }),
         { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
