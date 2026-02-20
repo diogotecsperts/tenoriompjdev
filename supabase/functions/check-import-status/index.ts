@@ -87,7 +87,9 @@ serve(async (req) => {
       }
     };
 
-    if (job.status === 'completed' && job.result) {
+    if (job.result) {
+      // Always return result if available - includes partial results from progressive save
+      // Frontend uses result.partial to determine if recovery is needed
       response.result = job.result;
     }
 
