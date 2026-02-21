@@ -1,59 +1,72 @@
 
 
-# Plano — Resolver Acentuacao na Importacao (Bug Real Identificado)
+# Plano — Blindagem Anti-Alucinacao no Resumo da Peticao + Auditoria de Permanencia
 
-## Diagnostico Correto
+## 1. Atualizar o Prompt do Resumo da Peticao (3 locais no codigo + 1 no banco)
 
-Voce tem **toda razao**. O laudo `241c0285` foi importado **hoje** (21/02/2026 12:02) — nao e dado antigo. A regra de idioma no `summarySystemPrompt` (linha 902) esta sendo **ignorada pelo modelo**.
+O prompt `prompt_gen_resumo_peticao` precisa ser atualizado com a regra anti-vies em **todos os locais** para garantir cobertura total:
 
-### Por que a regra falha?
+### Arquivo 1: `supabase/functions/gerar-resumos/index.ts` (linhas 35-48)
+Fallback usado quando o usuario clica "Resumir Texto" na UI.
 
-O pipeline funciona assim:
+### Arquivo 2: `supabase/functions/processar-autos/index.ts` (linhas 664-675)
+Fallback usado durante a importacao automatica do PDF.
 
-1. `getPromptForType('descricao_doencas', ctx)` busca o prompt do **banco de dados** (DevPanel)
-2. O prompt do banco **NAO contem regra de idioma** — so tem as instrucoes tecnicas
-3. `callAI(aiConfig, summarySystemPrompt, prompt)` envia: system=summarySystemPrompt, user=prompt
-4. O modelo `google/gemini-3-flash-preview` da mais peso ao **user prompt** e ignora a regra de acentuacao que esta apenas no system prompt
+### Arquivo 3: `supabase/functions/seed-prompts/index.ts` (linhas 580-591)
+Template usado para sincronizar/restaurar prompts no DevPanel.
 
-A Secao 15 (Analise de Incapacidade) saiu com acentos corretos provavelmente por acaso — o modelo foi inconsistente.
-
-### Solucao
-
-Injetar a regra de idioma **diretamente no final de cada user prompt** enviado ao modelo, alem de mante-la no system prompt. Isso garante redundancia: mesmo que o modelo ignore o system prompt, a regra estara no texto que ele processa diretamente.
-
-## Operacao Tecnica (1 arquivo)
-
-### Arquivo: `supabase/functions/processar-autos/index.ts`
-
-Na funcao `gerarResumosIA`, **apos** obter o prompt via `getPromptForType()` (linha 1155) e **antes** de chamar `callAI()` (linha 1164), concatenar a regra de idioma ao final do user prompt:
+**Novo prompt para os 3 arquivos:**
 
 ```
-Linha ~1155 (depois de obter o prompt):
+Voce e um perito medico especialista em medicina do trabalho.
+Elabore um resumo tecnico e objetivo da peticao inicial para um laudo pericial.
 
-const prompt = await getPromptForType(tipo, contexto);
+Texto da Peticao Inicial extraido:
+${peticaoInicial}
 
-// Injetar regra de idioma no final do user prompt para reforcar
-const REGRA_IDIOMA_INLINE = '\n\nREGRA FINAL INQUEBRAVEL: Todo o texto acima DEVE ser redigido em Portugues Brasileiro correto e formal, com TODOS os acentos e diacriticos (a, e, i, o, u, a, e, o, a, o, c). Palavras como "infeccao", "nao", "orgao", "funcoes" sao ERROS GRAVES — o correto e "infeccao", "nao", "orgao", "funcoes". NUNCA omita acentos.';
+REGRAS DE REDACAO INQUEBRAVEIS (RISCO LEGAL):
+1. ATENCAO AO VIES: E ESTRITAMENTE PROIBIDO presumir, inventar ou adicionar doencas ocupacionais tipicas da profissao (ex: tendinopatias, LER/DORT, sindrome do impacto, PAIR) se elas NAO estiverem textualmente descritas na peticao. O caso pode se tratar de um trauma grave ou acidente atipico.
+2. Seja absolutamente fiel aos fatos: cite apenas as lesoes, sintomas e dinamicas de acidente que estao explicitas no texto fornecido.
+3. Nao utilize placeholders ([INSERIR]). Se nao houver clareza, limite-se aos fatos apresentados.
+4. Use apenas texto plano, sem Markdown, em no maximo 3 paragrafos continuos.
 
-const promptComRegra = prompt + REGRA_IDIOMA_INLINE;
+INSTRUCOES:
+- Resuma os pontos principais alegados pelo reclamante
+- Destaque a dinamica do adoecimento/acidente e as doencas reais mencionadas
+- Identifique os nexos causais alegados
+- Mencione os pedidos principais
 ```
 
-E na chamada `callAI` (linha 1164), usar `promptComRegra` em vez de `prompt`:
+### Banco de dados (system_config)
+Ao executar "Sincronizar" ou "Restaurar Padrao" no DevPanel, o prompt atualizado do `seed-prompts` sera propagado automaticamente para o banco.
 
-```
-const result = await Promise.race([
-  callAI(aiConfig, summarySystemPrompt, promptComRegra, { ... }),
-  timeoutPromise
-]);
-```
+---
 
-Aplicar o mesmo no retry (linha 1218-1219).
+## 2. Auditoria de Permanencia das Correcoes
 
-## Resultado esperado
+Sobre sua pergunta — **todas as correcoes sao permanentes e estao salvas no codigo-fonte (git)**. Nenhuma se perde ao redeployar ou atualizar o app.
 
-- A regra de idioma estara presente em **dois lugares**: system prompt E user prompt
-- Independente do modelo dar mais peso a um ou outro, a regra sera vista
-- Funciona para qualquer prompt do DevPanel (que nao tem a regra)
-- Zero impacto em prompts que ja geram texto com acentos (redundancia inofensiva)
-- Novas importacoes de PDF terao acentuacao correta desde a primeira geracao
-- O usuario NAO precisa usar "Regerar" — o texto ja vira correto na importacao
+| Correcao | Onde foi feita | Tipo | Permanente? |
+|----------|---------------|------|-------------|
+| Mapeamento de variaveis cruas (prontuario, etc.) | `processar-autos/index.ts` | Codigo | Sim (git) |
+| Remocao do campo "Ha Incapacidade" | `generateLaudoDOCX.ts` | Codigo | Sim (git) |
+| Nexo Causal mapeado para `nexo_causal_justificativa` | `ImportarAutosDialog.tsx` | Codigo | Sim (git) |
+| Remocao da duplicacao Secao 14/16 | `ImportarAutosDialog.tsx` | Codigo | Sim (git) |
+| Regra de idioma no system prompt (processar-autos) | `processar-autos/index.ts` | Codigo | Sim (git) |
+| Regra de idioma inline no user prompt (processar-autos) | `processar-autos/index.ts` | Codigo | Sim (git) |
+| Regra de idioma no gerar-resumos | `gerar-resumos/index.ts` | Codigo | Sim (git) |
+| Anti-alucinacao no resumo peticao (este plano) | 3 arquivos .ts | Codigo | Sim (git) |
+
+**Nenhuma correcao depende exclusivamente do banco de dados.** O banco (system_config/DevPanel) funciona como uma **camada de customizacao opcional** — se ele falhar ou for resetado, os fallbacks hardcoded no codigo assumem automaticamente. Essa e a arquitetura de 3 camadas de protecao do sistema.
+
+---
+
+## Operacoes Tecnicas (3 arquivos)
+
+| # | Arquivo | Mudanca |
+|---|---------|---------|
+| 1 | `supabase/functions/gerar-resumos/index.ts` | Atualizar fallback `resumo_peticao` com regra anti-vies |
+| 2 | `supabase/functions/processar-autos/index.ts` | Atualizar fallback `resumo_peticao` com regra anti-vies |
+| 3 | `supabase/functions/seed-prompts/index.ts` | Atualizar template `prompt_gen_resumo_peticao` com regra anti-vies |
+
+Apos o deploy, qualquer nova importacao de PDF ou geracao manual de resumo usara o prompt blindado contra alucinacoes de doencas presumidas.
