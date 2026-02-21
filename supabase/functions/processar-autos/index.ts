@@ -656,7 +656,10 @@ const PROMPT_ID_MAPPING: Record<string, string> = {
   descricao_doencas: 'prompt_gen_descricao_doencas',
   nexo_causal: 'prompt_gen_nexo_causal',
   incapacidade: 'prompt_gen_incapacidade',
-  referencias_bibliograficas: 'prompt_gen_referencias'
+  referencias_bibliograficas: 'prompt_gen_referencias',
+  quesitos_juizo: 'prompt_regen_quesitosJuizo',
+  quesitos_reclamante: 'prompt_regen_quesitosReclamante',
+  quesitos_reclamada: 'prompt_regen_quesitosReclamada'
 };
 
 // Prompts padrão hardcoded como fallback (caso o banco não tenha ou falhe)
@@ -820,6 +823,92 @@ Adicione 2 a 4 referências científicas reais e pertinentes aos CIDs específic
 FORMATO OBRIGATÓRIO: ABNT (NBR 6023)
 Exemplo:
 SOBRENOME, Nome. Título da obra. Edição. Cidade: Editora, Ano.`
+
+  ,quesitos_juizo: `Você é um perito médico judicial especialista. Analise os quesitos formulados pelo Juízo e gere respostas técnicas fundamentadas.
+
+QUESITOS BRUTOS DO JUÍZO (extraídos do PDF — podem conter erros de OCR):
+\${quesitosTexto}
+
+DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
+- CIDs diagnosticados: \${cids}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+- Exames complementares: \${examesComplementares}
+- Atividades laborais: \${atividadesLaborais}
+- Nexo causal (já analisado): \${nexoCausal}
+- Incapacidade (já analisada): \${incapacidade}
+
+INSTRUÇÕES OBRIGATÓRIAS:
+1. Corrija TODA a acentuação OCR (lesoes→lesões, nao→não, orgao→órgão, etc.)
+2. Mantenha a numeração ORIGINAL dos quesitos (1, 2, 3... ou a, b, c... ou I, II, III...)
+3. Para CADA quesito, gere uma resposta técnica baseada nas evidências do caso
+4. Se não houver dados suficientes para responder, escreva: "Prejudicado pela ausência de elementos nos autos"
+5. Use linguagem técnica médico-legal formal em português brasileiro
+
+FORMATO DE SAÍDA OBRIGATÓRIO:
+QUESITO 1: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
+
+QUESITO 2: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
+
+(Continue para todos os quesitos encontrados)`,
+
+  quesitos_reclamante: `Você é um perito médico judicial especialista. Analise os quesitos formulados pelo Reclamante e gere respostas técnicas fundamentadas.
+
+QUESITOS BRUTOS DO RECLAMANTE (extraídos do PDF — podem conter erros de OCR):
+\${quesitosTexto}
+
+DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
+- CIDs diagnosticados: \${cids}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+- Exames complementares: \${examesComplementares}
+- Atividades laborais: \${atividadesLaborais}
+- Nexo causal (já analisado): \${nexoCausal}
+- Incapacidade (já analisada): \${incapacidade}
+
+INSTRUÇÕES OBRIGATÓRIAS:
+1. Corrija TODA a acentuação OCR
+2. Mantenha a numeração ORIGINAL dos quesitos
+3. Para CADA quesito, gere uma resposta técnica IMPARCIAL baseada nas evidências
+4. Se não houver dados suficientes, escreva: "Prejudicado pela ausência de elementos nos autos"
+5. Use linguagem técnica médico-legal formal em português brasileiro
+
+FORMATO DE SAÍDA OBRIGATÓRIO:
+QUESITO 1: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
+
+QUESITO 2: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]`,
+
+  quesitos_reclamada: `Você é um perito médico judicial especialista. Analise os quesitos formulados pela Reclamada e gere respostas técnicas fundamentadas.
+
+QUESITOS BRUTOS DA RECLAMADA (extraídos do PDF — podem conter erros de OCR):
+\${quesitosTexto}
+
+DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
+- CIDs diagnosticados: \${cids}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+- Exames complementares: \${examesComplementares}
+- Atividades laborais: \${atividadesLaborais}
+- Nexo causal (já analisado): \${nexoCausal}
+- Incapacidade (já analisada): \${incapacidade}
+
+INSTRUÇÕES OBRIGATÓRIAS:
+1. Corrija TODA a acentuação OCR
+2. Mantenha a numeração ORIGINAL dos quesitos
+3. Para CADA quesito, gere uma resposta técnica IMPARCIAL baseada nas evidências
+4. Se não houver dados suficientes, escreva: "Prejudicado pela ausência de elementos nos autos"
+5. Use linguagem técnica médico-legal formal em português brasileiro
+
+FORMATO DE SAÍDA OBRIGATÓRIO:
+QUESITO 1: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
+
+QUESITO 2: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]`
 };
 
 /**
@@ -868,7 +957,13 @@ async function getPromptForType(tipo: string, ctx: any): Promise<string> {
     tratamentos: ctx.tratamentos || 'Não informado',
     
     // Nexo causal (para análise de incapacidade)
-    nexoCausal: ctx.nexoCausal || 'Não informado',
+    nexoCausal: ctx.nexoCausal || ctx.nexoCausalGerado || 'Não informado',
+    
+    // Incapacidade (para quesitos)
+    incapacidade: ctx.incapacidade || ctx.incapacidadeGerada || 'Não informado',
+    
+    // Quesitos (texto bruto para sub-rotina automática)
+    quesitosTexto: ctx.quesitosTexto || ctx.quesitosJuizo || ctx.quesitosReclamante || ctx.quesitosReclamada || '',
     
     // Outros campos que podem ser usados em prompts futuros
     metodologia: ctx.metodologia || 'Não informado',
@@ -1020,22 +1115,28 @@ async function gerarResumosIA(
     nexo_causal: string;
     incapacidade: string;
     referencias_bibliograficas: string;
+    quesitos_juizo: string;
+    quesitos_reclamante: string;
+    quesitos_reclamada: string;
   };
   aiInfo: {
     provider: string;
     model: string;
     summariesGenerated: number;
-    summariesFailed: string[];  // NEW: lista de resumos que falharam
-    errors: Record<string, string>;  // NEW: mensagens de erro por tipo
+    summariesFailed: string[];
+    errors: Record<string, string>;
   };
 }> {
-const results = {
+const results: Record<string, string> = {
     resumo_peticao: '',
     resumo_contestacao: '',
     descricao_doencas: '',
     nexo_causal: '',
     incapacidade: '',
-    referencias_bibliograficas: ''
+    referencias_bibliograficas: '',
+    quesitos_juizo: '',
+    quesitos_reclamante: '',
+    quesitos_reclamada: ''
   };
 
   // Buscar configuração de IA
@@ -1045,12 +1146,12 @@ const results = {
   if (!aiConfig.apiKey) {
     console.warn('[gerarResumosIA] No API key configured, skipping AI summaries');
     return {
-      resumos: results,
+      resumos: results as any,
       aiInfo: { provider: 'none', model: 'none', summariesGenerated: 0, summariesFailed: [], errors: {} }
     };
   }
 
-  const contexto = {
+  const contexto: Record<string, string> = {
     peticaoInicial: extractedData.textos_brutos?.peticao_inicial || '',
     contestacao: extractedData.textos_brutos?.contestacao || '',
     cids: Array.isArray(extractedData.informacoes_medicas?.cids_mencionados) && extractedData.informacoes_medicas.cids_mencionados.length > 0
@@ -1067,7 +1168,14 @@ const results = {
     historiaAcidente: extractedData.acidente?.descricao || '',
     historiaAtual: extractedData.historico?.historia_atual || '',
     laudosMedicos: extractedData.exame_clinico?.laudos_medicos || '',
-    lesoesDescritas: extractedData.exame_clinico?.lesoes_descritas || ''
+    lesoesDescritas: extractedData.exame_clinico?.lesoes_descritas || '',
+    // Quesitos brutos para a sub-rotina automática
+    quesitosJuizo: extractedData.quesitos?.juizo || '',
+    quesitosReclamante: extractedData.quesitos?.reclamante || '',
+    quesitosReclamada: extractedData.quesitos?.reclamada || '',
+    // Serão preenchidos dinamicamente após gerar nexo_causal e incapacidade
+    nexoCausalGerado: '',
+    incapacidadeGerada: ''
   };
 
   // Helper: validate if text has enough substance (not just "não informado" or too short)
@@ -1090,7 +1198,10 @@ const results = {
     laudosMedicos: contexto.laudosMedicos ? `${contexto.laudosMedicos.length} chars` : 'VAZIO',
     lesoesDescritas: contexto.lesoesDescritas ? `${contexto.lesoesDescritas.length} chars` : 'VAZIO',
     antecedentes: contexto.antecedentes ? `${contexto.antecedentes.length} chars` : 'VAZIO',
-    tratamentos: contexto.tratamentos ? `${contexto.tratamentos.length} chars` : 'VAZIO'
+    tratamentos: contexto.tratamentos ? `${contexto.tratamentos.length} chars` : 'VAZIO',
+    quesitosJuizo: contexto.quesitosJuizo ? `${contexto.quesitosJuizo.length} chars` : 'VAZIO',
+    quesitosReclamante: contexto.quesitosReclamante ? `${contexto.quesitosReclamante.length} chars` : 'VAZIO',
+    quesitosReclamada: contexto.quesitosReclamada ? `${contexto.quesitosReclamada.length} chars` : 'VAZIO'
   });
 
   // More flexible conditions - generate summaries if we have ANY relevant context
@@ -1107,6 +1218,10 @@ const results = {
     // PRIORITY 2: Case summaries (only if content is substantial — prevents hallucination)
     { tipo: 'resumo_peticao', shouldGenerate: isContentSufficient(contexto.peticaoInicial), step: 'Gerando resumo da petição inicial...', progress: 80 },
     { tipo: 'resumo_contestacao', shouldGenerate: isContentSufficient(contexto.contestacao), step: 'Gerando resumo da contestação...', progress: 85 },
+    // PRIORITY 2.5: Quesitos — respostas automáticas (Zero-Touch)
+    { tipo: 'quesitos_juizo', shouldGenerate: !!contexto.quesitosJuizo && contexto.quesitosJuizo.length > 30, step: 'Respondendo quesitos do Juízo...', progress: 87 },
+    { tipo: 'quesitos_reclamante', shouldGenerate: !!contexto.quesitosReclamante && contexto.quesitosReclamante.length > 30, step: 'Respondendo quesitos do Reclamante...', progress: 89 },
+    { tipo: 'quesitos_reclamada', shouldGenerate: !!contexto.quesitosReclamada && contexto.quesitosReclamada.length > 30, step: 'Respondendo quesitos da Reclamada...', progress: 91 },
     // PRIORITY 3: Least critical (database has default value for this field)
     { tipo: 'referencias_bibliograficas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando referências bibliográficas...', progress: 92 }
   ];
@@ -1157,6 +1272,11 @@ const results = {
 
       console.log(`[gerarResumosIA] Generating: ${tipo} with ${aiConfig.provider}/${aiConfig.model}`);
       
+      // Set quesitosTexto dynamically before prompt generation for each quesito type
+      if (tipo === 'quesitos_juizo') contexto.quesitosTexto = contexto.quesitosJuizo;
+      else if (tipo === 'quesitos_reclamante') contexto.quesitosTexto = contexto.quesitosReclamante;
+      else if (tipo === 'quesitos_reclamada') contexto.quesitosTexto = contexto.quesitosReclamada;
+      
       const prompt = await getPromptForType(tipo, contexto);
       
       // Injetar regra de idioma no final do user prompt para reforçar redundância
@@ -1182,6 +1302,22 @@ const results = {
       if (tipo in results) {
         (results as any)[tipo] = result.text;
         summariesGenerated++;
+        
+        // Dynamic context update: after generating nexo_causal or incapacidade,
+        // update contexto so quesitos can reference them
+        if (tipo === 'nexo_causal') {
+          contexto.nexoCausalGerado = result.text;
+          contexto.nexoCausal = result.text;
+        } else if (tipo === 'incapacidade') {
+          contexto.incapacidadeGerada = result.text;
+          contexto.incapacidade = result.text;
+        } else if (tipo === 'quesitos_juizo') {
+          contexto.quesitosTexto = contexto.quesitosJuizo;
+        } else if (tipo === 'quesitos_reclamante') {
+          contexto.quesitosTexto = contexto.quesitosReclamante;
+        } else if (tipo === 'quesitos_reclamada') {
+          contexto.quesitosTexto = contexto.quesitosReclamada;
+        }
         
         // PROGRESSIVE SAVE: Persist partial results after each successful summary
         // If the function crashes on the next summary, these results are preserved
@@ -1523,6 +1659,17 @@ async function processarChunkedPDFBackground(
 
     // Add resumos to extracted data
     (extractedData as any).resumos_ia = resumosResult.resumos;
+
+    // Map quesitos responses back to extractedData (Zero-Touch)
+    if (resumosResult.resumos.quesitos_juizo && extractedData.quesitos) {
+      extractedData.quesitos.juizo = resumosResult.resumos.quesitos_juizo;
+    }
+    if (resumosResult.resumos.quesitos_reclamante && extractedData.quesitos) {
+      extractedData.quesitos.reclamante = resumosResult.resumos.quesitos_reclamante;
+    }
+    if (resumosResult.resumos.quesitos_reclamada && extractedData.quesitos) {
+      extractedData.quesitos.reclamada = resumosResult.resumos.quesitos_reclamada;
+    }
 
     // Finalize
     await supabaseAdmin.from('import_jobs').update({ 
@@ -2723,6 +2870,17 @@ async function processarPDFBackground(
 
     // Add resumos to extracted data
     (extractedData as any).resumos_ia = resumosResult.resumos;
+
+    // Map quesitos responses back to extractedData (Zero-Touch)
+    if (resumosResult.resumos.quesitos_juizo && extractedData.quesitos) {
+      extractedData.quesitos.juizo = resumosResult.resumos.quesitos_juizo;
+    }
+    if (resumosResult.resumos.quesitos_reclamante && extractedData.quesitos) {
+      extractedData.quesitos.reclamante = resumosResult.resumos.quesitos_reclamante;
+    }
+    if (resumosResult.resumos.quesitos_reclamada && extractedData.quesitos) {
+      extractedData.quesitos.reclamada = resumosResult.resumos.quesitos_reclamada;
+    }
 
     // Update progress: Finalizing
     await supabaseAdmin
