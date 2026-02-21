@@ -168,6 +168,12 @@ const RESPOSTA_PATTERN = /^(RESPOSTA|Resposta|R:)/i;
 // Formata quesitos garantindo quebra de linha para cada item numerado — com regex robusto
 const formatQuesitos = (text: string): string => {
   if (!text) return "";
+  
+  // Filtro de inexistência: retornar apenas a frase sem injetar resposta
+  if (/não identificados nos autos/i.test(text)) {
+    return sanitizeMarkdown(text);
+  }
+  
   const sanitized = sanitizeMarkdown(text);
   
   const lines = sanitized.split('\n');
@@ -211,12 +217,13 @@ const formatQuesitos = (text: string): string => {
       const nextLine = nextNonEmpty < outputLines.length ? outputLines[nextNonEmpty].trim() : '';
       // Se próxima linha é outro quesito ou fim, injetar placeholder de resposta
       if (!nextLine || QUESITO_PATTERN.test(nextLine)) {
-        finalLines.push('RESPOSTA SUGERIDA DA IA: ');
+        finalLines.push('Resposta: ');
       }
     }
   }
 
-  return finalLines.join('\n').trim();
+  // Sanitização final: garantir que nenhuma menção a "IA" sobreviva no documento
+  return finalLines.join('\n').replace(/RESPOSTA SUGERIDA DA IA:/g, 'Resposta:').trim();
 };
 
 const formatDate = (dateString: string): string => {
