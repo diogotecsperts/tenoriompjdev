@@ -1,120 +1,186 @@
 
 
-# Plano — Correcao Global: Acentuacao, Quesitos e Documentos Avaliados (Refinado)
+# Plano — Quesitos a Prova de Balas + sanitizeOcrAccents Global
 
-As duas ressalvas do Gem sao pertinentes e foram incorporadas ao plano.
+## 3 Acoes Aprovadas
 
----
-
-## Demanda 1: Correcao de Acentuacao no `regerar-campo-pdf`
-
-**Situacao atual**: O `processar-autos` ja tem regra de idioma no system prompt E inline no user prompt (dupla camada). O `regerar-campo-pdf` tem a regra apenas no system prompt (linha 525), mas NAO tem a injecao inline no user prompt.
-
-**Acao**: Adicionar a regra de idioma inline ao final do user prompt no `regerar-campo-pdf/index.ts`, antes da chamada `callAI()` (linhas 526 e similar no fallback). Mesma estrategia que ja funciona no `processar-autos`.
-
-**Arquivo**: `supabase/functions/regerar-campo-pdf/index.ts` (2 pontos de callAI: bucket path ~linha 526 e fallback path)
+| # | Acao | Escopo |
+|---|------|--------|
+| 1 | Regex robusto no DOCX e PDF | Frontend — `createQuesitoParagraphs` e `formatQuesitos` |
+| 2 | `sanitizeOcrAccents()` GLOBAL | Frontend — aplicado em TODOS os campos de texto longo no DOCX e PDF |
+| 4 | Sub-rotina automatica no backend | Backend — `processar-autos/index.ts` |
 
 ---
 
-## Demanda 2: Reestruturacao dos Quesitos
+## Acao 1: Reescrever `createQuesitoParagraphs` e `formatQuesitos` com Regex Robusto
 
-### 2.1 — Prompts (4 locais + seed-prompts)
+### DOCX (`src/utils/generateLaudoDOCX.ts`, linhas 148-199)
 
-Todos os prompts de quesitos serao atualizados para:
-1. Extrair LITERALMENTE cada pergunta com numeracao
-2. Corrigir acentuacao do OCR
-3. Gerar sugestao de resposta tecnica
-4. Usar `\n\n` entre pares pergunta/resposta
+Reescrever `createQuesitoParagraphs` para:
 
-**Arquivos e prompts a atualizar:**
+1. Usar Regex que detecta padroes reais de numeracao: `/^(\d+[\.\)\-]|\d+\.\d+[\.\)]?|[a-z]\)|[IVX]+\s*[\-\.\)]|QUESITO\s+\d+)/im`
+2. Fazer split forcado nesses padroes, criando um `Paragraph` por quesito
+3. Se a linha seguinte contem "RESPOSTA" (regex), formata normalmente; se NAO, injeta automaticamente um `Paragraph` em negrito: **"RESPOSTA SUGERIDA DA IA:"** (vazio para preenchimento)
+4. Cada par fica em `Paragraph` separado com `spacing: { after: 200 }`
 
-| Arquivo | Prompt(s) |
-|---------|-----------|
-| `_shared/build-import-prompt.ts` | `prompt_import_quesitos` |
-| `regerar-campo-pdf/index.ts` | fallbacks `quesitosJuizo`, `quesitosReclamante`, `quesitosReclamada` |
-| `seed-prompts/index.ts` | `prompt_import_quesitos` (via buildImportPrompts que le de `build-import-prompt.ts`), `prompt_regen_quesitosJuizo`, `prompt_regen_quesitosReclamante`, `prompt_regen_quesitosReclamada` |
+### PDF (`src/utils/generateLaudoPDF.ts`, linhas 122-133)
 
-**Ressalva do Gem incorporada**: O `seed-prompts/index.ts` ja importa `DEFAULT_IMPORT_PROMPTS` do `build-import-prompt.ts` (linha 3), entao o `prompt_import_quesitos` sera atualizado automaticamente no seed quando atualizarmos o `build-import-prompt.ts`. Os 3 prompts de regen (`prompt_regen_quesitosJuizo/Reclamante/Reclamada`) precisam ser atualizados diretamente no `seed-prompts/index.ts`.
+Reescrever `formatQuesitos` com a mesma logica de Regex para detectar e separar quesitos. Injetar "RESPOSTA SUGERIDA DA IA:" apos cada pergunta sem resposta detectada.
 
-**Formato de saida esperado pela IA:**
+---
+
+## Acao 2: `sanitizeOcrAccents()` — Aplicacao GLOBAL em Todos os Campos de Texto
+
+### Nova funcao (em ambos os geradores)
+
+Dicionario de substituicao com word boundary (`\b`) para evitar substituicoes parciais:
+
 ```text
-QUESITO 1: [Pergunta com acentos corrigidos]
-RESPOSTA: [Sugestao tecnica baseada no caso]
-
-QUESITO 2: [Pergunta]
-RESPOSTA: [Sugestao tecnica]
+lesoes -> lesões, protecao -> proteção, seguranca -> segurança,
+nao -> não, funcoes -> funções, reducao -> redução,
+infeccao -> infecção, orgao -> órgão, estetico -> estético,
+atencao -> atenção, comunicacao -> comunicação, doenca -> doença,
+prevencao -> prevenção, condicoes -> condições, situacao -> situação,
+avaliacao -> avaliação, informacao -> informação, ocupacao -> ocupação,
+operacao -> operação, classificacao -> classificação,
+peticao -> petição, contestacao -> contestação, restricao -> restrição,
+obrigacao -> obrigação, relacao -> relação, admissao -> admissão,
+demissao -> demissão, exposicao -> exposição, conclusao -> conclusão
 ```
 
-### 2.2 — DOCX: `formatQuesitos()` refatorado
+### Ponto de aplicacao — GLOBAL, nao apenas quesitos
 
-**Ressalva do Gem incorporada**: Em vez de usar `createParagraph()` (que joga tudo em um unico `Paragraph` com `TextRun`), a funcao de quesitos passara a usar `createParagraphs()` que ja divide por `\n\n` e cria instancias separadas de `Paragraph` com `spacing: { after: 120 }`. Isso resolve o problema de aglomeracao no Word.
+A funcao sera integrada dentro de `sanitizeMarkdown()` como etapa final, antes do `.trim()`. Assim, TODOS os campos de texto que passam por `sanitizeMarkdown` (que e chamada por `createParagraph`, `createParagraphs`, `createQuesitoParagraphs`, `addParagraph`) serao automaticamente corrigidos.
 
-**Mudanca concreta**: Substituir a chamada `createParagraph(formatQuesitos(...))` por `createQuesitoParagraphs(...)` — uma nova funcao dedicada que:
-1. Divide o texto por `\n\n` (separador entre pares quesito/resposta)
-2. Detecta linhas "QUESITO X:" e aplica negrito + cor primaria
-3. Detecta linhas "RESPOSTA:" e aplica formatacao normal
-4. Cada par vira um `Paragraph` separado com `spacing: { after: 200 }` para separacao visual clara
+**Campos cobertos automaticamente** (via `createParagraphs`/`addParagraph`):
+- objetivoPericia
+- resumoPeticaoInicial, resumoContestacao
+- metodologiaPericial
+- descricaoAtividadesLaborais
+- historiaAcidente, historicoOcupacional, historiaAtual
+- tratamentos, afastamentos
+- antecedentes
+- laudosMedicos, examesComplementares, exameFisico
+- descricaoTecnicaDoencas
+- nexoCausalJustificativa
+- analiseIncapacidadeLaboral
+- conclusaoAnalise, conclusaoJustificativa
+- quesitosJuizo, quesitosReclamante, quesitosReclamada
+- referenciasBibliograficas
 
-**Arquivo**: `src/utils/generateLaudoDOCX.ts` (linhas 139-146 e 662-681)
-
----
-
-## Demanda 3: Documentos Avaliados
-
-### 3.1 — UI: Novos checkboxes
-
-**Arquivo**: `src/components/laudo/sections/DocumentosAvaliacao.tsx`
-
-Adicionar ao array `documentosOptions`:
-- `{ id: "ppra_pcmso", label: "PPRA e PCMSO" }`
-- `{ id: "pgr", label: "PGR" }`
-- `{ id: "aso", label: "ASOs - Atestados de Saúde Ocupacional" }`
-
-Manter os existentes: `cat`, `prontuario`, `receitas`, `exames`, `laudos_anteriores`, `atestados`.
-
-### 3.2 — DOCX e PDF: Logica condicional
-
-**Arquivos**: `src/utils/generateLaudoDOCX.ts` e `src/utils/generateLaudoPDF.ts`
-
-Substituir a logica atual (que lista apenas os checkboxes marcados) por uma estrutura hibrida:
-
-**Bullets fixos** (sempre presentes):
-1. Peticao inicial
-2. Contestacao
-3. Exames medicos
-4. Laudos e atestados medicos
-5. Quesitos do juizo e do autor
-
-**Bullets condicionais** (aparecem quando o documento NAO foi marcado):
-- Se `ppra_pcmso` E `pgr` ausentes: "Nao foram localizados nos autos os laudos de PPRA, PGR e PCMSO da empresa reclamada, considerados relevantes para analise de riscos ocupacionais."
-- Se `cat` ausente: "Ausencia de Comunicacao de Acidente de Trabalho (CAT) vinculada ao caso."
-- Se `aso` ausente: "Ausencia de Atestados de Saude Ocupacional (ASO) anteriores ao desligamento."
-
-A secao sempre aparecera (sem condicao `if documentos.length > 0`), pois agora tem bullets fixos.
-
-Atualizar tambem o `DOCUMENTOS_LABEL_MAP` nos dois geradores com as novas chaves `ppra_pcmso`, `pgr`, `aso`.
-
-### 3.3 — JSON Template de importacao
-
-**Arquivo**: `_shared/build-import-prompt.ts` (linha 64-70)
-
-Atualizar o `documentos_checklist` no JSON template para incluir `ppra_pcmso`, `pgr` e `aso`.
+Isso e muito mais elegante do que chamar `sanitizeOcrAccents` manualmente em cada campo — basta inserir a logica dentro de `sanitizeMarkdown` e todos os campos ficam blindados.
 
 ---
 
-## Resumo de Operacoes (7 arquivos)
+## Acao 4: Sub-rotina Automatica de Respostas no Backend
+
+### Arquivo: `supabase/functions/processar-autos/index.ts`
+
+### Diagnostico da arquitetura atual
+
+A funcao `gerarResumosIA` (linha 1009) gera 6 tipos de conteudo analitico apos a extracao:
+- descricao_doencas, nexo_causal, incapacidade (Prioridade 1)
+- resumo_peticao, resumo_contestacao (Prioridade 2)
+- referencias_bibliograficas (Prioridade 3)
+
+Os quesitos (`extractedData.quesitos.juizo/reclamante/reclamada`) sao apenas copiados brutos do OCR e NUNCA passam por uma segunda chamada de IA.
+
+O frontend (ImportarAutosDialog.tsx, linha 1066) mapeia diretamente `extractedData.quesitos.juizo` para o banco — sem processamento.
+
+### Mudancas concretas
+
+**1. Expandir `PROMPT_ID_MAPPING` (linha 653)** com 3 novas entradas:
+
+```text
+quesitos_juizo: 'prompt_regen_quesitosJuizo'
+quesitos_reclamante: 'prompt_regen_quesitosReclamante'
+quesitos_reclamada: 'prompt_regen_quesitosReclamada'
+```
+
+**2. Expandir `DEFAULT_PROMPTS` (linha 663)** com 3 novos fallbacks dedicados:
+
+Cada prompt recebe o texto bruto dos quesitos e instrui a IA a:
+- Corrigir acentuacao OCR
+- Manter numeracao original
+- Gerar resposta tecnica para cada quesito baseada nos dados do caso
+- Formato: `QUESITO 1: [pergunta]\nRESPOSTA: [sugestao]\n\nQUESITO 2:...`
+
+Variaveis de interpolacao usadas: `${quesitosTexto}`, `${cids}`, `${historiaAtual}`, `${exameFisico}`, `${examesComplementares}`, `${atividadesLaborais}`, `${nexoCausal}`, `${incapacidade}`
+
+**3. Expandir `contexto` (linha 1053)** com os textos brutos dos quesitos:
+
+```text
+quesitosJuizo: extractedData.quesitos?.juizo || ''
+quesitosReclamante: extractedData.quesitos?.reclamante || ''
+quesitosReclamada: extractedData.quesitos?.reclamada || ''
+```
+
+E tambem incluir nexoCausal e incapacidade ja gerados (pois as respostas dos quesitos dependem deles):
+
+```text
+nexoCausalGerado: results.nexo_causal || ''
+incapacidadeGerada: results.incapacidade || ''
+```
+
+**4. Expandir `summariesToGenerate` (linha 1102)** com 3 novas entradas entre Prioridade 2 e 3:
+
+```text
+{ tipo: 'quesitos_juizo', shouldGenerate: !!contexto.quesitosJuizo && contexto.quesitosJuizo.length > 30, step: 'Respondendo quesitos do Juízo...', progress: 87 }
+{ tipo: 'quesitos_reclamante', shouldGenerate: !!contexto.quesitosReclamante && contexto.quesitosReclamante.length > 30, step: 'Respondendo quesitos do Reclamante...', progress: 89 }
+{ tipo: 'quesitos_reclamada', shouldGenerate: !!contexto.quesitosReclamada && contexto.quesitosReclamada.length > 30, step: 'Respondendo quesitos da Reclamada...', progress: 91 }
+```
+
+**5. Expandir `results` (linha 1032)** com as 3 novas chaves.
+
+**6. Mapear resultados de volta** apos `gerarResumosIA` retornar (nas 2 pipelines: `processarPDFBackground` e `processarChunkedPDFBackground`):
+
+Antes de salvar o resultado final, substituir os quesitos brutos pelos processados:
+
+```text
+if (resumosResult.resumos.quesitos_juizo) {
+  (extractedData as any).quesitos.juizo = resumosResult.resumos.quesitos_juizo;
+}
+// idem para reclamante e reclamada
+```
+
+Isso garante que o frontend (ImportarAutosDialog.tsx, linha 1066) receba os quesitos ja com respostas e acentos corrigidos, sem precisar de nenhuma alteracao no frontend.
+
+### Dependencia interna importante
+
+Os quesitos precisam ter acesso ao nexo_causal e incapacidade ja gerados para produzir respostas tecnicas de qualidade. Isso e viavel porque os quesitos estao na Prioridade 2.5, apos nexo_causal e incapacidade (Prioridade 1). O `contexto` sera expandido com os resultados parciais.
+
+**Porem**, o `contexto` e montado ANTES do loop. Sera necessario atualizar o contexto DENTRO do loop apos gerar nexo_causal e incapacidade:
+
+```text
+// Apos gerar nexo_causal:
+contexto.nexoCausalGerado = results.nexo_causal;
+// Apos gerar incapacidade:
+contexto.incapacidadeGerada = results.incapacidade;
+```
+
+### Impacto no tempo
+
+~10-15s por quesito. No pior caso (3 quesitos), +45s ao pipeline de ~5min. Dentro do orcamento de 600s.
+
+---
+
+## Resumo de Operacoes (3 arquivos, 1 deploy)
 
 | # | Arquivo | Mudanca |
 |---|---------|---------|
-| 1 | `supabase/functions/regerar-campo-pdf/index.ts` | Injetar REGRA_IDIOMA_INLINE no user prompt + atualizar fallbacks de quesitos com sugestao de respostas |
-| 2 | `supabase/functions/_shared/build-import-prompt.ts` | Atualizar `prompt_import_quesitos` + adicionar `ppra_pcmso`, `pgr`, `aso` ao JSON template |
-| 3 | `supabase/functions/seed-prompts/index.ts` | Atualizar `prompt_regen_quesitosJuizo/Reclamante/Reclamada` com sugestao de respostas |
-| 4 | `src/components/laudo/sections/DocumentosAvaliacao.tsx` | Adicionar checkboxes ppra_pcmso, pgr, aso |
-| 5 | `src/utils/generateLaudoDOCX.ts` | Nova funcao `createQuesitoParagraphs` + logica condicional de documentos |
-| 6 | `src/utils/generateLaudoPDF.ts` | Logica condicional de documentos |
-| 7 | (nenhum adicional) | `seed-prompts` ja importa de `build-import-prompt.ts` para import prompts |
+| 1 | `src/utils/generateLaudoDOCX.ts` | Reescrever `createQuesitoParagraphs` com Regex + injecao de "RESPOSTA SUGERIDA DA IA:" + integrar `sanitizeOcrAccents` em `sanitizeMarkdown` (GLOBAL) |
+| 2 | `src/utils/generateLaudoPDF.ts` | Reescrever `formatQuesitos` com Regex + integrar `sanitizeOcrAccents` em `sanitizeMarkdown` (GLOBAL) |
+| 3 | `supabase/functions/processar-autos/index.ts` | Adicionar 3 novas entradas de quesitos ao `gerarResumosIA` (`PROMPT_ID_MAPPING`, `DEFAULT_PROMPTS`, `results`, `contexto`, `summariesToGenerate`) + mapear resultados de volta em ambas as pipelines |
 
-**Deploy**: `regerar-campo-pdf`, `seed-prompts` (processar-autos nao precisa de mudanca nesta iteracao)
+**Deploy**: `processar-autos`
 
-Apos deploy + "Restaurar Padrao de Fabrica" no DevPanel, todos os prompts de quesitos e documentos estarao atualizados no banco.
+## Resultado esperado (Zero-Touch)
+
+Quando a barra de "Importar Autos" chegar a 100%, os quesitos ja aparecerao na UI:
+- Com respostas tecnicas sugeridas pela IA (geradas automaticamente no backend)
+- Com acentos corrigidos (dupla blindagem: IA no backend + dicionario OCR no frontend)
+- Separados por numeracao (Regex no DOCX/PDF como camada de seguranca extra)
+- Sem nenhum clique adicional do perito
+
+Todos os OUTROS campos de texto (anamnese, historico, laudos, nexo, etc.) tambem sao blindados contra erros de OCR via `sanitizeOcrAccents` integrado em `sanitizeMarkdown`.
 
