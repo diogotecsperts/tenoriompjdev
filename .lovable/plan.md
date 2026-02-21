@@ -1,72 +1,66 @@
 
 
-# Plano — Blindagem Anti-Alucinacao no Resumo da Peticao + Auditoria de Permanencia
+# Plano — Corrigir Mapeamento de Prompt (Causa Raiz da Alucinacao)
 
-## 1. Atualizar o Prompt do Resumo da Peticao (3 locais no codigo + 1 no banco)
+## Diagnostico
 
-O prompt `prompt_gen_resumo_peticao` precisa ser atualizado com a regra anti-vies em **todos os locais** para garantir cobertura total:
+O problema NAO e de cache nem de sincronizacao. E um **bug de mapeamento** no codigo.
 
-### Arquivo 1: `supabase/functions/gerar-resumos/index.ts` (linhas 35-48)
-Fallback usado quando o usuario clica "Resumir Texto" na UI.
+Na funcao `getPromptForType()` do `processar-autos/index.ts`, o dicionario `PROMPT_ID_MAPPING` (linha 654) aponta para o ID **errado** no banco de dados:
 
-### Arquivo 2: `supabase/functions/processar-autos/index.ts` (linhas 664-675)
-Fallback usado durante a importacao automatica do PDF.
+```text
+CODIGO ATUAL (linha 654):
+  resumo_peticao  -->  'prompt_regen_resumoPeticaoInicial'  (prompt ANTIGO, sem regra anti-vies)
+  resumo_contestacao --> 'prompt_regen_resumoContestacao'    (prompt ANTIGO)
 
-### Arquivo 3: `supabase/functions/seed-prompts/index.ts` (linhas 580-591)
-Template usado para sincronizar/restaurar prompts no DevPanel.
-
-**Novo prompt para os 3 arquivos:**
-
-```
-Voce e um perito medico especialista em medicina do trabalho.
-Elabore um resumo tecnico e objetivo da peticao inicial para um laudo pericial.
-
-Texto da Peticao Inicial extraido:
-${peticaoInicial}
-
-REGRAS DE REDACAO INQUEBRAVEIS (RISCO LEGAL):
-1. ATENCAO AO VIES: E ESTRITAMENTE PROIBIDO presumir, inventar ou adicionar doencas ocupacionais tipicas da profissao (ex: tendinopatias, LER/DORT, sindrome do impacto, PAIR) se elas NAO estiverem textualmente descritas na peticao. O caso pode se tratar de um trauma grave ou acidente atipico.
-2. Seja absolutamente fiel aos fatos: cite apenas as lesoes, sintomas e dinamicas de acidente que estao explicitas no texto fornecido.
-3. Nao utilize placeholders ([INSERIR]). Se nao houver clareza, limite-se aos fatos apresentados.
-4. Use apenas texto plano, sem Markdown, em no maximo 3 paragrafos continuos.
-
-INSTRUCOES:
-- Resuma os pontos principais alegados pelo reclamante
-- Destaque a dinamica do adoecimento/acidente e as doencas reais mencionadas
-- Identifique os nexos causais alegados
-- Mencione os pedidos principais
+CORRETO:
+  resumo_peticao  -->  'prompt_gen_resumo_peticao'          (prompt NOVO, com regra anti-vies)
+  resumo_contestacao --> 'prompt_gen_resumo_contestacao'     (prompt NOVO)
 ```
 
-### Banco de dados (system_config)
-Ao executar "Sincronizar" ou "Restaurar Padrao" no DevPanel, o prompt atualizado do `seed-prompts` sera propagado automaticamente para o banco.
+Quando a edge function importa o PDF, ela chama `getPromptForType('resumo_peticao', ctx)`, que busca `prompt_regen_resumoPeticaoInicial` no banco. Esse prompt antigo NAO contem a regra "ATENCAO AO VIES" e por isso a IA continua alucinando tendinopatias.
 
----
+O "Restaurar Padrao de Fabrica" funcionou corretamente — ele atualizou o `prompt_gen_resumo_peticao`. Porem, o codigo nunca consulta esse ID durante a importacao.
 
-## 2. Auditoria de Permanencia das Correcoes
+## Solucao
 
-Sobre sua pergunta — **todas as correcoes sao permanentes e estao salvas no codigo-fonte (git)**. Nenhuma se perde ao redeployar ou atualizar o app.
+Corrigir as duas entradas do `PROMPT_ID_MAPPING` para apontar para os IDs corretos:
 
-| Correcao | Onde foi feita | Tipo | Permanente? |
-|----------|---------------|------|-------------|
-| Mapeamento de variaveis cruas (prontuario, etc.) | `processar-autos/index.ts` | Codigo | Sim (git) |
-| Remocao do campo "Ha Incapacidade" | `generateLaudoDOCX.ts` | Codigo | Sim (git) |
-| Nexo Causal mapeado para `nexo_causal_justificativa` | `ImportarAutosDialog.tsx` | Codigo | Sim (git) |
-| Remocao da duplicacao Secao 14/16 | `ImportarAutosDialog.tsx` | Codigo | Sim (git) |
-| Regra de idioma no system prompt (processar-autos) | `processar-autos/index.ts` | Codigo | Sim (git) |
-| Regra de idioma inline no user prompt (processar-autos) | `processar-autos/index.ts` | Codigo | Sim (git) |
-| Regra de idioma no gerar-resumos | `gerar-resumos/index.ts` | Codigo | Sim (git) |
-| Anti-alucinacao no resumo peticao (este plano) | 3 arquivos .ts | Codigo | Sim (git) |
+### Arquivo: `supabase/functions/processar-autos/index.ts`
 
-**Nenhuma correcao depende exclusivamente do banco de dados.** O banco (system_config/DevPanel) funciona como uma **camada de customizacao opcional** — se ele falhar ou for resetado, os fallbacks hardcoded no codigo assumem automaticamente. Essa e a arquitetura de 3 camadas de protecao do sistema.
+Linha 654-655, alterar de:
 
----
+```
+resumo_peticao: 'prompt_regen_resumoPeticaoInicial',
+resumo_contestacao: 'prompt_regen_resumoContestacao',
+```
 
-## Operacoes Tecnicas (3 arquivos)
+Para:
 
-| # | Arquivo | Mudanca |
-|---|---------|---------|
-| 1 | `supabase/functions/gerar-resumos/index.ts` | Atualizar fallback `resumo_peticao` com regra anti-vies |
-| 2 | `supabase/functions/processar-autos/index.ts` | Atualizar fallback `resumo_peticao` com regra anti-vies |
-| 3 | `supabase/functions/seed-prompts/index.ts` | Atualizar template `prompt_gen_resumo_peticao` com regra anti-vies |
+```
+resumo_peticao: 'prompt_gen_resumo_peticao',
+resumo_contestacao: 'prompt_gen_resumo_contestacao',
+```
 
-Apos o deploy, qualquer nova importacao de PDF ou geracao manual de resumo usara o prompt blindado contra alucinacoes de doencas presumidas.
+Isso faz sentido semanticamente: durante a **importacao**, o sistema esta **gerando** o resumo pela primeira vez (categoria `gen`), nao **regenerando** a partir de um PDF existente (categoria `regen`).
+
+## Verificacao de banco
+
+Confirmado por query direta:
+
+| ID no banco | Contem regra anti-vies? |
+|---|---|
+| `prompt_regen_resumoPeticaoInicial` | NAO (prompt generico antigo) |
+| `prompt_gen_resumo_peticao` | SIM (regra "ATENCAO AO VIES" presente) |
+
+## Impacto
+
+- Zero risco: os IDs `prompt_gen_*` ja existem no banco e estao atualizados
+- O fallback hardcoded (DEFAULT_PROMPTS) tambem ja contem a regra anti-vies como seguranca extra
+- Nenhum outro arquivo precisa ser alterado
+- Deploy apenas de `processar-autos`
+
+## Resultado esperado
+
+Apos o deploy, novas importacoes de PDF consultarao o prompt correto (`prompt_gen_resumo_peticao`) que contem a blindagem anti-alucinacao. O resumo da peticao refletira fielmente os fatos do PDF sem inventar doencas ocupacionais tipicas.
+
