@@ -895,7 +895,17 @@ async function getPromptForType(tipo: string, ctx: any): Promise<string> {
   }
 }
 
-const summarySystemPrompt = 'Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.';
+const summarySystemPrompt = `Você é um perito médico especialista em medicina do trabalho, com vasta experiência em elaboração de laudos periciais. Responda sempre em português brasileiro, de forma técnica e imparcial.
+
+REGRA DE FORMATAÇÃO ESTRITA: Use APENAS texto plano. NUNCA use Markdown (asteriscos, negritos, bullets, headings). Separe parágrafos com quebras de linha duplas.
+
+REGRA DE IDIOMA: Todo o texto DEVE ser redigido em Português Brasileiro correto e formal, com TODOS os acentos, cedilhas e diacríticos adequados (á, é, í, ó, ú, â, ê, ô, ã, õ, ç). Texto sem acentuação será REJEITADO.
+
+REGRA DE CONDUTA: É ESTRITAMENTE PROIBIDO:
+- Inserir metatextos como "Nota Técnica do Perito:", "Observação:", "Ressalva:" no corpo do laudo.
+- Dialogar com o usuário ("Como você não forneceu...", "Aqui está o resumo...").
+- Inventar dados, casos fictícios ou modelos padrão quando a informação não estiver disponível.
+- Se uma variável estiver vazia ou contiver "Não informado", NÃO mencione essa ausência. Baseie a análise exclusivamente nos dados disponíveis.`;
 
 /**
  * Process a large PDF (>45MB) by splitting into smaller parts and extracting each
@@ -1041,11 +1051,11 @@ const results = {
     cids: Array.isArray(extractedData.informacoes_medicas?.cids_mencionados) && extractedData.informacoes_medicas.cids_mencionados.length > 0
       ? extractedData.informacoes_medicas.cids_mencionados.join(', ') 
       : '',
-    postoTrabalho: extractedData.posto_trabalho?.descricao_ambiente || '',
-    atividadesLaborais: extractedData.posto_trabalho?.descricao_atividades || '',
+    postoTrabalho: extractedData.posto_trabalho?.ambiente_e_atividades || extractedData.posto_trabalho?.descricao_ambiente || '',
+    atividadesLaborais: extractedData.posto_trabalho?.ambiente_e_atividades || extractedData.posto_trabalho?.descricao_atividades || '',
     cargoFuncao: extractedData.posto_trabalho?.cargo_funcao || '',
     historicoOcupacional: extractedData.historico?.historico_ocupacional || '',
-    exameFisico: '',
+    exameFisico: extractedData.exame_clinico?.exame_fisico || '',
     examesComplementares: extractedData.exame_clinico?.exames_complementares || '',
     antecedentes: extractedData.historico?.antecedentes_patologicos || '',
     tratamentos: extractedData.historico?.tratamentos_realizados || '',
@@ -1053,6 +1063,14 @@ const results = {
     historiaAtual: extractedData.historico?.historia_atual || '',
     laudosMedicos: extractedData.exame_clinico?.laudos_medicos || '',
     lesoesDescritas: extractedData.exame_clinico?.lesoes_descritas || ''
+  };
+
+  // Helper: validate if text has enough substance (not just "não informado" or too short)
+  const isContentSufficient = (text: string): boolean => {
+    if (!text || text.trim().length < 50) return false;
+    const lower = text.toLowerCase().trim();
+    if (lower === 'não informado' || lower === 'nao informado') return false;
+    return true;
   };
 
   // Log context availability for debugging
@@ -1081,9 +1099,9 @@ const results = {
     { tipo: 'descricao_doencas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando descrição técnica das doenças...', progress: 50 },
     { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Analisando nexo causal...', progress: 60 },
     { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares || hasHistoryContext || hasMedicalContext, step: 'Analisando incapacidade laboral...', progress: 70 },
-    // PRIORITY 2: Case summaries
-    { tipo: 'resumo_peticao', shouldGenerate: !!contexto.peticaoInicial, step: 'Gerando resumo da petição inicial...', progress: 80 },
-    { tipo: 'resumo_contestacao', shouldGenerate: !!contexto.contestacao, step: 'Gerando resumo da contestação...', progress: 85 },
+    // PRIORITY 2: Case summaries (only if content is substantial — prevents hallucination)
+    { tipo: 'resumo_peticao', shouldGenerate: isContentSufficient(contexto.peticaoInicial), step: 'Gerando resumo da petição inicial...', progress: 80 },
+    { tipo: 'resumo_contestacao', shouldGenerate: isContentSufficient(contexto.contestacao), step: 'Gerando resumo da contestação...', progress: 85 },
     // PRIORITY 3: Least critical (database has default value for this field)
     { tipo: 'referencias_bibliograficas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando referências bibliográficas...', progress: 92 }
   ];

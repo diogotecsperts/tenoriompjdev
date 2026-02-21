@@ -31,6 +31,16 @@ export function Conclusao() {
             placeholder="Ex: M75.1 - Síndrome do Manguito Rotador"
           />
         </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="conclusaoDestino">Destino Sugerido</Label>
+          <Input
+            id="conclusaoDestino"
+            value={currentLaudo.conclusaoDestino}
+            onChange={(e) => updateLaudo({ conclusaoDestino: e.target.value })}
+            placeholder="Ex: Alta Médica, Reabilitação Profissional, Aposentadoria por Invalidez"
+          />
+        </div>
         
         <LaudoTextareaAIField
           id="conclusaoAnalise"

@@ -67,6 +67,11 @@ const PLACEHOLDER_PATTERNS = [
   /^n\/a$/i,
   /^-{2,}$/,                // só traços
   /^erro:/i,                // "Erro: ..."
+  /como voc[eê] n[aã]o forneceu/i,        // Vazamento conversacional da IA
+  /elaborei um modelo padr[aã]o/i,         // IA inventando conteúdo genérico
+  /nota t[eé]cnica do perito/i,            // Metatexto da IA
+  /n[aã]o foi poss[ií]vel gerar/i,         // Erro de geração
+  /aqui est[aá] o resumo t[eé]cnico/i,     // IA conversando
 ];
 
 // Verifica se o campo está vazio ou contém conteúdo inválido/técnico
@@ -672,12 +677,21 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 10. DOCUMENTOS ANALISADOS
+  const DOCUMENTOS_LABEL_MAP: Record<string, string> = {
+    "cat": "CAT - Comunicação de Acidente de Trabalho",
+    "prontuario": "Prontuário Médico",
+    "receitas": "Receitas Médicas",
+    "exames": "Exames Complementares",
+    "laudos_anteriores": "Laudos Médicos Anteriores",
+    "atestados": "Atestados Médicos",
+  };
   if (laudo.documentos && laudo.documentos.length > 0) {
     const docListHeight = laudo.documentos.length * 6;
     y = ensureSpace(doc, y, Math.min(SECTION_TITLE_HEIGHT + docListHeight, 40));
     y = addSectionTitle(doc, `${sectionNumber}. DOCUMENTOS ANALISADOS`, y);
     
-    laudo.documentos.forEach((doc_item, index) => {
+    const docsLabels = laudo.documentos.map(d => DOCUMENTOS_LABEL_MAP[d] || d);
+    docsLabels.forEach((doc_item, index) => {
       y = checkNewPage(doc, y, 6);
       doc.setFontSize(10);
       doc.text(`${index + 1}. ${doc_item}`, MARGINS.left + 5, y);
@@ -790,12 +804,11 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 19. CONCLUSÃO
-  const hasConclusao = !isFieldEmpty(laudo.conclusaoCID) || !isFieldEmpty(laudo.conclusaoIncapacidade) ||
+  const hasConclusao = !isFieldEmpty(laudo.conclusaoCID) ||
     !isFieldEmpty(laudo.conclusaoStatus) || !isFieldEmpty(laudo.conclusaoDestino) || !isFieldEmpty(laudo.conclusaoJustificativa);
   if (hasConclusao) {
     let sectionHeight = SECTION_TITLE_HEIGHT;
     if (!isFieldEmpty(laudo.conclusaoCID)) sectionHeight += 8;
-    if (!isFieldEmpty(laudo.conclusaoIncapacidade)) sectionHeight += 8;
     if (!isFieldEmpty(laudo.conclusaoStatus)) sectionHeight += 8;
     if (!isFieldEmpty(laudo.conclusaoDestino)) sectionHeight += 8;
     if (!isFieldEmpty(laudo.conclusaoJustificativa)) sectionHeight += SUBTITLE_HEIGHT + 15;
@@ -803,10 +816,6 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
     y = addSectionTitle(doc, `${sectionNumber}. CONCLUSÃO`, y);
     if (!isFieldEmpty(laudo.conclusaoCID)) {
       y = addLabeledField(doc, "CID-10 Sugerido", laudo.conclusaoCID!, y);
-    }
-    if (!isFieldEmpty(laudo.conclusaoIncapacidade)) {
-      const incapacidadeText = laudo.conclusaoIncapacidade === "sim" ? "Sim" : "Não";
-      y = addLabeledField(doc, "Há Incapacidade", incapacidadeText, y);
     }
     if (!isFieldEmpty(laudo.conclusaoStatus)) {
       const statusMap: Record<string, string> = {
