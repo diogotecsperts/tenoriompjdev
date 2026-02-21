@@ -651,8 +651,8 @@ function ensureValidStructure(data: any): object {
 
 // Mapeamento de tipos de resumo para IDs de prompt no banco de dados
 const PROMPT_ID_MAPPING: Record<string, string> = {
-  resumo_peticao: 'prompt_regen_resumoPeticaoInicial',
-  resumo_contestacao: 'prompt_regen_resumoContestacao',
+  resumo_peticao: 'prompt_gen_resumo_peticao',
+  resumo_contestacao: 'prompt_gen_resumo_contestacao',
   descricao_doencas: 'prompt_gen_descricao_doencas',
   nexo_causal: 'prompt_gen_nexo_causal',
   incapacidade: 'prompt_gen_incapacidade',
