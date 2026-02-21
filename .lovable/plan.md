@@ -1,39 +1,59 @@
 
 
-# Plano — Remover Duplicacao de Secoes + Esclarecimento sobre Acentos
+# Plano — Resolver Acentuacao na Importacao (Bug Real Identificado)
 
-## Bug 1: Duplicacao de Conteudo (Secao 14 e 16 identicas)
+## Diagnostico Correto
 
-**Causa raiz**: Na ultima correcao, mapeamos `resumos_ia?.incapacidade` para DOIS campos:
-- `analise_incapacidade_laboral` (Secao 14 - Analise da Incapacidade) -- CORRETO
-- `conclusao_analise` (Secao 16 - Discussao e Analise) -- ERRADO, causa duplicacao
+Voce tem **toda razao**. O laudo `241c0285` foi importado **hoje** (21/02/2026 12:02) — nao e dado antigo. A regra de idioma no `summarySystemPrompt` (linha 902) esta sendo **ignorada pelo modelo**.
 
-**Fix**: Em `src/components/tools/ImportarAutosDialog.tsx`, linha 1077, reverter `conclusao_analise` para string vazia. O `isFieldEmpty` no DOCX/PDF ja oculta a Secao 16 automaticamente quando vazia.
+### Por que a regra falha?
 
-```
-Antes:  conclusao_analise: extractedData.resumos_ia?.incapacidade || '',
-Depois: conclusao_analise: '',
-```
+O pipeline funciona assim:
 
-## Bug 2: Acentos nas Secoes 12 e 13
+1. `getPromptForType('descricao_doencas', ctx)` busca o prompt do **banco de dados** (DevPanel)
+2. O prompt do banco **NAO contem regra de idioma** — so tem as instrucoes tecnicas
+3. `callAI(aiConfig, summarySystemPrompt, prompt)` envia: system=summarySystemPrompt, user=prompt
+4. O modelo `google/gemini-3-flash-preview` da mais peso ao **user prompt** e ignora a regra de acentuacao que esta apenas no system prompt
 
-**Diagnostico**: A regra de acentuacao JA ESTA implementada no `processar-autos/index.ts` (linha 902 do `summarySystemPrompt`) E no `gerar-resumos/index.ts` (constante `REGRA_IDIOMA`). O problema NAO e de codigo — e de dados antigos.
+A Secao 15 (Analise de Incapacidade) saiu com acentos corretos provavelmente por acaso — o modelo foi inconsistente.
 
-Os campos `descricao_tecnica_doencas` e `nexo_causal_justificativa` do laudo atual foram gerados ANTES da regra ser aplicada. Como o sistema nao sobrescreve dados existentes, o texto sem acentos permanece no banco.
+### Solucao
 
-**Solucao para laudos existentes**: O usuario precisa usar o botao "Regerar" em cada campo afetado (Descricao de Doencas e Nexo Causal) na interface do editor. Novos laudos importados ja virao com acentuacao correta.
-
-Nao ha alteracao de codigo necessaria para este item — apenas a regeneracao manual dos campos antigos.
+Injetar a regra de idioma **diretamente no final de cada user prompt** enviado ao modelo, alem de mante-la no system prompt. Isso garante redundancia: mesmo que o modelo ignore o system prompt, a regra estara no texto que ele processa diretamente.
 
 ## Operacao Tecnica (1 arquivo)
 
-| # | Arquivo | Mudanca |
-|---|---------|---------|
-| 1 | `src/components/tools/ImportarAutosDialog.tsx` | Linha 1077: `conclusao_analise: ''` em vez de `extractedData.resumos_ia?.incapacidade` |
+### Arquivo: `supabase/functions/processar-autos/index.ts`
+
+Na funcao `gerarResumosIA`, **apos** obter o prompt via `getPromptForType()` (linha 1155) e **antes** de chamar `callAI()` (linha 1164), concatenar a regra de idioma ao final do user prompt:
+
+```
+Linha ~1155 (depois de obter o prompt):
+
+const prompt = await getPromptForType(tipo, contexto);
+
+// Injetar regra de idioma no final do user prompt para reforcar
+const REGRA_IDIOMA_INLINE = '\n\nREGRA FINAL INQUEBRAVEL: Todo o texto acima DEVE ser redigido em Portugues Brasileiro correto e formal, com TODOS os acentos e diacriticos (a, e, i, o, u, a, e, o, a, o, c). Palavras como "infeccao", "nao", "orgao", "funcoes" sao ERROS GRAVES — o correto e "infeccao", "nao", "orgao", "funcoes". NUNCA omita acentos.';
+
+const promptComRegra = prompt + REGRA_IDIOMA_INLINE;
+```
+
+E na chamada `callAI` (linha 1164), usar `promptComRegra` em vez de `prompt`:
+
+```
+const result = await Promise.race([
+  callAI(aiConfig, summarySystemPrompt, promptComRegra, { ... }),
+  timeoutPromise
+]);
+```
+
+Aplicar o mesmo no retry (linha 1218-1219).
 
 ## Resultado esperado
 
-- Secao 16 (Discussao e Analise) desaparece do DOCX/PDF (campo vazio = secao oculta)
-- Secao 14 (Analise da Incapacidade) mantem o texto completo e unico
-- Novas importacoes de PDF ja terao acentuacao correta em todas as secoes
-- Laudos antigos precisam de "Regerar" nos campos afetados (unica vez)
+- A regra de idioma estara presente em **dois lugares**: system prompt E user prompt
+- Independente do modelo dar mais peso a um ou outro, a regra sera vista
+- Funciona para qualquer prompt do DevPanel (que nao tem a regra)
+- Zero impacto em prompts que ja geram texto com acentos (redundancia inofensiva)
+- Novas importacoes de PDF terao acentuacao correta desde a primeira geracao
+- O usuario NAO precisa usar "Regerar" — o texto ja vira correto na importacao
