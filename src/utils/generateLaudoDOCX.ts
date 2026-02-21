@@ -54,6 +54,11 @@ const PLACEHOLDER_PATTERNS = [
   /^n\/a$/i,
   /^-{2,}$/,                // só traços
   /^erro:/i,                // "Erro: ..."
+  /como voc[eê] n[aã]o forneceu/i,        // Vazamento conversacional da IA
+  /elaborei um modelo padr[aã]o/i,         // IA inventando conteúdo genérico
+  /nota t[eé]cnica do perito/i,            // Metatexto da IA
+  /n[aã]o foi poss[ií]vel gerar/i,         // Erro de geração
+  /aqui est[aá] o resumo t[eé]cnico/i,     // IA conversando
 ];
 
 // Verifica se o campo está vazio ou contém conteúdo inválido/técnico
@@ -495,9 +500,18 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 10. DOCUMENTOS ANALISADOS ==========
+  const DOCUMENTOS_LABEL_MAP: Record<string, string> = {
+    "cat": "CAT - Comunicação de Acidente de Trabalho",
+    "prontuario": "Prontuário Médico",
+    "receitas": "Receitas Médicas",
+    "exames": "Exames Complementares",
+    "laudos_anteriores": "Laudos Médicos Anteriores",
+    "atestados": "Atestados Médicos",
+  };
   if (laudo.documentos && laudo.documentos.length > 0) {
     paragraphs.push(createSectionTitle(`${sectionNumber}. DOCUMENTOS ANALISADOS`));
-    paragraphs.push(...createNumberedList(laudo.documentos));
+    const docsLabels = laudo.documentos.map(d => DOCUMENTOS_LABEL_MAP[d] || d);
+    paragraphs.push(...createNumberedList(docsLabels));
     sectionNumber++;
   }
 
@@ -598,16 +612,12 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 19. CONCLUSÃO ==========
-  const hasConclusao = !isFieldEmpty(laudo.conclusaoCID) || !isFieldEmpty(laudo.conclusaoIncapacidade) ||
+  const hasConclusao = !isFieldEmpty(laudo.conclusaoCID) ||
     !isFieldEmpty(laudo.conclusaoStatus) || !isFieldEmpty(laudo.conclusaoDestino) || !isFieldEmpty(laudo.conclusaoJustificativa);
   if (hasConclusao) {
     paragraphs.push(createSectionTitle(`${sectionNumber}. CONCLUSÃO`));
     if (!isFieldEmpty(laudo.conclusaoCID)) {
       paragraphs.push(createLabeledField("CID-10 Sugerido", laudo.conclusaoCID!));
-    }
-    if (!isFieldEmpty(laudo.conclusaoIncapacidade)) {
-      const incapacidadeText = laudo.conclusaoIncapacidade === "sim" ? "Sim" : "Não";
-      paragraphs.push(createLabeledField("Há Incapacidade", incapacidadeText));
     }
     if (!isFieldEmpty(laudo.conclusaoStatus)) {
       const statusMap: Record<string, string> = {

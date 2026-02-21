@@ -8,6 +8,8 @@ const documentosOptions = [
   { id: "prontuario", label: "Prontuário Médico" },
   { id: "receitas", label: "Receitas Médicas" },
   { id: "exames", label: "Exames Complementares" },
+  { id: "laudos_anteriores", label: "Laudos Médicos Anteriores" },
+  { id: "atestados", label: "Atestados Médicos" },
 ];
 
 export function DocumentosAvaliacao() {
