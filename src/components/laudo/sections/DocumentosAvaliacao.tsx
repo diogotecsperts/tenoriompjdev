@@ -10,6 +10,9 @@ const documentosOptions = [
   { id: "exames", label: "Exames Complementares" },
   { id: "laudos_anteriores", label: "Laudos Médicos Anteriores" },
   { id: "atestados", label: "Atestados Médicos" },
+  { id: "ppra_pcmso", label: "PPRA e PCMSO" },
+  { id: "pgr", label: "PGR" },
+  { id: "aso", label: "ASOs - Atestados de Saúde Ocupacional" },
 ];
 
 export function DocumentosAvaliacao() {
