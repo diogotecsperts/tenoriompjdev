@@ -1070,10 +1070,10 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         resumo_peticao_inicial: extractedData.resumos_ia?.resumo_peticao || '',
         resumo_contestacao: extractedData.resumos_ia?.resumo_contestacao || '',
         descricao_tecnica_doencas: extractedData.resumos_ia?.descricao_doencas || '',
-        // IMPORTANT: Justificativas should NOT be auto-filled - left empty for manual input
-        nexo_causal_justificativa: '',
-        analise_incapacidade_laboral: '',
-        // Análise Conclusiva - mapear do resumo de incapacidade gerado pela IA
+        // Mapear análises geradas pela IA para os campos corretos do laudo
+        nexo_causal_justificativa: extractedData.resumos_ia?.nexo_causal || '',
+        analise_incapacidade_laboral: extractedData.resumos_ia?.incapacidade || '',
+        // Análise Conclusiva - cópia do resumo de incapacidade para o campo de conclusão
         conclusao_analise: extractedData.resumos_ia?.incapacidade || '',
         referencias_bibliograficas: extractedData.resumos_ia?.referencias_bibliograficas || '',
         
