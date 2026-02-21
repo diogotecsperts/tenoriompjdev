@@ -661,18 +661,23 @@ const PROMPT_ID_MAPPING: Record<string, string> = {
 
 // Prompts padrão hardcoded como fallback (caso o banco não tenha ou falhe)
 const DEFAULT_PROMPTS: Record<string, string> = {
-  resumo_peticao: `Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da petição inicial para um laudo pericial médico trabalhista.
+  resumo_peticao: `Você é um perito médico especialista em medicina do trabalho.
+Elabore um resumo técnico e objetivo da petição inicial para um laudo pericial.
 
-Texto da Petição Inicial:
+Texto da Petição Inicial extraído:
 \${peticaoInicial}
 
-Instruções:
+REGRAS DE REDAÇÃO INQUEBRÁVEIS (RISCO LEGAL):
+1. ATENÇÃO AO VIÉS: É ESTRITAMENTE PROIBIDO presumir, inventar ou adicionar doenças ocupacionais típicas da profissão (ex: tendinopatias, LER/DORT, síndrome do impacto, PAIR) se elas NÃO estiverem textualmente descritas na petição. O caso pode se tratar de um trauma grave ou acidente atípico.
+2. Seja absolutamente fiel aos fatos: cite apenas as lesões, sintomas e dinâmicas de acidente que estão explícitas no texto fornecido.
+3. Não utilize placeholders ([INSERIR]). Se não houver clareza, limite-se aos fatos apresentados.
+4. Use apenas texto plano, sem Markdown, em no máximo 3 parágrafos contínuos.
+
+INSTRUÇÕES:
 - Resuma os pontos principais alegados pelo reclamante
-- Destaque as doenças/lesões mencionadas
+- Destaque a dinâmica do adoecimento/acidente e as doenças reais mencionadas
 - Identifique os nexos causais alegados
-- Mencione os pedidos principais
-- Use linguagem técnica e imparcial
-- Máximo 3 parágrafos`,
+- Mencione os pedidos principais`,
 
   resumo_contestacao: `Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da contestação para um laudo pericial médico trabalhista.
 

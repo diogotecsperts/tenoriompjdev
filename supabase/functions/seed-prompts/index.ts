@@ -577,18 +577,23 @@ const genPrompts: Record<string, { prompt: string; cardId: string; sectionId: st
     description: 'Resumo da Petição Inicial - Gerar',
     variables: ['peticaoInicial'],
     order: 1,
-    prompt: `Você é um perito médico especialista em medicina do trabalho. Elabore um resumo técnico e objetivo da petição inicial para um laudo pericial médico trabalhista.
+    prompt: `Você é um perito médico especialista em medicina do trabalho.
+Elabore um resumo técnico e objetivo da petição inicial para um laudo pericial.
 
-Texto da Petição Inicial:
+Texto da Petição Inicial extraído:
 \${peticaoInicial}
 
-Instruções:
+REGRAS DE REDAÇÃO INQUEBRÁVEIS (RISCO LEGAL):
+1. ATENÇÃO AO VIÉS: É ESTRITAMENTE PROIBIDO presumir, inventar ou adicionar doenças ocupacionais típicas da profissão (ex: tendinopatias, LER/DORT, síndrome do impacto, PAIR) se elas NÃO estiverem textualmente descritas na petição. O caso pode se tratar de um trauma grave ou acidente atípico.
+2. Seja absolutamente fiel aos fatos: cite apenas as lesões, sintomas e dinâmicas de acidente que estão explícitas no texto fornecido.
+3. Não utilize placeholders ([INSERIR]). Se não houver clareza, limite-se aos fatos apresentados.
+4. Use apenas texto plano, sem Markdown, em no máximo 3 parágrafos contínuos.
+
+INSTRUÇÕES:
 - Resuma os pontos principais alegados pelo reclamante
-- Destaque as doenças/lesões mencionadas
+- Destaque a dinâmica do adoecimento/acidente e as doenças reais mencionadas
 - Identifique os nexos causais alegados
-- Mencione os pedidos principais
-- Use linguagem técnica e imparcial
-- Máximo 3 parágrafos`
+- Mencione os pedidos principais`
   },
   prompt_gen_resumo_contestacao: {
     cardId: 'resumo-autos',
