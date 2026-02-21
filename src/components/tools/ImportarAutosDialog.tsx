@@ -1073,8 +1073,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         // Mapear análises geradas pela IA para os campos corretos do laudo
         nexo_causal_justificativa: extractedData.resumos_ia?.nexo_causal || '',
         analise_incapacidade_laboral: extractedData.resumos_ia?.incapacidade || '',
-        // Análise Conclusiva - cópia do resumo de incapacidade para o campo de conclusão
-        conclusao_analise: extractedData.resumos_ia?.incapacidade || '',
+        // Análise Conclusiva - vazio na importação (isFieldEmpty oculta a seção no DOCX/PDF)
+        conclusao_analise: '',
         referencias_bibliograficas: extractedData.resumos_ia?.referencias_bibliograficas || '',
         
         // Campo fixo gerenciado via banco de dados (config_metodologia_padrao)
