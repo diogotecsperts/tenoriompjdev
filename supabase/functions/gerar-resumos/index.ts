@@ -391,6 +391,9 @@ const TIPOS_COM_MARKDOWN_INTENCIONAL = new Set(['sugestoes_pericia', 'aprimorar_
 // Regra de formatação injetada no system prompt para tipos que vão para o corpo do laudo
 const REGRA_FORMATACAO_PLAIN_TEXT = ' REGRA DE FORMATAÇÃO OBRIGATÓRIA: Retorne APENAS texto plano. É estritamente proibido usar formatação Markdown (sem negritos com asteriscos, sem títulos com #, sem listas com * ou -). Use CAIXA ALTA para títulos de seção e quebras de linha simples para separar blocos de conteúdo.';
 
+// Regra de idioma para garantir acentuação correta em português
+const REGRA_IDIOMA = ' REGRA DE IDIOMA: Todo o texto DEVE ser redigido em Português Brasileiro correto e formal, com TODOS os acentos, cedilhas e diacríticos adequados (á, é, í, ó, ú, â, ê, ô, ã, õ, ç). Texto sem acentuação será REJEITADO.';
+
 serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
@@ -476,8 +479,8 @@ serve(async (req) => {
     // Injetar regra de plain text apenas para tipos que vão para o corpo do laudo
     // Tipos com Markdown intencional (renderizado via react-markdown em painéis dedicados) ficam isentos
     const systemPrompt = TIPOS_COM_MARKDOWN_INTENCIONAL.has(tipo)
-      ? baseSystemPrompt
-      : baseSystemPrompt + REGRA_FORMATACAO_PLAIN_TEXT;
+      ? baseSystemPrompt + REGRA_IDIOMA
+      : baseSystemPrompt + REGRA_FORMATACAO_PLAIN_TEXT + REGRA_IDIOMA;
 
     console.log(`[gerar-resumos] Formatação plain text: ${!TIPOS_COM_MARKDOWN_INTENCIONAL.has(tipo) ? 'ATIVA' : 'ISENTA (markdown intencional)'}`);
 
