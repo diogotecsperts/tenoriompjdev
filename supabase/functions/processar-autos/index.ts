@@ -1154,6 +1154,10 @@ const results = {
       
       const prompt = await getPromptForType(tipo, contexto);
       
+      // Injetar regra de idioma no final do user prompt para reforçar redundância
+      const REGRA_IDIOMA_INLINE = '\n\nREGRA FINAL INQUEBRÁVEL: Todo o texto acima DEVE ser redigido em Português Brasileiro correto e formal, com TODOS os acentos e diacríticos (á, é, í, ó, ú, â, ê, ô, ã, õ, ç). Palavras como "infeccao", "nao", "orgao", "funcoes" são ERROS GRAVES — o correto é "infecção", "não", "órgão", "funções". NUNCA omita acentos.';
+      const promptComRegra = prompt + REGRA_IDIOMA_INLINE;
+      
       // Create a timeout promise
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(() => reject(new Error(`Timeout após ${SUMMARY_TIMEOUT_MS/1000}s aguardando resposta da IA`)), SUMMARY_TIMEOUT_MS);
@@ -1161,7 +1165,7 @@ const results = {
       
       // Race between AI call and timeout
       const result = await Promise.race([
-        callAI(aiConfig, summarySystemPrompt, prompt, {
+        callAI(aiConfig, summarySystemPrompt, promptComRegra, {
           promptType: tipo,
           userId: userId
         }),
@@ -1212,11 +1216,12 @@ const results = {
         
         try {
           const retryPrompt = await getPromptForType(tipo, contexto);
+          const retryPromptComRegra = retryPrompt + '\n\nREGRA FINAL INQUEBRÁVEL: Todo o texto acima DEVE ser redigido em Português Brasileiro correto e formal, com TODOS os acentos e diacríticos (á, é, í, ó, ú, â, ê, ô, ã, õ, ç). Palavras como "infeccao", "nao", "orgao", "funcoes" são ERROS GRAVES — o correto é "infecção", "não", "órgão", "funções". NUNCA omita acentos.';
           const retryTimeout = new Promise<never>((_, reject) => {
             setTimeout(() => reject(new Error(`Retry timeout após 180s`)), 180_000);
           });
           const retryResult = await Promise.race([
-            callAI(aiConfig, summarySystemPrompt, retryPrompt, {
+            callAI(aiConfig, summarySystemPrompt, retryPromptComRegra, {
               promptType: tipo, userId
             }),
             retryTimeout
