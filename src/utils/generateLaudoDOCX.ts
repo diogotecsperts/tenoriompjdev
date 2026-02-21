@@ -194,6 +194,21 @@ const RESPOSTA_PATTERN = /^(RESPOSTA|Resposta|R:)/i;
 // Cria parágrafos separados para quesitos — força split por regex de numeração
 const createQuesitoParagraphs = (text: string): Paragraph[] => {
   if (isFieldEmpty(text)) return [];
+  
+  // Filtro de inexistência: se é apenas uma frase informativa, retornar sem injetar resposta
+  if (/não identificados nos autos/i.test(text)) {
+    return [new Paragraph({
+      children: [new TextRun({
+        text: sanitizeMarkdown(text),
+        size: FONT.sizeDefault,
+        color: COLORS.text,
+        font: FONT.name,
+      })],
+      alignment: AlignmentType.BOTH,
+      spacing: { after: 200 },
+    })];
+  }
+  
   const sanitized = sanitizeMarkdown(text);
   
   // Estratégia: dividir o texto por padrões de numeração
@@ -258,8 +273,8 @@ const createQuesitoParagraphs = (text: string): Paragraph[] => {
       spacing: { after: 120 },
     }));
 
-    // Parágrafo da resposta (ou placeholder)
-    const respostaText = resposta || 'RESPOSTA SUGERIDA DA IA: ';
+    // Parágrafo da resposta (ou placeholder) — sanitizado para compliance
+    const respostaText = (resposta || 'Resposta: ').replace(/RESPOSTA SUGERIDA DA IA:/g, 'Resposta:');
     const isPlaceholder = !resposta;
     paragraphs.push(new Paragraph({
       children: [
