@@ -96,40 +96,127 @@ const debugField = (fieldName: string, value: string | null | undefined): void =
   console.groupEnd();
 };
 
+// Dicionário de correção de OCR — erros comuns de acentuação em contexto jurídico/médico
+const OCR_ACCENT_MAP: Array<[RegExp, string]> = [
+  [/\blesoes\b/gi, 'lesões'], [/\blesao\b/gi, 'lesão'],
+  [/\bprotecao\b/gi, 'proteção'], [/\bseguranca\b/gi, 'segurança'],
+  [/\bnao\b/gi, 'não'], [/\bfuncoes\b/gi, 'funções'], [/\bfuncao\b/gi, 'função'],
+  [/\breducao\b/gi, 'redução'], [/\binfeccao\b/gi, 'infecção'],
+  [/\borgao\b/gi, 'órgão'], [/\borgaos\b/gi, 'órgãos'],
+  [/\bestetico\b/gi, 'estético'], [/\bestetica\b/gi, 'estética'],
+  [/\batencao\b/gi, 'atenção'], [/\bcomunicacao\b/gi, 'comunicação'],
+  [/\bdoenca\b/gi, 'doença'], [/\bdoencas\b/gi, 'doenças'],
+  [/\bprevencao\b/gi, 'prevenção'], [/\bcondicoes\b/gi, 'condições'], [/\bcondicao\b/gi, 'condição'],
+  [/\bsituacao\b/gi, 'situação'], [/\bavaliacao\b/gi, 'avaliação'],
+  [/\binformacao\b/gi, 'informação'], [/\binformacoes\b/gi, 'informações'],
+  [/\bocupacao\b/gi, 'ocupação'], [/\boperacao\b/gi, 'operação'],
+  [/\bclassificacao\b/gi, 'classificação'], [/\bpeticao\b/gi, 'petição'],
+  [/\bcontestacao\b/gi, 'contestação'], [/\brestricao\b/gi, 'restrição'],
+  [/\bobrigacao\b/gi, 'obrigação'], [/\brelacao\b/gi, 'relação'],
+  [/\badmissao\b/gi, 'admissão'], [/\bdemissao\b/gi, 'demissão'],
+  [/\bexposicao\b/gi, 'exposição'], [/\bconclusao\b/gi, 'conclusão'],
+  [/\bdescricao\b/gi, 'descrição'], [/\bpericia\b/gi, 'perícia'],
+  [/\bpericias\b/gi, 'perícias'], [/\bjuridico\b/gi, 'jurídico'],
+  [/\bmedico\b/gi, 'médico'], [/\bmedica\b/gi, 'médica'],
+  [/\btecnico\b/gi, 'técnico'], [/\btecnica\b/gi, 'técnica'],
+  [/\banalise\b/gi, 'análise'], [/\bincapacidade\b/gi, 'incapacidade'],
+  [/\bprofissao\b/gi, 'profissão'], [/\bdiagnostico\b/gi, 'diagnóstico'],
+  [/\bdiagnosticos\b/gi, 'diagnósticos'], [/\bcirurgico\b/gi, 'cirúrgico'],
+  [/\bortopedico\b/gi, 'ortopédico'], [/\bpatologico\b/gi, 'patológico'],
+  [/\bpatologicos\b/gi, 'patológicos'], [/\bcronico\b/gi, 'crônico'],
+  [/\bcronica\b/gi, 'crônica'],
+];
+
+// Corrige erros de acentuação comuns de OCR — aplicado GLOBALMENTE em todos os campos
+const sanitizeOcrAccents = (text: string): string => {
+  if (!text) return text;
+  let result = text;
+  for (const [pattern, replacement] of OCR_ACCENT_MAP) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+};
+
 // Sanitiza markdown — converte formatação para texto plano estruturado
 const sanitizeMarkdown = (text: string): string => {
   if (!text) return "";
-  return text
-    // 1. Headings: ### Título → Título
-    .replace(/^#{1,6}\s+/gm, '')
-    // 2. Bold multi-linha → CAIXA ALTA (flag 's' para dotAll)
-    .replace(/\*\*(.+?)\*\*/gs, (_, p1) => p1.toUpperCase())
-    .replace(/__(.+?)__/gs, (_, p1) => p1.toUpperCase())
-    // 3. Bullets com asterisco no início de linha: "* item" → "item"
-    .replace(/^\*\s+/gm, '')
-    // 4. Itálico simples (após remover bullets)
-    .replace(/\*(.+?)\*/gs, '$1')
-    .replace(/_(.+?)_/gs, '$1')
-    // 5. Linhas separadoras: --- ou *** sozinhos numa linha
-    .replace(/^[-*]{3,}\s*$/gm, '')
-    // 6. Backtick code: `código` → código
-    .replace(/`(.+?)`/g, '$1')
-    // 7. Normalizar quebras de linha múltiplas
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  return sanitizeOcrAccents(
+    text
+      // 1. Headings: ### Título → Título
+      .replace(/^#{1,6}\s+/gm, '')
+      // 2. Bold multi-linha → CAIXA ALTA (flag 's' para dotAll)
+      .replace(/\*\*(.+?)\*\*/gs, (_, p1) => p1.toUpperCase())
+      .replace(/__(.+?)__/gs, (_, p1) => p1.toUpperCase())
+      // 3. Bullets com asterisco no início de linha: "* item" → "item"
+      .replace(/^\*\s+/gm, '')
+      // 4. Itálico simples (após remover bullets)
+      .replace(/\*(.+?)\*/gs, '$1')
+      .replace(/_(.+?)_/gs, '$1')
+      // 5. Linhas separadoras: --- ou *** sozinhos numa linha
+      .replace(/^[-*]{3,}\s*$/gm, '')
+      // 6. Backtick code: `código` → código
+      .replace(/`(.+?)`/g, '$1')
+      // 7. Normalizar quebras de linha múltiplas
+      .replace(/\n{3,}/g, '\n\n')
+  ).trim();
 };
 
-// Formata quesitos garantindo quebra de linha para cada item numerado
+// Regex robusto para detectar padrões de numeração de quesitos
+const QUESITO_PATTERN = /^(\d+[\.\)\-]|\d+\.\d+[\.\)]?|[a-z]\)|[IVX]+\s*[\-\.\)]|QUESITO\s+\d+)/im;
+const RESPOSTA_PATTERN = /^(RESPOSTA|Resposta|R:)/i;
+
+// Formata quesitos garantindo quebra de linha para cada item numerado — com regex robusto
 const formatQuesitos = (text: string): string => {
   if (!text) return "";
-  // Primeiro sanitiza o markdown
-  let sanitized = sanitizeMarkdown(text);
-  // Garante quebra de linha antes de cada quesito numerado
-  // Padrões: "1.", "1)", "1 -", "1-", etc.
-  sanitized = sanitized.replace(/(\d+[\.\)\-])\s*/g, '\n$1 ');
-  // Remove possíveis quebras duplas e limpa início
-  sanitized = sanitized.replace(/^\n+/, '').replace(/\n{3,}/g, '\n\n');
-  return sanitized.trim();
+  const sanitized = sanitizeMarkdown(text);
+  
+  const lines = sanitized.split('\n');
+  const outputLines: string[] = [];
+  let lastWasQuesito = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    if (QUESITO_PATTERN.test(trimmed)) {
+      // Adicionar separador antes de cada quesito (exceto o primeiro)
+      if (outputLines.length > 0) outputLines.push('');
+      outputLines.push(trimmed);
+      lastWasQuesito = true;
+    } else if (RESPOSTA_PATTERN.test(trimmed)) {
+      outputLines.push(trimmed);
+      lastWasQuesito = false;
+    } else {
+      // Se seguiu um quesito sem resposta, e encontra texto sem padrão,
+      // pode ser continuação da pergunta ou texto solto
+      outputLines.push(trimmed);
+      if (lastWasQuesito && !RESPOSTA_PATTERN.test(trimmed)) {
+        // Verificar se a próxima linha será um novo quesito — se sim, injetar resposta
+        // (tratado abaixo no pós-processamento)
+      }
+    }
+  }
+
+  // Pós-processamento: garantir que cada quesito tenha uma resposta
+  const finalLines: string[] = [];
+  for (let i = 0; i < outputLines.length; i++) {
+    const current = outputLines[i];
+    finalLines.push(current);
+    
+    if (QUESITO_PATTERN.test(current.trim())) {
+      // Verificar se a próxima linha não-vazia é uma resposta
+      let nextNonEmpty = i + 1;
+      while (nextNonEmpty < outputLines.length && !outputLines[nextNonEmpty].trim()) nextNonEmpty++;
+      
+      const nextLine = nextNonEmpty < outputLines.length ? outputLines[nextNonEmpty].trim() : '';
+      // Se próxima linha é outro quesito ou fim, injetar placeholder de resposta
+      if (!nextLine || QUESITO_PATTERN.test(nextLine)) {
+        finalLines.push('RESPOSTA SUGERIDA DA IA: ');
+      }
+    }
+  }
+
+  return finalLines.join('\n').trim();
 };
 
 const formatDate = (dateString: string): string => {

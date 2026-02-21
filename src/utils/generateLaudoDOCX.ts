@@ -83,27 +83,69 @@ const debugField = (fieldName: string, value: string | null | undefined): void =
   console.groupEnd();
 };
 
+// Dicionário de correção de OCR — erros comuns de acentuação em contexto jurídico/médico
+const OCR_ACCENT_MAP: Array<[RegExp, string]> = [
+  [/\blesoes\b/gi, 'lesões'], [/\blesao\b/gi, 'lesão'],
+  [/\bprotecao\b/gi, 'proteção'], [/\bseguranca\b/gi, 'segurança'],
+  [/\bnao\b/gi, 'não'], [/\bfuncoes\b/gi, 'funções'], [/\bfuncao\b/gi, 'função'],
+  [/\breducao\b/gi, 'redução'], [/\binfeccao\b/gi, 'infecção'],
+  [/\borgao\b/gi, 'órgão'], [/\borgaos\b/gi, 'órgãos'],
+  [/\bestetico\b/gi, 'estético'], [/\bestetica\b/gi, 'estética'],
+  [/\batencao\b/gi, 'atenção'], [/\bcomunicacao\b/gi, 'comunicação'],
+  [/\bdoenca\b/gi, 'doença'], [/\bdoencas\b/gi, 'doenças'],
+  [/\bprevencao\b/gi, 'prevenção'], [/\bcondicoes\b/gi, 'condições'], [/\bcondicao\b/gi, 'condição'],
+  [/\bsituacao\b/gi, 'situação'], [/\bavaliacao\b/gi, 'avaliação'],
+  [/\binformacao\b/gi, 'informação'], [/\binformacoes\b/gi, 'informações'],
+  [/\bocupacao\b/gi, 'ocupação'], [/\boperacao\b/gi, 'operação'],
+  [/\bclassificacao\b/gi, 'classificação'], [/\bpeticao\b/gi, 'petição'],
+  [/\bcontestacao\b/gi, 'contestação'], [/\brestricao\b/gi, 'restrição'],
+  [/\bobrigacao\b/gi, 'obrigação'], [/\brelacao\b/gi, 'relação'],
+  [/\badmissao\b/gi, 'admissão'], [/\bdemissao\b/gi, 'demissão'],
+  [/\bexposicao\b/gi, 'exposição'], [/\bconclusao\b/gi, 'conclusão'],
+  [/\bdescricao\b/gi, 'descrição'], [/\bpericia\b/gi, 'perícia'],
+  [/\bpericias\b/gi, 'perícias'], [/\bjuridico\b/gi, 'jurídico'],
+  [/\bmedico\b/gi, 'médico'], [/\bmedica\b/gi, 'médica'],
+  [/\btecnico\b/gi, 'técnico'], [/\btecnica\b/gi, 'técnica'],
+  [/\banalise\b/gi, 'análise'], [/\bincapacidade\b/gi, 'incapacidade'],
+  [/\bprofissao\b/gi, 'profissão'], [/\bdiagnostico\b/gi, 'diagnóstico'],
+  [/\bdiagnosticos\b/gi, 'diagnósticos'], [/\bcirurgico\b/gi, 'cirúrgico'],
+  [/\bortopedico\b/gi, 'ortopédico'], [/\bpatologico\b/gi, 'patológico'],
+  [/\bpatologicos\b/gi, 'patológicos'], [/\bcronico\b/gi, 'crônico'],
+  [/\bcronica\b/gi, 'crônica'],
+];
+
+// Corrige erros de acentuação comuns de OCR — aplicado GLOBALMENTE em todos os campos
+const sanitizeOcrAccents = (text: string): string => {
+  if (!text) return text;
+  let result = text;
+  for (const [pattern, replacement] of OCR_ACCENT_MAP) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+};
+
 // Sanitiza markdown — converte formatação para texto plano estruturado
 const sanitizeMarkdown = (text: string): string => {
   if (!text) return "";
-  return text
-    // 1. Headings: ### Título → Título
-    .replace(/^#{1,6}\s+/gm, '')
-    // 2. Bold multi-linha → CAIXA ALTA (flag 's' para dotAll)
-    .replace(/\*\*(.+?)\*\*/gs, (_, p1) => p1.toUpperCase())
-    .replace(/__(.+?)__/gs, (_, p1) => p1.toUpperCase())
-    // 3. Bullets com asterisco no início de linha: "* item" → "item"
-    .replace(/^\*\s+/gm, '')
-    // 4. Itálico simples (após remover bullets)
-    .replace(/\*(.+?)\*/gs, '$1')
-    .replace(/_(.+?)_/gs, '$1')
-    // 5. Linhas separadoras: --- ou *** sozinhos numa linha
-    .replace(/^[-*]{3,}\s*$/gm, '')
-    // 6. Backtick code: `código` → código
-    .replace(/`(.+?)`/g, '$1')
-    // 7. Normalizar quebras de linha múltiplas
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  return sanitizeOcrAccents(
+    text
+      // 1. Headings: ### Título → Título
+      .replace(/^#{1,6}\s+/gm, '')
+      // 2. Bold multi-linha → CAIXA ALTA (flag 's' para dotAll)
+      .replace(/\*\*(.+?)\*\*/gs, (_, p1) => p1.toUpperCase())
+      .replace(/__(.+?)__/gs, (_, p1) => p1.toUpperCase())
+      // 3. Bullets com asterisco no início de linha: "* item" → "item"
+      .replace(/^\*\s+/gm, '')
+      // 4. Itálico simples (após remover bullets)
+      .replace(/\*(.+?)\*/gs, '$1')
+      .replace(/_(.+?)_/gs, '$1')
+      // 5. Linhas separadoras: --- ou *** sozinhos numa linha
+      .replace(/^[-*]{3,}\s*$/gm, '')
+      // 6. Backtick code: `código` → código
+      .replace(/`(.+?)`/g, '$1')
+      // 7. Normalizar quebras de linha múltiplas
+      .replace(/\n{3,}/g, '\n\n')
+  ).trim();
 };
 
 const formatDate = (dateString: string): string => {
@@ -145,57 +187,96 @@ const formatQuesitos = (text: string): string => {
   return sanitized.trim();
 };
 
-// Cria parágrafos separados para quesitos — cada par QUESITO/RESPOSTA vira um Paragraph independente
+// Regex robusto para detectar padrões de numeração de quesitos do mundo real
+const QUESITO_PATTERN = /^(\d+[\.\)\-]|\d+\.\d+[\.\)]?|[a-z]\)|[IVX]+\s*[\-\.\)]|QUESITO\s+\d+)/im;
+const RESPOSTA_PATTERN = /^(RESPOSTA|Resposta|R:)/i;
+
+// Cria parágrafos separados para quesitos — força split por regex de numeração
 const createQuesitoParagraphs = (text: string): Paragraph[] => {
   if (isFieldEmpty(text)) return [];
   const sanitized = sanitizeMarkdown(text);
-  // Divide por \n\n (separador entre pares quesito/resposta)
-  const blocks = sanitized.split('\n\n').filter(b => b.trim().length > 0);
+  
+  // Estratégia: dividir o texto por padrões de numeração
+  const lines = sanitized.split('\n');
+  const quesitos: Array<{ pergunta: string; resposta: string }> = [];
+  let currentPergunta = '';
+  let currentResposta = '';
+  let inResposta = false;
 
-  return blocks.map(block => {
-    const lines = block.split('\n');
-    const textRuns: TextRun[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
 
-    lines.forEach((line, i) => {
-      const trimmed = line.trim();
-      const isQuesito = /^QUESITO\s+\d+/i.test(trimmed) || /^\d+[\.\)\-]\s/.test(trimmed);
-      const isResposta = /^RESPOSTA/i.test(trimmed);
+    if (QUESITO_PATTERN.test(trimmed)) {
+      // Se já temos uma pergunta acumulada, salvar o par anterior
+      if (currentPergunta) {
+        quesitos.push({ pergunta: currentPergunta.trim(), resposta: currentResposta.trim() });
+      }
+      currentPergunta = trimmed;
+      currentResposta = '';
+      inResposta = false;
+    } else if (RESPOSTA_PATTERN.test(trimmed)) {
+      inResposta = true;
+      currentResposta = trimmed;
+    } else if (inResposta || (currentPergunta && !QUESITO_PATTERN.test(trimmed))) {
+      // Se já encontrou RESPOSTA, acumula nela; senão acumula na pergunta
+      if (inResposta) {
+        currentResposta += (currentResposta ? '\n' : '') + trimmed;
+      } else {
+        currentPergunta += '\n' + trimmed;
+      }
+    }
+  }
+  // Salvar o último par
+  if (currentPergunta) {
+    quesitos.push({ pergunta: currentPergunta.trim(), resposta: currentResposta.trim() });
+  }
 
-      if (isQuesito) {
-        textRuns.push(new TextRun({
-          text: trimmed,
+  // Se o regex não encontrou nenhum padrão de numeração, fallback para split por \n\n
+  if (quesitos.length === 0) {
+    const blocks = sanitized.split('\n\n').filter(b => b.trim().length > 0);
+    for (const block of blocks) {
+      quesitos.push({ pergunta: block.trim(), resposta: '' });
+    }
+  }
+
+  // Gerar parágrafos para cada par quesito/resposta
+  const paragraphs: Paragraph[] = [];
+  for (const { pergunta, resposta } of quesitos) {
+    // Parágrafo do quesito (negrito, cor primária)
+    paragraphs.push(new Paragraph({
+      children: [
+        new TextRun({
+          text: pergunta,
           bold: true,
           size: FONT.sizeDefault,
           color: COLORS.primary,
           font: FONT.name,
-        }));
-      } else if (isResposta) {
-        textRuns.push(new TextRun({
-          text: trimmed,
+        }),
+      ],
+      alignment: AlignmentType.BOTH,
+      spacing: { after: 120 },
+    }));
+
+    // Parágrafo da resposta (ou placeholder)
+    const respostaText = resposta || 'RESPOSTA SUGERIDA DA IA: ';
+    const isPlaceholder = !resposta;
+    paragraphs.push(new Paragraph({
+      children: [
+        new TextRun({
+          text: respostaText,
+          bold: isPlaceholder,
           size: FONT.sizeDefault,
           color: COLORS.text,
           font: FONT.name,
-        }));
-      } else {
-        textRuns.push(new TextRun({
-          text: trimmed,
-          size: FONT.sizeDefault,
-          color: COLORS.text,
-          font: FONT.name,
-        }));
-      }
-
-      if (i < lines.length - 1) {
-        textRuns.push(new TextRun({ break: 1 }));
-      }
-    });
-
-    return new Paragraph({
-      children: textRuns,
+        }),
+      ],
       alignment: AlignmentType.BOTH,
       spacing: { after: 200 },
-    });
-  });
+    }));
+  }
+
+  return paragraphs;
 };
 
 // ========== CARREGAMENTO DE IMAGENS ==========
