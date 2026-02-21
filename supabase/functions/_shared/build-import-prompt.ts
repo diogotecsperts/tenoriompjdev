@@ -60,13 +60,16 @@
      "descricao": "",
      "local": ""
    },
-   "documentos_checklist": {
+  "documentos_checklist": {
      "cat": false,
      "prontuario": false,
      "receitas": false,
      "exames": false,
      "laudos_anteriores": false,
      "atestados": false,
+     "ppra_pcmso": false,
+     "pgr": false,
+     "aso": false,
      "outros": []
    },
    "historico": {
@@ -397,27 +400,27 @@ MÍNIMO 2 parágrafos ou lista cronológica completa. Busque em CTPS, PPP, depoi
    prompt_import_quesitos: {
     section: 'Quesitos',
      order: 18,
-    prompt: `EXTRAÇÃO INTEGRAL OBRIGATÓRIA - Os quesitos são perguntas técnicas formuladas pelo Juízo e pelas partes para serem respondidas pelo perito.
- É ABSOLUTAMENTE ESSENCIAL extrair TODOS os quesitos INTEGRALMENTE, pois são a base do laudo pericial.
- 
- QUESITOS DO JUÍZO:
- Busque em despachos ou decisões judiciais. Copie EXATAMENTE como aparecem:
- - Numeração original (1, 2, 3... ou I, II, III... ou a, b, c...)
- - Texto integral de CADA quesito sem alterações
- - Todos os sub-quesitos (Ex: 1.1, 1.2, 2.a, 2.b)
- Busque por: "O(A) perito(a) deverá responder...", "Quesitos do MM. Juízo"
- NÃO RESUMA. Copie LITERALMENTE cada quesito. NÃO invente quesitos.
- 
- QUESITOS DO RECLAMANTE:
- Extraia da petição inicial ou petição específica de quesitos.
- Mesmas regras: numeração original, texto integral, sub-quesitos.
- 
- QUESITOS DA RECLAMADA:
- Extraia da contestação ou petição específica.
- Mesmas regras: numeração original, texto integral, sub-quesitos.
- 
- ATENÇÃO: Os quesitos podem estar em anexos separados ou no corpo das petições.
- Busque em TODO o documento. NÃO invente quesitos - extraia APENAS os que existem.`
+    prompt: `EXTRAÇÃO INTEGRAL OBRIGATÓRIA COM SUGESTÃO DE RESPOSTAS - Os quesitos são perguntas técnicas formuladas pelo Juízo e pelas partes para serem respondidas pelo perito.
+
+SUA TAREFA para CADA grupo de quesitos (Juízo, Reclamante, Reclamada):
+1. Extraia LITERALMENTE cada pergunta mantendo a numeração original.
+2. CORREÇÃO DE IDIOMA: Corrija os erros de OCR, aplicando todos os acentos e cedilhas na pergunta extraída.
+3. RESPOSTA: Logo abaixo de cada pergunta, gere uma sugestão de resposta técnica baseada estritamente na anamnese, exames e análise do caso. Se faltar dado, sugira "Aguardando avaliação pericial complementar."
+
+REGRA DE FORMATAÇÃO: Use uma quebra de linha dupla (\\n\\n) entre a resposta de um quesito e a pergunta do próximo para evitar aglomeração.
+
+ESTRUTURA EXATA ESPERADA (para cada grupo):
+QUESITO 1: [Pergunta com acentos corrigidos]
+RESPOSTA: [Sugestão de resposta técnica]
+
+QUESITO 2: [Pergunta com acentos corrigidos]
+RESPOSTA: [Sugestão de resposta técnica]
+
+QUESITOS DO JUÍZO: Busque em despachos ou decisões judiciais.
+QUESITOS DO RECLAMANTE: Extraia da petição inicial ou petição específica.
+QUESITOS DA RECLAMADA: Extraia da contestação ou petição específica.
+
+NÃO invente quesitos - extraia APENAS os que existem no documento.`
    },
    
    // Seção: Textos Brutos

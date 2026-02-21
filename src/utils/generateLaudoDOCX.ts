@@ -136,13 +136,66 @@ const calculateAge = (birthDate: string): string => {
   }
 };
 
-// Formata quesitos garantindo quebra de linha para cada item numerado
+// Formata quesitos garantindo quebra de linha para cada item numerado (legacy - used by PDF)
 const formatQuesitos = (text: string): string => {
   if (!text) return "";
   let sanitized = sanitizeMarkdown(text);
   sanitized = sanitized.replace(/(\d+[\.\)\-])\s*/g, '\n$1 ');
   sanitized = sanitized.replace(/^\n+/, '').replace(/\n{3,}/g, '\n\n');
   return sanitized.trim();
+};
+
+// Cria parágrafos separados para quesitos — cada par QUESITO/RESPOSTA vira um Paragraph independente
+const createQuesitoParagraphs = (text: string): Paragraph[] => {
+  if (isFieldEmpty(text)) return [];
+  const sanitized = sanitizeMarkdown(text);
+  // Divide por \n\n (separador entre pares quesito/resposta)
+  const blocks = sanitized.split('\n\n').filter(b => b.trim().length > 0);
+
+  return blocks.map(block => {
+    const lines = block.split('\n');
+    const textRuns: TextRun[] = [];
+
+    lines.forEach((line, i) => {
+      const trimmed = line.trim();
+      const isQuesito = /^QUESITO\s+\d+/i.test(trimmed) || /^\d+[\.\)\-]\s/.test(trimmed);
+      const isResposta = /^RESPOSTA/i.test(trimmed);
+
+      if (isQuesito) {
+        textRuns.push(new TextRun({
+          text: trimmed,
+          bold: true,
+          size: FONT.sizeDefault,
+          color: COLORS.primary,
+          font: FONT.name,
+        }));
+      } else if (isResposta) {
+        textRuns.push(new TextRun({
+          text: trimmed,
+          size: FONT.sizeDefault,
+          color: COLORS.text,
+          font: FONT.name,
+        }));
+      } else {
+        textRuns.push(new TextRun({
+          text: trimmed,
+          size: FONT.sizeDefault,
+          color: COLORS.text,
+          font: FONT.name,
+        }));
+      }
+
+      if (i < lines.length - 1) {
+        textRuns.push(new TextRun({ break: 1 }));
+      }
+    });
+
+    return new Paragraph({
+      children: textRuns,
+      alignment: AlignmentType.BOTH,
+      spacing: { after: 200 },
+    });
+  });
 };
 
 // ========== CARREGAMENTO DE IMAGENS ==========
@@ -500,18 +553,50 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 10. DOCUMENTOS ANALISADOS ==========
-  const DOCUMENTOS_LABEL_MAP: Record<string, string> = {
-    "cat": "CAT - Comunicação de Acidente de Trabalho",
-    "prontuario": "Prontuário Médico",
-    "receitas": "Receitas Médicas",
-    "exames": "Exames Complementares",
-    "laudos_anteriores": "Laudos Médicos Anteriores",
-    "atestados": "Atestados Médicos",
-  };
-  if (laudo.documentos && laudo.documentos.length > 0) {
+  {
+    const docs = laudo.documentos || [];
     paragraphs.push(createSectionTitle(`${sectionNumber}. DOCUMENTOS ANALISADOS`));
-    const docsLabels = laudo.documentos.map(d => DOCUMENTOS_LABEL_MAP[d] || d);
-    paragraphs.push(...createNumberedList(docsLabels));
+    
+    // Bullets fixos (sempre presentes)
+    const fixedBullets = [
+      "Petição inicial.",
+      "Contestação.",
+      "Exames médicos.",
+      "Laudos e atestados médicos.",
+      "Quesitos do juízo e do autor.",
+    ];
+    paragraphs.push(...createNumberedList(fixedBullets));
+    
+    // Bullets condicionais (aparecem quando documento NÃO foi marcado)
+    const conditionalBullets: string[] = [];
+    if (!docs.includes("ppra_pcmso") && !docs.includes("pgr")) {
+      conditionalBullets.push("Não foram localizados nos autos os laudos de PPRA, PGR e PCMSO da empresa reclamada, considerados relevantes para análise de riscos ocupacionais.");
+    }
+    if (!docs.includes("cat")) {
+      conditionalBullets.push("Ausência de Comunicação de Acidente de Trabalho (CAT) vinculada ao caso.");
+    }
+    if (!docs.includes("aso")) {
+      conditionalBullets.push("Ausência de Atestados de Saúde Ocupacional (ASO) anteriores ao desligamento.");
+    }
+    
+    if (conditionalBullets.length > 0) {
+      conditionalBullets.forEach(text => {
+        paragraphs.push(new Paragraph({
+          children: [
+            new TextRun({
+              text,
+              size: FONT.sizeDefault,
+              color: COLORS.text,
+              font: FONT.name,
+              italics: true,
+            }),
+          ],
+          alignment: AlignmentType.BOTH,
+          spacing: { after: 80 },
+          indent: { left: convertInchesToTwip(0.25) },
+        }));
+      });
+    }
     sectionNumber++;
   }
 
@@ -666,17 +751,17 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
     let subSection = 1;
     if (!isFieldEmpty(laudo.quesitosJuizo)) {
       paragraphs.push(createSubtitle(`${sectionNumber}.${subSection} Quesitos do Juízo`));
-      paragraphs.push(createParagraph(formatQuesitos(laudo.quesitosJuizo!)));
+      paragraphs.push(...createQuesitoParagraphs(laudo.quesitosJuizo!));
       subSection++;
     }
     if (!isFieldEmpty(laudo.quesitosReclamante)) {
       paragraphs.push(createSubtitle(`${sectionNumber}.${subSection} Quesitos do Reclamante`));
-      paragraphs.push(createParagraph(formatQuesitos(laudo.quesitosReclamante!)));
+      paragraphs.push(...createQuesitoParagraphs(laudo.quesitosReclamante!));
       subSection++;
     }
     if (!isFieldEmpty(laudo.quesitosReclamada)) {
       paragraphs.push(createSubtitle(`${sectionNumber}.${subSection} Quesitos da Reclamada`));
-      paragraphs.push(createParagraph(formatQuesitos(laudo.quesitosReclamada!)));
+      paragraphs.push(...createQuesitoParagraphs(laudo.quesitosReclamada!));
     }
     sectionNumber++;
   }

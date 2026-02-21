@@ -677,26 +677,56 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 10. DOCUMENTOS ANALISADOS
-  const DOCUMENTOS_LABEL_MAP: Record<string, string> = {
-    "cat": "CAT - Comunicação de Acidente de Trabalho",
-    "prontuario": "Prontuário Médico",
-    "receitas": "Receitas Médicas",
-    "exames": "Exames Complementares",
-    "laudos_anteriores": "Laudos Médicos Anteriores",
-    "atestados": "Atestados Médicos",
-  };
-  if (laudo.documentos && laudo.documentos.length > 0) {
-    const docListHeight = laudo.documentos.length * 6;
-    y = ensureSpace(doc, y, Math.min(SECTION_TITLE_HEIGHT + docListHeight, 40));
+  {
+    const docs = laudo.documentos || [];
+    y = ensureSpace(doc, y, Math.min(SECTION_TITLE_HEIGHT + 60, 80));
     y = addSectionTitle(doc, `${sectionNumber}. DOCUMENTOS ANALISADOS`, y);
     
-    const docsLabels = laudo.documentos.map(d => DOCUMENTOS_LABEL_MAP[d] || d);
-    docsLabels.forEach((doc_item, index) => {
+    // Bullets fixos (sempre presentes)
+    const fixedBullets = [
+      "Petição inicial.",
+      "Contestação.",
+      "Exames médicos.",
+      "Laudos e atestados médicos.",
+      "Quesitos do juízo e do autor.",
+    ];
+    fixedBullets.forEach((item, index) => {
       y = checkNewPage(doc, y, 6);
       doc.setFontSize(10);
-      doc.text(`${index + 1}. ${doc_item}`, MARGINS.left + 5, y);
+      doc.setFont("helvetica", "normal");
+      doc.text(`${index + 1}. ${item}`, MARGINS.left + 5, y);
       y += 6;
     });
+    
+    // Bullets condicionais (aparecem quando documento NÃO foi marcado)
+    const conditionalBullets: string[] = [];
+    if (!docs.includes("ppra_pcmso") && !docs.includes("pgr")) {
+      conditionalBullets.push("Não foram localizados nos autos os laudos de PPRA, PGR e PCMSO da empresa reclamada, considerados relevantes para análise de riscos ocupacionais.");
+    }
+    if (!docs.includes("cat")) {
+      conditionalBullets.push("Ausência de Comunicação de Acidente de Trabalho (CAT) vinculada ao caso.");
+    }
+    if (!docs.includes("aso")) {
+      conditionalBullets.push("Ausência de Atestados de Saúde Ocupacional (ASO) anteriores ao desligamento.");
+    }
+    
+    if (conditionalBullets.length > 0) {
+      y += 3;
+      conditionalBullets.forEach(text => {
+        y = checkNewPage(doc, y, 12);
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "italic");
+        const lines = doc.splitTextToSize(text, PAGE.contentWidth - 10);
+        lines.forEach((line: string) => {
+          y = checkNewPage(doc, y, LINE_HEIGHT);
+          doc.text(line, MARGINS.left + 5, y);
+          y += LINE_HEIGHT;
+        });
+        doc.setFont("helvetica", "normal");
+        y += 2;
+      });
+    }
+    
     y += 5;
     sectionNumber++;
   }

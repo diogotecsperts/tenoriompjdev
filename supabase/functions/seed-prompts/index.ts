@@ -479,27 +479,23 @@ Se não houver menção a necessidade de auxílio, retorne:
     sectionId: 'quesitos',
     description: 'Quesitos do Juízo - Regerar via PDF',
     order: 1,
-    prompt: `Extraia INTEGRALMENTE os "Quesitos do Juízo" do documento.
+    prompt: `Extraia os "Quesitos do Juízo" do documento e gere sugestões de respostas técnicas.
 
 Os quesitos do Juízo são perguntas técnicas formuladas pelo Juiz para o perito responder.
 
-ONDE BUSCAR:
-- Despachos judiciais (busque por "O perito deverá responder...", "Quesitos do MM. Juízo")
-- Decisões que nomeiam o perito
-- Atas de audiência com determinação de quesitos
-- Intimações do perito
+SUA TAREFA:
+1. Extraia LITERALMENTE cada pergunta mantendo a numeração original.
+2. CORREÇÃO DE IDIOMA: Corrija os erros de OCR, aplicando todos os acentos e cedilhas na pergunta extraída.
+3. RESPOSTA: Logo abaixo de cada pergunta, gere uma sugestão de resposta técnica baseada estritamente na anamnese, exames e análise do caso. Se faltar dado, sugira "Aguardando avaliação pericial complementar."
 
-COMO EXTRAIR:
-- Copie CADA quesito EXATAMENTE como aparece no documento
-- Mantenha a numeração original (1, 2, 3... ou I, II, III... ou a, b, c...)
-- NÃO altere o texto - transcreva literalmente
-- Inclua todos os sub-quesitos se houver (Ex: 1.1, 1.2, 2.a, 2.b)
-- Preserve a ordem original dos quesitos
+REGRA DE FORMATAÇÃO: Use uma quebra de linha dupla (\\n\\n) entre a resposta de um quesito e a pergunta do próximo.
 
-FORMATO ESPERADO:
-1. [Texto completo do primeiro quesito]
-2. [Texto completo do segundo quesito]
-...
+ESTRUTURA EXATA ESPERADA:
+QUESITO 1: [Pergunta com acentos corrigidos]
+RESPOSTA: [Sugestão de resposta técnica]
+
+QUESITO 2: [Pergunta com acentos corrigidos]
+RESPOSTA: [Sugestão de resposta técnica]
 
 Se não encontrar quesitos do Juízo, retorne: "Quesitos do Juízo não identificados nos autos."`
   },
@@ -508,27 +504,23 @@ Se não encontrar quesitos do Juízo, retorne: "Quesitos do Juízo não identifi
     sectionId: 'quesitos',
     description: 'Quesitos do Reclamante - Regerar via PDF',
     order: 2,
-    prompt: `Extraia INTEGRALMENTE os "Quesitos do Reclamante" (ou do Autor) do documento.
+    prompt: `Extraia os "Quesitos do Reclamante" (ou do Autor) do documento e gere sugestões de respostas técnicas.
 
 Os quesitos do Reclamante são perguntas formuladas pelo advogado da parte autora.
 
-ONDE BUSCAR:
-- Petição inicial (geralmente ao final)
-- Petição específica de quesitos do reclamante
-- Rol de quesitos anexado aos autos
-- Emendas à inicial com quesitos
+SUA TAREFA:
+1. Extraia LITERALMENTE cada pergunta mantendo a numeração original.
+2. CORREÇÃO DE IDIOMA: Corrija os erros de OCR, aplicando todos os acentos e cedilhas na pergunta extraída.
+3. RESPOSTA: Logo abaixo de cada pergunta, gere uma sugestão de resposta técnica baseada estritamente na anamnese, exames e análise do caso. Se faltar dado, sugira "Aguardando avaliação pericial complementar."
 
-COMO EXTRAIR:
-- Copie CADA quesito EXATAMENTE como aparece no documento
-- Mantenha a numeração original
-- NÃO altere, resuma ou parafraseie o texto
-- Inclua todos os sub-quesitos (Ex: 3.1, 3.2, 3.a, 3.b)
-- Preserve a ordem original
+REGRA DE FORMATAÇÃO: Use uma quebra de linha dupla (\\n\\n) entre a resposta de um quesito e a pergunta do próximo.
 
-FORMATO ESPERADO:
-1. [Texto completo do primeiro quesito]
-2. [Texto completo do segundo quesito]
-...
+ESTRUTURA EXATA ESPERADA:
+QUESITO 1: [Pergunta com acentos corrigidos]
+RESPOSTA: [Sugestão de resposta técnica]
+
+QUESITO 2: [Pergunta com acentos corrigidos]
+RESPOSTA: [Sugestão de resposta técnica]
 
 Se não encontrar quesitos do Reclamante, retorne: "Quesitos do Reclamante não identificados nos autos."`
   },
@@ -537,27 +529,23 @@ Se não encontrar quesitos do Reclamante, retorne: "Quesitos do Reclamante não 
     sectionId: 'quesitos',
     description: 'Quesitos da Reclamada - Regerar via PDF',
     order: 3,
-    prompt: `Extraia INTEGRALMENTE os "Quesitos da Reclamada" (ou da Ré) do documento.
+    prompt: `Extraia os "Quesitos da Reclamada" (ou da Ré) do documento e gere sugestões de respostas técnicas.
 
 Os quesitos da Reclamada são perguntas formuladas pelo advogado da parte ré/empresa.
 
-ONDE BUSCAR:
-- Contestação (geralmente ao final)
-- Petição específica de quesitos da reclamada
-- Rol de quesitos anexado aos autos
-- Réplica ou outras manifestações com quesitos
+SUA TAREFA:
+1. Extraia LITERALMENTE cada pergunta mantendo a numeração original.
+2. CORREÇÃO DE IDIOMA: Corrija os erros de OCR, aplicando todos os acentos e cedilhas na pergunta extraída.
+3. RESPOSTA: Logo abaixo de cada pergunta, gere uma sugestão de resposta técnica baseada estritamente na anamnese, exames e análise do caso. Se faltar dado, sugira "Aguardando avaliação pericial complementar."
 
-COMO EXTRAIR:
-- Copie CADA quesito EXATAMENTE como aparece no documento
-- Mantenha a numeração original
-- NÃO altere, resuma ou parafraseie o texto
-- Inclua todos os sub-quesitos
-- Preserve a ordem original
+REGRA DE FORMATAÇÃO: Use uma quebra de linha dupla (\\n\\n) entre a resposta de um quesito e a pergunta do próximo.
 
-FORMATO ESPERADO:
-1. [Texto completo do primeiro quesito]
-2. [Texto completo do segundo quesito]
-...
+ESTRUTURA EXATA ESPERADA:
+QUESITO 1: [Pergunta com acentos corrigidos]
+RESPOSTA: [Sugestão de resposta técnica]
+
+QUESITO 2: [Pergunta com acentos corrigidos]
+RESPOSTA: [Sugestão de resposta técnica]
 
 Se não encontrar quesitos da Reclamada, retorne: "Quesitos da Reclamada não identificados nos autos."`
   }
