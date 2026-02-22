@@ -848,6 +848,10 @@ INSTRUÇÕES OBRIGATÓRIAS:
 4. Se não houver dados suficientes para responder, escreva: "Prejudicado pela ausência de elementos nos autos"
 5. Use linguagem técnica médico-legal formal em português brasileiro
 
+FOCO DE BUSCA: As perguntas do Juízo estão tipicamente localizadas no FINAL do texto (Despachos). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas e responda-as tecnicamente.
+
+REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pelo Juízo no texto, retorne apenas a frase exata: 'Quesitos do Juízo não identificados nos autos.'
+
 FORMATO DE SAÍDA OBRIGATÓRIO:
 QUESITO 1: [pergunta corrigida]
 RESPOSTA: [resposta técnica fundamentada]
@@ -881,9 +885,9 @@ INSTRUÇÕES OBRIGATÓRIAS:
 4. Se não houver dados suficientes, escreva: "Prejudicado pela ausência de elementos nos autos"
 5. Use linguagem técnica médico-legal formal em português brasileiro
 
-ATENÇÃO — BUSCA AGRESSIVA OBRIGATÓRIA: É GARANTIDO que os quesitos (perguntas direcionadas ao perito) EXISTEM neste documento. Você DEVE realizar uma busca agressiva. Não procure apenas por títulos óbvios como "Quesitos". Procure ativamente por: pontos de interrogação (?), listas numeradas no meio ou fim das petições, e termos como 'diga o perito', 'informe', 'esclareça', 'requer a perícia'. Extraia todas as perguntas que encontrar.
+FOCO DE BUSCA: As perguntas do Reclamante estão tipicamente localizadas no INÍCIO do texto (Petição Inicial). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas do reclamante e responda-as tecnicamente.
 
-REGRA DE INEXISTÊNCIA (RISCO LEGAL): Se, e SOMENTE SE, após uma busca exaustiva você confirmar que houve falha no OCR e não há texto legível de perguntas, é ESTRITAMENTE PROIBIDO justificar, explicar, pedir desculpas ou conversar. Você DEVE retornar ÚNICA E EXCLUSIVAMENTE a string exata: 'Quesitos do Reclamante não identificados nos autos.' Qualquer palavra adicional além desta frase exata causará quebra crítica no sistema do tribunal.
+REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pelo Reclamante no texto, retorne apenas a frase exata: 'Quesitos do Reclamante não identificados nos autos.'
 
 FORMATO DE SAÍDA OBRIGATÓRIO:
 QUESITO 1: [pergunta corrigida]
@@ -916,9 +920,9 @@ INSTRUÇÕES OBRIGATÓRIAS:
 4. Se não houver dados suficientes, escreva: "Prejudicado pela ausência de elementos nos autos"
 5. Use linguagem técnica médico-legal formal em português brasileiro
 
-ATENÇÃO — BUSCA AGRESSIVA OBRIGATÓRIA: É GARANTIDO que os quesitos (perguntas direcionadas ao perito) EXISTEM neste documento. Você DEVE realizar uma busca agressiva. Não procure apenas por títulos óbvios como "Quesitos". Procure ativamente por: pontos de interrogação (?), listas numeradas no meio ou fim das petições, e termos como 'diga o perito', 'informe', 'esclareça', 'requer a perícia'. Extraia todas as perguntas que encontrar.
+FOCO DE BUSCA: As perguntas da Reclamada estão tipicamente localizadas no FINAL do texto (Contestações e Despachos). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas e responda-as tecnicamente.
 
-REGRA DE INEXISTÊNCIA (RISCO LEGAL): Se, e SOMENTE SE, após uma busca exaustiva você confirmar que houve falha no OCR e não há texto legível de perguntas, é ESTRITAMENTE PROIBIDO justificar, explicar, pedir desculpas ou conversar. Você DEVE retornar ÚNICA E EXCLUSIVAMENTE a string exata: 'Quesitos da Reclamada não identificados nos autos.' Qualquer palavra adicional além desta frase exata causará quebra crítica no sistema do tribunal.
+REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pela Reclamada no texto, retorne apenas a frase exata: 'Quesitos da Reclamada não identificados nos autos.'
 
 FORMATO DE SAÍDA OBRIGATÓRIO:
 QUESITO 1: [pergunta corrigida]
