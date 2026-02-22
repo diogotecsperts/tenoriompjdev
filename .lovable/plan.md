@@ -1,96 +1,74 @@
 
 
-# Correção Arquitetural: Head + Tail do Texto Bruto para Sub-rotina de Quesitos
+# Correção de Prompt: Remoção de Viés Defensivo nos Quesitos
 
-## Diagnóstico Confirmado
+## Diagnóstico
 
-O bug está confirmado: nas 2 pipelines (chunked e regular), o texto bruto do PDF é liberado da memória ANTES de `gerarResumosIA` ser chamada. A sub-rotina de quesitos recebe `extractedData.quesitos` (frequentemente vazio por Task Overload) e não tem o texto do PDF para fazer a busca agressiva.
+As frases punitivas ("RISCO LEGAL", "ESTRITAMENTE PROIBIDO", "causará quebra crítica") disparam filtros de segurança do Gemini 3.0 Flash, fazendo o modelo preferir retornar a frase de erro ("não identificados") em vez de realizar a busca. A arquitetura de dados (Head+Tail) está funcionando -- o problema agora é puramente de linguagem de prompt.
 
-A correção do cliente (Head + Tail) está 100% aplicável e é superior ao `slice(-80000)` original.
+## Alterações (3 arquivos, 2 deploys)
 
-## Alterações (1 arquivo, 1 deploy)
+### Arquivo 1: `supabase/functions/processar-autos/index.ts`
 
-**Arquivo:** `supabase/functions/processar-autos/index.ts`
+**3 blocos de DEFAULT_PROMPTS** (linhas 844-858, 877-893, 912-928):
 
-### Mudança 1: Pipeline Chunked — Capturar Head+Tail antes de liberar memória (antes da linha 1645)
-
-Antes de `textForFilling = null` (linha 1645), inserir:
-
-```typescript
-// Preservar head+tail do texto bruto para busca agressiva de quesitos
-const _head = textForFilling.slice(0, 60000);
-const _tail = textForFilling.slice(-60000);
-extractedData._rawTextTail = _head + "\n\n...[CONTEÚDO INTERMEDIÁRIO OMITIDO PELO SISTEMA]...\n\n" + _tail;
-```
-
-### Mudança 2: Pipeline Regular — Capturar Head+Tail antes de liberar memória (antes da linha 2861)
-
-Antes de `visionResult = null` (linha 2861), inserir a mesma lógica. Aqui o texto bruto não está mais em variável separada (foi consumido em vários sub-caminhos: Duas Fases, Mistral, Streaming, base64). A solução é capturar o texto DENTRO de cada sub-caminho, logo após `extractedData` ser definido.
-
-Pontos concretos:
-
-- **Duas Fases** (após linha 2194, `extractedData = ensureValidStructure(parsedResult)`): Capturar de `textForFilling` (que ainda existe nesse escopo)
-- **Passagem Única - Mistral** (após `extractedData` ser definido ~linha 2460): Capturar de `mistralRawText`
-- **Passagem Única - Streaming** (após `extractedData` ser definido ~linha 2560): Capturar de `extracted.rawText`
-- **Passagem Única - base64/Small** (após linha 2843): Não tem rawText separado disponível — pular (neste caso `extractedData.quesitos` tende a funcionar pois PDFs pequenos não sofrem Task Overload)
-- **Fallback do Two-Phase** (após linha 2250): Idem ao base64
-
-**Abordagem simplificada**: Para evitar tocar 5+ sub-caminhos, a alternativa mais robusta é inserir um único ponto de captura ANTES de `visionResult = null` (linha 2858). Se `extractedData._rawTextTail` ainda não foi definido por nenhum sub-caminho, usar os dados já disponíveis no `extractedData` como fallback (concatenar `textos_brutos.peticao_inicial` + `textos_brutos.contestacao` + quesitos).
-
-**Solução escolhida**: Dois pontos de captura diretos (um no chunked, um no regular) + fallback.
-
-### Mudança 3: Expandir `contexto` em `gerarResumosIA` (linha 1162)
-
-Adicionar no objeto `contexto`:
-
-```typescript
-textoProcesso: extractedData._rawTextTail || ''
-```
-
-### Mudança 4: Alterar os 3 DEFAULT_PROMPTS de quesitos (linhas 827, 857, 889)
-
-Em cada um, após o bloco `QUESITOS BRUTOS DO [JUÍZO/RECLAMANTE/RECLAMADA]`, adicionar:
+Para `quesitos_juizo` e `quesitos_reclamada`, substituir os blocos "ATENÇÃO — BUSCA AGRESSIVA" e "REGRA DE INEXISTÊNCIA (RISCO LEGAL)" por:
 
 ```
-TEXTO BRUTO DO PROCESSO (para busca agressiva — use se os quesitos acima estiverem vazios ou incompletos):
-${textoProcesso}
+FOCO DE BUSCA: As perguntas do Juízo [ou da Reclamada] estão tipicamente localizadas no FINAL do texto
+(Contestações e Despachos). Procure por pontos de interrogação (?), listas numeradas, e termos como
+'diga o perito', 'informe', 'esclareça'. Extraia as perguntas e responda-as tecnicamente.
+
+REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pelo Juízo [ou pela Reclamada]
+no texto, retorne apenas a frase exata: 'Quesitos do Juízo [ou da Reclamada] não identificados nos autos.'
 ```
 
-### Mudança 5: Relaxar `shouldGenerate` para quesitos (linhas 1230-1232)
+Para `quesitos_reclamante`, substituir por:
 
-De:
-```typescript
-shouldGenerate: !!contexto.quesitosJuizo && contexto.quesitosJuizo.length > 30
+```
+FOCO DE BUSCA: As perguntas do Reclamante estão tipicamente localizadas no INÍCIO do texto (Petição Inicial).
+Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'.
+Extraia as perguntas do reclamante e responda-as tecnicamente.
+
+REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pelo Reclamante no texto,
+retorne apenas a frase exata: 'Quesitos do Reclamante não identificados nos autos.'
 ```
 
-Para:
-```typescript
-shouldGenerate: (!!contexto.quesitosJuizo && contexto.quesitosJuizo.length > 30) || contexto.textoProcesso.length > 500
+### Arquivo 2: `supabase/functions/seed-prompts/index.ts`
+
+**3 prompts de regeneração** (linhas 500-502, 527-529, 554-556):
+
+Mesma substituição: remover "ATENÇÃO — BUSCA AGRESSIVA OBRIGATÓRIA: É GARANTIDO..." e "REGRA DE INEXISTÊNCIA (RISCO LEGAL)..." por versões suavizadas com direcionamento posicional (INÍCIO para Reclamante, FINAL para Juízo e Reclamada).
+
+### Arquivo 3: `supabase/functions/_shared/build-import-prompt.ts`
+
+**prompt_import_quesitos** (linhas 423-425):
+
+Substituir as duas regras punitivas por:
+
+```
+FOCO DE BUSCA:
+- QUESITOS DO RECLAMANTE: Procure no INÍCIO do texto (Petição Inicial).
+- QUESITOS DO JUÍZO: Procure nos Despachos (geralmente no FINAL do texto).
+- QUESITOS DA RECLAMADA: Procure na Contestação (geralmente no FINAL do texto).
+Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'.
+
+REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta de um grupo específico,
+retorne apenas: 'Quesitos do [Juízo/Reclamante/Reclamada] não identificados nos autos.'
+
+NÃO invente quesitos - extraia APENAS os que existem no documento.
 ```
 
-Mesma lógica para reclamante e reclamada.
+## O que NÃO muda
 
-### Mudança 6: Log de debug para `textoProcesso` (linha 1198)
+- Nenhuma variavel, lógica ou fluxo de dados alterado
+- A frase exata de fallback permanece idêntica (compatível com o filtro do frontend)
+- A instrução "NÃO invente quesitos" permanece
+- O formato de saída (QUESITO X / RESPOSTA) permanece
+- As instruções obrigatórias 1-5 permanecem intactas
+- O `shouldGenerate` e o `textoProcesso` permanecem como estão
 
-Adicionar ao log de contexto:
-```typescript
-textoProcesso: contexto.textoProcesso ? `${contexto.textoProcesso.length} chars` : 'VAZIO'
-```
+## Deploy
 
-## Resumo de Operações
+`processar-autos` e `seed-prompts`
 
-| # | Local no arquivo | Mudança |
-|---|------------------|---------|
-| 1 | Linha 1643 (antes de `textForFilling = null`) | Capturar head(60k) + tail(60k) em `extractedData._rawTextTail` |
-| 2 | Linha 2194 (após `extractedData` no Duas Fases) | Capturar head+tail de `textForFilling` |
-| 3 | Linha 2858 (antes de `visionResult = null`) | Fallback: se `_rawTextTail` não existe, montar a partir de `extractedData.textos_brutos` |
-| 4 | Linha 1162 (contexto) | Adicionar `textoProcesso` |
-| 5 | Linhas 827, 857, 889 (DEFAULT_PROMPTS) | Adicionar `${textoProcesso}` aos prompts de quesitos |
-| 6 | Linhas 1230-1232 (shouldGenerate) | Relaxar condição para incluir `textoProcesso.length > 500` |
-| 7 | Linha 1198 (log) | Adicionar log de `textoProcesso` |
-
-**Deploy**: `processar-autos`
-
-## Resultado Esperado
-
-Mesmo quando a extração inicial JSON falha nos quesitos (Task Overload), a sub-rotina receberá ~120k chars do texto bruto (60k do início + 60k do final), cobrindo tanto a Petição Inicial (quesitos do Reclamante) quanto os despachos finais (quesitos do Juízo e Reclamada). A busca agressiva terá dados reais para funcionar.
