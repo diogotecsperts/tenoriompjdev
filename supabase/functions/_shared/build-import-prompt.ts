@@ -420,9 +420,13 @@ QUESITOS DO JUÍZO: Busque em despachos ou decisões judiciais.
 QUESITOS DO RECLAMANTE: Extraia da petição inicial ou petição específica.
 QUESITOS DA RECLAMADA: Extraia da contestação ou petição específica.
 
-ATENÇÃO — BUSCA AGRESSIVA OBRIGATÓRIA: É GARANTIDO que os quesitos (perguntas direcionadas ao perito) EXISTEM neste documento. Você DEVE realizar uma busca agressiva. Não procure apenas por títulos óbvios como "Quesitos". Procure ativamente por: pontos de interrogação (?), listas numeradas no meio ou fim das petições, e termos como 'diga o perito', 'informe', 'esclareça', 'requer a perícia'. Extraia todas as perguntas que encontrar.
+FOCO DE BUSCA:
+- QUESITOS DO RECLAMANTE: Procure no INÍCIO do texto (Petição Inicial).
+- QUESITOS DO JUÍZO: Procure nos Despachos (geralmente no FINAL do texto).
+- QUESITOS DA RECLAMADA: Procure na Contestação (geralmente no FINAL do texto).
+Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'.
 
-REGRA DE INEXISTÊNCIA (RISCO LEGAL): Se, e SOMENTE SE, após uma busca exaustiva você confirmar que houve falha no OCR e não há texto legível de perguntas, é ESTRITAMENTE PROIBIDO justificar, explicar, pedir desculpas ou conversar. Você DEVE retornar ÚNICA E EXCLUSIVAMENTE a string exata: 'Quesitos do [Juízo/Reclamante/Reclamada] não identificados nos autos.' Qualquer palavra adicional além desta frase exata causará quebra crítica no sistema do tribunal.
+REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta de um grupo específico, retorne apenas: 'Quesitos do [Juízo/Reclamante/Reclamada] não identificados nos autos.'
 
 NÃO invente quesitos - extraia APENAS os que existem no documento.`
    },
