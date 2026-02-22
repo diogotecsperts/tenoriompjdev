@@ -793,12 +793,24 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   }
 
   // ========== 19. CONCLUSÃO ==========
-  const hasConclusao = !isFieldEmpty(laudo.conclusaoCID) ||
+  const hasConclusao = !isFieldEmpty(laudo.conclusaoCID) || !isFieldEmpty(laudo.nexoCausalTipo) ||
     !isFieldEmpty(laudo.conclusaoStatus) || !isFieldEmpty(laudo.conclusaoDestino) || !isFieldEmpty(laudo.conclusaoJustificativa);
   if (hasConclusao) {
     paragraphs.push(createSectionTitle(`${sectionNumber}. CONCLUSÃO`));
     if (!isFieldEmpty(laudo.conclusaoCID)) {
       paragraphs.push(createLabeledField("CID-10 Sugerido", laudo.conclusaoCID!));
+    }
+    if (!isFieldEmpty(laudo.nexoCausalTipo)) {
+      const nexoMap: Record<string, string> = {
+        "direto": "Nexo Causal Direto",
+        "concausa": "Concausa",
+        "agravamento": "Agravamento",
+        "inexistente": "Nexo Causal Inexistente",
+        "nexo_causal": "Nexo Causal",
+        "concausal": "Concausal",
+        "ausencia": "Ausência de Nexo Causal",
+      };
+      paragraphs.push(createLabeledField("Tipo de Nexo", nexoMap[laudo.nexoCausalTipo!] || laudo.nexoCausalTipo!));
     }
     if (!isFieldEmpty(laudo.conclusaoStatus)) {
       const statusMap: Record<string, string> = {
