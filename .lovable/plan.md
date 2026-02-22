@@ -1,100 +1,96 @@
 
 
-# Atualização de UX e Blindagem de Prompts (Quesitos e Conclusão)
+# Correção Arquitetural: Head + Tail do Texto Bruto para Sub-rotina de Quesitos
 
-## Ação 1: Espelhar "Tipo de Nexo" na Seção CONCLUSÃO (DOCX e PDF)
+## Diagnóstico Confirmado
 
-Atualmente, a seção CONCLUSÃO exibe: CID-10, Tipo(s) de Incapacidade, Destino Sugerido e Justificativa. O "Tipo de Nexo" está ausente.
+O bug está confirmado: nas 2 pipelines (chunked e regular), o texto bruto do PDF é liberado da memória ANTES de `gerarResumosIA` ser chamada. A sub-rotina de quesitos recebe `extractedData.quesitos` (frequentemente vazio por Task Overload) e não tem o texto do PDF para fazer a busca agressiva.
 
-### DOCX (`src/utils/generateLaudoDOCX.ts`, linhas 800-801)
+A correção do cliente (Head + Tail) está 100% aplicável e é superior ao `slice(-80000)` original.
 
-Após a linha que imprime o CID (`createLabeledField("CID-10 Sugerido", ...)`), inserir:
+## Alterações (1 arquivo, 1 deploy)
 
-```
-if (!isFieldEmpty(laudo.nexoCausalTipo)) {
-  const nexoMap: Record<string, string> = {
-    "direto": "Nexo Causal Direto",
-    "concausa": "Concausa",
-    "agravamento": "Agravamento",
-    "inexistente": "Nexo Causal Inexistente",
-  };
-  paragraphs.push(createLabeledField("Tipo de Nexo", nexoMap[laudo.nexoCausalTipo!] || laudo.nexoCausalTipo!));
-}
-```
+**Arquivo:** `supabase/functions/processar-autos/index.ts`
 
-O `nexoMap` já existe na seção 15 (NEXO CAUSAL, linha 745) — será replicado na seção 19.
+### Mudança 1: Pipeline Chunked — Capturar Head+Tail antes de liberar memória (antes da linha 1645)
 
-A variável `laudo.nexoCausalTipo` existe e está mapeada corretamente no `LaudoContext.tsx` (linha 60) a partir do campo `nexo_causal_tipo` do banco de dados. Também precisa ser adicionada à condição `hasConclusao` (linha 796).
+Antes de `textForFilling = null` (linha 1645), inserir:
 
-### PDF (`src/utils/generateLaudoPDF.ts`, linhas 941-942)
-
-Mesma lógica: após `addLabeledField("CID-10 Sugerido", ...)`, inserir o bloco de Tipo de Nexo com o mesmo `nexoMap`. Também adicionar `!isFieldEmpty(laudo.nexoCausalTipo)` à condição `hasConclusao` (linha 931) e ao cálculo de `sectionHeight` (linha 934).
-
-**Saída esperada no documento:**
-```
-CID-10 Sugerido: M54.4; M51.1
-Tipo de Nexo: Concausa
-Tipo(s) de Incapacidade: Incapacidade Total Temporária
-Destino Sugerido: Alta Médica
+```typescript
+// Preservar head+tail do texto bruto para busca agressiva de quesitos
+const _head = textForFilling.slice(0, 60000);
+const _tail = textForFilling.slice(-60000);
+extractedData._rawTextTail = _head + "\n\n...[CONTEÚDO INTERMEDIÁRIO OMITIDO PELO SISTEMA]...\n\n" + _tail;
 ```
 
----
+### Mudança 2: Pipeline Regular — Capturar Head+Tail antes de liberar memória (antes da linha 2861)
 
-## Ação 2: Blindagem Anti-Conversa e Busca Agressiva nos Prompts (Backend)
+Antes de `visionResult = null` (linha 2861), inserir a mesma lógica. Aqui o texto bruto não está mais em variável separada (foi consumido em vários sub-caminhos: Duas Fases, Mistral, Streaming, base64). A solução é capturar o texto DENTRO de cada sub-caminho, logo após `extractedData` ser definido.
 
-### Arquivos afetados:
+Pontos concretos:
 
-1. **`supabase/functions/_shared/build-import-prompt.ts`** (linha 400-423) — Prompt de extração inicial (`prompt_import_quesitos`)
-2. **`supabase/functions/seed-prompts/index.ts`** (linhas 477-550) — Prompts de regeneração (`prompt_regen_quesitosJuizo/Reclamante/Reclamada`)
-3. **`supabase/functions/processar-autos/index.ts`** (linhas 827-911) — Fallback prompts da sub-rotina automática (`DEFAULT_PROMPTS.quesitos_juizo/reclamante/reclamada`)
+- **Duas Fases** (após linha 2194, `extractedData = ensureValidStructure(parsedResult)`): Capturar de `textForFilling` (que ainda existe nesse escopo)
+- **Passagem Única - Mistral** (após `extractedData` ser definido ~linha 2460): Capturar de `mistralRawText`
+- **Passagem Única - Streaming** (após `extractedData` ser definido ~linha 2560): Capturar de `extracted.rawText`
+- **Passagem Única - base64/Small** (após linha 2843): Não tem rawText separado disponível — pular (neste caso `extractedData.quesitos` tende a funcionar pois PDFs pequenos não sofrem Task Overload)
+- **Fallback do Two-Phase** (após linha 2250): Idem ao base64
 
-### Regras a injetar em TODOS os prompts de quesitos (extração e regeneração):
+**Abordagem simplificada**: Para evitar tocar 5+ sub-caminhos, a alternativa mais robusta é inserir um único ponto de captura ANTES de `visionResult = null` (linha 2858). Se `extractedData._rawTextTail` ainda não foi definido por nenhum sub-caminho, usar os dados já disponíveis no `extractedData` como fallback (concatenar `textos_brutos.peticao_inicial` + `textos_brutos.contestacao` + quesitos).
 
-**Regra 1 — BUSCA AGRESSIVA OBRIGATÓRIA:**
-```
-ATENÇÃO: É GARANTIDO que os quesitos (perguntas direcionadas ao perito) EXISTEM neste documento.
-Você DEVE realizar uma busca agressiva. Não procure apenas por títulos óbvios como "Quesitos".
-Procure ativamente por: pontos de interrogação (?), listas numeradas no meio ou fim das petições,
-e termos como 'diga o perito', 'informe', 'esclareça', 'requer a perícia'.
-Extraia todas as perguntas que encontrar.
-```
+**Solução escolhida**: Dois pontos de captura diretos (um no chunked, um no regular) + fallback.
 
-**Regra 2 — SILÊNCIO ABSOLUTO (Anti-Conversa):**
-```
-REGRA DE INEXISTÊNCIA (RISCO LEGAL): Se, e SOMENTE SE, após uma busca exaustiva você confirmar
-que houve falha no OCR e não há texto legível de perguntas, é ESTRITAMENTE PROIBIDO justificar,
-explicar, pedir desculpas ou conversar. Você DEVE retornar ÚNICA E EXCLUSIVAMENTE a string exata:
-'Quesitos do [Juízo/Reclamante/Reclamada] não identificados nos autos.'
-Qualquer palavra adicional além desta frase exata causará quebra crítica no sistema do tribunal.
+### Mudança 3: Expandir `contexto` em `gerarResumosIA` (linha 1162)
+
+Adicionar no objeto `contexto`:
+
+```typescript
+textoProcesso: extractedData._rawTextTail || ''
 ```
 
-### Pontos de inserção concretos:
+### Mudança 4: Alterar os 3 DEFAULT_PROMPTS de quesitos (linhas 827, 857, 889)
 
-1. **`build-import-prompt.ts`** (prompt_import_quesitos, linha 403): Adicionar as duas regras antes de "NÃO invente quesitos" (linha 423)
+Em cada um, após o bloco `QUESITOS BRUTOS DO [JUÍZO/RECLAMANTE/RECLAMADA]`, adicionar:
 
-2. **`seed-prompts/index.ts`** (3 prompts, linhas 482, 507, 532): Adicionar as duas regras dentro do bloco "SUA TAREFA", antes da linha "Se não encontrar quesitos..."
+```
+TEXTO BRUTO DO PROCESSO (para busca agressiva — use se os quesitos acima estiverem vazios ou incompletos):
+${textoProcesso}
+```
 
-3. **`processar-autos/index.ts`** (3 DEFAULT_PROMPTS, linhas 827, 857, 885): Adicionar as duas regras dentro de "INSTRUÇÕES OBRIGATÓRIAS", substituindo a regra 4 atual ("Se não houver dados suficientes...") pela regra de SILÊNCIO ABSOLUTO para o caso de inexistência total
+### Mudança 5: Relaxar `shouldGenerate` para quesitos (linhas 1230-1232)
 
----
+De:
+```typescript
+shouldGenerate: !!contexto.quesitosJuizo && contexto.quesitosJuizo.length > 30
+```
 
-## Resumo de Operações (4 arquivos, 1 deploy)
+Para:
+```typescript
+shouldGenerate: (!!contexto.quesitosJuizo && contexto.quesitosJuizo.length > 30) || contexto.textoProcesso.length > 500
+```
 
-| # | Arquivo | Mudança |
-|---|---------|---------|
-| 1 | `src/utils/generateLaudoDOCX.ts` | Adicionar "Tipo de Nexo" na seção CONCLUSÃO (entre CID e Incapacidade) |
-| 2 | `src/utils/generateLaudoPDF.ts` | Adicionar "Tipo de Nexo" na seção CONCLUSÃO (entre CID e Incapacidade) |
-| 3 | `supabase/functions/_shared/build-import-prompt.ts` | Regras de busca agressiva + anti-conversa no prompt_import_quesitos |
-| 4 | `supabase/functions/seed-prompts/index.ts` | Regras de busca agressiva + anti-conversa nos 3 prompts de regeneração |
-| 5 | `supabase/functions/processar-autos/index.ts` | Regras de busca agressiva + anti-conversa nos 3 DEFAULT_PROMPTS da sub-rotina |
+Mesma lógica para reclamante e reclamada.
 
-**Deploy**: `processar-autos` e `seed-prompts`
+### Mudança 6: Log de debug para `textoProcesso` (linha 1198)
 
-## Validação de compatibilidade
+Adicionar ao log de contexto:
+```typescript
+textoProcesso: contexto.textoProcesso ? `${contexto.textoProcesso.length} chars` : 'VAZIO'
+```
 
-- A variável `laudo.nexoCausalTipo` existe no `LaudoContext` (linha 60) e mapeia para `nexo_causal_tipo` no banco
-- O `nexoMap` com 4 valores (direto, concausa, agravamento, inexistente) já é usado na seção 15 de ambos os geradores
-- O `isFieldEmpty` já está disponível em ambos os geradores
-- Os prompts de extração e regeneração já seguem o padrão de formatação `QUESITO X: / RESPOSTA:` — as novas regras são aditivas e não quebram a estrutura existente
-- O filtro de inexistência no frontend (`/não identificados nos autos/i`) continua compatível com a frase exata da regra de SILÊNCIO ABSOLUTO
+## Resumo de Operações
 
+| # | Local no arquivo | Mudança |
+|---|------------------|---------|
+| 1 | Linha 1643 (antes de `textForFilling = null`) | Capturar head(60k) + tail(60k) em `extractedData._rawTextTail` |
+| 2 | Linha 2194 (após `extractedData` no Duas Fases) | Capturar head+tail de `textForFilling` |
+| 3 | Linha 2858 (antes de `visionResult = null`) | Fallback: se `_rawTextTail` não existe, montar a partir de `extractedData.textos_brutos` |
+| 4 | Linha 1162 (contexto) | Adicionar `textoProcesso` |
+| 5 | Linhas 827, 857, 889 (DEFAULT_PROMPTS) | Adicionar `${textoProcesso}` aos prompts de quesitos |
+| 6 | Linhas 1230-1232 (shouldGenerate) | Relaxar condição para incluir `textoProcesso.length > 500` |
+| 7 | Linha 1198 (log) | Adicionar log de `textoProcesso` |
+
+**Deploy**: `processar-autos`
+
+## Resultado Esperado
+
+Mesmo quando a extração inicial JSON falha nos quesitos (Task Overload), a sub-rotina receberá ~120k chars do texto bruto (60k do início + 60k do final), cobrindo tanto a Petição Inicial (quesitos do Reclamante) quanto os despachos finais (quesitos do Juízo e Reclamada). A busca agressiva terá dados reais para funcionar.
