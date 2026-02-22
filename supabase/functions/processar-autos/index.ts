@@ -1201,6 +1201,25 @@ const results: Record<string, string> = {
     textoProcesso: (extractedData as any)._rawTextTail || ''
   };
 
+  // Fallback robusto: se _rawTextTail se perdeu na memória, reconstruir a partir dos campos já extraídos
+  if (!contexto.textoProcesso || contexto.textoProcesso.length < 500) {
+    const fallbackProcesso = [
+      extractedData.textos_brutos?.peticao_inicial || '',
+      extractedData.textos_brutos?.contestacao || '',
+      extractedData.resumo_peticao_inicial || '',
+      extractedData.quesitos?.juizo || '',
+      extractedData.quesitos?.reclamante || '',
+      extractedData.quesitos?.reclamada || ''
+    ].filter(Boolean).join('\n\n');
+    
+    if (fallbackProcesso.length > 100) {
+      contexto.textoProcesso = fallbackProcesso;
+      console.log(`[gerarResumosIA] FALLBACK textoProcesso reconstruido: ${fallbackProcesso.length} chars`);
+    } else {
+      console.warn('[gerarResumosIA] ALERTA: textoProcesso vazio E fallback insuficiente');
+    }
+  }
+
   // Helper: validate if text has enough substance (not just "não informado" or too short)
   const isContentSufficient = (text: string): boolean => {
     if (!text || text.trim().length < 50) return false;
@@ -1243,9 +1262,9 @@ const results: Record<string, string> = {
     { tipo: 'resumo_peticao', shouldGenerate: isContentSufficient(contexto.peticaoInicial), step: 'Gerando resumo da petição inicial...', progress: 80 },
     { tipo: 'resumo_contestacao', shouldGenerate: isContentSufficient(contexto.contestacao), step: 'Gerando resumo da contestação...', progress: 85 },
     // PRIORITY 2.5: Quesitos — respostas automáticas (Zero-Touch)
-    { tipo: 'quesitos_juizo', shouldGenerate: (!!contexto.quesitosJuizo && contexto.quesitosJuizo.length > 30) || contexto.textoProcesso.length > 500, step: 'Respondendo quesitos do Juízo...', progress: 87 },
-    { tipo: 'quesitos_reclamante', shouldGenerate: (!!contexto.quesitosReclamante && contexto.quesitosReclamante.length > 30) || contexto.textoProcesso.length > 500, step: 'Respondendo quesitos do Reclamante...', progress: 89 },
-    { tipo: 'quesitos_reclamada', shouldGenerate: (!!contexto.quesitosReclamada && contexto.quesitosReclamada.length > 30) || contexto.textoProcesso.length > 500, step: 'Respondendo quesitos da Reclamada...', progress: 91 },
+    { tipo: 'quesitos_juizo', shouldGenerate: true, step: 'Respondendo quesitos do Juízo...', progress: 87 },
+    { tipo: 'quesitos_reclamante', shouldGenerate: true, step: 'Respondendo quesitos do Reclamante...', progress: 89 },
+    { tipo: 'quesitos_reclamada', shouldGenerate: true, step: 'Respondendo quesitos da Reclamada...', progress: 91 },
     // PRIORITY 3: Least critical (database has default value for this field)
     { tipo: 'referencias_bibliograficas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando referências bibliográficas...', progress: 92 }
   ];
@@ -1295,6 +1314,16 @@ const results: Record<string, string> = {
         .eq('id', jobId);
 
       console.log(`[gerarResumosIA] Generating: ${tipo} with ${aiConfig.provider}/${aiConfig.model}`);
+      
+      // Debug log para quesitos - rastrear tamanho das variáveis injetadas
+      if (tipo.startsWith('quesitos_')) {
+        console.log(`[gerarResumosIA] DEBUG QUESITOS ${tipo}:`, {
+          quesitosTexto: contexto.quesitosTexto?.length || 0,
+          textoProcesso: contexto.textoProcesso?.length || 0,
+          nexoCausal: contexto.nexoCausalGerado?.length || 0,
+          incapacidade: contexto.incapacidadeGerada?.length || 0
+        });
+      }
       
       // Set quesitosTexto dynamically before prompt generation for each quesito type
       if (tipo === 'quesitos_juizo') contexto.quesitosTexto = contexto.quesitosJuizo;
