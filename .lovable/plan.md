@@ -1,74 +1,80 @@
 
 
-# Correção de Prompt: Remoção de Viés Defensivo nos Quesitos
+# Correção de Pipeline: Forçar Execução e Fallback Robusto na Sub-rotina de Quesitos
 
-## Diagnóstico
+## Diagnóstico Confirmado
 
-As frases punitivas ("RISCO LEGAL", "ESTRITAMENTE PROIBIDO", "causará quebra crítica") disparam filtros de segurança do Gemini 3.0 Flash, fazendo o modelo preferir retornar a frase de erro ("não identificados") em vez de realizar a busca. A arquitetura de dados (Head+Tail) está funcionando -- o problema agora é puramente de linguagem de prompt.
+O `_rawTextTail` não está sendo persistido em todas as pipelines (especialmente Mistral OCR e passagem única/base64), fazendo `textoProcesso` chegar vazio. O fallback existente (linha 2891) tenta montar a partir de `extractedData.textos_brutos`, mas se esses também estiverem vazios (Task Overload na extração), o `shouldGenerate` avalia como falso e a sub-rotina nem roda.
 
-## Alterações (3 arquivos, 2 deploys)
+## Alterações (1 arquivo, 1 deploy)
 
-### Arquivo 1: `supabase/functions/processar-autos/index.ts`
+### Arquivo: `supabase/functions/processar-autos/index.ts`
 
-**3 blocos de DEFAULT_PROMPTS** (linhas 844-858, 877-893, 912-928):
+### Mudanca 1: Forcar shouldGenerate dos 3 quesitos (linhas 1246-1248)
 
-Para `quesitos_juizo` e `quesitos_reclamada`, substituir os blocos "ATENÇÃO — BUSCA AGRESSIVA" e "REGRA DE INEXISTÊNCIA (RISCO LEGAL)" por:
+Substituir as condicionais complexas por `shouldGenerate: true` nos 3 quesitos. A regra de inexistencia no prompt ja garante saida controlada se nao houver dados.
 
-```
-FOCO DE BUSCA: As perguntas do Juízo [ou da Reclamada] estão tipicamente localizadas no FINAL do texto
-(Contestações e Despachos). Procure por pontos de interrogação (?), listas numeradas, e termos como
-'diga o perito', 'informe', 'esclareça'. Extraia as perguntas e responda-as tecnicamente.
+### Mudanca 2: Fallback robusto de contexto DENTRO do gerarResumosIA (apos linha 1201)
 
-REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pelo Juízo [ou pela Reclamada]
-no texto, retorne apenas a frase exata: 'Quesitos do Juízo [ou da Reclamada] não identificados nos autos.'
-```
+Logo apos definir `textoProcesso` na linha 1201, adicionar fallback agressivo:
 
-Para `quesitos_reclamante`, substituir por:
-
-```
-FOCO DE BUSCA: As perguntas do Reclamante estão tipicamente localizadas no INÍCIO do texto (Petição Inicial).
-Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'.
-Extraia as perguntas do reclamante e responda-as tecnicamente.
-
-REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pelo Reclamante no texto,
-retorne apenas a frase exata: 'Quesitos do Reclamante não identificados nos autos.'
-```
-
-### Arquivo 2: `supabase/functions/seed-prompts/index.ts`
-
-**3 prompts de regeneração** (linhas 500-502, 527-529, 554-556):
-
-Mesma substituição: remover "ATENÇÃO — BUSCA AGRESSIVA OBRIGATÓRIA: É GARANTIDO..." e "REGRA DE INEXISTÊNCIA (RISCO LEGAL)..." por versões suavizadas com direcionamento posicional (INÍCIO para Reclamante, FINAL para Juízo e Reclamada).
-
-### Arquivo 3: `supabase/functions/_shared/build-import-prompt.ts`
-
-**prompt_import_quesitos** (linhas 423-425):
-
-Substituir as duas regras punitivas por:
-
-```
-FOCO DE BUSCA:
-- QUESITOS DO RECLAMANTE: Procure no INÍCIO do texto (Petição Inicial).
-- QUESITOS DO JUÍZO: Procure nos Despachos (geralmente no FINAL do texto).
-- QUESITOS DA RECLAMADA: Procure na Contestação (geralmente no FINAL do texto).
-Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'.
-
-REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta de um grupo específico,
-retorne apenas: 'Quesitos do [Juízo/Reclamante/Reclamada] não identificados nos autos.'
-
-NÃO invente quesitos - extraia APENAS os que existem no documento.
+```typescript
+// Fallback robusto: se _rawTextTail se perdeu na memoria, reconstruir a partir dos campos ja extraidos
+if (!contexto.textoProcesso || contexto.textoProcesso.length < 500) {
+  const fallbackProcesso = [
+    extractedData.textos_brutos?.peticao_inicial || '',
+    extractedData.textos_brutos?.contestacao || '',
+    extractedData.resumo_peticao_inicial || '',
+    extractedData.quesitos?.juizo || '',
+    extractedData.quesitos?.reclamante || '',
+    extractedData.quesitos?.reclamada || ''
+  ].filter(Boolean).join('\n\n');
+  
+  if (fallbackProcesso.length > 100) {
+    contexto.textoProcesso = fallbackProcesso;
+    console.log(`[gerarResumosIA] FALLBACK textoProcesso reconstruido: ${fallbackProcesso.length} chars`);
+  } else {
+    console.warn('[gerarResumosIA] ALERTA: textoProcesso vazio E fallback insuficiente');
+  }
+}
 ```
 
-## O que NÃO muda
+### Mudanca 3: Debug nos logs da Edge Function (NAO no prompt)
 
-- Nenhuma variavel, lógica ou fluxo de dados alterado
-- A frase exata de fallback permanece idêntica (compatível com o filtro do frontend)
-- A instrução "NÃO invente quesitos" permanece
-- O formato de saída (QUESITO X / RESPOSTA) permanece
-- As instruções obrigatórias 1-5 permanecem intactas
-- O `shouldGenerate` e o `textoProcesso` permanecem como estão
+Dentro do loop de geracao (linha 1297), antes da chamada `callAI`, adicionar log especifico para quesitos mostrando o tamanho das variaveis injetadas:
+
+```typescript
+if (tipo.startsWith('quesitos_')) {
+  console.log(`[gerarResumosIA] DEBUG QUESITOS ${tipo}:`, {
+    quesitosTexto: contexto.quesitosTexto?.length || 0,
+    textoProcesso: contexto.textoProcesso?.length || 0,
+    nexoCausal: contexto.nexoCausalGerado?.length || 0,
+    incapacidade: contexto.incapacidadeGerada?.length || 0
+  });
+}
+```
+
+Isso permite rastrear visualmente nos logs se o Gemini foi acionado e com quantos caracteres, sem contaminar o documento final.
+
+## O que NAO muda
+
+- Prompts dos quesitos (ja estao suavizados e com direcional posicional)
+- Fluxo de dados e logica de salvamento
+- Formato de saida (QUESITO/RESPOSTA)
+- Frase de fallback de inexistencia (compativel com filtro do frontend)
+
+## Por que a Acao 3 original foi ajustada
+
+A sintaxe `${textoProcesso.length}` nao funciona nos DEFAULT_PROMPTS porque eles usam interpolacao tardia (`\${textoProcesso}` e substituido pela `fillPromptVariables`). O `.length` nao seria avaliado pelo JavaScript. Alem disso, injetar texto de debug na saida do LLM e arriscado -- poderia vazar para laudos exportados em DOCX/PDF.
 
 ## Deploy
 
-`processar-autos` e `seed-prompts`
+`processar-autos`
+
+## Resultado Esperado
+
+1. Os 3 quesitos SEMPRE rodam (sem condicional de tamanho)
+2. Se `_rawTextTail` se perdeu, o fallback reconstroi contexto a partir de `extractedData`
+3. Logs da Edge Function mostram exatamente quantos caracteres cada variavel tem ao chamar o Gemini
+4. Zero risco de contaminacao de documentos legais com texto de debug
 
