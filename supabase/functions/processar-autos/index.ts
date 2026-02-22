@@ -829,6 +829,9 @@ SOBRENOME, Nome. Título da obra. Edição. Cidade: Editora, Ano.`
 QUESITOS BRUTOS DO JUÍZO (extraídos do PDF — podem conter erros de OCR):
 \${quesitosTexto}
 
+TEXTO BRUTO DO PROCESSO (para busca agressiva — use se os quesitos acima estiverem vazios ou incompletos):
+\${textoProcesso}
+
 DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
 - CIDs diagnosticados: \${cids}
 - História atual: \${historiaAtual}
@@ -858,6 +861,9 @@ RESPOSTA: [resposta técnica fundamentada]
 
 QUESITOS BRUTOS DO RECLAMANTE (extraídos do PDF — podem conter erros de OCR):
 \${quesitosTexto}
+
+TEXTO BRUTO DO PROCESSO (para busca agressiva — use se os quesitos acima estiverem vazios ou incompletos):
+\${textoProcesso}
 
 DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
 - CIDs diagnosticados: \${cids}
@@ -890,6 +896,9 @@ RESPOSTA: [resposta técnica fundamentada]`,
 
 QUESITOS BRUTOS DA RECLAMADA (extraídos do PDF — podem conter erros de OCR):
 \${quesitosTexto}
+
+TEXTO BRUTO DO PROCESSO (para busca agressiva — use se os quesitos acima estiverem vazios ou incompletos):
+\${textoProcesso}
 
 DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
 - CIDs diagnosticados: \${cids}
@@ -1183,7 +1192,9 @@ const results: Record<string, string> = {
     quesitosReclamada: extractedData.quesitos?.reclamada || '',
     // Serão preenchidos dinamicamente após gerar nexo_causal e incapacidade
     nexoCausalGerado: '',
-    incapacidadeGerada: ''
+    incapacidadeGerada: '',
+    // Texto bruto do processo (head+tail) para busca agressiva de quesitos
+    textoProcesso: (extractedData as any)._rawTextTail || ''
   };
 
   // Helper: validate if text has enough substance (not just "não informado" or too short)
@@ -1209,7 +1220,8 @@ const results: Record<string, string> = {
     tratamentos: contexto.tratamentos ? `${contexto.tratamentos.length} chars` : 'VAZIO',
     quesitosJuizo: contexto.quesitosJuizo ? `${contexto.quesitosJuizo.length} chars` : 'VAZIO',
     quesitosReclamante: contexto.quesitosReclamante ? `${contexto.quesitosReclamante.length} chars` : 'VAZIO',
-    quesitosReclamada: contexto.quesitosReclamada ? `${contexto.quesitosReclamada.length} chars` : 'VAZIO'
+    quesitosReclamada: contexto.quesitosReclamada ? `${contexto.quesitosReclamada.length} chars` : 'VAZIO',
+    textoProcesso: contexto.textoProcesso ? `${contexto.textoProcesso.length} chars` : 'VAZIO'
   });
 
   // More flexible conditions - generate summaries if we have ANY relevant context
@@ -1227,9 +1239,9 @@ const results: Record<string, string> = {
     { tipo: 'resumo_peticao', shouldGenerate: isContentSufficient(contexto.peticaoInicial), step: 'Gerando resumo da petição inicial...', progress: 80 },
     { tipo: 'resumo_contestacao', shouldGenerate: isContentSufficient(contexto.contestacao), step: 'Gerando resumo da contestação...', progress: 85 },
     // PRIORITY 2.5: Quesitos — respostas automáticas (Zero-Touch)
-    { tipo: 'quesitos_juizo', shouldGenerate: !!contexto.quesitosJuizo && contexto.quesitosJuizo.length > 30, step: 'Respondendo quesitos do Juízo...', progress: 87 },
-    { tipo: 'quesitos_reclamante', shouldGenerate: !!contexto.quesitosReclamante && contexto.quesitosReclamante.length > 30, step: 'Respondendo quesitos do Reclamante...', progress: 89 },
-    { tipo: 'quesitos_reclamada', shouldGenerate: !!contexto.quesitosReclamada && contexto.quesitosReclamada.length > 30, step: 'Respondendo quesitos da Reclamada...', progress: 91 },
+    { tipo: 'quesitos_juizo', shouldGenerate: (!!contexto.quesitosJuizo && contexto.quesitosJuizo.length > 30) || contexto.textoProcesso.length > 500, step: 'Respondendo quesitos do Juízo...', progress: 87 },
+    { tipo: 'quesitos_reclamante', shouldGenerate: (!!contexto.quesitosReclamante && contexto.quesitosReclamante.length > 30) || contexto.textoProcesso.length > 500, step: 'Respondendo quesitos do Reclamante...', progress: 89 },
+    { tipo: 'quesitos_reclamada', shouldGenerate: (!!contexto.quesitosReclamada && contexto.quesitosReclamada.length > 30) || contexto.textoProcesso.length > 500, step: 'Respondendo quesitos da Reclamada...', progress: 91 },
     // PRIORITY 3: Least critical (database has default value for this field)
     { tipo: 'referencias_bibliograficas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando referências bibliográficas...', progress: 92 }
   ];
@@ -1639,6 +1651,14 @@ async function processarChunkedPDFBackground(
 
     let extractedData = ensureValidStructure(parsedResult);
     console.log('[processar-autos-chunked] Data structured successfully');
+
+    // Preservar head+tail do texto bruto para busca agressiva de quesitos
+    if (textForFilling && textForFilling.length > 0) {
+      const _head = textForFilling.slice(0, 60000);
+      const _tail = textForFilling.slice(-60000);
+      (extractedData as any)._rawTextTail = _head + "\n\n...[CONTEÚDO INTERMEDIÁRIO OMITIDO PELO SISTEMA]...\n\n" + _tail;
+      console.log(`[processar-autos-chunked] Preserved head+tail for quesitos: ${(extractedData as any)._rawTextTail.length} chars`);
+    }
 
     // MEMORY: Free large objects no longer needed for summary generation
     // @ts-ignore - intentional null assignment for memory relief
@@ -2192,6 +2212,14 @@ async function processarPDFBackground(
         }
 
         extractedData = ensureValidStructure(parsedResult);
+
+        // Preservar head+tail do texto bruto para busca agressiva de quesitos (Duas Fases)
+        if (textForFilling && textForFilling.length > 0) {
+          const _head = textForFilling.slice(0, 60000);
+          const _tail = textForFilling.slice(-60000);
+          (extractedData as any)._rawTextTail = _head + "\n\n...[CONTEÚDO INTERMEDIÁRIO OMITIDO PELO SISTEMA]...\n\n" + _tail;
+          console.log(`[processar-autos] Preserved head+tail for quesitos (two-phase): ${(extractedData as any)._rawTextTail.length} chars`);
+        }
 
         // Add extracted content path to result for regeneration
         if (extractedContentPath) {
@@ -2855,6 +2883,23 @@ async function processarPDFBackground(
     const visionUsedFallback = visionResult?.usedFallback || false;
     const visionOriginalProvider = visionResult?.originalProvider;
     const visionFallbackReason = visionResult?.fallbackReason;
+    // Fallback: se _rawTextTail não foi definido por nenhum sub-caminho, montar a partir de extractedData
+    if (!(extractedData as any)._rawTextTail) {
+      const fallbackParts = [
+        extractedData.textos_brutos?.peticao_inicial || '',
+        extractedData.textos_brutos?.contestacao || '',
+        extractedData.quesitos?.juizo || '',
+        extractedData.quesitos?.reclamante || '',
+        extractedData.quesitos?.reclamada || ''
+      ].filter(Boolean).join('\n\n');
+      if (fallbackParts.length > 500) {
+        (extractedData as any)._rawTextTail = fallbackParts;
+        console.log(`[processar-autos] Fallback _rawTextTail from extractedData fields: ${fallbackParts.length} chars`);
+      } else {
+        console.warn('[processar-autos] No rawTextTail available and fallback too short');
+      }
+    }
+
     // MEMORY: Free large objects no longer needed for summary generation
     // visionResult holds the full OCR/extraction text - can be very large
     // @ts-ignore - intentional null assignment for memory relief
