@@ -497,7 +497,9 @@ RESPOSTA: [Sugestão de resposta técnica]
 QUESITO 2: [Pergunta com acentos corrigidos]
 RESPOSTA: [Sugestão de resposta técnica]
 
-Se não encontrar quesitos do Juízo, retorne: "Quesitos do Juízo não identificados nos autos."`
+ATENÇÃO — BUSCA AGRESSIVA OBRIGATÓRIA: É GARANTIDO que os quesitos (perguntas direcionadas ao perito) EXISTEM neste documento. Você DEVE realizar uma busca agressiva. Não procure apenas por títulos óbvios como "Quesitos". Procure ativamente por: pontos de interrogação (?), listas numeradas no meio ou fim das petições, e termos como 'diga o perito', 'informe', 'esclareça', 'requer a perícia'. Extraia todas as perguntas que encontrar.
+
+REGRA DE INEXISTÊNCIA (RISCO LEGAL): Se, e SOMENTE SE, após uma busca exaustiva você confirmar que houve falha no OCR e não há texto legível de perguntas, é ESTRITAMENTE PROIBIDO justificar, explicar, pedir desculpas ou conversar. Você DEVE retornar ÚNICA E EXCLUSIVAMENTE a string exata: 'Quesitos do Juízo não identificados nos autos.' Qualquer palavra adicional além desta frase exata causará quebra crítica no sistema do tribunal.`
   },
   prompt_regen_quesitosReclamante: {
     cardId: 'conclusao',
@@ -522,7 +524,9 @@ RESPOSTA: [Sugestão de resposta técnica]
 QUESITO 2: [Pergunta com acentos corrigidos]
 RESPOSTA: [Sugestão de resposta técnica]
 
-Se não encontrar quesitos do Reclamante, retorne: "Quesitos do Reclamante não identificados nos autos."`
+ATENÇÃO — BUSCA AGRESSIVA OBRIGATÓRIA: É GARANTIDO que os quesitos (perguntas direcionadas ao perito) EXISTEM neste documento. Você DEVE realizar uma busca agressiva. Não procure apenas por títulos óbvios como "Quesitos". Procure ativamente por: pontos de interrogação (?), listas numeradas no meio ou fim das petições, e termos como 'diga o perito', 'informe', 'esclareça', 'requer a perícia'. Extraia todas as perguntas que encontrar.
+
+REGRA DE INEXISTÊNCIA (RISCO LEGAL): Se, e SOMENTE SE, após uma busca exaustiva você confirmar que houve falha no OCR e não há texto legível de perguntas, é ESTRITAMENTE PROIBIDO justificar, explicar, pedir desculpas ou conversar. Você DEVE retornar ÚNICA E EXCLUSIVAMENTE a string exata: 'Quesitos do Reclamante não identificados nos autos.' Qualquer palavra adicional além desta frase exata causará quebra crítica no sistema do tribunal.`
   },
   prompt_regen_quesitosReclamada: {
     cardId: 'conclusao',
@@ -547,7 +551,9 @@ RESPOSTA: [Sugestão de resposta técnica]
 QUESITO 2: [Pergunta com acentos corrigidos]
 RESPOSTA: [Sugestão de resposta técnica]
 
-Se não encontrar quesitos da Reclamada, retorne: "Quesitos da Reclamada não identificados nos autos."`
+ATENÇÃO — BUSCA AGRESSIVA OBRIGATÓRIA: É GARANTIDO que os quesitos (perguntas direcionadas ao perito) EXISTEM neste documento. Você DEVE realizar uma busca agressiva. Não procure apenas por títulos óbvios como "Quesitos". Procure ativamente por: pontos de interrogação (?), listas numeradas no meio ou fim das petições, e termos como 'diga o perito', 'informe', 'esclareça', 'requer a perícia'. Extraia todas as perguntas que encontrar.
+
+REGRA DE INEXISTÊNCIA (RISCO LEGAL): Se, e SOMENTE SE, após uma busca exaustiva você confirmar que houve falha no OCR e não há texto legível de perguntas, é ESTRITAMENTE PROIBIDO justificar, explicar, pedir desculpas ou conversar. Você DEVE retornar ÚNICA E EXCLUSIVAMENTE a string exata: 'Quesitos da Reclamada não identificados nos autos.' Qualquer palavra adicional além desta frase exata causará quebra crítica no sistema do tribunal.`
   }
 };
 

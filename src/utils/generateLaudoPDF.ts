@@ -928,11 +928,12 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   }
   
   // 19. CONCLUSÃO
-  const hasConclusao = !isFieldEmpty(laudo.conclusaoCID) ||
+  const hasConclusao = !isFieldEmpty(laudo.conclusaoCID) || !isFieldEmpty(laudo.nexoCausalTipo) ||
     !isFieldEmpty(laudo.conclusaoStatus) || !isFieldEmpty(laudo.conclusaoDestino) || !isFieldEmpty(laudo.conclusaoJustificativa);
   if (hasConclusao) {
     let sectionHeight = SECTION_TITLE_HEIGHT;
     if (!isFieldEmpty(laudo.conclusaoCID)) sectionHeight += 8;
+    if (!isFieldEmpty(laudo.nexoCausalTipo)) sectionHeight += 8;
     if (!isFieldEmpty(laudo.conclusaoStatus)) sectionHeight += 8;
     if (!isFieldEmpty(laudo.conclusaoDestino)) sectionHeight += 8;
     if (!isFieldEmpty(laudo.conclusaoJustificativa)) sectionHeight += SUBTITLE_HEIGHT + 15;
@@ -940,6 +941,18 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
     y = addSectionTitle(doc, `${sectionNumber}. CONCLUSÃO`, y);
     if (!isFieldEmpty(laudo.conclusaoCID)) {
       y = addLabeledField(doc, "CID-10 Sugerido", laudo.conclusaoCID!, y);
+    }
+    if (!isFieldEmpty(laudo.nexoCausalTipo)) {
+      const nexoMap: Record<string, string> = {
+        "direto": "Nexo Causal Direto",
+        "concausa": "Concausa",
+        "agravamento": "Agravamento",
+        "inexistente": "Nexo Causal Inexistente",
+        "nexo_causal": "Nexo Causal",
+        "concausal": "Concausal",
+        "ausencia": "Ausência de Nexo Causal",
+      };
+      y = addLabeledField(doc, "Tipo de Nexo", nexoMap[laudo.nexoCausalTipo!] || laudo.nexoCausalTipo!, y);
     }
     if (!isFieldEmpty(laudo.conclusaoStatus)) {
       const statusMap: Record<string, string> = {
