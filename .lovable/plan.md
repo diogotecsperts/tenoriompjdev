@@ -1,57 +1,84 @@
 
 
-# Correção: Captura Head+Tail na Pipeline Mistral OCR Single-Pass
+# Correção: Descontaminação de Variáveis de Quesitos (LLM Anchoring Fix)
 
-## Causa Raiz Confirmada (Logs do Supabase)
+## Diagnóstico
 
-Os logs provam exatamente o que aconteceu:
+O `extractedData.quesitos.reclamante` chega preenchido com "Quesitos do Reclamante não identificados nos autos." (resultado da extração inicial pelo Gemini). Quando esse texto é injetado na variável `${quesitosTexto}` do prompt, o Gemini interpreta como uma validação prévia do sistema e repete a frase, ignorando os 120k chars do `textoProcesso`.
 
-1. Mistral OCR extraiu **195.376 caracteres** (105 paginas) com sucesso
-2. O Gemini estruturou o JSON, mas retornou quesitos como "nao identificados" (Task Overload na extracao)
-3. O `_rawTextTail` **NUNCA foi capturado** na pipeline Mistral OCR -- "Preserved head+tail" nao aparece nos logs
-4. O fallback da linha 2920 montou apenas **2.461 chars** a partir dos campos ja extraidos (que ja continham "nao identificados")
-5. O Gemini foi chamado com 2.461 chars de contexto praticamente inutil -- e corretamente retornou "nao identificados" porque nao havia texto real para buscar
-
-O problema: as capturas Head+Tail foram inseridas apenas na pipeline **chunked** (linha 1690) e **two-phase** (linha 2251), mas a pipeline **Mistral OCR single-pass** (linhas 2480-2524) ficou sem captura. E essa e exatamente a pipeline que esta sendo usada!
-
-## Correcao (1 arquivo, 1 deploy)
+## Alterações (1 arquivo, 1 deploy)
 
 ### Arquivo: `supabase/functions/processar-autos/index.ts`
 
-### Mudanca unica: Inserir captura Head+Tail apos linha 2521
+### Mudança 1: Função sanitizeQuesitos (antes da linha 1194)
 
-Apos `extractedData = ensureValidStructure(parsed);` (linha 2521), e ANTES do log de conclusao (linha 2524), inserir:
+Adicionar helper que limpa strings contaminadas:
 
 ```typescript
-// Capturar head+tail do texto OCR para busca agressiva de quesitos
-if (mistralRawText && mistralRawText.length > 1000) {
-  const _head = mistralRawText.slice(0, 60000);
-  const _tail = mistralRawText.slice(-60000);
-  (extractedData as any)._rawTextTail = _head + 
-    "\n\n...[CONTEUDO INTERMEDIARIO OMITIDO PELO SISTEMA]...\n\n" + _tail;
-  console.log(`[processar-autos] Preserved head+tail for quesitos (mistral-ocr): ${(extractedData as any)._rawTextTail.length} chars`);
-}
+const sanitizeQuesitos = (text: string | undefined): string => {
+  if (!text) return '';
+  if (text.toLowerCase().includes('não identificados') || 
+      text.toLowerCase().includes('nao identificados')) return '';
+  return text;
+};
 ```
 
-Isso captura os 195k chars ANTES de `mistralRawText` sair de escopo, criando o buffer Head+Tail de ~120k chars que a sub-rotina de quesitos precisa.
+### Mudança 2: Aplicar sanitização na montagem do contexto (linhas 1194-1196)
 
-## O que NAO muda
+Substituir:
+```typescript
+quesitosJuizo: extractedData.quesitos?.juizo || '',
+quesitosReclamante: extractedData.quesitos?.reclamante || '',
+quesitosReclamada: extractedData.quesitos?.reclamada || '',
+```
 
-- Nenhuma outra pipeline e alterada
-- Os prompts suavizados permanecem
-- O shouldGenerate: true permanece
-- O fallback robusto permanece (agora como segunda linha de defesa)
-- Os logs de debug permanecem
+Por:
+```typescript
+quesitosJuizo: sanitizeQuesitos(extractedData.quesitos?.juizo),
+quesitosReclamante: sanitizeQuesitos(extractedData.quesitos?.reclamante),
+quesitosReclamada: sanitizeQuesitos(extractedData.quesitos?.reclamada),
+```
+
+### Mudança 3: Fallback de segurança na captura Head+Tail (linha 2524)
+
+Substituir:
+```typescript
+if (mistralRawText && mistralRawText.length > 1000) {
+```
+
+Por:
+```typescript
+const textoOCR = mistralRawText || parsed?.text || extractedData?.textos_brutos?.peticao_inicial || '';
+if (textoOCR && textoOCR.length > 1000) {
+```
+
+E usar `textoOCR` em vez de `mistralRawText` dentro do bloco (nas chamadas `.slice()`).
+
+### Mudança 4: Remover quesitos contaminados do fallback (linhas 1210-1212)
+
+No fallback robusto, remover as linhas que injetam quesitos contaminados no `textoProcesso`:
+```typescript
+// REMOVER estas 3 linhas:
+extractedData.quesitos?.juizo || '',
+extractedData.quesitos?.reclamante || '',
+extractedData.quesitos?.reclamada || ''
+```
+
+Esses campos já estavam preenchidos com "não identificados", poluindo o fallback.
+
+## O que NÃO muda
+
+- Prompts dos quesitos permanecem suavizados
+- shouldGenerate: true permanece
+- Formato de saída QUESITO/RESPOSTA permanece
+- Frase de fallback de inexistência permanece compatível com frontend
 
 ## Resultado Esperado
 
-Na proxima importacao via Mistral OCR:
-- Log "Preserved head+tail for quesitos (mistral-ocr): ~120000 chars" aparecera
-- textoProcesso chegara com ~120k chars em vez de 2.461
-- O Gemini tera o texto real do PDF para encontrar os quesitos
-- O fallback de 2.461 chars so sera usado se mistralRawText falhar completamente
+1. Log "DEBUG QUESITOS": `quesitosTexto: 0` (descontaminado) e `textoProcesso: ~120000`
+2. Gemini recebe texto limpo sem ancoragem de "não identificados"
+3. Gemini procura ativamente no textoProcesso de 120k chars pelas perguntas reais
 
 ## Deploy
 
 `processar-autos`
-
