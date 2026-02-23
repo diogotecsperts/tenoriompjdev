@@ -824,14 +824,7 @@ FORMATO OBRIGATÓRIO: ABNT (NBR 6023)
 Exemplo:
 SOBRENOME, Nome. Título da obra. Edição. Cidade: Editora, Ano.`
 
-  ,quesitos_juizo: `Você é um perito médico judicial especialista. Analise os quesitos formulados pelo Juízo e gere respostas técnicas fundamentadas.
-
-CONTEXTO DE QUESITOS:
-\${quesitosTexto}
-
-FOCO DE BUSCA: As perguntas do Juízo estão tipicamente localizadas no FINAL do texto (Despachos). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas e responda-as tecnicamente.
-
-TEXTO BRUTO COMPLETO DO PROCESSO (FONTE PRIMARIA — BUSQUE AQUI):
+  ,quesitos_juizo: `TEXTO INTEGRAL DO PROCESSO:
 \${textoProcesso}
 
 DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
@@ -840,36 +833,21 @@ DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
 - Exame físico: \${exameFisico}
 - Exames complementares: \${examesComplementares}
 - Atividades laborais: \${atividadesLaborais}
-- Nexo causal (já analisado): \${nexoCausal}
-- Incapacidade (já analisada): \${incapacidade}
+- Nexo causal: \${nexoCausal}
+- Incapacidade: \${incapacidade}
 
-INSTRUÇÕES OBRIGATÓRIAS:
-0. PRIORIDADE ABSOLUTA: O TEXTO BRUTO DO PROCESSO é a fonte primária. SEMPRE leia e analise o texto bruto completo para localizar os quesitos, INDEPENDENTEMENTE de existirem quesitos pré-extraídos ou não.
-1. Corrija TODA a acentuação OCR (lesoes→lesões, nao→não, orgao→órgão, etc.)
-2. Mantenha a numeração ORIGINAL dos quesitos (1, 2, 3... ou a, b, c... ou I, II, III...)
-3. Para CADA quesito, gere uma resposta técnica baseada nas evidências do caso
-4. Se não houver dados suficientes para responder, escreva: "Prejudicado pela ausência de elementos nos autos"
-5. Use linguagem técnica médico-legal formal em português brasileiro
+TAREFA: Leia o documento acima na íntegra. Localize e extraia todas as perguntas (quesitos) formuladas EXCLUSIVAMENTE pelo Juízo. Abaixo de cada pergunta extraída, gere a resposta técnica correspondente agindo como perito médico.
 
-REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pelo Juízo no texto, retorne apenas a frase exata: 'Quesitos do Juízo não identificados nos autos.'
-
-FORMATO DE SAÍDA OBRIGATÓRIO:
+FORMATO DE SAÍDA:
 QUESITO 1: [pergunta corrigida]
 RESPOSTA: [resposta técnica fundamentada]
 
 QUESITO 2: [pergunta corrigida]
 RESPOSTA: [resposta técnica fundamentada]
 
-(Continue para todos os quesitos encontrados)`,
+REGRA DE INEXISTÊNCIA: Se e somente se o documento realmente não contiver perguntas do Juízo, retorne unicamente: 'Quesitos do Juízo não identificados nos autos.'`,
 
-  quesitos_reclamante: `Você é um perito médico judicial especialista. Analise os quesitos formulados pelo Reclamante e gere respostas técnicas fundamentadas.
-
-CONTEXTO DE QUESITOS:
-\${quesitosTexto}
-
-FOCO DE BUSCA: As perguntas do Reclamante estão tipicamente localizadas no INÍCIO do texto (Petição Inicial). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas do reclamante e responda-as tecnicamente.
-
-TEXTO BRUTO COMPLETO DO PROCESSO (FONTE PRIMARIA — BUSQUE AQUI):
+  quesitos_reclamante: `TEXTO INTEGRAL DO PROCESSO:
 \${textoProcesso}
 
 DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
@@ -878,34 +856,21 @@ DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
 - Exame físico: \${exameFisico}
 - Exames complementares: \${examesComplementares}
 - Atividades laborais: \${atividadesLaborais}
-- Nexo causal (já analisado): \${nexoCausal}
-- Incapacidade (já analisada): \${incapacidade}
+- Nexo causal: \${nexoCausal}
+- Incapacidade: \${incapacidade}
 
-INSTRUÇÕES OBRIGATÓRIAS:
-0. PRIORIDADE ABSOLUTA: O TEXTO BRUTO DO PROCESSO é a fonte primária. SEMPRE leia e analise o texto bruto completo para localizar os quesitos, INDEPENDENTEMENTE de existirem quesitos pré-extraídos ou não.
-1. Corrija TODA a acentuação OCR
-2. Mantenha a numeração ORIGINAL dos quesitos
-3. Para CADA quesito, gere uma resposta técnica IMPARCIAL baseada nas evidências
-4. Se não houver dados suficientes, escreva: "Prejudicado pela ausência de elementos nos autos"
-5. Use linguagem técnica médico-legal formal em português brasileiro
+TAREFA: Leia o documento acima na íntegra. Localize e extraia todas as perguntas (quesitos) formuladas EXCLUSIVAMENTE pelo Reclamante. Abaixo de cada pergunta extraída, gere a resposta técnica correspondente agindo como perito médico.
 
-REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pelo Reclamante no texto, retorne apenas a frase exata: 'Quesitos do Reclamante não identificados nos autos.'
-
-FORMATO DE SAÍDA OBRIGATÓRIO:
+FORMATO DE SAÍDA:
 QUESITO 1: [pergunta corrigida]
 RESPOSTA: [resposta técnica fundamentada]
 
 QUESITO 2: [pergunta corrigida]
-RESPOSTA: [resposta técnica fundamentada]`,
+RESPOSTA: [resposta técnica fundamentada]
 
-  quesitos_reclamada: `Você é um perito médico judicial especialista. Analise os quesitos formulados pela Reclamada e gere respostas técnicas fundamentadas.
+REGRA DE INEXISTÊNCIA: Se e somente se o documento realmente não contiver perguntas do Reclamante, retorne unicamente: 'Quesitos do Reclamante não identificados nos autos.'`,
 
-CONTEXTO DE QUESITOS:
-\${quesitosTexto}
-
-FOCO DE BUSCA: As perguntas da Reclamada estão tipicamente localizadas no FINAL do texto (Contestações e Despachos). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas e responda-as tecnicamente.
-
-TEXTO BRUTO COMPLETO DO PROCESSO (FONTE PRIMARIA — BUSQUE AQUI):
+  quesitos_reclamada: `TEXTO INTEGRAL DO PROCESSO:
 \${textoProcesso}
 
 DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
@@ -914,25 +879,19 @@ DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
 - Exame físico: \${exameFisico}
 - Exames complementares: \${examesComplementares}
 - Atividades laborais: \${atividadesLaborais}
-- Nexo causal (já analisado): \${nexoCausal}
-- Incapacidade (já analisada): \${incapacidade}
+- Nexo causal: \${nexoCausal}
+- Incapacidade: \${incapacidade}
 
-INSTRUÇÕES OBRIGATÓRIAS:
-0. PRIORIDADE ABSOLUTA: O TEXTO BRUTO DO PROCESSO é a fonte primária. SEMPRE leia e analise o texto bruto completo para localizar os quesitos, INDEPENDENTEMENTE de existirem quesitos pré-extraídos ou não.
-1. Corrija TODA a acentuação OCR
-2. Mantenha a numeração ORIGINAL dos quesitos
-3. Para CADA quesito, gere uma resposta técnica IMPARCIAL baseada nas evidências
-4. Se não houver dados suficientes, escreva: "Prejudicado pela ausência de elementos nos autos"
-5. Use linguagem técnica médico-legal formal em português brasileiro
+TAREFA: Leia o documento acima na íntegra. Localize e extraia todas as perguntas (quesitos) formuladas EXCLUSIVAMENTE pela Reclamada. Abaixo de cada pergunta extraída, gere a resposta técnica correspondente agindo como perito médico.
 
-REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pela Reclamada no texto, retorne apenas a frase exata: 'Quesitos da Reclamada não identificados nos autos.'
-
-FORMATO DE SAÍDA OBRIGATÓRIO:
+FORMATO DE SAÍDA:
 QUESITO 1: [pergunta corrigida]
 RESPOSTA: [resposta técnica fundamentada]
 
 QUESITO 2: [pergunta corrigida]
-RESPOSTA: [resposta técnica fundamentada]`
+RESPOSTA: [resposta técnica fundamentada]
+
+REGRA DE INEXISTÊNCIA: Se e somente se o documento realmente não contiver perguntas da Reclamada, retorne unicamente: 'Quesitos da Reclamada não identificados nos autos.'`
 };
 
 /**
@@ -987,7 +946,7 @@ async function getPromptForType(tipo: string, ctx: any): Promise<string> {
     incapacidade: ctx.incapacidade || ctx.incapacidadeGerada || 'Não informado',
     
     // Quesitos (texto bruto para sub-rotina automática)
-    quesitosTexto: ctx.quesitosTexto || ctx.quesitosJuizo || ctx.quesitosReclamante || ctx.quesitosReclamada || '[NENHUM QUESITO PRE-EXTRAIDO — BUSCA NO TEXTO BRUTO E OBRIGATORIA]',
+    quesitosTexto: ctx.quesitosTexto || ctx.quesitosJuizo || ctx.quesitosReclamante || ctx.quesitosReclamada || '',
     
     // Outros campos que podem ser usados em prompts futuros
     metodologia: ctx.metodologia || 'Não informado',
@@ -1694,12 +1653,10 @@ async function processarChunkedPDFBackground(
     let extractedData = ensureValidStructure(parsedResult);
     console.log('[processar-autos-chunked] Data structured successfully');
 
-    // Preservar head+tail do texto bruto para busca agressiva de quesitos
+    // Preservar texto integral para busca de quesitos (sem fatiamento)
     if (textForFilling && textForFilling.length > 0) {
-      const _head = textForFilling.slice(0, 60000);
-      const _tail = textForFilling.slice(-60000);
-      (extractedData as any)._rawTextTail = _head + "\n\n...[CONTEÚDO INTERMEDIÁRIO OMITIDO PELO SISTEMA]...\n\n" + _tail;
-      console.log(`[processar-autos-chunked] Preserved head+tail for quesitos: ${(extractedData as any)._rawTextTail.length} chars`);
+      (extractedData as any)._rawTextTail = textForFilling;
+      console.log(`[processar-autos-chunked] Preserved full text for quesitos: ${textForFilling.length} chars`);
     }
 
     // MEMORY: Free large objects no longer needed for summary generation
@@ -2255,12 +2212,10 @@ async function processarPDFBackground(
 
         extractedData = ensureValidStructure(parsedResult);
 
-        // Preservar head+tail do texto bruto para busca agressiva de quesitos (Duas Fases)
+        // Preservar texto integral para busca de quesitos (sem fatiamento)
         if (textForFilling && textForFilling.length > 0) {
-          const _head = textForFilling.slice(0, 60000);
-          const _tail = textForFilling.slice(-60000);
-          (extractedData as any)._rawTextTail = _head + "\n\n...[CONTEÚDO INTERMEDIÁRIO OMITIDO PELO SISTEMA]...\n\n" + _tail;
-          console.log(`[processar-autos] Preserved head+tail for quesitos (two-phase): ${(extractedData as any)._rawTextTail.length} chars`);
+          (extractedData as any)._rawTextTail = textForFilling;
+          console.log(`[processar-autos] Preserved full text for quesitos (two-phase): ${textForFilling.length} chars`);
         }
 
         // Add extracted content path to result for regeneration
@@ -2529,14 +2484,11 @@ async function processarPDFBackground(
             
             extractedData = ensureValidStructure(parsed);
             
-            // Capturar head+tail do texto OCR para busca agressiva de quesitos (com fallback)
+            // Preservar texto integral para busca de quesitos (sem fatiamento)
             const textoOCR = mistralRawText || parsed?.text || extractedData?.textos_brutos?.peticao_inicial || '';
             if (textoOCR && textoOCR.length > 1000) {
-              const _head = textoOCR.slice(0, 60000);
-              const _tail = textoOCR.slice(-60000);
-              (extractedData as any)._rawTextTail = _head + 
-                "\n\n...[CONTEUDO INTERMEDIARIO OMITIDO PELO SISTEMA]...\n\n" + _tail;
-              console.log(`[processar-autos] Preserved head+tail for quesitos (mistral-ocr): ${(extractedData as any)._rawTextTail.length} chars`);
+              (extractedData as any)._rawTextTail = textoOCR;
+              console.log(`[processar-autos] Preserved full text for quesitos (mistral-ocr): ${textoOCR.length} chars`);
             }
             
             // Skip the rest of the single-pass flow since we're done
