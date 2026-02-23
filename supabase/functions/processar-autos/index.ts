@@ -826,10 +826,12 @@ SOBRENOME, Nome. Título da obra. Edição. Cidade: Editora, Ano.`
 
   ,quesitos_juizo: `Você é um perito médico judicial especialista. Analise os quesitos formulados pelo Juízo e gere respostas técnicas fundamentadas.
 
-QUESITOS BRUTOS DO JUÍZO (extraídos do PDF — podem conter erros de OCR):
+CONTEXTO DE QUESITOS:
 \${quesitosTexto}
 
-TEXTO BRUTO DO PROCESSO (para busca agressiva — use se os quesitos acima estiverem vazios ou incompletos):
+FOCO DE BUSCA: As perguntas do Juízo estão tipicamente localizadas no FINAL do texto (Despachos). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas e responda-as tecnicamente.
+
+TEXTO BRUTO COMPLETO DO PROCESSO (FONTE PRIMARIA — BUSQUE AQUI):
 \${textoProcesso}
 
 DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
@@ -842,13 +844,12 @@ DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
 - Incapacidade (já analisada): \${incapacidade}
 
 INSTRUÇÕES OBRIGATÓRIAS:
+0. PRIORIDADE ABSOLUTA: O TEXTO BRUTO DO PROCESSO é a fonte primária. SEMPRE leia e analise o texto bruto completo para localizar os quesitos, INDEPENDENTEMENTE de existirem quesitos pré-extraídos ou não.
 1. Corrija TODA a acentuação OCR (lesoes→lesões, nao→não, orgao→órgão, etc.)
 2. Mantenha a numeração ORIGINAL dos quesitos (1, 2, 3... ou a, b, c... ou I, II, III...)
 3. Para CADA quesito, gere uma resposta técnica baseada nas evidências do caso
 4. Se não houver dados suficientes para responder, escreva: "Prejudicado pela ausência de elementos nos autos"
 5. Use linguagem técnica médico-legal formal em português brasileiro
-
-FOCO DE BUSCA: As perguntas do Juízo estão tipicamente localizadas no FINAL do texto (Despachos). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas e responda-as tecnicamente.
 
 REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pelo Juízo no texto, retorne apenas a frase exata: 'Quesitos do Juízo não identificados nos autos.'
 
@@ -863,10 +864,12 @@ RESPOSTA: [resposta técnica fundamentada]
 
   quesitos_reclamante: `Você é um perito médico judicial especialista. Analise os quesitos formulados pelo Reclamante e gere respostas técnicas fundamentadas.
 
-QUESITOS BRUTOS DO RECLAMANTE (extraídos do PDF — podem conter erros de OCR):
+CONTEXTO DE QUESITOS:
 \${quesitosTexto}
 
-TEXTO BRUTO DO PROCESSO (para busca agressiva — use se os quesitos acima estiverem vazios ou incompletos):
+FOCO DE BUSCA: As perguntas do Reclamante estão tipicamente localizadas no INÍCIO do texto (Petição Inicial). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas do reclamante e responda-as tecnicamente.
+
+TEXTO BRUTO COMPLETO DO PROCESSO (FONTE PRIMARIA — BUSQUE AQUI):
 \${textoProcesso}
 
 DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
@@ -879,13 +882,12 @@ DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
 - Incapacidade (já analisada): \${incapacidade}
 
 INSTRUÇÕES OBRIGATÓRIAS:
+0. PRIORIDADE ABSOLUTA: O TEXTO BRUTO DO PROCESSO é a fonte primária. SEMPRE leia e analise o texto bruto completo para localizar os quesitos, INDEPENDENTEMENTE de existirem quesitos pré-extraídos ou não.
 1. Corrija TODA a acentuação OCR
 2. Mantenha a numeração ORIGINAL dos quesitos
 3. Para CADA quesito, gere uma resposta técnica IMPARCIAL baseada nas evidências
 4. Se não houver dados suficientes, escreva: "Prejudicado pela ausência de elementos nos autos"
 5. Use linguagem técnica médico-legal formal em português brasileiro
-
-FOCO DE BUSCA: As perguntas do Reclamante estão tipicamente localizadas no INÍCIO do texto (Petição Inicial). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas do reclamante e responda-as tecnicamente.
 
 REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pelo Reclamante no texto, retorne apenas a frase exata: 'Quesitos do Reclamante não identificados nos autos.'
 
@@ -898,10 +900,12 @@ RESPOSTA: [resposta técnica fundamentada]`,
 
   quesitos_reclamada: `Você é um perito médico judicial especialista. Analise os quesitos formulados pela Reclamada e gere respostas técnicas fundamentadas.
 
-QUESITOS BRUTOS DA RECLAMADA (extraídos do PDF — podem conter erros de OCR):
+CONTEXTO DE QUESITOS:
 \${quesitosTexto}
 
-TEXTO BRUTO DO PROCESSO (para busca agressiva — use se os quesitos acima estiverem vazios ou incompletos):
+FOCO DE BUSCA: As perguntas da Reclamada estão tipicamente localizadas no FINAL do texto (Contestações e Despachos). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas e responda-as tecnicamente.
+
+TEXTO BRUTO COMPLETO DO PROCESSO (FONTE PRIMARIA — BUSQUE AQUI):
 \${textoProcesso}
 
 DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
@@ -914,13 +918,12 @@ DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
 - Incapacidade (já analisada): \${incapacidade}
 
 INSTRUÇÕES OBRIGATÓRIAS:
+0. PRIORIDADE ABSOLUTA: O TEXTO BRUTO DO PROCESSO é a fonte primária. SEMPRE leia e analise o texto bruto completo para localizar os quesitos, INDEPENDENTEMENTE de existirem quesitos pré-extraídos ou não.
 1. Corrija TODA a acentuação OCR
 2. Mantenha a numeração ORIGINAL dos quesitos
 3. Para CADA quesito, gere uma resposta técnica IMPARCIAL baseada nas evidências
 4. Se não houver dados suficientes, escreva: "Prejudicado pela ausência de elementos nos autos"
 5. Use linguagem técnica médico-legal formal em português brasileiro
-
-FOCO DE BUSCA: As perguntas da Reclamada estão tipicamente localizadas no FINAL do texto (Contestações e Despachos). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas e responda-as tecnicamente.
 
 REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pela Reclamada no texto, retorne apenas a frase exata: 'Quesitos da Reclamada não identificados nos autos.'
 
@@ -984,7 +987,7 @@ async function getPromptForType(tipo: string, ctx: any): Promise<string> {
     incapacidade: ctx.incapacidade || ctx.incapacidadeGerada || 'Não informado',
     
     // Quesitos (texto bruto para sub-rotina automática)
-    quesitosTexto: ctx.quesitosTexto || ctx.quesitosJuizo || ctx.quesitosReclamante || ctx.quesitosReclamada || '',
+    quesitosTexto: ctx.quesitosTexto || ctx.quesitosJuizo || ctx.quesitosReclamante || ctx.quesitosReclamada || '[NENHUM QUESITO PRE-EXTRAIDO — BUSCA NO TEXTO BRUTO E OBRIGATORIA]',
     
     // Outros campos que podem ser usados em prompts futuros
     metodologia: ctx.metodologia || 'Não informado',
