@@ -479,81 +479,84 @@ Se não houver menção a necessidade de auxílio, retorne:
     sectionId: 'quesitos',
     description: 'Quesitos do Juízo - Regerar via PDF',
     order: 1,
-    prompt: `Extraia os "Quesitos do Juízo" do documento e gere sugestões de respostas técnicas.
+    prompt: `TEXTO INTEGRAL DO PROCESSO:
+\${textoProcesso}
 
-Os quesitos do Juízo são perguntas técnicas formuladas pelo Juiz para o perito responder.
+DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
+- CIDs diagnosticados: \${cids}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+- Exames complementares: \${examesComplementares}
+- Atividades laborais: \${atividadesLaborais}
+- Nexo causal: \${nexoCausal}
+- Incapacidade: \${incapacidade}
 
-SUA TAREFA:
-1. Extraia LITERALMENTE cada pergunta mantendo a numeração original.
-2. CORREÇÃO DE IDIOMA: Corrija os erros de OCR, aplicando todos os acentos e cedilhas na pergunta extraída.
-3. RESPOSTA: Logo abaixo de cada pergunta, gere uma sugestão de resposta técnica baseada estritamente na anamnese, exames e análise do caso. Se faltar dado, sugira "Aguardando avaliação pericial complementar."
+TAREFA: Leia o documento acima na íntegra. Localize e extraia todas as perguntas (quesitos) formuladas EXCLUSIVAMENTE pelo Juízo. Abaixo de cada pergunta extraída, gere a resposta técnica correspondente agindo como perito médico.
 
-REGRA DE FORMATAÇÃO: Use uma quebra de linha dupla (\\n\\n) entre a resposta de um quesito e a pergunta do próximo.
+FORMATO DE SAÍDA:
+QUESITO 1: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
 
-ESTRUTURA EXATA ESPERADA:
-QUESITO 1: [Pergunta com acentos corrigidos]
-RESPOSTA: [Sugestão de resposta técnica]
+QUESITO 2: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
 
-QUESITO 2: [Pergunta com acentos corrigidos]
-RESPOSTA: [Sugestão de resposta técnica]
-
-FOCO DE BUSCA: As perguntas do Juízo estão tipicamente localizadas no FINAL do texto (Despachos). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas e responda-as tecnicamente.
-
-REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pelo Juízo no texto, retorne apenas a frase exata: 'Quesitos do Juízo não identificados nos autos.'`
+REGRA DE INEXISTÊNCIA: Se e somente se o documento realmente não contiver perguntas do Juízo, retorne unicamente: 'Quesitos do Juízo não identificados nos autos.'`
   },
   prompt_regen_quesitosReclamante: {
     cardId: 'conclusao',
     sectionId: 'quesitos',
     description: 'Quesitos do Reclamante - Regerar via PDF',
     order: 2,
-    prompt: `Extraia os "Quesitos do Reclamante" (ou do Autor) do documento e gere sugestões de respostas técnicas.
+    prompt: `TEXTO INTEGRAL DO PROCESSO:
+\${textoProcesso}
 
-Os quesitos do Reclamante são perguntas formuladas pelo advogado da parte autora.
+DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
+- CIDs diagnosticados: \${cids}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+- Exames complementares: \${examesComplementares}
+- Atividades laborais: \${atividadesLaborais}
+- Nexo causal: \${nexoCausal}
+- Incapacidade: \${incapacidade}
 
-SUA TAREFA:
-1. Extraia LITERALMENTE cada pergunta mantendo a numeração original.
-2. CORREÇÃO DE IDIOMA: Corrija os erros de OCR, aplicando todos os acentos e cedilhas na pergunta extraída.
-3. RESPOSTA: Logo abaixo de cada pergunta, gere uma sugestão de resposta técnica baseada estritamente na anamnese, exames e análise do caso. Se faltar dado, sugira "Aguardando avaliação pericial complementar."
+TAREFA: Leia o documento acima na íntegra. Localize e extraia todas as perguntas (quesitos) formuladas EXCLUSIVAMENTE pelo Reclamante. Abaixo de cada pergunta extraída, gere a resposta técnica correspondente agindo como perito médico.
 
-REGRA DE FORMATAÇÃO: Use uma quebra de linha dupla (\\n\\n) entre a resposta de um quesito e a pergunta do próximo.
+FORMATO DE SAÍDA:
+QUESITO 1: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
 
-ESTRUTURA EXATA ESPERADA:
-QUESITO 1: [Pergunta com acentos corrigidos]
-RESPOSTA: [Sugestão de resposta técnica]
+QUESITO 2: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
 
-QUESITO 2: [Pergunta com acentos corrigidos]
-RESPOSTA: [Sugestão de resposta técnica]
-
-FOCO DE BUSCA: As perguntas do Reclamante estão tipicamente localizadas no INÍCIO do texto (Petição Inicial). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas do reclamante e responda-as tecnicamente.
-
-REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pelo Reclamante no texto, retorne apenas a frase exata: 'Quesitos do Reclamante não identificados nos autos.'`
+REGRA DE INEXISTÊNCIA: Se e somente se o documento realmente não contiver perguntas do Reclamante, retorne unicamente: 'Quesitos do Reclamante não identificados nos autos.'`
   },
   prompt_regen_quesitosReclamada: {
     cardId: 'conclusao',
     sectionId: 'quesitos',
     description: 'Quesitos da Reclamada - Regerar via PDF',
     order: 3,
-    prompt: `Extraia os "Quesitos da Reclamada" (ou da Ré) do documento e gere sugestões de respostas técnicas.
+    prompt: `TEXTO INTEGRAL DO PROCESSO:
+\${textoProcesso}
 
-Os quesitos da Reclamada são perguntas formuladas pelo advogado da parte ré/empresa.
+DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
+- CIDs diagnosticados: \${cids}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+- Exames complementares: \${examesComplementares}
+- Atividades laborais: \${atividadesLaborais}
+- Nexo causal: \${nexoCausal}
+- Incapacidade: \${incapacidade}
 
-SUA TAREFA:
-1. Extraia LITERALMENTE cada pergunta mantendo a numeração original.
-2. CORREÇÃO DE IDIOMA: Corrija os erros de OCR, aplicando todos os acentos e cedilhas na pergunta extraída.
-3. RESPOSTA: Logo abaixo de cada pergunta, gere uma sugestão de resposta técnica baseada estritamente na anamnese, exames e análise do caso. Se faltar dado, sugira "Aguardando avaliação pericial complementar."
+TAREFA: Leia o documento acima na íntegra. Localize e extraia todas as perguntas (quesitos) formuladas EXCLUSIVAMENTE pela Reclamada. Abaixo de cada pergunta extraída, gere a resposta técnica correspondente agindo como perito médico.
 
-REGRA DE FORMATAÇÃO: Use uma quebra de linha dupla (\\n\\n) entre a resposta de um quesito e a pergunta do próximo.
+FORMATO DE SAÍDA:
+QUESITO 1: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
 
-ESTRUTURA EXATA ESPERADA:
-QUESITO 1: [Pergunta com acentos corrigidos]
-RESPOSTA: [Sugestão de resposta técnica]
+QUESITO 2: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
 
-QUESITO 2: [Pergunta com acentos corrigidos]
-RESPOSTA: [Sugestão de resposta técnica]
-
-FOCO DE BUSCA: As perguntas da Reclamada estão tipicamente localizadas no FINAL do texto (Contestações e Despachos). Procure por pontos de interrogação (?), listas numeradas, e termos como 'diga o perito', 'informe', 'esclareça'. Extraia as perguntas e responda-as tecnicamente.
-
-REGRA DE INEXISTÊNCIA: Caso não exista absolutamente nenhuma pergunta formulada pela Reclamada no texto, retorne apenas a frase exata: 'Quesitos da Reclamada não identificados nos autos.'`
+REGRA DE INEXISTÊNCIA: Se e somente se o documento realmente não contiver perguntas da Reclamada, retorne unicamente: 'Quesitos da Reclamada não identificados nos autos.'`
   }
 };
 
