@@ -856,6 +856,50 @@ ESTRUTURA DA RESPOSTA:
 - Sensibilidade (quando aplicável)
 
 Forneça entre 8-12 perguntas e 5-8 testes/manobras específicas relevantes para os CIDs informados.`
+  },
+  
+  // ================================
+  // CARD: conclusao | SECTION: conclusao (Geração)
+  // ================================
+  prompt_gen_conclusao: {
+    cardId: 'conclusao',
+    sectionId: 'conclusao',
+    description: 'Análise Conclusiva - Gerar',
+    variables: ['cids', 'nexoCausal', 'incapacidade', 'historiaAtual', 'exameFisico'],
+    order: 1,
+    prompt: `Você é um perito médico do trabalho. Com base nos dados do caso, elabore a análise conclusiva do laudo pericial.
+
+DADOS DO CASO:
+- CIDs: \${cids}
+- Nexo causal: \${nexoCausal}
+- Incapacidade: \${incapacidade}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+
+Elabore uma conclusão técnica fundamentada que sintetize:
+1. O diagnóstico confirmado e os CIDs pertinentes
+2. A relação causal com a atividade laboral (nexo)
+3. O grau e tipo de incapacidade constatada
+4. Prognóstico e recomendações
+
+Seja objetivo e imparcial. Máximo 4 parágrafos.`
+  },
+  prompt_gen_destino_sugerido: {
+    cardId: 'conclusao',
+    sectionId: 'conclusao',
+    description: 'Destino Sugerido - Gerar',
+    variables: ['cids', 'incapacidade', 'nexoCausal'],
+    order: 2,
+    prompt: `Você é um perito médico do trabalho. Com base na análise do caso, indique o destino/encaminhamento sugerido para o periciando.
+
+DADOS DO CASO:
+- CIDs: \${cids}
+- Incapacidade: \${incapacidade}
+- Nexo causal: \${nexoCausal}
+
+Indique de forma direta e objetiva o destino sugerido. Exemplos: "Retorno ao trabalho sem restrições", "Reabilitação profissional", "Aposentadoria por invalidez", "Manutenção do benefício por incapacidade temporária".
+
+Responda em no máximo 2 frases.`
   }
 };
 

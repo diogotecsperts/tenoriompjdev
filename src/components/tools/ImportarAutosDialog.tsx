@@ -120,6 +120,8 @@ interface ExtractedData {
     descricao_doencas: string;
     nexo_causal: string;
     incapacidade: string;
+    conclusao: string;
+    destino_sugerido: string;
     referencias_bibliograficas: string;
   };
   resumo: string;
@@ -1074,7 +1076,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         nexo_causal_justificativa: extractedData.resumos_ia?.nexo_causal || '',
         analise_incapacidade_laboral: extractedData.resumos_ia?.incapacidade || '',
         // Análise Conclusiva - vazio na importação (isFieldEmpty oculta a seção no DOCX/PDF)
-        conclusao_analise: '',
+        conclusao_analise: extractedData.resumos_ia?.conclusao || '',
+        conclusao_destino: extractedData.resumos_ia?.destino_sugerido || '',
         referencias_bibliograficas: extractedData.resumos_ia?.referencias_bibliograficas || '',
         
         // Campo fixo gerenciado via banco de dados (config_metodologia_padrao)
@@ -1178,6 +1181,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       descricao_doencas: partial.resumos_parciais?.descricao_doencas || '',
       nexo_causal: partial.resumos_parciais?.nexo_causal || '',
       incapacidade: partial.resumos_parciais?.incapacidade || '',
+      conclusao: partial.resumos_parciais?.conclusao || '',
+      destino_sugerido: partial.resumos_parciais?.destino_sugerido || '',
       referencias_bibliograficas: partial.resumos_parciais?.referencias_bibliograficas || '',
     };
     
