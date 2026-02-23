@@ -950,7 +950,10 @@ async function getPromptForType(tipo: string, ctx: any): Promise<string> {
     
     // Outros campos que podem ser usados em prompts futuros
     metodologia: ctx.metodologia || 'Não informado',
-    conclusao: ctx.conclusao || 'Não informado'
+    conclusao: ctx.conclusao || 'Não informado',
+    
+    // Texto bruto integral do processo para quesitos
+    textoProcesso: ctx.textoProcesso || '',
   };
   
   try {
