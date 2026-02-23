@@ -627,6 +627,18 @@ function sanitizeOcrAccents(text: string | undefined): string {
     'estetico': 'estético', 'estetica': 'estética',
     'auxilio': 'auxílio', 'necessario': 'necessário',
     'temporaria': 'temporária',
+    'pressao': 'pressão', 'internacao': 'internação', 'recuperacao': 'recuperação',
+    'evolucao': 'evolução', 'realizacao': 'realização', 'restricao': 'restrição',
+    'exposicao': 'exposição', 'concessao': 'concessão', 'condicao': 'condição',
+    'condicoes': 'condições', 'alteracao': 'alteração', 'alteracoes': 'alterações',
+    'comprovacao': 'comprovação', 'medicacao': 'medicação', 'medicacoes': 'medicações',
+    'prescricao': 'prescrição', 'respiratoria': 'respiratória',
+    'ortostatica': 'ortostática', 'clinico': 'clínico', 'diagnostico': 'diagnóstico',
+    'historico': 'histórico', 'prontuario': 'prontuário', 'calcados': 'calçados',
+    'producao': 'produção', 'relacao': 'relação', 'sindrome': 'síndrome',
+    'neurologico': 'neurológico', 'neurologica': 'neurológica',
+    'ortopedico': 'ortopédico', 'ortopedica': 'ortopédica',
+    'psiquiatrico': 'psiquiátrico', 'psiquiatrica': 'psiquiátrica',
   };
 
   let sanitized = text;
