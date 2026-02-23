@@ -1160,6 +1160,14 @@ const results: Record<string, string> = {
     quesitos_reclamada: ''
   };
 
+  // Helper: limpa strings contaminadas com "não identificados" para evitar LLM anchoring
+  const sanitizeQuesitos = (text: string | undefined): string => {
+    if (!text) return '';
+    if (text.toLowerCase().includes('não identificados') || 
+        text.toLowerCase().includes('nao identificados')) return '';
+    return text;
+  };
+
   // Buscar configuração de IA
   const aiConfig = await getAIConfig();
   console.log(`[gerarResumosIA] Using AI Config - Provider: ${aiConfig.provider}, Model: ${aiConfig.model}`);
@@ -1191,9 +1199,9 @@ const results: Record<string, string> = {
     laudosMedicos: extractedData.exame_clinico?.laudos_medicos || '',
     lesoesDescritas: extractedData.exame_clinico?.lesoes_descritas || '',
     // Quesitos brutos para a sub-rotina automática
-    quesitosJuizo: extractedData.quesitos?.juizo || '',
-    quesitosReclamante: extractedData.quesitos?.reclamante || '',
-    quesitosReclamada: extractedData.quesitos?.reclamada || '',
+    quesitosJuizo: sanitizeQuesitos(extractedData.quesitos?.juizo),
+    quesitosReclamante: sanitizeQuesitos(extractedData.quesitos?.reclamante),
+    quesitosReclamada: sanitizeQuesitos(extractedData.quesitos?.reclamada),
     // Serão preenchidos dinamicamente após gerar nexo_causal e incapacidade
     nexoCausalGerado: '',
     incapacidadeGerada: '',
@@ -1207,9 +1215,7 @@ const results: Record<string, string> = {
       extractedData.textos_brutos?.peticao_inicial || '',
       extractedData.textos_brutos?.contestacao || '',
       extractedData.resumo_peticao_inicial || '',
-      extractedData.quesitos?.juizo || '',
-      extractedData.quesitos?.reclamante || '',
-      extractedData.quesitos?.reclamada || ''
+      // Quesitos removidos do fallback (podem conter "não identificados" contaminando o contexto)
     ].filter(Boolean).join('\n\n');
     
     if (fallbackProcesso.length > 100) {
@@ -2520,10 +2526,11 @@ async function processarPDFBackground(
             
             extractedData = ensureValidStructure(parsed);
             
-            // Capturar head+tail do texto OCR para busca agressiva de quesitos
-            if (mistralRawText && mistralRawText.length > 1000) {
-              const _head = mistralRawText.slice(0, 60000);
-              const _tail = mistralRawText.slice(-60000);
+            // Capturar head+tail do texto OCR para busca agressiva de quesitos (com fallback)
+            const textoOCR = mistralRawText || parsed?.text || extractedData?.textos_brutos?.peticao_inicial || '';
+            if (textoOCR && textoOCR.length > 1000) {
+              const _head = textoOCR.slice(0, 60000);
+              const _tail = textoOCR.slice(-60000);
               (extractedData as any)._rawTextTail = _head + 
                 "\n\n...[CONTEUDO INTERMEDIARIO OMITIDO PELO SISTEMA]...\n\n" + _tail;
               console.log(`[processar-autos] Preserved head+tail for quesitos (mistral-ocr): ${(extractedData as any)._rawTextTail.length} chars`);
