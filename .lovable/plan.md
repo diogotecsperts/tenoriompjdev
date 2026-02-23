@@ -1,90 +1,110 @@
 
 
-# Correção: Prompt Dinâmico para Quesitos (Empty State Confusion)
+# Correção: Texto Integral + Prompts Simplificados (processar-autos + seed-prompts)
 
-## Diagnóstico Confirmado pelos Logs
+## Alterações (2 arquivos, 2 deploys)
 
-Os logs do Supabase confirmam que as correções anteriores funcionaram:
-- sanitizeQuesitos limpou o juizo (0 chars)
-- Head+Tail preservou 120.055 chars de textoProcesso
-- Reclamante (999 chars) e Reclamada (1.772 chars) tinham conteúdo real
+### Arquivo 1: `supabase/functions/processar-autos/index.ts`
 
-O problema restante: quando `quesitosTexto` esta vazio (0 chars), o prompt renderiza assim:
+#### Mudança 1: Remover fatiamento Head+Tail (linhas 2532-2540)
 
-```text
-QUESITOS BRUTOS DO JUÍZO (extraídos do PDF — podem conter erros de OCR):
-[VAZIO]
+Substituir o bloco de captura com slice por texto integral:
 
-TEXTO BRUTO DO PROCESSO (para busca agressiva — use se os quesitos acima estiverem vazios ou incompletos):
-[120k chars]
+```typescript
+// ANTES:
+const textoOCR = mistralRawText || parsed?.text || extractedData?.textos_brutos?.peticao_inicial || '';
+if (textoOCR && textoOCR.length > 1000) {
+  const _head = textoOCR.slice(0, 60000);
+  const _tail = textoOCR.slice(-60000);
+  (extractedData as any)._rawTextTail = _head + 
+    "\n\n...[CONTEUDO INTERMEDIARIO OMITIDO PELO SISTEMA]...\n\n" + _tail;
+  console.log(`[processar-autos] Preserved head+tail for quesitos (mistral-ocr): ${(extractedData as any)._rawTextTail.length} chars`);
+}
+
+// DEPOIS:
+const textoOCR = mistralRawText || parsed?.text || extractedData?.textos_brutos?.peticao_inicial || '';
+if (textoOCR && textoOCR.length > 1000) {
+  (extractedData as any)._rawTextTail = textoOCR;
+  console.log(`[processar-autos] Preserved full text for quesitos (mistral-ocr): ${textoOCR.length} chars`);
+}
 ```
 
-O Gemini ve a secao vazia, interpreta que "nao ha quesitos previamente extraidos", e dispara a REGRA DE INEXISTENCIA antes de procurar no textoProcesso.
+#### Mudança 2: Simplificar os 3 prompts de quesitos (linhas 827-935)
 
-## Correcao (1 arquivo, 1 deploy)
+Substituir os 3 prompts (quesitos_juizo, quesitos_reclamante, quesitos_reclamada) pela estrutura limpa. Exemplo para juizo:
 
-### Arquivo: `supabase/functions/processar-autos/index.ts`
+```
+TEXTO INTEGRAL DO PROCESSO:
+${textoProcesso}
 
-### Mudanca 1: Tornar a secao de quesitos brutos condicional em fillPromptVariables (linha 987)
+DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
+- CIDs diagnosticados: ${cids}
+- História atual: ${historiaAtual}
+- Exame físico: ${exameFisico}
+- Exames complementares: ${examesComplementares}
+- Atividades laborais: ${atividadesLaborais}
+- Nexo causal: ${nexoCausal}
+- Incapacidade: ${incapacidade}
 
-Alterar a logica de `quesitosTexto` para injetar uma directiva de busca quando vazio, em vez de uma string vazia:
+TAREFA: Leia o documento acima na íntegra. Localize e extraia todas as perguntas (quesitos) formuladas EXCLUSIVAMENTE pelo Juízo. Abaixo de cada pergunta extraída, gere a resposta técnica correspondente agindo como perito médico.
 
-Substituir (linha 987):
+FORMATO DE SAÍDA:
+QUESITO 1: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
+
+QUESITO 2: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
+
+REGRA DE INEXISTÊNCIA: Se e somente se o documento realmente não contiver perguntas do Juízo, retorne unicamente: 'Quesitos do Juízo não identificados nos autos.'
+```
+
+Mesma estrutura para Reclamante e Reclamada (mudando apenas o nome da parte).
+
+#### Mudança 3: Simplificar fillPromptVariables (linha 990)
+
+Reverter a diretiva complexa para fallback simples:
 ```typescript
 quesitosTexto: ctx.quesitosTexto || ctx.quesitosJuizo || ctx.quesitosReclamante || ctx.quesitosReclamada || '',
 ```
 
-Por:
-```typescript
-quesitosTexto: ctx.quesitosTexto || ctx.quesitosJuizo || ctx.quesitosReclamante || ctx.quesitosReclamada || '[NENHUM QUESITO PRE-EXTRAIDO — BUSCA NO TEXTO BRUTO E OBRIGATORIA]',
-```
+### Arquivo 2: `supabase/functions/seed-prompts/index.ts`
 
-### Mudanca 2: Alterar os 3 templates de prompt para remover a secao de quesitos brutos quando vazia
+#### Mudança 4: Atualizar os 3 prompts de regeneração de quesitos (linhas 477-557)
 
-Substituir nos 3 prompts (linhas 829-830, 866-867, 901-902) o bloco fixo:
+Substituir os 3 prompts `prompt_regen_quesitosJuizo`, `prompt_regen_quesitosReclamante` e `prompt_regen_quesitosReclamada` pela mesma estrutura limpa usada no processar-autos. Exemplo para Juizo:
 
 ```
-QUESITOS BRUTOS DO [PARTE] (extraídos do PDF — podem conter erros de OCR):
-${quesitosTexto}
-
-TEXTO BRUTO DO PROCESSO (para busca agressiva — use se os quesitos acima estiverem vazios ou incompletos):
+TEXTO INTEGRAL DO PROCESSO:
 ${textoProcesso}
+
+DADOS DO CASO PARA FUNDAMENTAR AS RESPOSTAS:
+- CIDs diagnosticados: ${cids}
+- História atual: ${historiaAtual}
+- Exame físico: ${exameFisico}
+- Exames complementares: ${examesComplementares}
+- Atividades laborais: ${atividadesLaborais}
+- Nexo causal: ${nexoCausal}
+- Incapacidade: ${incapacidade}
+
+TAREFA: Leia o documento acima na íntegra. Localize e extraia todas as perguntas (quesitos) formuladas EXCLUSIVAMENTE pelo Juízo. Abaixo de cada pergunta extraída, gere a resposta técnica correspondente agindo como perito médico.
+
+FORMATO DE SAÍDA:
+QUESITO 1: [pergunta corrigida]
+RESPOSTA: [resposta técnica fundamentada]
+
+REGRA DE INEXISTÊNCIA: Se e somente se o documento realmente não contiver perguntas do Juízo, retorne unicamente: 'Quesitos do Juízo não identificados nos autos.'
 ```
 
-Por uma versao com instrucao mais direta:
+Mesma estrutura para Reclamante e Reclamada.
 
-```
-CONTEXTO DE QUESITOS:
-${quesitosTexto}
+## O que NÃO muda
 
-TEXTO BRUTO COMPLETO DO PROCESSO (FONTE PRIMARIA — BUSQUE AQUI):
-${textoProcesso}
-```
-
-E mover o "FOCO DE BUSCA" para ANTES do texto bruto, nao depois.
-
-### Mudanca 3: Reforcar a prioridade do textoProcesso nas INSTRUCOES OBRIGATORIAS
-
-Nos 3 prompts, adicionar como instrucao numero 0 (antes de todas as outras):
-
-```
-0. PRIORIDADE ABSOLUTA: O TEXTO BRUTO DO PROCESSO e a fonte primaria. SEMPRE leia e analise o texto bruto completo para localizar os quesitos, INDEPENDENTEMENTE de existirem quesitos pre-extraidos ou nao.
-```
-
-## O que NAO muda
-
-- shouldGenerate: true permanece nos 3 quesitos
 - sanitizeQuesitos permanece ativa
-- Head+Tail permanece ativo
+- shouldGenerate: true permanece
 - Formato QUESITO/RESPOSTA permanece
-- Regra de inexistencia permanece (so dispara se realmente nao houver perguntas no texto)
-
-## Resultado Esperado
-
-1. Quando quesitosTexto=0: o Gemini recebe "[NENHUM QUESITO PRE-EXTRAIDO]" em vez de vazio, forcando a busca no textoProcesso
-2. O cabecalho "CONTEXTO DE QUESITOS" e neutro e nao sugere que ja houve validacao previa
-3. A instrucao 0 reforca que o textoProcesso e a fonte primaria
+- Frase de inexistência permanece compatível com frontend
+- Fallback robusto de textoProcesso permanece (linhas 1216-1229)
 
 ## Deploy
 
-`processar-autos`
+`processar-autos` e `seed-prompts`
