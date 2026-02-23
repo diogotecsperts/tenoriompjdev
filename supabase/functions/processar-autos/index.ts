@@ -2520,6 +2520,15 @@ async function processarPDFBackground(
             
             extractedData = ensureValidStructure(parsed);
             
+            // Capturar head+tail do texto OCR para busca agressiva de quesitos
+            if (mistralRawText && mistralRawText.length > 1000) {
+              const _head = mistralRawText.slice(0, 60000);
+              const _tail = mistralRawText.slice(-60000);
+              (extractedData as any)._rawTextTail = _head + 
+                "\n\n...[CONTEUDO INTERMEDIARIO OMITIDO PELO SISTEMA]...\n\n" + _tail;
+              console.log(`[processar-autos] Preserved head+tail for quesitos (mistral-ocr): ${(extractedData as any)._rawTextTail.length} chars`);
+            }
+            
             // Skip the rest of the single-pass flow since we're done
             console.log('[processar-autos] Mistral OCR single-pass completed successfully');
             
