@@ -1,80 +1,57 @@
 
 
-# Correção de Pipeline: Forçar Execução e Fallback Robusto na Sub-rotina de Quesitos
+# Correção: Captura Head+Tail na Pipeline Mistral OCR Single-Pass
 
-## Diagnóstico Confirmado
+## Causa Raiz Confirmada (Logs do Supabase)
 
-O `_rawTextTail` não está sendo persistido em todas as pipelines (especialmente Mistral OCR e passagem única/base64), fazendo `textoProcesso` chegar vazio. O fallback existente (linha 2891) tenta montar a partir de `extractedData.textos_brutos`, mas se esses também estiverem vazios (Task Overload na extração), o `shouldGenerate` avalia como falso e a sub-rotina nem roda.
+Os logs provam exatamente o que aconteceu:
 
-## Alterações (1 arquivo, 1 deploy)
+1. Mistral OCR extraiu **195.376 caracteres** (105 paginas) com sucesso
+2. O Gemini estruturou o JSON, mas retornou quesitos como "nao identificados" (Task Overload na extracao)
+3. O `_rawTextTail` **NUNCA foi capturado** na pipeline Mistral OCR -- "Preserved head+tail" nao aparece nos logs
+4. O fallback da linha 2920 montou apenas **2.461 chars** a partir dos campos ja extraidos (que ja continham "nao identificados")
+5. O Gemini foi chamado com 2.461 chars de contexto praticamente inutil -- e corretamente retornou "nao identificados" porque nao havia texto real para buscar
+
+O problema: as capturas Head+Tail foram inseridas apenas na pipeline **chunked** (linha 1690) e **two-phase** (linha 2251), mas a pipeline **Mistral OCR single-pass** (linhas 2480-2524) ficou sem captura. E essa e exatamente a pipeline que esta sendo usada!
+
+## Correcao (1 arquivo, 1 deploy)
 
 ### Arquivo: `supabase/functions/processar-autos/index.ts`
 
-### Mudanca 1: Forcar shouldGenerate dos 3 quesitos (linhas 1246-1248)
+### Mudanca unica: Inserir captura Head+Tail apos linha 2521
 
-Substituir as condicionais complexas por `shouldGenerate: true` nos 3 quesitos. A regra de inexistencia no prompt ja garante saida controlada se nao houver dados.
-
-### Mudanca 2: Fallback robusto de contexto DENTRO do gerarResumosIA (apos linha 1201)
-
-Logo apos definir `textoProcesso` na linha 1201, adicionar fallback agressivo:
+Apos `extractedData = ensureValidStructure(parsed);` (linha 2521), e ANTES do log de conclusao (linha 2524), inserir:
 
 ```typescript
-// Fallback robusto: se _rawTextTail se perdeu na memoria, reconstruir a partir dos campos ja extraidos
-if (!contexto.textoProcesso || contexto.textoProcesso.length < 500) {
-  const fallbackProcesso = [
-    extractedData.textos_brutos?.peticao_inicial || '',
-    extractedData.textos_brutos?.contestacao || '',
-    extractedData.resumo_peticao_inicial || '',
-    extractedData.quesitos?.juizo || '',
-    extractedData.quesitos?.reclamante || '',
-    extractedData.quesitos?.reclamada || ''
-  ].filter(Boolean).join('\n\n');
-  
-  if (fallbackProcesso.length > 100) {
-    contexto.textoProcesso = fallbackProcesso;
-    console.log(`[gerarResumosIA] FALLBACK textoProcesso reconstruido: ${fallbackProcesso.length} chars`);
-  } else {
-    console.warn('[gerarResumosIA] ALERTA: textoProcesso vazio E fallback insuficiente');
-  }
+// Capturar head+tail do texto OCR para busca agressiva de quesitos
+if (mistralRawText && mistralRawText.length > 1000) {
+  const _head = mistralRawText.slice(0, 60000);
+  const _tail = mistralRawText.slice(-60000);
+  (extractedData as any)._rawTextTail = _head + 
+    "\n\n...[CONTEUDO INTERMEDIARIO OMITIDO PELO SISTEMA]...\n\n" + _tail;
+  console.log(`[processar-autos] Preserved head+tail for quesitos (mistral-ocr): ${(extractedData as any)._rawTextTail.length} chars`);
 }
 ```
 
-### Mudanca 3: Debug nos logs da Edge Function (NAO no prompt)
-
-Dentro do loop de geracao (linha 1297), antes da chamada `callAI`, adicionar log especifico para quesitos mostrando o tamanho das variaveis injetadas:
-
-```typescript
-if (tipo.startsWith('quesitos_')) {
-  console.log(`[gerarResumosIA] DEBUG QUESITOS ${tipo}:`, {
-    quesitosTexto: contexto.quesitosTexto?.length || 0,
-    textoProcesso: contexto.textoProcesso?.length || 0,
-    nexoCausal: contexto.nexoCausalGerado?.length || 0,
-    incapacidade: contexto.incapacidadeGerada?.length || 0
-  });
-}
-```
-
-Isso permite rastrear visualmente nos logs se o Gemini foi acionado e com quantos caracteres, sem contaminar o documento final.
+Isso captura os 195k chars ANTES de `mistralRawText` sair de escopo, criando o buffer Head+Tail de ~120k chars que a sub-rotina de quesitos precisa.
 
 ## O que NAO muda
 
-- Prompts dos quesitos (ja estao suavizados e com direcional posicional)
-- Fluxo de dados e logica de salvamento
-- Formato de saida (QUESITO/RESPOSTA)
-- Frase de fallback de inexistencia (compativel com filtro do frontend)
+- Nenhuma outra pipeline e alterada
+- Os prompts suavizados permanecem
+- O shouldGenerate: true permanece
+- O fallback robusto permanece (agora como segunda linha de defesa)
+- Os logs de debug permanecem
 
-## Por que a Acao 3 original foi ajustada
+## Resultado Esperado
 
-A sintaxe `${textoProcesso.length}` nao funciona nos DEFAULT_PROMPTS porque eles usam interpolacao tardia (`\${textoProcesso}` e substituido pela `fillPromptVariables`). O `.length` nao seria avaliado pelo JavaScript. Alem disso, injetar texto de debug na saida do LLM e arriscado -- poderia vazar para laudos exportados em DOCX/PDF.
+Na proxima importacao via Mistral OCR:
+- Log "Preserved head+tail for quesitos (mistral-ocr): ~120000 chars" aparecera
+- textoProcesso chegara com ~120k chars em vez de 2.461
+- O Gemini tera o texto real do PDF para encontrar os quesitos
+- O fallback de 2.461 chars so sera usado se mistralRawText falhar completamente
 
 ## Deploy
 
 `processar-autos`
-
-## Resultado Esperado
-
-1. Os 3 quesitos SEMPRE rodam (sem condicional de tamanho)
-2. Se `_rawTextTail` se perdeu, o fallback reconstroi contexto a partir de `extractedData`
-3. Logs da Edge Function mostram exatamente quantos caracteres cada variavel tem ao chamar o Gemini
-4. Zero risco de contaminacao de documentos legais com texto de debug
 
