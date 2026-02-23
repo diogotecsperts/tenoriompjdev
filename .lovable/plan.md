@@ -1,83 +1,89 @@
 
 
-# Correção: Descontaminação de Variáveis de Quesitos (LLM Anchoring Fix)
+# Correção: Prompt Dinâmico para Quesitos (Empty State Confusion)
 
-## Diagnóstico
+## Diagnóstico Confirmado pelos Logs
 
-O `extractedData.quesitos.reclamante` chega preenchido com "Quesitos do Reclamante não identificados nos autos." (resultado da extração inicial pelo Gemini). Quando esse texto é injetado na variável `${quesitosTexto}` do prompt, o Gemini interpreta como uma validação prévia do sistema e repete a frase, ignorando os 120k chars do `textoProcesso`.
+Os logs do Supabase confirmam que as correções anteriores funcionaram:
+- sanitizeQuesitos limpou o juizo (0 chars)
+- Head+Tail preservou 120.055 chars de textoProcesso
+- Reclamante (999 chars) e Reclamada (1.772 chars) tinham conteúdo real
 
-## Alterações (1 arquivo, 1 deploy)
+O problema restante: quando `quesitosTexto` esta vazio (0 chars), o prompt renderiza assim:
+
+```text
+QUESITOS BRUTOS DO JUÍZO (extraídos do PDF — podem conter erros de OCR):
+[VAZIO]
+
+TEXTO BRUTO DO PROCESSO (para busca agressiva — use se os quesitos acima estiverem vazios ou incompletos):
+[120k chars]
+```
+
+O Gemini ve a secao vazia, interpreta que "nao ha quesitos previamente extraidos", e dispara a REGRA DE INEXISTENCIA antes de procurar no textoProcesso.
+
+## Correcao (1 arquivo, 1 deploy)
 
 ### Arquivo: `supabase/functions/processar-autos/index.ts`
 
-### Mudança 1: Função sanitizeQuesitos (antes da linha 1194)
+### Mudanca 1: Tornar a secao de quesitos brutos condicional em fillPromptVariables (linha 987)
 
-Adicionar helper que limpa strings contaminadas:
+Alterar a logica de `quesitosTexto` para injetar uma directiva de busca quando vazio, em vez de uma string vazia:
 
+Substituir (linha 987):
 ```typescript
-const sanitizeQuesitos = (text: string | undefined): string => {
-  if (!text) return '';
-  if (text.toLowerCase().includes('não identificados') || 
-      text.toLowerCase().includes('nao identificados')) return '';
-  return text;
-};
-```
-
-### Mudança 2: Aplicar sanitização na montagem do contexto (linhas 1194-1196)
-
-Substituir:
-```typescript
-quesitosJuizo: extractedData.quesitos?.juizo || '',
-quesitosReclamante: extractedData.quesitos?.reclamante || '',
-quesitosReclamada: extractedData.quesitos?.reclamada || '',
+quesitosTexto: ctx.quesitosTexto || ctx.quesitosJuizo || ctx.quesitosReclamante || ctx.quesitosReclamada || '',
 ```
 
 Por:
 ```typescript
-quesitosJuizo: sanitizeQuesitos(extractedData.quesitos?.juizo),
-quesitosReclamante: sanitizeQuesitos(extractedData.quesitos?.reclamante),
-quesitosReclamada: sanitizeQuesitos(extractedData.quesitos?.reclamada),
+quesitosTexto: ctx.quesitosTexto || ctx.quesitosJuizo || ctx.quesitosReclamante || ctx.quesitosReclamada || '[NENHUM QUESITO PRE-EXTRAIDO — BUSCA NO TEXTO BRUTO E OBRIGATORIA]',
 ```
 
-### Mudança 3: Fallback de segurança na captura Head+Tail (linha 2524)
+### Mudanca 2: Alterar os 3 templates de prompt para remover a secao de quesitos brutos quando vazia
 
-Substituir:
-```typescript
-if (mistralRawText && mistralRawText.length > 1000) {
+Substituir nos 3 prompts (linhas 829-830, 866-867, 901-902) o bloco fixo:
+
+```
+QUESITOS BRUTOS DO [PARTE] (extraídos do PDF — podem conter erros de OCR):
+${quesitosTexto}
+
+TEXTO BRUTO DO PROCESSO (para busca agressiva — use se os quesitos acima estiverem vazios ou incompletos):
+${textoProcesso}
 ```
 
-Por:
-```typescript
-const textoOCR = mistralRawText || parsed?.text || extractedData?.textos_brutos?.peticao_inicial || '';
-if (textoOCR && textoOCR.length > 1000) {
+Por uma versao com instrucao mais direta:
+
+```
+CONTEXTO DE QUESITOS:
+${quesitosTexto}
+
+TEXTO BRUTO COMPLETO DO PROCESSO (FONTE PRIMARIA — BUSQUE AQUI):
+${textoProcesso}
 ```
 
-E usar `textoOCR` em vez de `mistralRawText` dentro do bloco (nas chamadas `.slice()`).
+E mover o "FOCO DE BUSCA" para ANTES do texto bruto, nao depois.
 
-### Mudança 4: Remover quesitos contaminados do fallback (linhas 1210-1212)
+### Mudanca 3: Reforcar a prioridade do textoProcesso nas INSTRUCOES OBRIGATORIAS
 
-No fallback robusto, remover as linhas que injetam quesitos contaminados no `textoProcesso`:
-```typescript
-// REMOVER estas 3 linhas:
-extractedData.quesitos?.juizo || '',
-extractedData.quesitos?.reclamante || '',
-extractedData.quesitos?.reclamada || ''
+Nos 3 prompts, adicionar como instrucao numero 0 (antes de todas as outras):
+
+```
+0. PRIORIDADE ABSOLUTA: O TEXTO BRUTO DO PROCESSO e a fonte primaria. SEMPRE leia e analise o texto bruto completo para localizar os quesitos, INDEPENDENTEMENTE de existirem quesitos pre-extraidos ou nao.
 ```
 
-Esses campos já estavam preenchidos com "não identificados", poluindo o fallback.
+## O que NAO muda
 
-## O que NÃO muda
-
-- Prompts dos quesitos permanecem suavizados
-- shouldGenerate: true permanece
-- Formato de saída QUESITO/RESPOSTA permanece
-- Frase de fallback de inexistência permanece compatível com frontend
+- shouldGenerate: true permanece nos 3 quesitos
+- sanitizeQuesitos permanece ativa
+- Head+Tail permanece ativo
+- Formato QUESITO/RESPOSTA permanece
+- Regra de inexistencia permanece (so dispara se realmente nao houver perguntas no texto)
 
 ## Resultado Esperado
 
-1. Log "DEBUG QUESITOS": `quesitosTexto: 0` (descontaminado) e `textoProcesso: ~120000`
-2. Gemini recebe texto limpo sem ancoragem de "não identificados"
-3. Gemini procura ativamente no textoProcesso de 120k chars pelas perguntas reais
+1. Quando quesitosTexto=0: o Gemini recebe "[NENHUM QUESITO PRE-EXTRAIDO]" em vez de vazio, forcando a busca no textoProcesso
+2. O cabecalho "CONTEXTO DE QUESITOS" e neutro e nao sugere que ja houve validacao previa
+3. A instrucao 0 reforca que o textoProcesso e a fonte primaria
 
 ## Deploy
 
