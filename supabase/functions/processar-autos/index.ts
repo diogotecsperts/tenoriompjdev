@@ -608,6 +608,39 @@ function tryFixTruncatedJson(jsonStr: string): object | null {
   }
 }
 
+// Sanitize OCR accent errors in short fields extracted via JSON
+function sanitizeOcrAccents(text: string | undefined): string {
+  if (!text) return '';
+  const dict: Record<string, string> = {
+    'lesao': 'lesão', 'lesoes': 'lesões',
+    'reducao': 'redução', 'funcao': 'função',
+    'avaliacao': 'avaliação', 'conclusao': 'conclusão',
+    'nao': 'não', 'sao': 'são',
+    'medico': 'médico', 'medica': 'médica',
+    'fisica': 'física', 'clinica': 'clínica',
+    'periodo': 'período', 'pos-hospitalar': 'pós-hospitalar',
+    'peticao': 'petição', 'acao': 'ação',
+    'profissao': 'profissão', 'funcoes': 'funções',
+    'orgao': 'órgão', 'orgaos': 'órgãos',
+    'infeccao': 'infecção', 'operacao': 'operação',
+    'reabilitacao': 'reabilitação', 'limitacao': 'limitação',
+    'estetico': 'estético', 'estetica': 'estética',
+    'auxilio': 'auxílio', 'necessario': 'necessário',
+    'temporaria': 'temporária',
+  };
+
+  let sanitized = text;
+  for (const [key, value] of Object.entries(dict)) {
+    const regex = new RegExp(`\\b${key}\\b`, 'gi');
+    sanitized = sanitized.replace(regex, (match) => {
+      return match.charAt(0) === match.charAt(0).toUpperCase()
+        ? value.charAt(0).toUpperCase() + value.slice(1)
+        : value;
+    });
+  }
+  return sanitized;
+}
+
 // Helper to create a valid structure with defaults
 function ensureValidStructure(data: any): object {
   const defaultStructure = {
@@ -656,6 +689,8 @@ const PROMPT_ID_MAPPING: Record<string, string> = {
   descricao_doencas: 'prompt_gen_descricao_doencas',
   nexo_causal: 'prompt_gen_nexo_causal',
   incapacidade: 'prompt_gen_incapacidade',
+  conclusao: 'prompt_gen_conclusao',
+  destino_sugerido: 'prompt_gen_destino_sugerido',
   referencias_bibliograficas: 'prompt_gen_referencias',
   quesitos_juizo: 'prompt_regen_quesitosJuizo',
   quesitos_reclamante: 'prompt_regen_quesitosReclamante',
@@ -891,7 +926,35 @@ RESPOSTA: [resposta técnica fundamentada]
 QUESITO 2: [pergunta corrigida]
 RESPOSTA: [resposta técnica fundamentada]
 
-REGRA DE INEXISTÊNCIA: Se e somente se o documento realmente não contiver perguntas da Reclamada, retorne unicamente: 'Quesitos da Reclamada não identificados nos autos.'`
+REGRA DE INEXISTÊNCIA: Se e somente se o documento realmente não contiver perguntas da Reclamada, retorne unicamente: 'Quesitos da Reclamada não identificados nos autos.'`,
+
+  conclusao: `Você é um perito médico do trabalho. Com base nos dados do caso, elabore a análise conclusiva do laudo pericial.
+
+DADOS DO CASO:
+- CIDs: \${cids}
+- Nexo causal: \${nexoCausal}
+- Incapacidade: \${incapacidade}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+
+Elabore uma conclusão técnica fundamentada que sintetize:
+1. O diagnóstico confirmado e os CIDs pertinentes
+2. A relação causal com a atividade laboral (nexo)
+3. O grau e tipo de incapacidade constatada
+4. Prognóstico e recomendações
+
+Seja objetivo e imparcial. Máximo 4 parágrafos.`,
+
+  destino_sugerido: `Você é um perito médico do trabalho. Com base na análise do caso, indique o destino/encaminhamento sugerido para o periciando.
+
+DADOS DO CASO:
+- CIDs: \${cids}
+- Incapacidade: \${incapacidade}
+- Nexo causal: \${nexoCausal}
+
+Indique de forma direta e objetiva o destino sugerido. Exemplos: "Retorno ao trabalho sem restrições", "Reabilitação profissional", "Aposentadoria por invalidez", "Manutenção do benefício por incapacidade temporária".
+
+Responda em no máximo 2 frases.`
 };
 
 /**
@@ -951,6 +1014,7 @@ async function getPromptForType(tipo: string, ctx: any): Promise<string> {
     // Outros campos que podem ser usados em prompts futuros
     metodologia: ctx.metodologia || 'Não informado',
     conclusao: ctx.conclusao || 'Não informado',
+    destinoSugerido: ctx.destinoSugerido || '',
     
     // Texto bruto integral do processo para quesitos
     textoProcesso: ctx.textoProcesso || '',
@@ -1119,6 +1183,8 @@ const results: Record<string, string> = {
     descricao_doencas: '',
     nexo_causal: '',
     incapacidade: '',
+    conclusao: '',
+    destino_sugerido: '',
     referencias_bibliograficas: '',
     quesitos_juizo: '',
     quesitos_reclamante: '',
@@ -1227,15 +1293,18 @@ const results: Record<string, string> = {
   const summariesToGenerate: Array<{ tipo: string; shouldGenerate: boolean; step: string; progress: number }> = [
     // PRIORITY 1: Technical-scientific summaries (most important)
     { tipo: 'descricao_doencas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando descrição técnica das doenças...', progress: 50 },
-    { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Analisando nexo causal...', progress: 60 },
-    { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares || hasHistoryContext || hasMedicalContext, step: 'Analisando incapacidade laboral...', progress: 70 },
+    { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Analisando nexo causal...', progress: 58 },
+    { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares || hasHistoryContext || hasMedicalContext, step: 'Analisando incapacidade laboral...', progress: 66 },
+    // PRIORITY 1.5: Conclusão e destino (fallback para campos frequentemente vazios)
+    { tipo: 'conclusao', shouldGenerate: !contexto.conclusao || contexto.conclusao.length < 50 || contexto.conclusao === 'Não informado', step: 'Gerando análise conclusiva...', progress: 72 },
+    { tipo: 'destino_sugerido', shouldGenerate: !contexto.destinoSugerido || (contexto.destinoSugerido || '').length < 5, step: 'Definindo destino sugerido...', progress: 74 },
     // PRIORITY 2: Case summaries (only if content is substantial — prevents hallucination)
-    { tipo: 'resumo_peticao', shouldGenerate: isContentSufficient(contexto.peticaoInicial), step: 'Gerando resumo da petição inicial...', progress: 80 },
-    { tipo: 'resumo_contestacao', shouldGenerate: isContentSufficient(contexto.contestacao), step: 'Gerando resumo da contestação...', progress: 85 },
+    { tipo: 'resumo_peticao', shouldGenerate: isContentSufficient(contexto.peticaoInicial), step: 'Gerando resumo da petição inicial...', progress: 78 },
+    { tipo: 'resumo_contestacao', shouldGenerate: isContentSufficient(contexto.contestacao), step: 'Gerando resumo da contestação...', progress: 82 },
     // PRIORITY 2.5: Quesitos — respostas automáticas (Zero-Touch)
-    { tipo: 'quesitos_juizo', shouldGenerate: true, step: 'Respondendo quesitos do Juízo...', progress: 87 },
-    { tipo: 'quesitos_reclamante', shouldGenerate: true, step: 'Respondendo quesitos do Reclamante...', progress: 89 },
-    { tipo: 'quesitos_reclamada', shouldGenerate: true, step: 'Respondendo quesitos da Reclamada...', progress: 91 },
+    { tipo: 'quesitos_juizo', shouldGenerate: true, step: 'Respondendo quesitos do Juízo...', progress: 86 },
+    { tipo: 'quesitos_reclamante', shouldGenerate: true, step: 'Respondendo quesitos do Reclamante...', progress: 88 },
+    { tipo: 'quesitos_reclamada', shouldGenerate: true, step: 'Respondendo quesitos da Reclamada...', progress: 90 },
     // PRIORITY 3: Least critical (database has default value for this field)
     { tipo: 'referencias_bibliograficas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando referências bibliográficas...', progress: 92 }
   ];
@@ -1335,6 +1404,8 @@ const results: Record<string, string> = {
         } else if (tipo === 'incapacidade') {
           contexto.incapacidadeGerada = result.text;
           contexto.incapacidade = result.text;
+        } else if (tipo === 'conclusao') {
+          contexto.conclusao = result.text;
         } else if (tipo === 'quesitos_juizo') {
           contexto.quesitosTexto = contexto.quesitosJuizo;
         } else if (tipo === 'quesitos_reclamante') {
@@ -2912,6 +2983,23 @@ async function processarPDFBackground(
     // @ts-ignore - intentional null assignment for memory relief
     visionResult = null;
     console.log('[processar-autos] MEMORY: Freed visionResult before summaries');
+
+    // Sanitize accent-prone short fields before summary generation
+    if (extractedData.avaliacao_sequelas) {
+      extractedData.avaliacao_sequelas.tabela_susep = sanitizeOcrAccents(extractedData.avaliacao_sequelas.tabela_susep);
+      extractedData.avaliacao_sequelas.dano_estetico = sanitizeOcrAccents(extractedData.avaliacao_sequelas.dano_estetico);
+      extractedData.avaliacao_sequelas.auxilio_terceiros = sanitizeOcrAccents(extractedData.avaliacao_sequelas.auxilio_terceiros);
+    }
+    if (extractedData.historico) {
+      extractedData.historico.historia_atual = sanitizeOcrAccents(extractedData.historico.historia_atual);
+      extractedData.historico.antecedentes_patologicos = sanitizeOcrAccents(extractedData.historico.antecedentes_patologicos);
+      extractedData.historico.tratamentos_realizados = sanitizeOcrAccents(extractedData.historico.tratamentos_realizados);
+    }
+    if (extractedData.exame_clinico) {
+      extractedData.exame_clinico.exame_fisico = sanitizeOcrAccents(extractedData.exame_clinico.exame_fisico);
+      extractedData.exame_clinico.laudos_medicos = sanitizeOcrAccents(extractedData.exame_clinico.laudos_medicos);
+    }
+    console.log('[processar-autos] sanitizeOcrAccents applied to extractedData fields');
 
     // Generate AI summaries with progress updates
     console.log("[processar-autos] Starting AI summary generation...");
