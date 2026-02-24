@@ -1,56 +1,32 @@
 
 
-# Fix: Politicas RLS da tabela user_presence sao TODAS RESTRICTIVE
+# Fix: Falta politica SELECT para usuarios normais na tabela user_presence
 
-## Causa raiz definitiva
+## Causa raiz
 
-Todas as politicas RLS na tabela `user_presence` estao definidas como **RESTRICTIVE** (nao permissivas). No PostgreSQL, o modelo de avaliacao e:
+O PostgreSQL exige que o usuario tenha permissao SELECT na coluna usada no `ON CONFLICT` para que o upsert funcione. Na tabela `user_presence`, apenas desenvolvedores possuem politica SELECT (via `is_developer()`). Usuarios normais como o Bruno nao conseguem fazer upsert porque nao tem visibilidade sobre a coluna de conflito (`user_id`).
 
-1. Primeiro, todas as politicas PERMISSIVE sao avaliadas com logica OR (basta uma passar)
-2. Depois, todas as RESTRICTIVE sao avaliadas com logica AND (todas precisam passar)
-3. Se nao ha NENHUMA politica PERMISSIVE, o acesso e **negado por padrao**
-
-Resultado: nenhum usuario consegue fazer INSERT nem UPDATE, porque nao existe nenhuma politica PERMISSIVE para conceder o acesso base.
-
-O Diogo so tem um registro antigo porque ele foi criado antes de RLS ser ativada (ou por outra via).
+Isso explica perfeitamente o comportamento observado:
+- **Diogo** (developer) tem SELECT via `is_developer()` -> upsert funciona
+- **Bruno** (usuario normal) nao tem SELECT -> ON CONFLICT falha -> erro RLS
 
 ## Correcao
 
-Uma unica migracao SQL para recriar as 3 politicas como PERMISSIVE:
+Uma migracao SQL para adicionar uma politica SELECT que permite usuarios verem sua propria linha de presenca:
 
 ```sql
--- Recriar INSERT como PERMISSIVE
-DROP POLICY IF EXISTS "Users can upsert own presence" ON public.user_presence;
-CREATE POLICY "Users can upsert own presence"
-  ON public.user_presence
-  FOR INSERT
-  TO authenticated
-  WITH CHECK (auth.uid() = user_id);
-
--- Recriar UPDATE como PERMISSIVE
-DROP POLICY IF EXISTS "Users can update own presence" ON public.user_presence;
-CREATE POLICY "Users can update own presence"
-  ON public.user_presence
-  FOR UPDATE
-  TO authenticated
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
-
--- Recriar SELECT (dev) como PERMISSIVE
-DROP POLICY IF EXISTS "Developers can view presence" ON public.user_presence;
-CREATE POLICY "Developers can view presence"
+CREATE POLICY "Users can view own presence"
   ON public.user_presence
   FOR SELECT
   TO authenticated
-  USING (is_developer());
+  USING (auth.uid() = user_id);
 ```
 
-A diferenca tecnica: sem o `AS RESTRICTIVE`, PostgreSQL cria politicas como PERMISSIVE por padrao, que e o comportamento correto para este caso.
+## Impacto
 
-## Seguranca
-
-- Semantica identica: usuarios so alteram sua propria presenca, devs podem visualizar tudo
 - Nenhum arquivo de codigo alterado
 - Nenhum edge function tocado
-- Apenas as 3 politicas RLS da tabela `user_presence` sao recriadas
+- Apenas uma nova politica SELECT adicionada
+- Seguranca mantida: cada usuario so ve sua propria presenca, desenvolvedores continuam vendo tudo
+- Corrige definitivamente o upsert para usuarios nao-desenvolvedores
 
