@@ -1,155 +1,143 @@
 
 
-# Historico de Acesso - Nova Pagina no DevPanel
+# Fix: Heartbeat de Presenca - 3 Bugs Identificados
 
-## Avaliacao de Riscos
+## Diagnostico
 
-### Risco ZERO para o pipeline existente
-- Nenhum arquivo de edge function (processar-autos, gerar-resumos, etc.) sera tocado
-- Nenhum contexto (AuthContext, LaudoContext, NavigationGuard) sera modificado na logica core
-- A unica alteracao no AuthContext sera uma unica linha de INSERT em background apos login bem-sucedido, sem await (fire-and-forget), sem alterar o fluxo de retorno
-- Tabelas existentes (laudos, profiles, etc.) nao serao alteradas
+Dados do banco:
+- `user_presence` tem apenas 1 registro (Diogo), com `is_online: false`
+- Bruno (e48a06e4) nao tem NENHUM registro na tabela
+- O heartbeat do Bruno falha silenciosamente (catch vazio esconde o erro)
 
-### O que e perfeitamente possivel
-1. **Registro de logins** - Sim, seguro. Um INSERT fire-and-forget apos `signInWithPassword` retornar sucesso
-2. **Laudos finalizados** - Sim, sem codigo novo. A tabela `laudos` ja tem `created_at` e `user_id`, basta consultar
-3. **Filtro Dev vs Usuarios** - Sim, trivial. Ja temos 2 usuarios no profiles (Diogo=dev, Bruno=user)
-4. **Status online/offline** - Sim, possivel via heartbeat. Um pequeno hook que atualiza `last_seen_at` a cada 60s numa tabela `user_presence`
+3 bugs no codigo atual:
 
-### Unico ponto de atencao
-O heartbeat de presenca adiciona uma chamada ao Supabase a cada 60s por usuario conectado. Com 2 usuarios, isso e irrelevante. Sera implementado como um hook isolado (`usePresenceHeartbeat`) que roda apenas quando o usuario esta autenticado, sem interferir em nenhum fluxo existente.
+1. **Race condition**: `sendHeartbeat(false)` no cleanup do useEffect (linha 51) dispara em StrictMode e sobrescreve o `true` do re-mount
+2. **Logica isOnline errada**: Verifica `is_online` flag antes do timestamp -- se flag=false, sempre offline mesmo com heartbeat recente
+3. **sendBeacon sem autenticacao**: Falta header `apikey` no sendBeacon, Supabase rejeita silenciosamente
 
----
+## Correcoes
 
-## Alteracoes
+### Arquivo 1: `src/hooks/usePresenceHeartbeat.ts`
 
-### 1. Migration: Criar tabelas `access_logs` e `user_presence`
-
-```sql
--- Tabela de logs de acesso (logins)
-CREATE TABLE public.access_logs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  event_type text NOT NULL DEFAULT 'login',
-  metadata jsonb DEFAULT '{}'::jsonb,
-  created_at timestamptz DEFAULT now()
-);
-
-ALTER TABLE public.access_logs ENABLE ROW LEVEL SECURITY;
-
--- Somente devs podem ler
-CREATE POLICY "Developers can view access_logs"
-  ON public.access_logs FOR SELECT
-  USING (is_developer());
-
--- Qualquer autenticado pode inserir (para registrar proprio login)
-CREATE POLICY "Authenticated can insert own access_logs"
-  ON public.access_logs FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
-
--- Devs podem limpar
-CREATE POLICY "Developers can delete access_logs"
-  ON public.access_logs FOR DELETE
-  USING (is_developer());
-
--- Tabela de presenca (heartbeat)
-CREATE TABLE public.user_presence (
-  user_id uuid PRIMARY KEY,
-  last_seen_at timestamptz DEFAULT now(),
-  is_online boolean DEFAULT true
-);
-
-ALTER TABLE public.user_presence ENABLE ROW LEVEL SECURITY;
-
--- Devs podem ler tudo
-CREATE POLICY "Developers can view presence"
-  ON public.user_presence FOR SELECT
-  USING (is_developer());
-
--- Usuarios atualizam propria presenca
-CREATE POLICY "Users can upsert own presence"
-  ON public.user_presence FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own presence"
-  ON public.user_presence FOR UPDATE
-  USING (auth.uid() = user_id);
-```
-
-### 2. Hook: `src/hooks/usePresenceHeartbeat.ts` (novo arquivo)
-
-Hook isolado que:
-- Executa um UPSERT em `user_presence` a cada 60 segundos
-- Envia `is_online: true` e `last_seen_at: now()`
-- No unmount (fechar aba), envia `is_online: false` via `navigator.sendBeacon` ou update final
-- Usado apenas no `AppLayout` (rotas protegidas), sem tocar no AuthContext
-
-### 3. AuthContext: Adicionar 1 linha de log apos login
-
-No `AuthContext.tsx`, dentro da funcao `login`, apos `if (data.user)` retornar true (linha 291-294), adicionar:
+Reescrever o hook com:
 
 ```typescript
-if (data.user) {
-  // Fire-and-forget: registrar acesso sem bloquear login
-  supabase.from('access_logs').insert({
-    user_id: data.user.id,
-    event_type: 'login',
-    metadata: { method: identifier.includes('@') ? 'email' : 'user_id' }
-  } as any).then(() => {});
-  
-  return true;
+import { useEffect, useRef } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
+
+const HEARTBEAT_INTERVAL = 60_000;
+
+export function usePresenceHeartbeat() {
+  const { user } = useAuth();
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    if (!user) return;
+    mountedRef.current = true;
+
+    const sendHeartbeat = async () => {
+      if (!mountedRef.current) return;
+      try {
+        await (supabase.from("user_presence") as any).upsert(
+          {
+            user_id: user.id,
+            last_seen_at: new Date().toISOString(),
+            is_online: true,
+          },
+          { onConflict: "user_id" }
+        );
+      } catch {
+        // Silent fail
+      }
+    };
+
+    // Heartbeat inicial com delay para evitar race do StrictMode
+    const initTimeout = setTimeout(() => sendHeartbeat(), 150);
+
+    // Heartbeat periodico
+    intervalRef.current = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL);
+
+    // Ao fechar aba: sendBeacon COM headers de autenticacao
+    const handleBeforeUnload = () => {
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/user_presence?user_id=eq.${user.id}`;
+      const body = JSON.stringify({
+        is_online: false,
+        last_seen_at: new Date().toISOString(),
+      });
+      // sendBeacon nao suporta headers customizados,
+      // entao usamos fetch com keepalive como alternativa
+      fetch(url, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          "Prefer": "return=minimal",
+        },
+        body,
+        keepalive: true,
+      }).catch(() => {});
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(initTimeout);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      // NAO enviar sendHeartbeat(false) aqui - causa race condition
+    };
+  }, [user?.id]);
 }
 ```
 
-Isso e completamente seguro: nao usa await, nao altera o fluxo, e se falhar, falha silenciosamente.
+Mudancas chave:
+- Removido o parametro `online` do `sendHeartbeat` -- ele so envia `true`
+- Adicionado `mountedRef` para prevenir envio apos desmonte
+- Delay de 150ms no heartbeat inicial contra race do StrictMode
+- Removido `sendHeartbeat(false)` do cleanup (era a causa raiz)
+- Substituido `sendBeacon` por `fetch` com `keepalive: true` (sendBeacon nao suporta headers customizados, e sem `apikey` o Supabase rejeita)
 
-### 4. AppLayout: Ativar heartbeat
+### Arquivo 2: `src/components/dev-panel/DevAccessHistory.tsx`
 
-No `src/components/layout/AppLayout.tsx`, adicionar o hook:
+Alterar apenas a funcao `isOnline` (linhas 75-80):
 
+De:
 ```typescript
-import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
-// dentro do componente:
-usePresenceHeartbeat();
+const isOnline = (userId: string) => {
+  const p = presence.find((pr) => pr.user_id === userId);
+  if (!p || !p.is_online) return false;
+  const diff = Date.now() - new Date(p.last_seen_at).getTime();
+  return diff < 2 * 60 * 1000;
+};
 ```
 
-### 5. Componente: `src/components/dev-panel/DevAccessHistory.tsx` (novo)
-
-Pagina com:
-- **Filtro** no topo: Select com opcoes "Todos", "Dev (Diogo)", "Usuarios" que filtra por user_id
-- **Cards de presenca**: Para cada usuario, um card com avatar, nome, e indicador verde (online) ou vermelho (offline). Online = `last_seen_at` < 2 minutos atras
-- **Tabela de logins**: Lista de access_logs com data/hora, usuario, metodo de login
-- **Tabela de laudos criados**: Query na tabela `laudos` filtrando por `status != 'rascunho'` (laudos finalizados), mostrando titulo, data de criacao, usuario
-- Auto-refresh a cada 30 segundos para atualizar presenca
-
-### 6. DevPanel.tsx: Registrar nova aba
-
-Adicionar ao type `DevTab`:
+Para:
 ```typescript
-type DevTab = "dashboard" | ... | "access-history" | "settings";
+const isOnline = (userId: string) => {
+  const p = presence.find((pr) => pr.user_id === userId);
+  if (!p) return false;
+  const diff = Date.now() - new Date(p.last_seen_at).getTime();
+  return diff < 2 * 60 * 1000; // Online = heartbeat nos ultimos 2 min
+};
 ```
 
-Adicionar ao `navItems`:
-```typescript
-{ id: "access-history", label: "Historico de Acesso", icon: History }
-```
+Unica mudanca: removido `!p.is_online` da condicao. Agora depende APENAS do timestamp do ultimo heartbeat, que e muito mais confiavel.
 
-Adicionar ao `renderContent`:
-```typescript
-case "access-history":
-  return <DevAccessHistory />;
-```
+## Garantia de seguranca
 
----
+Arquivos que NAO serao tocados:
+- `supabase/functions/processar-autos/index.ts`
+- `supabase/functions/gerar-resumos/index.ts`
+- Qualquer edge function
+- `src/contexts/AuthContext.tsx`
+- `src/contexts/LaudoContext.tsx`
+- `src/contexts/NavigationGuardContext.tsx`
+- `src/components/tools/ImportarAutosDialog.tsx`
+- `src/components/layout/AppLayout.tsx`
+- Todas as tabelas existentes (laudos, profiles, etc.)
 
-## O que NAO muda (garantia)
-
-- `processar-autos/index.ts` - intocado
-- `seed-prompts/index.ts` - intocado
-- `sanitizeOcrAccents` - intocado
-- `LaudoContext.tsx` - intocado
-- `NavigationGuardContext.tsx` - intocado
-- `ImportarAutosDialog.tsx` - intocado
-- Tabelas existentes (laudos, profiles, etc.) - nenhuma alteracao de schema
-- Fluxo de login - a unica adicao e um INSERT fire-and-forget que nao pode afetar o retorno da funcao
-
+Somente 2 arquivos alterados, ambos exclusivos do sistema de monitoramento.
