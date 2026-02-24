@@ -74,9 +74,9 @@ export function DevAccessHistory() {
 
   const isOnline = (userId: string) => {
     const p = presence.find((pr) => pr.user_id === userId);
-    if (!p || !p.is_online) return false;
+    if (!p) return false;
     const diff = Date.now() - new Date(p.last_seen_at).getTime();
-    return diff < 2 * 60 * 1000; // 2 min
+    return diff < 2 * 60 * 1000; // Online = heartbeat nos ultimos 2 min
   };
 
   // Check who is dev by looking at user_id pattern or profiles
