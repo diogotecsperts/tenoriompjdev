@@ -2,22 +2,25 @@ import { useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 
-const HEARTBEAT_INTERVAL = 60_000; // 60 seconds
+const HEARTBEAT_INTERVAL = 60_000;
 
 export function usePresenceHeartbeat() {
   const { user } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     if (!user) return;
+    mountedRef.current = true;
 
-    const sendHeartbeat = async (online: boolean) => {
+    const sendHeartbeat = async () => {
+      if (!mountedRef.current) return;
       try {
         await (supabase.from("user_presence") as any).upsert(
           {
             user_id: user.id,
             last_seen_at: new Date().toISOString(),
-            is_online: online,
+            is_online: true,
           },
           { onConflict: "user_id" }
         );
@@ -26,29 +29,40 @@ export function usePresenceHeartbeat() {
       }
     };
 
-    // Initial heartbeat
-    sendHeartbeat(true);
+    // Heartbeat inicial com delay para evitar race do StrictMode
+    const initTimeout = setTimeout(() => sendHeartbeat(), 150);
 
-    // Periodic heartbeat
-    intervalRef.current = setInterval(() => sendHeartbeat(true), HEARTBEAT_INTERVAL);
+    // Heartbeat periodico
+    intervalRef.current = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL);
 
-    // On tab close / navigate away
+    // Ao fechar aba: fetch com keepalive (sendBeacon nao suporta headers)
     const handleBeforeUnload = () => {
-      // Use sendBeacon for reliability on tab close
       const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/user_presence?user_id=eq.${user.id}`;
-      const body = JSON.stringify({ is_online: false, last_seen_at: new Date().toISOString() });
-      navigator.sendBeacon(
-        url,
-        new Blob([body], { type: "application/json" })
-      );
+      const body = JSON.stringify({
+        is_online: false,
+        last_seen_at: new Date().toISOString(),
+      });
+      fetch(url, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          "Prefer": "return=minimal",
+        },
+        body,
+        keepalive: true,
+      }).catch(() => {});
     };
 
     window.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
+      mountedRef.current = false;
+      clearTimeout(initTimeout);
       if (intervalRef.current) clearInterval(intervalRef.current);
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      sendHeartbeat(false);
+      // NAO enviar sendHeartbeat(false) aqui - causa race condition
     };
   }, [user?.id]);
 }
