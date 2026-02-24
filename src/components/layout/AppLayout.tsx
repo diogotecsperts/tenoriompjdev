@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { ImportarAutosDialog } from "@/components/tools/ImportarAutosDialog";
+import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -42,6 +43,7 @@ const toolMenuItems = [
 ];
 
 export function AppLayout({ children }: AppLayoutProps) {
+  usePresenceHeartbeat();
   const { user, profile, logout } = useAuth();
   const { isGuarded, requestNavigation } = useNavigationGuardContext();
   const location = useLocation();

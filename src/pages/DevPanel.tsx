@@ -15,7 +15,8 @@ import {
   RefreshCw,
   Server,
   Gauge,
-  MessageSquare
+  MessageSquare,
+  History
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -33,8 +34,9 @@ import { DevPDFCosts } from "@/components/dev-panel/DevPDFCosts";
 import { DevRetryStats } from "@/components/dev-panel/DevRetryStats";
 import { DevAIEfficiency } from "@/components/dev-panel/DevAIEfficiency";
 import { DevPrompts } from "@/components/dev-panel/DevPrompts";
+import { DevAccessHistory } from "@/components/dev-panel/DevAccessHistory";
 
-type DevTab = "dashboard" | "users" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "settings";
+type DevTab = "dashboard" | "users" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -53,6 +55,7 @@ const navItems: NavItem[] = [
   { id: "retries", label: "Retries & Rate Limits", icon: RefreshCw },
   { id: "pdf-costs", label: "Custos PDF", icon: DollarSign },
   { id: "prompts", label: "DevPrompts", icon: MessageSquare },
+  { id: "access-history", label: "Histórico de Acesso", icon: History },
   { id: "settings", label: "Configurações", icon: Settings },
 ];
 
@@ -94,6 +97,8 @@ export default function DevPanel() {
         return <DevRetryStats />;
       case "pdf-costs":
         return <DevPDFCosts />;
+      case "access-history":
+        return <DevAccessHistory />;
       case "settings":
         return <DevSettings />;
       default:

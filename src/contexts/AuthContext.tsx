@@ -289,6 +289,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (data.user) {
+        // Fire-and-forget: registrar acesso sem bloquear login
+        (supabase.from('access_logs') as any).insert({
+          user_id: data.user.id,
+          event_type: 'login',
+          metadata: { method: identifier.includes('@') ? 'email' : 'user_id' }
+        }).then(() => {});
+
         // Navegação controlada pelo Login.tsx via useEffect
         return true;
       }
