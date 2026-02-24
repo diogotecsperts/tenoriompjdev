@@ -1,38 +1,56 @@
 
-# Fix: RLS da tabela user_presence bloqueando upsert
 
-## Problema encontrado
+# Fix: Politicas RLS da tabela user_presence sao TODAS RESTRICTIVE
 
-Nos logs do banco de dados, encontrei erros repetidos a cada 60 segundos:
-```text
-ERROR: new row violates row-level security policy for table "user_presence"
-```
+## Causa raiz definitiva
 
-A causa raiz: a politica de UPDATE da tabela `user_presence` tem apenas `USING (auth.uid() = user_id)` mas **nao tem `WITH CHECK`**. No PostgreSQL, quando um UPSERT (INSERT ON CONFLICT UPDATE) executa a parte de UPDATE, ele precisa de um `WITH CHECK` explicito para validar a nova linha sendo escrita. Sem isso, o banco rejeita a operacao.
+Todas as politicas RLS na tabela `user_presence` estao definidas como **RESTRICTIVE** (nao permissivas). No PostgreSQL, o modelo de avaliacao e:
 
-O Diogo funciona porque ja tinha um registro criado anteriormente. O Bruno nunca conseguiu criar o registro inicial, e os upserts continuam falhando silenciosamente.
+1. Primeiro, todas as politicas PERMISSIVE sao avaliadas com logica OR (basta uma passar)
+2. Depois, todas as RESTRICTIVE sao avaliadas com logica AND (todas precisam passar)
+3. Se nao ha NENHUMA politica PERMISSIVE, o acesso e **negado por padrao**
+
+Resultado: nenhum usuario consegue fazer INSERT nem UPDATE, porque nao existe nenhuma politica PERMISSIVE para conceder o acesso base.
+
+O Diogo so tem um registro antigo porque ele foi criado antes de RLS ser ativada (ou por outra via).
 
 ## Correcao
 
-### Migracao SQL
-
-Recriar a politica de UPDATE com `WITH CHECK`:
+Uma unica migracao SQL para recriar as 3 politicas como PERMISSIVE:
 
 ```sql
-DROP POLICY IF EXISTS "Users can update own presence" ON public.user_presence;
+-- Recriar INSERT como PERMISSIVE
+DROP POLICY IF EXISTS "Users can upsert own presence" ON public.user_presence;
+CREATE POLICY "Users can upsert own presence"
+  ON public.user_presence
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = user_id);
 
+-- Recriar UPDATE como PERMISSIVE
+DROP POLICY IF EXISTS "Users can update own presence" ON public.user_presence;
 CREATE POLICY "Users can update own presence"
   ON public.user_presence
   FOR UPDATE
+  TO authenticated
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
+
+-- Recriar SELECT (dev) como PERMISSIVE
+DROP POLICY IF EXISTS "Developers can view presence" ON public.user_presence;
+CREATE POLICY "Developers can view presence"
+  ON public.user_presence
+  FOR SELECT
+  TO authenticated
+  USING (is_developer());
 ```
 
-Isso permite que o upsert funcione corretamente tanto para INSERT quanto para UPDATE no ON CONFLICT.
+A diferenca tecnica: sem o `AS RESTRICTIVE`, PostgreSQL cria politicas como PERMISSIVE por padrao, que e o comportamento correto para este caso.
 
 ## Seguranca
 
-- Nenhum edge function tocado
+- Semantica identica: usuarios so alteram sua propria presenca, devs podem visualizar tudo
 - Nenhum arquivo de codigo alterado
-- Apenas uma politica RLS corrigida na tabela `user_presence`
-- A semantica de seguranca permanece identica (usuario so pode alterar sua propria presenca)
+- Nenhum edge function tocado
+- Apenas as 3 politicas RLS da tabela `user_presence` sao recriadas
+
