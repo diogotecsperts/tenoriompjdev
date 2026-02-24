@@ -16,7 +16,7 @@ export function usePresenceHeartbeat() {
     const sendHeartbeat = async () => {
       if (!mountedRef.current) return;
       try {
-        await (supabase.from("user_presence") as any).upsert(
+        const { error } = await (supabase.from("user_presence") as any).upsert(
           {
             user_id: user.id,
             last_seen_at: new Date().toISOString(),
@@ -24,8 +24,9 @@ export function usePresenceHeartbeat() {
           },
           { onConflict: "user_id" }
         );
-      } catch {
-        // Silent fail
+        if (error) console.warn("[Heartbeat] upsert error:", error.message);
+      } catch (e) {
+        console.warn("[Heartbeat] exception:", e);
       }
     };
 

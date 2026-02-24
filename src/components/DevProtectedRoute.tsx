@@ -2,6 +2,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { Navigate, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { Loader2, ShieldAlert } from "lucide-react";
 
 interface DevProtectedRouteProps {
@@ -12,6 +13,7 @@ export function DevProtectedRoute({ children }: DevProtectedRouteProps) {
   const { isAuthenticated, user, loading } = useAuth();
   const [isDeveloper, setIsDeveloper] = useState<boolean | null>(null);
   const [checkingRole, setCheckingRole] = useState(true);
+  usePresenceHeartbeat();
 
   useEffect(() => {
     const checkDeveloperRole = async () => {
