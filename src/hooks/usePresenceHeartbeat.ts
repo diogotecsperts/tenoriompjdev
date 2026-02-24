@@ -8,6 +8,7 @@ export function usePresenceHeartbeat() {
   const { user } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
+  const tokenRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -25,6 +26,10 @@ export function usePresenceHeartbeat() {
           { onConflict: "user_id" }
         );
         if (error) console.warn("[Heartbeat] upsert error:", error.message);
+
+        // Atualizar token JWT para uso no beforeunload
+        const { data: { session } } = await supabase.auth.getSession();
+        tokenRef.current = session?.access_token ?? null;
       } catch (e) {
         console.warn("[Heartbeat] exception:", e);
       }
@@ -36,7 +41,7 @@ export function usePresenceHeartbeat() {
     // Heartbeat periodico
     intervalRef.current = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL);
 
-    // Ao fechar aba: fetch com keepalive (sendBeacon nao suporta headers)
+    // Ao fechar aba: fetch com keepalive usando JWT real
     const handleBeforeUnload = () => {
       const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/user_presence?user_id=eq.${user.id}`;
       const body = JSON.stringify({
@@ -48,7 +53,7 @@ export function usePresenceHeartbeat() {
         headers: {
           "Content-Type": "application/json",
           "apikey": import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          "Authorization": `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          "Authorization": `Bearer ${tokenRef.current ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           "Prefer": "return=minimal",
         },
         body,
