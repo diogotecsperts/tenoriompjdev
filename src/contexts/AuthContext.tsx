@@ -312,6 +312,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    // Marcar offline ANTES do signOut (enquanto JWT ainda é válido)
+    if (user) {
+      await (supabase.from("user_presence") as any).update({
+        is_online: false,
+        last_seen_at: new Date().toISOString(),
+      }).eq("user_id", user.id);
+    }
     await supabase.auth.signOut();
     setSession(null);
     setUser(null);
