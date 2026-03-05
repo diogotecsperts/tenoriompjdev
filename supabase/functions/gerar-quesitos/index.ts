@@ -162,28 +162,61 @@ serve(async (req) => {
       });
     }
 
-    // 4. Retrieve PDF text from storage
+    // 4. Retrieve PDF text using multiple fallback strategies
     const aiMetadata = laudo.ai_metadata as any;
     const contentPath = aiMetadata?.extracted_content_path || aiMetadata?.extractedContentPath;
+    const pdfFilePath = aiMetadata?.pdfFilePath;
+    const importJobId = aiMetadata?.importJobId;
 
-    if (!contentPath) {
+    if (!contentPath && !pdfFilePath && !importJobId) {
       return new Response(
         JSON.stringify({ error: "PDF não processado. Importe os autos primeiro." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`[gerar-quesitos] Retrieving PDF content from: ${contentPath}`);
-    const extractedContent = await retrieveExtractedContent(contentPath);
+    let textoProcesso = "";
 
-    if (!extractedContent?.rawText) {
+    // PRIORITY 1: Try bucket extracted content
+    if (contentPath) {
+      console.log(`[gerar-quesitos] Trying bucket content at: ${contentPath}`);
+      try {
+        const extractedContent = await retrieveExtractedContent(contentPath);
+        if (extractedContent?.rawText && extractedContent.rawText.length > 500) {
+          textoProcesso = extractedContent.rawText;
+          console.log(`[gerar-quesitos] Using bucket content (${textoProcesso.length} chars)`);
+        }
+      } catch (err) {
+        console.warn(`[gerar-quesitos] Bucket retrieval failed:`, err);
+      }
+    }
+
+    // PRIORITY 2: Try import_jobs result cache
+    if (!textoProcesso && importJobId) {
+      console.log(`[gerar-quesitos] Trying import_jobs cache for job: ${importJobId}`);
+      try {
+        const { data: job } = await supabaseAdmin
+          .from("import_jobs")
+          .select("result")
+          .eq("id", importJobId)
+          .single();
+
+        const jobResult = job?.result as any;
+        if (jobResult?.data?.textoCompleto) {
+          textoProcesso = jobResult.data.textoCompleto;
+          console.log(`[gerar-quesitos] Using import_jobs cache (${textoProcesso.length} chars)`);
+        }
+      } catch (err) {
+        console.warn(`[gerar-quesitos] Import jobs cache failed:`, err);
+      }
+    }
+
+    if (!textoProcesso) {
       return new Response(
-        JSON.stringify({ error: "Não foi possível recuperar o texto do PDF." }),
+        JSON.stringify({ error: "Não foi possível recuperar o texto do PDF. Tente reimportar os autos." }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-
-    const textoProcesso = extractedContent.rawText;
     console.log(`[gerar-quesitos] PDF text length: ${textoProcesso.length} chars`);
 
     // 5. Build context variables from payload
