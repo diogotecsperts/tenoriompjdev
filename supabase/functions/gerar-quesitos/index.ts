@@ -202,8 +202,9 @@ serve(async (req) => {
           .single();
 
         const jobResult = job?.result as any;
-        if (jobResult?.data?.textoCompleto) {
-          textoProcesso = jobResult.data.textoCompleto;
+        const cachedText = jobResult?.data?._rawTextTail || jobResult?.data?.textoCompleto || jobResult?.data?.textos_brutos;
+        if (cachedText && cachedText.length > 500) {
+          textoProcesso = typeof cachedText === 'string' ? cachedText : JSON.stringify(cachedText);
           console.log(`[gerar-quesitos] Using import_jobs cache (${textoProcesso.length} chars)`);
         }
       } catch (err) {
