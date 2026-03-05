@@ -1,116 +1,96 @@
 
 
-# Plano Executável: Remoção Completa da "Avaliação de Sequelas"
+# Plano: Geração de Quesitos Sob Demanda
 
-Todas as linhas foram verificadas e confirmadas via leitura direta dos ficheiros.
+## Resumo
 
-## 1. ELIMINAR FICHEIRO
+Desativar a geração automática de quesitos na importação e criar um fluxo on-demand onde o médico clica um botão após preencher o laudo. A IA lê o PDF para encontrar as perguntas e responde usando exclusivamente os dados clínicos do formulário.
 
-- `src/components/laudo/sections/AvaliacaoSequelas.tsx` — eliminar integralmente
+---
 
-## 2. FRONTEND — Alterações com linhas exatas
+## 1. Backend — Desativar Geração na Importação
 
-### `src/contexts/LaudoContext.tsx` (7 pontos)
-| Linhas | Ação | Conteúdo a remover |
-|---|---|---|
-| 71-73 | Remover da interface `LaudoData` | `tabelaSUSEP`, `danoEstetico`, `auxilioTerceiros` |
-| 214-216 | Remover do mapeamento DB→estado (loadLaudo) | `tabelaSUSEP: dbLaudo.tabela_susep...` |
-| 336-338 | Remover de `createLocalLaudo` | `tabelaSUSEP: ''...` |
-| 437-439 | Remover de `createLaudo` | `tabelaSUSEP: ''...` |
-| 538-540 | Remover de `loadFromImportJob` | `tabelaSUSEP: data.tabela_susep...` |
-| 640-642 | Remover de `saveLaudo` (insert) | `tabela_susep: currentLaudo.tabelaSUSEP...` |
-| 730-732 | Remover de `saveLaudo` (update) | `tabela_susep: currentLaudo.tabelaSUSEP...` |
+### `supabase/functions/processar-autos/index.ts`
 
-### `src/pages/LaudoEditor.tsx` (2 pontos)
-| Linhas | Ação |
-|---|---|
-| 77 | Remover `import { AvaliacaoSequelas }` |
-| 108 | Remover `sequelas: AvaliacaoSequelas,` |
-
-### `src/lib/laudo-structure.ts` (2 pontos)
-| Linhas | Ação |
-|---|---|
-| 212 | Remover `'sequelas': ['import', 'regen'],` de `EXPECTED_PROMPT_TYPES` |
-| 290-294 | Atualizar description para `"Conclusão e quesitos"` e remover `{ id: "sequelas", label: "Avaliação de Sequelas" }` |
-
-### `src/hooks/useLaudoProgress.ts`
-| Linhas | Ação |
-|---|---|
-| 62-64 | Remover `"tabelaSUSEP"`, `"danoEstetico"`, `"auxilioTerceiros"` do array `conclusao` |
-
-### `src/components/tools/ImportarAutosDialog.tsx` (3 pontos)
-| Linhas | Ação |
-|---|---|
-| 103-107 | Remover `avaliacao_sequelas` da interface `ExtractedData` |
-| 1057-1060 | Remover mapeamento dos 3 campos para o update |
-| 1207 | Remover `avaliacao_sequelas: { ... }` do default vazio |
-
-### `src/components/dev-panel/PromptEditor.tsx` (2 pontos)
-| Linhas | Ação |
-|---|---|
-| 87-89 | Remover 3 entradas de `AVAILABLE_VARIABLES` |
-| 115-117 | Remover 3 entradas de `ALL_VARIABLES` |
-
-## 3. EXPORTADORES
-
-### `src/utils/generateLaudoDOCX.ts`
-| Linhas | Ação |
-|---|---|
-| 769-783 | Remover bloco inteiro "17. AVALIAÇÃO DE SEQUELAS" (numeração dinâmica `sectionNumber++` ajusta automaticamente) |
-
-### `src/utils/generateLaudoPDF.ts`
-| Linhas | Ação |
-|---|---|
-| 904-918 | Remover bloco inteiro "17. AVALIAÇÃO DE SEQUELAS" (mesma lógica dinâmica) |
-
-## 4. EDGE FUNCTIONS
-
-### `supabase/functions/processar-autos/index.ts` (4 pontos)
-| Linhas | Ação |
-|---|---|
-| 103-107 | Remover `"avaliacao_sequelas": {...}` do JSON template |
-| 278-310 | Remover bloco inteiro "7.5. AVALIAÇÃO DE SEQUELAS" (instruções 7.5.1-7.5.3) |
-| 719 | Remover `avaliacao_sequelas: {...}` do `defaultStructure` |
-| 738 | Remover `avaliacao_sequelas: {...}` do merge de dados |
-| 3052-3056 | Remover bloco `sanitizeOcrAccents` para `avaliacao_sequelas` |
-
-### `supabase/functions/_shared/build-import-prompt.ts` (5 pontos)
-| Linhas | Ação |
-|---|---|
-| 100-104 | Remover `"avaliacao_sequelas": {...}` do `IMPORT_JSON_TEMPLATE` |
-| 380-397 | Remover `prompt_import_sequelas` inteiro de `DEFAULT_IMPORT_PROMPTS` |
-| 471 | Remover `'prompt_import_sequelas'` de `PROMPT_ORDER` |
-| 605 | Remover `prompt_import_sequelas: 'conclusao'` de `cardMapping` |
-| 634 | Remover `prompt_import_sequelas: 'sequelas'` de `sectionMapping` |
-
-### `supabase/functions/regerar-campo-pdf/index.ts` (2 pontos)
-| Linhas | Ação |
-|---|---|
-| 28-30 | Remover 3 mapeamentos (`tabelaSUSEP`, `danoEstetico`, `auxilioTerceiros`) do `FIELD_PROMPT_MAP` |
-| 420-422 + 460-462 | Remover `tabela_susep`, `dano_estetico`, `auxilio_terceiros` do select e do `laudoContext` |
-
-### `supabase/functions/seed-prompts/index.ts` (2 pontos)
-| Linhas | Ação |
-|---|---|
-| 34 | Remover `prompt_import_sequelas: { cardId: 'conclusao', sectionId: 'sequelas' }` do `cardMapping` |
-| 394-472 | Remover 3 blocos inteiros: `prompt_regen_tabelaSUSEP`, `prompt_regen_danoEstetico`, `prompt_regen_auxilioTerceiros` |
-
-## 5. MIGRAÇÃO SQL (dados)
-
-```sql
-DELETE FROM public.system_config WHERE id IN (
-  'prompt_import_sequelas',
-  'prompt_regen_tabelaSUSEP',
-  'prompt_regen_danoEstetico',
-  'prompt_regen_auxilioTerceiros'
-);
+**Linhas 1328-1330** — Mudar `shouldGenerate: true` para `shouldGenerate: false`:
+```typescript
+{ tipo: 'quesitos_juizo', shouldGenerate: false, step: 'Respondendo quesitos do Juízo...', progress: 86 },
+{ tipo: 'quesitos_reclamante', shouldGenerate: false, step: 'Respondendo quesitos do Reclamante...', progress: 88 },
+{ tipo: 'quesitos_reclamada', shouldGenerate: false, step: 'Respondendo quesitos da Reclamada...', progress: 90 },
 ```
 
-Colunas na tabela `laudos` preservadas para dados históricos.
+**Linhas 1787-1796** — Remover bloco "Map quesitos responses back to extractedData (Zero-Touch)" (chunked path).
 
-## 6. NÃO TOCADOS (isolamento)
+**Linhas 3040-3049** — Remover bloco idêntico (non-chunked path).
 
-- `gerar-resposta-impugnacao` — mantém referência a colunas históricas (exibe "Não informado")
-- AuthContext, NavigationGuard, hooks de presença, `gerar-resumos`, `extrair-texto-pdf`
-- Zero refatorações cosméticas
+### `src/components/tools/ImportarAutosDialog.tsx`
+
+**Linhas 1058-1060** — Forçar quesitos vazios na importação:
+```typescript
+quesitos_juizo: '',
+quesitos_reclamante: '',
+quesitos_reclamada: '',
+```
+
+---
+
+## 2. Nova Edge Function — `gerar-quesitos`
+
+### `supabase/functions/gerar-quesitos/index.ts` (CRIAR)
+
+Fluxo:
+1. Autenticar via JWT, validar propriedade do laudo
+2. Receber `laudoId` + `contexto` (campos clínicos do formulário) no body
+3. Buscar `ai_metadata.extracted_content_path` do laudo para obter o texto do PDF via `retrieveExtractedContent`
+4. Executar 3 chamadas de IA em paralelo (`Promise.allSettled`) — uma por grupo (Juízo, Reclamante, Reclamada)
+5. Cada chamada recebe:
+   - O texto integral do PDF (para localizar as perguntas)
+   - O contexto clínico do médico (nexo, incapacidade, conclusão, etc.) — vindo do payload, não do banco
+6. Retornar `{ quesitosJuizo, quesitosReclamante, quesitosReclamada }`
+
+Reutiliza: `getAIConfig`, `callAI` de `_shared/ai-config.ts`, `retrieveExtractedContent` de `_shared/pdf-visual-extractor.ts`, `getPrompt` de `_shared/prompt-manager.ts`.
+
+Prompt blindado: instruir a IA a responder APENAS com base nos dados clínicos fornecidos, nunca inventar achados. Regra de inexistência: se quesitos não forem encontrados, retornar frase padrão.
+
+### `supabase/config.toml`
+
+Adicionar:
+```toml
+[functions.gerar-quesitos]
+verify_jwt = true
+```
+
+---
+
+## 3. Frontend — Botão Único (`Quesitos.tsx`)
+
+### `src/components/laudo/sections/Quesitos.tsx` (REESCREVER)
+
+- Remover `enableRegenerate={true}` dos 3 `LaudoTextareaAIField`
+- Adicionar botão "Gerar Respostas dos Quesitos" com ícone `Sparkles` acima das tabs
+- Ao clicar:
+  1. Verificar se campos não estão vazios → mostrar `AlertDialog` de confirmação
+  2. Montar payload com campos do `currentLaudo`: `nexoCausalJustificativa`, `conclusaoIncapacidade`, `analiseIncapacidadeLaboral`, `historiaAtual`, `exameFisico`, `examesComplementares`, `descricaoAtividadesLaborais`, `conclusaoAnalise`, `diagnosticoCIDs`, `antecedentes`, `laudosMedicos`
+  3. Chamar `supabase.functions.invoke('gerar-quesitos', { body: { laudoId, contexto } })`
+  4. Preencher os 3 campos via `updateLaudo()`
+  5. Loading state com `Loader2` + toast de sucesso/erro
+
+---
+
+## 4. Ficheiros Impactados
+
+| Arquivo | Ação |
+|---|---|
+| `supabase/functions/gerar-quesitos/index.ts` | **CRIAR** |
+| `supabase/config.toml` | Adicionar entrada |
+| `supabase/functions/processar-autos/index.ts` | `shouldGenerate: false` + remover 2 blocos de mapeamento |
+| `src/components/tools/ImportarAutosDialog.tsx` | Forçar quesitos vazios |
+| `src/components/laudo/sections/Quesitos.tsx` | Reescrever com botão único |
+
+## 5. Ficheiros NÃO Tocados
+
+- `LaudoContext.tsx` — interface e persistência inalterados
+- `regerar-campo-pdf` — mantido intacto
+- `build-import-prompt.ts` — extração de perguntas brutas preservada
+- `seed-prompts`, `laudo-structure.ts`, exportadores DOCX/PDF — zero alterações
 
