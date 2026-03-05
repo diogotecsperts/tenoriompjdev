@@ -1055,9 +1055,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         // Mapear tipo_incapacidade para conclusao_status (marcação de checkbox)
         conclusao_status: extractedData.informacoes_medicas.tipo_incapacidade || '',
         
-        quesitos_juizo: extractedData.quesitos.juizo || '',
-        quesitos_reclamante: extractedData.quesitos.reclamante || '',
-        quesitos_reclamada: extractedData.quesitos.reclamada || '',
+        quesitos_juizo: '',
+        quesitos_reclamante: '',
+        quesitos_reclamada: '',
         
         resumo_peticao_inicial: extractedData.resumos_ia?.resumo_peticao || '',
         resumo_contestacao: extractedData.resumos_ia?.resumo_contestacao || '',
