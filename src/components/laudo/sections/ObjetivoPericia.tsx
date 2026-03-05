@@ -21,9 +21,9 @@ export function ObjetivoPericia() {
           label="Objetivo"
           value={currentLaudo.objetivoPericia || ""}
           onChange={(value) => updateLaudo({ objetivoPericia: value })}
-          placeholder="Ex: O presente laudo tem por objetivo avaliar a existência de nexo causal entre as atividades laborais exercidas pelo(a) reclamante e as patologias alegadas, bem como quantificar eventuais sequelas..."
-          rows={4}
-          enableEnhance={true}
+          placeholder="Texto padrão preenchido automaticamente. Edite se necessário."
+          rows={6}
+          enableEnhance={false}
           enableRegenerate={false}
         />
       </CardContent>

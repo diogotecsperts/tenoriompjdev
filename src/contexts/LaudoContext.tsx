@@ -3,6 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./AuthContext";
 import { toast } from "@/hooks/use-toast";
 
+/** Texto padrão estático para o campo "Objetivo da Perícia" */
+export const OBJETIVO_PERICIA_PADRAO = `Foi designada Perícia Médica Judicial, por determinação deste Juízo, com a finalidade de avaliar a existência de nexo causal ou concausal entre a lesão ou doença alegada e as atividades laborativas exercidas pelo(a) periciando(a), bem como verificar eventual repercussão do quadro clínico sobre sua capacidade laborativa.\n\nO presente laudo pericial tem por objetivo subsidiar este Juízo na apreciação da matéria técnica, mediante análise da história clínica e ocupacional, realização de exame físico pericial, descrição das atividades laborativas informadas, bem como avaliação dos documentos médicos apresentados em perícia e daqueles constantes nos autos, em conformidade com a legislação vigente e com o conhecimento médico-científico atual.`;
+
 // AI Metadata interface for tracking AI usage per laudo
 export interface AIMetadata {
   importDate: string;
@@ -339,7 +342,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
       assistenteTecnicoReclamada: '',
       assistenteTecnicoReclamante: '',
       localPericia: '',
-      objetivoPericia: '',
+      objetivoPericia: OBJETIVO_PERICIA_PADRAO,
       resumoPeticaoInicial: '',
       resumoContestacao: '',
       metodologiaPericial: '', // Será preenchido pelo texto padrão do system_config
@@ -441,7 +444,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           assistenteTecnicoReclamada: '',
           assistenteTecnicoReclamante: '',
           localPericia: '',
-          objetivoPericia: '',
+          objetivoPericia: OBJETIVO_PERICIA_PADRAO,
           resumoPeticaoInicial: '',
           resumoContestacao: '',
           metodologiaPericial: (data as any).metodologia_pericial || '',
