@@ -417,9 +417,6 @@ serve(async (req) => {
         conclusao_analise,
         conclusao_incapacidade,
         laudos_medicos,
-        tabela_susep,
-        dano_estetico,
-        auxilio_terceiros,
         analise_incapacidade_laboral
       `)
       .eq('id', laudoId)
@@ -457,9 +454,6 @@ serve(async (req) => {
       conclusao: laudo.conclusao_analise || '',
       conclusaoIncapacidade: laudo.conclusao_incapacidade || '',
       laudosMedicos: laudo.laudos_medicos || '',
-      tabelaSUSEP: laudo.tabela_susep || '',
-      danoEstetico: laudo.dano_estetico || '',
-      auxilioTerceiros: laudo.auxilio_terceiros || '',
       analiseIncapacidade: laudo.analise_incapacidade_laboral || ''
     };
 

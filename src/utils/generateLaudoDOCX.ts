@@ -766,23 +766,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
     sectionNumber++;
   }
 
-  // ========== 17. AVALIAÇÃO DE SEQUELAS ==========
-  const hasSequelas = !isFieldEmpty(laudo.tabelaSUSEP) || !isFieldEmpty(laudo.danoEstetico) || !isFieldEmpty(laudo.auxilioTerceiros);
-  if (hasSequelas) {
-    paragraphs.push(createSectionTitle(`${sectionNumber}. AVALIAÇÃO DE SEQUELAS`));
-    if (!isFieldEmpty(laudo.tabelaSUSEP)) {
-      paragraphs.push(createLabeledField("Tabela SUSEP", laudo.tabelaSUSEP!));
-    }
-    if (!isFieldEmpty(laudo.danoEstetico)) {
-      paragraphs.push(createLabeledField("Dano Estético", laudo.danoEstetico!));
-    }
-    if (!isFieldEmpty(laudo.auxilioTerceiros)) {
-      paragraphs.push(createLabeledField("Auxílio de Terceiros", laudo.auxilioTerceiros!));
-    }
-    sectionNumber++;
-  }
-
-  // ========== 18. DISCUSSÃO E ANÁLISE ==========
+  // ========== 17. DISCUSSÃO E ANÁLISE ==========
   debugField("conclusaoAnalise", laudo.conclusaoAnalise);
   if (!isFieldEmpty(laudo.conclusaoAnalise)) {
     paragraphs.push(

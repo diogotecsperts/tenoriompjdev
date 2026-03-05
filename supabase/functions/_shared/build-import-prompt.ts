@@ -97,11 +97,6 @@
      "nexo_sugerido": "",
      "tipo_incapacidade": ""
    },
-   "avaliacao_sequelas": {
-     "tabela_susep": "",
-     "dano_estetico": "",
-     "auxilio_terceiros": ""
-   },
    "quesitos": {
      "juizo": "",
      "reclamante": "",
@@ -377,25 +372,6 @@ MÍNIMO 2 parágrafos ou lista cronológica completa. Busque em CTPS, PPP, depoi
  ATENÇÃO: Preencha APENAS se houver evidência clara no documento. Não invente nexo.`
    },
    
-   // Seção: Avaliação de Sequelas
-   prompt_import_sequelas: {
-    section: 'Avaliação de Sequelas',
-     order: 17,
-     prompt: `Busque informações sobre sequelas permanentes:
- 
- 1. tabela_susep: Busque percentual de invalidez, referências à Tabela SUSEP/DPVAT.
-    Estruture: "[X%] de invalidez permanente conforme item [Y] da Tabela SUSEP - [descrição da sequela]"
- 
- 2. dano_estetico: Extraia informações sobre danos estéticos:
-    Cicatrizes visíveis, deformidades permanentes, amputações, alterações de marcha visíveis.
-    Classifique se mencionado: leve, moderado, grave, gravíssimo.
- 
- 3. auxilio_terceiros: Extraia necessidade de auxílio de terceiros:
-    AVDs (alimentar-se, vestir-se, higiene), locomoção, cuidador permanente/intermitente.
- 
- Se não houver informações, deixe os campos vazios.`
-   },
-   
    // Seção: Quesitos
    prompt_import_quesitos: {
     section: 'Quesitos',
@@ -468,7 +444,6 @@ NÃO invente quesitos - extraia APENAS os que existem no documento.`
    'prompt_import_cids',
    'prompt_import_incapacidade',
    'prompt_import_nexoCausal',
-   'prompt_import_sequelas',
    'prompt_import_quesitos',
    'prompt_import_textosBrutos',
    'prompt_import_resumo'
@@ -602,7 +577,6 @@ NÃO invente quesitos - extraia APENAS os que existem no documento.`
      prompt_import_cids: 'analise-tecnica',
      prompt_import_incapacidade: 'analise-tecnica',
      prompt_import_nexoCausal: 'analise-tecnica',
-     prompt_import_sequelas: 'conclusao',
      prompt_import_quesitos: 'conclusao',
      prompt_import_textosBrutos: 'resumo-autos',
      prompt_import_resumo: '_system'
@@ -631,7 +605,6 @@ NÃO invente quesitos - extraia APENAS os que existem no documento.`
      prompt_import_cids: 'descricao-doencas',
      prompt_import_incapacidade: 'analise-incapacidade',
      prompt_import_nexoCausal: 'nexo',
-     prompt_import_sequelas: 'sequelas',
      prompt_import_quesitos: 'quesitos',
      prompt_import_textosBrutos: 'resumo',
      prompt_import_resumo: '_import'

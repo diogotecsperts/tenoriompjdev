@@ -100,11 +100,6 @@ interface ExtractedData {
     nexo_sugerido: string;
     tipo_incapacidade: string;
   };
-  avaliacao_sequelas: {
-    tabela_susep: string;
-    dano_estetico: string;
-    auxilio_terceiros: string;
-  };
   quesitos: {
     juizo: string;
     reclamante: string;
@@ -1054,11 +1049,6 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         // Exame Físico - NOVO campo mapeado
         exame_fisico: extractedData.exame_clinico?.exame_fisico || '',
         
-        // Avaliação de Sequelas (NOVOS)
-        tabela_susep: extractedData.avaliacao_sequelas?.tabela_susep || '',
-        dano_estetico: extractedData.avaliacao_sequelas?.dano_estetico || '',
-        auxilio_terceiros: extractedData.avaliacao_sequelas?.auxilio_terceiros || '',
-        
         conclusao_cid: extractedData.informacoes_medicas.cids_mencionados?.join(', ') || '',
         conclusao_incapacidade: extractedData.informacoes_medicas.incapacidade_alegada || '',
         nexo_causal_tipo: extractedData.informacoes_medicas.nexo_sugerido || '',
@@ -1204,7 +1194,6 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         posto_trabalho: { cargo_funcao: '', data_admissao: '', data_afastamento: '', descricao_ambiente: '', descricao_atividades: '' },
         exame_clinico: { laudos_medicos: '', exames_complementares: '', lesoes_descritas: '', exame_fisico: '' },
         informacoes_medicas: { cids_mencionados: [], incapacidade_alegada: '', nexo_sugerido: '', tipo_incapacidade: '' },
-        avaliacao_sequelas: { tabela_susep: '', dano_estetico: '', auxilio_terceiros: '' },
         quesitos: { juizo: '', reclamante: '', reclamada: '' },
         textos_brutos: { peticao_inicial: '', contestacao: '' },
         resumos_ia: partialResumosIA,

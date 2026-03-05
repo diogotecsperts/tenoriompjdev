@@ -100,11 +100,6 @@ const defaultSystemPrompt = `Você é um perito médico especialista em medicina
     "nexo_sugerido": "",
     "tipo_incapacidade": ""
   },
-  "avaliacao_sequelas": {
-    "tabela_susep": "",
-    "dano_estetico": "",
-    "auxilio_terceiros": ""
-  },
   "quesitos": {
     "juizo": "",
     "reclamante": "",
@@ -274,40 +269,6 @@ const defaultSystemPrompt = `Você é um perito médico especialista em medicina
         - "parcial_temporaria" → limitações temporárias com melhora esperada
         - "ausencia" → laudos indicam capacidade laboral preservada
         - "" → se não há informação suficiente para classificar
-
-7.5. AVALIAÇÃO DE SEQUELAS - PARA LAUDOS COM SEQUELAS PERMANENTES:
-
-   7.5.1. tabela_susep (Tabela SUSEP/DPVAT):
-          Busque nos autos informações sobre grau de invalidez ou sequelas permanentes:
-          - Percentual de invalidez mencionado em laudos médicos ou perícias anteriores
-          - Referências à Tabela SUSEP/DPVAT ou outras tabelas de invalidez
-          - Item específico da tabela aplicável à lesão/sequela
-          - Grau de comprometimento funcional documentado
-          - Laudo do INSS sobre invalidez (se B91 ou aposentadoria por invalidez)
-          - Perícias anteriores que quantificaram sequelas
-          ESTRUTURE: "[X%] de invalidez permanente conforme item [Y] da Tabela SUSEP - [descrição da sequela]"
-          Se não houver menção a percentuais de invalidez, deixe vazio.
-
-   7.5.2. dano_estetico:
-          Extraia informações sobre danos estéticos documentados:
-          - Cicatrizes visíveis (localização anatômica, tamanho, características)
-          - Deformidades permanentes (tipo, gravidade, visibilidade)
-          - Amputações ou perdas anatômicas
-          - Alterações de marcha ou postura permanentes e visíveis
-          - Grau do dano estético se mencionado (leve, moderado, grave, gravíssimo)
-          - Impacto psicológico do dano estético
-          Busque em: laudos médicos, perícias, fotos anexadas aos autos.
-          Se não houver menção a dano estético, deixe vazio.
-
-   7.5.3. auxilio_terceiros:
-          Extraia informações sobre necessidade de auxílio de terceiros:
-          - Se o periciando necessita de ajuda para AVDs (alimentar-se, vestir-se, higiene pessoal)
-          - Se necessita de ajuda para locomoção dentro e fora de casa
-          - Se necessita de cuidador permanente ou intermitente
-          - Tipo de auxílio necessário e frequência (24 horas, apenas para certas atividades)
-          - Laudo médico, de assistente social ou perícia que ateste a necessidade
-          Busque em: laudos médicos, laudos de assistente social, perícias anteriores.
-          Se não houver menção a necessidade de auxílio, deixe vazio.
 
 8. QUESITOS - EXTRAÇÃO INTEGRAL OBRIGATÓRIA:
 
@@ -716,7 +677,6 @@ function ensureValidStructure(data: any): object {
     posto_trabalho: { cargo_funcao: "", data_admissao: "", data_afastamento: "", descricao_ambiente: "", descricao_atividades: "" },
     exame_clinico: { laudos_medicos: "", exames_complementares: "", lesoes_descritas: "", exame_fisico: "" },
     informacoes_medicas: { cids_mencionados: [], incapacidade_alegada: "", nexo_sugerido: "", tipo_incapacidade: "" },
-    avaliacao_sequelas: { tabela_susep: "", dano_estetico: "", auxilio_terceiros: "" },
     quesitos: { juizo: "", reclamante: "", reclamada: "" },
     textos_brutos: { peticao_inicial: "", contestacao: "" },
     resumo: ""
@@ -735,7 +695,6 @@ function ensureValidStructure(data: any): object {
     posto_trabalho: { ...defaultStructure.posto_trabalho, ...(data.posto_trabalho || {}) },
     exame_clinico: { ...defaultStructure.exame_clinico, ...(data.exame_clinico || {}) },
     informacoes_medicas: { ...defaultStructure.informacoes_medicas, ...(data.informacoes_medicas || {}) },
-    avaliacao_sequelas: { ...defaultStructure.avaliacao_sequelas, ...(data.avaliacao_sequelas || {}) },
     quesitos: { ...defaultStructure.quesitos, ...(data.quesitos || {}) },
     textos_brutos: { ...defaultStructure.textos_brutos, ...(data.textos_brutos || {}) },
     resumo: data.resumo || ""
@@ -3049,11 +3008,6 @@ async function processarPDFBackground(
     console.log('[processar-autos] MEMORY: Freed visionResult before summaries');
 
     // Sanitize accent-prone short fields before summary generation
-    if (extractedData.avaliacao_sequelas) {
-      extractedData.avaliacao_sequelas.tabela_susep = sanitizeOcrAccents(extractedData.avaliacao_sequelas.tabela_susep);
-      extractedData.avaliacao_sequelas.dano_estetico = sanitizeOcrAccents(extractedData.avaliacao_sequelas.dano_estetico);
-      extractedData.avaliacao_sequelas.auxilio_terceiros = sanitizeOcrAccents(extractedData.avaliacao_sequelas.auxilio_terceiros);
-    }
     if (extractedData.historico) {
       extractedData.historico.historia_atual = sanitizeOcrAccents(extractedData.historico.historia_atual);
       extractedData.historico.antecedentes_patologicos = sanitizeOcrAccents(extractedData.historico.antecedentes_patologicos);
