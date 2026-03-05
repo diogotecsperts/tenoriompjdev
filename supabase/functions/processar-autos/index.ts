@@ -1325,9 +1325,9 @@ const results: Record<string, string> = {
     { tipo: 'resumo_peticao', shouldGenerate: isContentSufficient(contexto.peticaoInicial), step: 'Gerando resumo da petição inicial...', progress: 78 },
     { tipo: 'resumo_contestacao', shouldGenerate: isContentSufficient(contexto.contestacao), step: 'Gerando resumo da contestação...', progress: 82 },
     // PRIORITY 2.5: Quesitos — respostas automáticas (Zero-Touch)
-    { tipo: 'quesitos_juizo', shouldGenerate: true, step: 'Respondendo quesitos do Juízo...', progress: 86 },
-    { tipo: 'quesitos_reclamante', shouldGenerate: true, step: 'Respondendo quesitos do Reclamante...', progress: 88 },
-    { tipo: 'quesitos_reclamada', shouldGenerate: true, step: 'Respondendo quesitos da Reclamada...', progress: 90 },
+    { tipo: 'quesitos_juizo', shouldGenerate: false, step: 'Respondendo quesitos do Juízo...', progress: 86 },
+    { tipo: 'quesitos_reclamante', shouldGenerate: false, step: 'Respondendo quesitos do Reclamante...', progress: 88 },
+    { tipo: 'quesitos_reclamada', shouldGenerate: false, step: 'Respondendo quesitos da Reclamada...', progress: 90 },
     // PRIORITY 3: Least critical (database has default value for this field)
     { tipo: 'referencias_bibliograficas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando referências bibliográficas...', progress: 92 }
   ];
@@ -1783,17 +1783,6 @@ async function processarChunkedPDFBackground(
 
     // Add resumos to extracted data
     (extractedData as any).resumos_ia = resumosResult.resumos;
-
-    // Map quesitos responses back to extractedData (Zero-Touch)
-    if (resumosResult.resumos.quesitos_juizo && extractedData.quesitos) {
-      extractedData.quesitos.juizo = resumosResult.resumos.quesitos_juizo;
-    }
-    if (resumosResult.resumos.quesitos_reclamante && extractedData.quesitos) {
-      extractedData.quesitos.reclamante = resumosResult.resumos.quesitos_reclamante;
-    }
-    if (resumosResult.resumos.quesitos_reclamada && extractedData.quesitos) {
-      extractedData.quesitos.reclamada = resumosResult.resumos.quesitos_reclamada;
-    }
 
     // Finalize
     await supabaseAdmin.from('import_jobs').update({ 
@@ -3036,17 +3025,6 @@ async function processarPDFBackground(
 
     // Add resumos to extracted data
     (extractedData as any).resumos_ia = resumosResult.resumos;
-
-    // Map quesitos responses back to extractedData (Zero-Touch)
-    if (resumosResult.resumos.quesitos_juizo && extractedData.quesitos) {
-      extractedData.quesitos.juizo = resumosResult.resumos.quesitos_juizo;
-    }
-    if (resumosResult.resumos.quesitos_reclamante && extractedData.quesitos) {
-      extractedData.quesitos.reclamante = resumosResult.resumos.quesitos_reclamante;
-    }
-    if (resumosResult.resumos.quesitos_reclamada && extractedData.quesitos) {
-      extractedData.quesitos.reclamada = resumosResult.resumos.quesitos_reclamada;
-    }
 
     // Update progress: Finalizing
     await supabaseAdmin
