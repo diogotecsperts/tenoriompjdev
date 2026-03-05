@@ -209,7 +209,6 @@ export const EXPECTED_PROMPT_TYPES: Record<string, PromptType[]> = {
   
   // Conclusão
   'conclusao': ['regen'],
-  'sequelas': ['import', 'regen'],
   'quesitos': ['import'],
   
   // Referências
@@ -287,10 +286,9 @@ export const LAUDO_CARDS_STRUCTURE: Omit<LaudoCard, "icon">[] = [
   {
     id: "conclusao",
     label: "Conclusão",
-    description: "Conclusão, sequelas e quesitos",
+    description: "Conclusão e quesitos",
     sections: [
       { id: "conclusao", label: "Conclusão" },
-      { id: "sequelas", label: "Avaliação de Sequelas" },
       { id: "quesitos", label: "Quesitos" },
     ],
   },

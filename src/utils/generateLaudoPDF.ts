@@ -901,23 +901,7 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
     sectionNumber++;
   }
   
-  // 17. AVALIAÇÃO DE SEQUELAS
-  const hasSequelas = !isFieldEmpty(laudo.tabelaSUSEP) || !isFieldEmpty(laudo.danoEstetico) || !isFieldEmpty(laudo.auxilioTerceiros);
-  if (hasSequelas) {
-    let sectionHeight = SECTION_TITLE_HEIGHT;
-    if (!isFieldEmpty(laudo.tabelaSUSEP)) sectionHeight += 8;
-    if (!isFieldEmpty(laudo.danoEstetico)) sectionHeight += 8;
-    if (!isFieldEmpty(laudo.auxilioTerceiros)) sectionHeight += 8;
-    y = ensureSpace(doc, y, Math.min(sectionHeight, 35));
-    y = addSectionTitle(doc, `${sectionNumber}. AVALIAÇÃO DE SEQUELAS`, y);
-    if (!isFieldEmpty(laudo.tabelaSUSEP)) y = addLabeledField(doc, "Tabela SUSEP", laudo.tabelaSUSEP!, y);
-    if (!isFieldEmpty(laudo.danoEstetico)) y = addLabeledField(doc, "Dano Estético", laudo.danoEstetico!, y);
-    if (!isFieldEmpty(laudo.auxilioTerceiros)) y = addLabeledField(doc, "Auxílio de Terceiros", laudo.auxilioTerceiros!, y);
-    y += 5;
-    sectionNumber++;
-  }
-  
-  // 18. DISCUSSÃO E ANÁLISE
+  // 17. DISCUSSÃO E ANÁLISE
   debugField("conclusaoAnalise", laudo.conclusaoAnalise);
   if (!isFieldEmpty(laudo.conclusaoAnalise)) {
     const sectionHeight = SECTION_TITLE_HEIGHT + measureParagraphHeight(doc, laudo.conclusaoAnalise!);

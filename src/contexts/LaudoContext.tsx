@@ -68,9 +68,6 @@ export interface LaudoData {
   conclusaoStatus: string;
   conclusaoJustificativa: string;
   conclusaoDestino: string;
-  tabelaSUSEP: string;
-  danoEstetico: string;
-  auxilioTerceiros: string;
   quesitosJuizo: string;
   quesitosReclamante: string;
   quesitosReclamada: string;
@@ -211,9 +208,6 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           conclusaoStatus: dbLaudo.conclusao_status || "",
           conclusaoJustificativa: dbLaudo.conclusao_justificativa || "",
           conclusaoDestino: dbLaudo.conclusao_destino || "",
-          tabelaSUSEP: dbLaudo.tabela_susep || "",
-          danoEstetico: dbLaudo.dano_estetico || "",
-          auxilioTerceiros: dbLaudo.auxilio_terceiros || "",
           quesitosJuizo: dbLaudo.quesitos_juizo || "",
           quesitosReclamante: dbLaudo.quesitos_reclamante || "",
           quesitosReclamada: dbLaudo.quesitos_reclamada || "",
@@ -333,9 +327,6 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
       conclusaoStatus: '',
       conclusaoJustificativa: '',
       conclusaoDestino: '',
-      tabelaSUSEP: '',
-      danoEstetico: '',
-      auxilioTerceiros: '',
       quesitosJuizo: '',
       quesitosReclamante: '',
       quesitosReclamada: '',
@@ -434,9 +425,6 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           conclusaoStatus: '',
           conclusaoJustificativa: '',
           conclusaoDestino: '',
-          tabelaSUSEP: '',
-          danoEstetico: '',
-          auxilioTerceiros: '',
           quesitosJuizo: '',
           quesitosReclamante: '',
           quesitosReclamada: '',
@@ -535,9 +523,6 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           conclusaoStatus: data.conclusao_status || '',
           conclusaoJustificativa: data.conclusao_justificativa || '',
           conclusaoDestino: data.conclusao_destino || '',
-          tabelaSUSEP: data.tabela_susep || '',
-          danoEstetico: data.dano_estetico || '',
-          auxilioTerceiros: data.auxilio_terceiros || '',
           quesitosJuizo: data.quesitos_juizo || '',
           quesitosReclamante: data.quesitos_reclamante || '',
           quesitosReclamada: data.quesitos_reclamada || '',
@@ -637,9 +622,6 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
             conclusao_status: currentLaudo.conclusaoStatus,
             conclusao_justificativa: currentLaudo.conclusaoJustificativa,
             conclusao_destino: currentLaudo.conclusaoDestino,
-            tabela_susep: currentLaudo.tabelaSUSEP,
-            dano_estetico: currentLaudo.danoEstetico,
-            auxilio_terceiros: currentLaudo.auxilioTerceiros,
             quesitos_juizo: currentLaudo.quesitosJuizo,
             quesitos_reclamante: currentLaudo.quesitosReclamante,
             quesitos_reclamada: currentLaudo.quesitosReclamada,
@@ -727,9 +709,6 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
             conclusao_status: currentLaudo.conclusaoStatus,
             conclusao_justificativa: currentLaudo.conclusaoJustificativa,
             conclusao_destino: currentLaudo.conclusaoDestino,
-            tabela_susep: currentLaudo.tabelaSUSEP,
-            dano_estetico: currentLaudo.danoEstetico,
-            auxilio_terceiros: currentLaudo.auxilioTerceiros,
             quesitos_juizo: currentLaudo.quesitosJuizo,
             quesitos_reclamante: currentLaudo.quesitosReclamante,
             quesitos_reclamada: currentLaudo.quesitosReclamada,

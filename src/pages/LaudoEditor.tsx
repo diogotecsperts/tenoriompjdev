@@ -74,7 +74,6 @@ import { ExamesComplementares } from "@/components/laudo/sections/ExamesCompleme
 import { ExameFisico } from "@/components/laudo/sections/ExameFisico";
 import { NexoCausal } from "@/components/laudo/sections/NexoCausal";
 import { Conclusao } from "@/components/laudo/sections/Conclusao";
-import { AvaliacaoSequelas } from "@/components/laudo/sections/AvaliacaoSequelas";
 import { Quesitos } from "@/components/laudo/sections/Quesitos";
 import { ObjetivoPericia } from "@/components/laudo/sections/ObjetivoPericia";
 import { ResumoAutos } from "@/components/laudo/sections/ResumoAutos";
@@ -105,7 +104,6 @@ const sectionComponents: Record<string, React.ComponentType<any>> = {
   nexo: NexoCausal,
   "analise-incapacidade": AnaliseIncapacidade,
   conclusao: Conclusao,
-  sequelas: AvaliacaoSequelas,
   quesitos: Quesitos,
   referencias: ReferenciasBibliograficas,
 };

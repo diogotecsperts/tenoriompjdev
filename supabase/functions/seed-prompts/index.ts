@@ -31,7 +31,6 @@ function buildImportPrompts(): Record<string, { prompt: string; cardId: string; 
     prompt_import_cids: { cardId: 'analise-tecnica', sectionId: 'descricao-doencas' },
     prompt_import_incapacidade: { cardId: 'analise-tecnica', sectionId: 'analise-incapacidade' },
     prompt_import_nexoCausal: { cardId: 'analise-tecnica', sectionId: 'nexo' },
-    prompt_import_sequelas: { cardId: 'conclusao', sectionId: 'sequelas' },
     prompt_import_quesitos: { cardId: 'conclusao', sectionId: 'quesitos' },
     prompt_import_textosBrutos: { cardId: 'resumo-autos', sectionId: 'resumo' },
     prompt_import_resumo: { cardId: '_system', sectionId: '_import' }
@@ -389,86 +388,6 @@ A ANÁLISE DEVE CONTER:
 
 Use linguagem técnica médico-legal. Seja objetivo e fundamentado.
 MÍNIMO 2 parágrafos.`
-  },
-  
-  // ================================
-  // CARD: conclusao | SECTION: sequelas
-  // ================================
-  prompt_regen_tabelaSUSEP: {
-    cardId: 'conclusao',
-    sectionId: 'sequelas',
-    description: 'Tabela SUSEP - Regerar via PDF',
-    order: 1,
-    prompt: `Extraia informações para avaliação pela "Tabela SUSEP/DPVAT" de invalidez permanente.
-
-BUSQUE NOS AUTOS:
-- Percentuais de invalidez mencionados em laudos médicos ou perícias anteriores
-- Referências específicas à Tabela SUSEP, DPVAT ou outras tabelas de invalidez
-- Item da tabela aplicável às lesões/sequelas identificadas
-- Grau de comprometimento funcional ou anatômico documentado
-- Decisões do INSS sobre grau de invalidez (B91, aposentadoria por invalidez)
-- Laudos periciais anteriores que quantificaram sequelas
-
-ESTRUTURE A RESPOSTA:
-Se encontrar informações, formate assim:
-"[X%] de invalidez permanente conforme item [Y] da Tabela SUSEP/DPVAT
-Sequela: [descrição da lesão/sequela]
-Fundamentação: [fonte da informação - laudo de Dr. X, perícia do INSS, etc.]"
-
-Se não houver menção a percentuais de invalidez, retorne:
-"Não foram identificados nos autos documentos que quantifiquem o grau de invalidez permanente segundo a Tabela SUSEP/DPVAT."`
-  },
-  prompt_regen_danoEstetico: {
-    cardId: 'conclusao',
-    sectionId: 'sequelas',
-    description: 'Dano Estético - Regerar via PDF',
-    order: 2,
-    prompt: `Extraia informações sobre "Dano Estético" do documento.
-
-BUSQUE NOS AUTOS:
-- Cicatrizes visíveis: localização anatômica, dimensões aproximadas, características (hipertrófica, queloidiana, hiperpigmentada)
-- Deformidades permanentes: tipo (angular, rotacional), gravidade, visibilidade
-- Amputações ou perdas anatômicas: nível, membro afetado
-- Alterações de marcha ou postura permanentes e visíveis
-- Assimetrias corporais resultantes de lesões
-- Fotos anexadas aos autos que documentem o dano
-
-CLASSIFICAÇÃO DO DANO ESTÉTICO (se mencionada ou possível inferir):
-- Leve: cicatrizes discretas, pouco visíveis, em áreas normalmente cobertas
-- Moderado: cicatrizes visíveis em áreas expostas, pequenas deformidades
-- Grave: deformidades significativas, cicatrizes extensas, alterações funcionais visíveis
-- Gravíssimo: grandes deformidades, amputações, desfiguramento
-
-ESTRUTURE A RESPOSTA:
-Descreva objetivamente os achados estéticos documentados, a localização, e se possível classifique a gravidade.
-
-Se não houver menção a dano estético, retorne:
-"Não foram identificados nos autos documentos que descrevam dano estético decorrente das lesões."`
-  },
-  prompt_regen_auxilioTerceiros: {
-    cardId: 'conclusao',
-    sectionId: 'sequelas',
-    description: 'Auxílio de Terceiros - Regerar via PDF',
-    order: 3,
-    prompt: `Extraia informações sobre "Necessidade de Auxílio de Terceiros" do documento.
-
-BUSQUE NOS AUTOS:
-- Se o periciando necessita de ajuda para Atividades da Vida Diária (AVDs):
-  * Alimentar-se (cortar alimentos, levar à boca)
-  * Vestir-se e despir-se
-  * Higiene pessoal (banho, uso do banheiro)
-  * Locomoção dentro e fora de casa
-- Se necessita de cuidador permanente ou intermitente
-- Tipo de auxílio necessário e frequência (24 horas, apenas para certas atividades)
-- Laudos médicos, de assistente social ou perícias que atestem a necessidade
-- Prescrição médica de acompanhante ou cuidador
-
-ESTRUTURE A RESPOSTA:
-Descreva as limitações funcionais que demandam auxílio, as atividades para as quais necessita de ajuda, 
-o tipo de cuidador necessário (familiar, profissional), e a fonte documental da informação.
-
-Se não houver menção a necessidade de auxílio, retorne:
-"Não foram identificados nos autos documentos que indiquem necessidade de auxílio permanente de terceiros para atividades da vida diária."`
   },
   
   // ================================

@@ -84,9 +84,6 @@ const AVAILABLE_VARIABLES: Record<string, string[]> = {
   // Prompts de regeneração (regerar-campo-pdf) - recebem contexto do laudo
   'prompt_regen_descricaoTecnicaDoencas': ['cids'],
   'prompt_regen_conclusaoAnalise': ['cids', 'nexoCausal', 'exameFisico', 'examesComplementares', 'historicoOcupacional'],
-  'prompt_regen_tabelaSUSEP': ['cids', 'exameFisico', 'conclusao', 'analiseIncapacidade'],
-  'prompt_regen_danoEstetico': ['cids', 'exameFisico', 'conclusao'],
-  'prompt_regen_auxilioTerceiros': ['cids', 'exameFisico', 'conclusao', 'analiseIncapacidade'],
   'prompt_regen_analiseIncapacidade': ['cids', 'nexoCausal', 'exameFisico', 'examesComplementares', 'postoTrabalho', 'atividadesLaborais'],
   // Prompts de geração (gerar-resumos) - já possuem contexto completo
   'prompt_gen_nexoCausal': ['cids', 'postoTrabalho', 'atividadesLaborais', 'historicoOcupacional', 'exameFisico', 'examesComplementares'],
@@ -112,9 +109,6 @@ const ALL_VARIABLES = [
   { name: 'conclusao', desc: 'Análise conclusiva' },
   { name: 'conclusaoIncapacidade', desc: 'Conclusão sobre incapacidade' },
   { name: 'laudosMedicos', desc: 'Laudos médicos' },
-  { name: 'tabelaSUSEP', desc: 'Tabela SUSEP' },
-  { name: 'danoEstetico', desc: 'Dano estético' },
-  { name: 'auxilioTerceiros', desc: 'Auxílio de terceiros' },
   { name: 'analiseIncapacidade', desc: 'Análise de incapacidade laboral' },
 ];
 
