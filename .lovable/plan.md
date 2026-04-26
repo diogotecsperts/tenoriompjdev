@@ -1,96 +1,80 @@
+# Plano Combinado — DevPanel "Arquivos Originais" + Correção dos Quesitos
 
-
-# Plano: Geração de Quesitos Sob Demanda
-
-## Resumo
-
-Desativar a geração automática de quesitos na importação e criar um fluxo on-demand onde o médico clica um botão após preencher o laudo. A IA lê o PDF para encontrar as perguntas e responde usando exclusivamente os dados clínicos do formulário.
+Dois ajustes **totalmente isolados** do pipeline de produção. Nada do que existe hoje (importação, IA, geração de laudo, exportação) muda comportamento. Cumpre a diretriz de **Isolamento Total**.
 
 ---
 
-## 1. Backend — Desativar Geração na Importação
+## PARTE 1 — Aba "Arquivos Originais" no DevPanel
 
-### `supabase/functions/processar-autos/index.ts`
+### Objetivo
+Permitir que você (developer) acesse, sem solicitar manualmente, qualquer PDF original já enviado por qualquer usuário, organizados por perito e espelhando o histórico de laudos.
 
-**Linhas 1328-1330** — Mudar `shouldGenerate: true` para `shouldGenerate: false`:
-```typescript
-{ tipo: 'quesitos_juizo', shouldGenerate: false, step: 'Respondendo quesitos do Juízo...', progress: 86 },
-{ tipo: 'quesitos_reclamante', shouldGenerate: false, step: 'Respondendo quesitos do Reclamante...', progress: 88 },
-{ tipo: 'quesitos_reclamada', shouldGenerate: false, step: 'Respondendo quesitos da Reclamada...', progress: 90 },
-```
+### Avaliação de viabilidade e segurança
+- **Dados já existem**: bucket `processos-pdf` (privado) tem ~379 arquivos, todos preservados (nenhum auto-delete). Tabela `import_jobs` mantém `file_path` ligado ao `user_id`.
+- **Acesso restrito**: a função usará `is_developer()` (RPC já existente) + `SUPABASE_SERVICE_ROLE_KEY` para gerar **signed URLs temporárias (1h)**. O bucket continua privado.
+- **Risco zero ao app**: nenhuma alteração em `processar-autos`, `extrair-texto-pdf`, `LaudoContext`, RLS de tabelas de produção, schema, prompts ou pipelines de IA. É uma "leitura paralela".
+- **Reflexão automática dos PDFs pré-existentes**: sim, basta listar `import_jobs` (todos os 151 registros já estão lá com `file_path`).
 
-**Linhas 1787-1796** — Remover bloco "Map quesitos responses back to extractedData (Zero-Touch)" (chunked path).
+### Arquivos a criar
 
-**Linhas 3040-3049** — Remover bloco idêntico (non-chunked path).
-
-### `src/components/tools/ImportarAutosDialog.tsx`
-
-**Linhas 1058-1060** — Forçar quesitos vazios na importação:
-```typescript
-quesitos_juizo: '',
-quesitos_reclamante: '',
-quesitos_reclamada: '',
-```
-
----
-
-## 2. Nova Edge Function — `gerar-quesitos`
-
-### `supabase/functions/gerar-quesitos/index.ts` (CRIAR)
-
-Fluxo:
-1. Autenticar via JWT, validar propriedade do laudo
-2. Receber `laudoId` + `contexto` (campos clínicos do formulário) no body
-3. Buscar `ai_metadata.extracted_content_path` do laudo para obter o texto do PDF via `retrieveExtractedContent`
-4. Executar 3 chamadas de IA em paralelo (`Promise.allSettled`) — uma por grupo (Juízo, Reclamante, Reclamada)
-5. Cada chamada recebe:
-   - O texto integral do PDF (para localizar as perguntas)
-   - O contexto clínico do médico (nexo, incapacidade, conclusão, etc.) — vindo do payload, não do banco
-6. Retornar `{ quesitosJuizo, quesitosReclamante, quesitosReclamada }`
-
-Reutiliza: `getAIConfig`, `callAI` de `_shared/ai-config.ts`, `retrieveExtractedContent` de `_shared/pdf-visual-extractor.ts`, `getPrompt` de `_shared/prompt-manager.ts`.
-
-Prompt blindado: instruir a IA a responder APENAS com base nos dados clínicos fornecidos, nunca inventar achados. Regra de inexistência: se quesitos não forem encontrados, retornar frase padrão.
-
-### `supabase/config.toml`
-
-Adicionar:
-```toml
-[functions.gerar-quesitos]
-verify_jwt = true
-```
-
----
-
-## 3. Frontend — Botão Único (`Quesitos.tsx`)
-
-### `src/components/laudo/sections/Quesitos.tsx` (REESCREVER)
-
-- Remover `enableRegenerate={true}` dos 3 `LaudoTextareaAIField`
-- Adicionar botão "Gerar Respostas dos Quesitos" com ícone `Sparkles` acima das tabs
-- Ao clicar:
-  1. Verificar se campos não estão vazios → mostrar `AlertDialog` de confirmação
-  2. Montar payload com campos do `currentLaudo`: `nexoCausalJustificativa`, `conclusaoIncapacidade`, `analiseIncapacidadeLaboral`, `historiaAtual`, `exameFisico`, `examesComplementares`, `descricaoAtividadesLaborais`, `conclusaoAnalise`, `diagnosticoCIDs`, `antecedentes`, `laudosMedicos`
-  3. Chamar `supabase.functions.invoke('gerar-quesitos', { body: { laudoId, contexto } })`
-  4. Preencher os 3 campos via `updateLaudo()`
-  5. Loading state com `Loader2` + toast de sucesso/erro
-
----
-
-## 4. Ficheiros Impactados
-
-| Arquivo | Ação |
+| Arquivo | Função |
 |---|---|
-| `supabase/functions/gerar-quesitos/index.ts` | **CRIAR** |
-| `supabase/config.toml` | Adicionar entrada |
-| `supabase/functions/processar-autos/index.ts` | `shouldGenerate: false` + remover 2 blocos de mapeamento |
-| `src/components/tools/ImportarAutosDialog.tsx` | Forçar quesitos vazios |
-| `src/components/laudo/sections/Quesitos.tsx` | Reescrever com botão único |
+| `supabase/functions/dev-list-pdfs/index.ts` | Lista `import_jobs` agrupados por usuário (com filtro opcional `user_id`). Valida JWT + `is_developer()` server-side. Retorna metadados (path, criado_em, status, laudo vinculado se houver). |
+| `supabase/functions/dev-download-pdf/index.ts` | Recebe `{ file_path }`, valida developer, gera signed URL de 1h via service_role e retorna `{ url, expires_at }`. |
+| `src/components/dev-panel/DevOriginalFiles.tsx` | UI da aba. Tela 1: grid de usuários (nome, email, MED###, total de PDFs). Tela 2 (ao clicar): tabela espelhando o histórico — data de upload, nome do arquivo, processo (se vinculado a laudo), status do job, badge "✓ Laudo gerado", botão **Baixar** (chama `dev-download-pdf` e abre em nova aba). |
 
-## 5. Ficheiros NÃO Tocados
+### Arquivos a editar (mínimo, cirúrgico)
 
-- `LaudoContext.tsx` — interface e persistência inalterados
-- `regerar-campo-pdf` — mantido intacto
-- `build-import-prompt.ts` — extração de perguntas brutas preservada
-- `seed-prompts`, `laudo-structure.ts`, exportadores DOCX/PDF — zero alterações
+| Arquivo | Alteração |
+|---|---|
+| `src/pages/DevPanel.tsx` | Adicionar 1 item ao array `navItems` ("Arquivos Originais", ícone `FileArchive`), 1 case no `switch`, 1 entrada no type `DevTab`. ~4 linhas. |
+| `supabase/config.toml` | Adicionar `[functions.dev-list-pdfs]` e `[functions.dev-download-pdf]` com `verify_jwt = true`. |
 
+### Arquivos NÃO tocados
+`LaudoContext.tsx`, `processar-autos`, `extrair-texto-pdf`, `regerar-campo-pdf`, `gerar-quesitos`, prompts, schema do banco, RLS de qualquer tabela de produção, exportadores DOCX/PDF, `ImportarAutosDialog`, todas as seções do laudo.
+
+### Segurança
+- Validação dupla: JWT do Supabase + `is_developer()` em **toda** request das duas functions (rejeita 403 caso contrário).
+- Bucket permanece **privado**.
+- Signed URLs expiram em 1h (não são públicas, não ficam em log).
+- Sem RPC nova, sem mudança em policies existentes.
+- Auditável: cada chamada loga em `backend_logs` (tabela já existente).
+
+### Reflexão dos PDFs pré-existentes
+Automática — a UI lê `import_jobs` direto. Os 120 PDFs do Diogo + 31 do Bruno aparecem imediatamente após deploy, agrupados.
+
+---
+
+## PARTE 2 — Correção dos Quesitos no DOCX/PDF (pendente da rodada anterior)
+
+### Diagnóstico confirmado
+Em `src/utils/generateLaudoDOCX.ts` e `src/utils/generateLaudoPDF.ts`, o regex `/\[.{3,}\]/` dentro de `PLACEHOLDER_PATTERNS` marca como "vazio" qualquer campo que contenha colchetes em qualquer posição (ex.: `[CID-10]`, `[anotação do perito]`), suprimindo o conteúdo inteiro. É por isso que "Quesitos da Reclamada" some completamente do DOCX do laudo do VALDEMIR (mais de 14k caracteres válidos sendo escondidos).
+
+### Correção cirúrgica
+Trocar **uma linha** em cada um dos dois arquivos:
+- **De:** `/\[.{3,}\]/`
+- **Para:** `/^\s*\[.{3,}\]\s*$/` (só suprime se o campo INTEIRO for um placeholder isolado)
+
+Mantém `/\[INSERIR/i` para continuar pegando placeholders explícitos da IA.
+
+### Arquivos a editar
+- `src/utils/generateLaudoDOCX.ts` — 1 linha
+- `src/utils/generateLaudoPDF.ts` — 1 linha
+
+### Arquivos NÃO tocados
+Prompts, edge functions, `LaudoContext`, schema, seções, IA.
+
+### Impacto esperado
+- "Quesitos da Reclamada" passa a aparecer no DOCX/PDF do VALDEMIR e dos outros 5 laudos afetados.
+- "Quesitos do Reclamante" continuará exibindo "Quesitos do Reclamante não identificados nos autos" quando o PDF realmente não trouxer perguntas — esse texto vem da IA, é resposta legítima, não bug.
+
+---
+
+## Resumo de risco
+
+| Item | Risco para produção |
+|---|---|
+| Aba Arquivos Originais | **Zero** — funções novas isoladas, bucket continua privado, sem mudança em tabelas de produção. |
+| Correção Quesitos DOCX/PDF | **Mínimo** — regex mais restritiva, só deixa de suprimir conteúdo válido. Comportamento de placeholders explícitos preservado. |
+
+Aprove para eu executar as duas partes na mesma rodada, ou diga se prefere uma de cada vez.
