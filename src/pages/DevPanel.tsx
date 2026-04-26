@@ -16,7 +16,8 @@ import {
   Server,
   Gauge,
   MessageSquare,
-  History
+  History,
+  FileArchive
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,8 +36,9 @@ import { DevRetryStats } from "@/components/dev-panel/DevRetryStats";
 import { DevAIEfficiency } from "@/components/dev-panel/DevAIEfficiency";
 import { DevPrompts } from "@/components/dev-panel/DevPrompts";
 import { DevAccessHistory } from "@/components/dev-panel/DevAccessHistory";
+import { DevOriginalFiles } from "@/components/dev-panel/DevOriginalFiles";
 
-type DevTab = "dashboard" | "users" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "settings";
+type DevTab = "dashboard" | "users" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -56,6 +58,7 @@ const navItems: NavItem[] = [
   { id: "pdf-costs", label: "Custos PDF", icon: DollarSign },
   { id: "prompts", label: "DevPrompts", icon: MessageSquare },
   { id: "access-history", label: "Histórico de Acesso", icon: History },
+  { id: "original-files", label: "Arquivos Originais", icon: FileArchive },
   { id: "settings", label: "Configurações", icon: Settings },
 ];
 
@@ -99,6 +102,8 @@ export default function DevPanel() {
         return <DevPDFCosts />;
       case "access-history":
         return <DevAccessHistory />;
+      case "original-files":
+        return <DevOriginalFiles />;
       case "settings":
         return <DevSettings />;
       default:
