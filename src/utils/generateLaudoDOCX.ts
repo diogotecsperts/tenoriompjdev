@@ -46,7 +46,7 @@ const FONT = {
 // Padrões que indicam campo técnico/vazio que NÃO deve aparecer no documento
 const PLACEHOLDER_PATTERNS = [
   /\[INSERIR/i,              // [INSERIR algo] em qualquer posição
-  /\[.{3,}\]/,              // [qualquer placeholder] de 3+ chars
+  /^\s*\[.{3,}\]\s*$/,      // só suprime se o campo INTEIRO for um placeholder isolado
   /^erro\s*cr[ií]tico/i,    // "erro crítico: ..."
   /^aguardando/i,            // "aguardando..."
   /^undefined$/i,
