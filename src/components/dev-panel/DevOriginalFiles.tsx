@@ -50,6 +50,7 @@ export function DevOriginalFiles() {
   const [files, setFiles] = useState<DevFileRow[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [search, setSearch] = useState("");
+  const [filesSearch, setFilesSearch] = useState("");
   const [downloadingPath, setDownloadingPath] = useState<string | null>(null);
 
   const loadUsers = async () => {
@@ -151,6 +152,16 @@ export function DevOriginalFiles() {
 
   // Tela 2: arquivos do usuário selecionado
   if (selectedUser) {
+    const q = filesSearch.toLowerCase().trim();
+    const filteredFiles = q
+      ? files.filter(
+          (f) =>
+            f.file_name?.toLowerCase().includes(q) ||
+            f.reclamante?.toLowerCase().includes(q) ||
+            f.processo?.toLowerCase().includes(q),
+        )
+      : files;
+
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-3">
@@ -160,6 +171,7 @@ export function DevOriginalFiles() {
             onClick={() => {
               setSelectedUser(null);
               setFiles([]);
+              setFilesSearch("");
             }}
           >
             <ArrowLeft className="h-4 w-4 mr-1" />
@@ -180,7 +192,18 @@ export function DevOriginalFiles() {
               PDFs originais enviados
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            {!loadingFiles && files.length > 0 && (
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por reclamante, processo ou nome do arquivo..."
+                  value={filesSearch}
+                  onChange={(e) => setFilesSearch(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+            )}
             {loadingFiles ? (
               <div className="space-y-2">
                 {[...Array(5)].map((_, i) => (
@@ -191,21 +214,41 @@ export function DevOriginalFiles() {
               <p className="text-sm text-muted-foreground text-center py-8">
                 Nenhum PDF encontrado para este usuário.
               </p>
+            ) : filteredFiles.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                Nenhum arquivo corresponde à busca.
+              </p>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Arquivo</TableHead>
+                    <TableHead>Reclamante</TableHead>
+                    <TableHead>Processo</TableHead>
                     <TableHead>Data</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {files.map((f) => (
+                  {filteredFiles.map((f) => (
                     <TableRow key={f.job_id}>
-                      <TableCell className="font-mono text-xs max-w-md truncate">
+                      <TableCell className="font-mono text-xs max-w-xs truncate">
                         {f.file_name}
+                      </TableCell>
+                      <TableCell className="text-sm font-medium max-w-[200px] truncate">
+                        {f.reclamante ? (
+                          f.reclamante
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs whitespace-nowrap">
+                        {f.processo ? (
+                          f.processo
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs whitespace-nowrap">
                         {new Date(f.created_at).toLocaleString("pt-BR")}

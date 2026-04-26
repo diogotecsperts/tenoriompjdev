@@ -6,6 +6,9 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+// Regex padrão CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO
+const PROCESSO_REGEX = /\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}/;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -93,14 +96,41 @@ Deno.serve(async (req) => {
       .order("created_at", { ascending: false });
     if (jErr) throw jErr;
 
+    // Fallback: fetch laudos from this user to enrich missing reclamante/processo
+    const { data: laudos } = await admin
+      .from("laudos")
+      .select("processo_numero, reclamante")
+      .eq("user_id", userId);
+
+    const laudosByProcesso = new Map<string, string>();
+    (laudos ?? []).forEach((l: any) => {
+      if (l.processo_numero && l.reclamante) {
+        laudosByProcesso.set(l.processo_numero.trim(), l.reclamante);
+      }
+    });
+
     const files = (jobs ?? []).map((j: any) => {
       const fileName = j.file_path?.split("/").pop() ?? j.file_path;
-      const reclamante =
+
+      let reclamante: string | null =
         j.result?.reclamante ?? j.result?.dadosBasicos?.reclamante ?? null;
-      const processo =
+      let processo: string | null =
         j.result?.processo_numero ??
         j.result?.dadosBasicos?.processoNumero ??
         null;
+
+      // Fallback 1: extract processo from filename via CNJ regex
+      if (!processo && fileName) {
+        const match = fileName.match(PROCESSO_REGEX);
+        if (match) processo = match[0];
+      }
+
+      // Fallback 2: cross-ref laudos table by processo
+      if (!reclamante && processo) {
+        const found = laudosByProcesso.get(processo.trim());
+        if (found) reclamante = found;
+      }
+
       return {
         job_id: j.id,
         file_path: j.file_path,
