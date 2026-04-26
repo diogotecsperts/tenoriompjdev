@@ -1,77 +1,71 @@
-## Objetivo
+## Contexto
 
-Adicionar **nome do reclamante (paciente)** e **número do processo** à listagem de PDFs originais no DevPanel → "Arquivos Originais", facilitando a localização visual dos arquivos quando houver múltiplos uploads no mesmo dia. Nenhuma informação atual será removida — apenas enriquecida.
+O build falhou com 2 erros TypeScript em `supabase/functions/processar-autos/index.ts` — **arquivo que não foi modificado nas últimas implementações**. Os erros são pré-existentes e só apareceram agora porque o Deno faz type-check global em todas as edge functions a cada deploy, e a adição das novas funções (`dev-list-pdfs`, `dev-download-pdf`) forçou uma re-checagem completa que expôs os erros latentes.
 
----
-
-## Diagnóstico
-
-A edge function `dev-list-pdfs` **já retorna** os campos `reclamante` e `processo` no objeto `files[]` (extraídos de `import_jobs.result`), mas o componente `DevOriginalFiles.tsx` ignora esses campos ao renderizar a tabela.
-
-Adicionalmente, alguns jobs antigos podem não ter populado esses campos no `result` (falhas parciais, formatos legados). Para garantir cobertura máxima, vou adicionar um **fallback opcional** cruzando com a tabela `laudos` quando o reclamante não estiver no `import_jobs.result`.
+**Consequência atual:**
+- Nova aba "Arquivos Originais" no DevPanel não funciona (funções não foram deployadas).
+- App continua funcionando normalmente (versões anteriores das edge functions seguem ativas).
+- Correção dos quesitos DOCX/PDF funciona normalmente (é frontend).
 
 ---
 
-## Mudanças propostas
+## Erros a corrigir
 
-### 1. `supabase/functions/dev-list-pdfs/index.ts` (refinamento do fallback)
-
-- Após buscar `import_jobs`, fazer uma segunda query enxuta em `laudos` (filtrada pelo `user_id`) selecionando apenas `processo_numero` e `reclamante`.
-- Construir um `Map<processo_numero, reclamante>` em memória.
-- Para cada `file`, se `reclamante` ou `processo` vierem nulos do `import_jobs.result`, tentar enriquecer:
-  - Extrair o número do processo do nome do arquivo (regex `/\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}/`) como fallback de `processo`.
-  - Cruzar com o Map de laudos para preencher `reclamante`.
-- Custo: **1 query SQL adicional por requisição** (irrelevante, executa apenas quando o dev abre a tela do usuário).
-- Segurança: nada muda — ainda valida JWT + `is_developer()`.
-
-### 2. `src/components/dev-panel/DevOriginalFiles.tsx` (UI)
-
-Na tabela de arquivos do usuário (segunda tela), adicionar **duas novas colunas** entre "Arquivo" e "Data":
-
-| Arquivo | **Reclamante** | **Processo** | Data | Status | Ações |
-
-- **Reclamante**: exibe `f.reclamante` ou `—` (em `text-muted-foreground` quando ausente).
-- **Processo**: exibe `f.processo` em `font-mono text-xs` ou `—` quando ausente.
-- A coluna "Arquivo" mantém o nome técnico do PDF (não remove informação existente).
-- Largura da tabela continua confortável no viewport atual (2060px).
-
-Opcional (UX bônus): adicionar um campo de busca local no topo da tabela de arquivos para filtrar por reclamante/processo, similar ao que já existe na tela de usuários. **Sugiro incluir** — é trivial e atende exatamente o cenário "muitos arquivos no mesmo dia".
-
----
-
-## Segurança e isolamento
-
-- ✅ **Zero impacto** em pipelines de produção (OCR, IA, geração de laudos).
-- ✅ **Zero alterações** em prompts, no `LaudoContext` ou no schema do banco.
-- ✅ Edge function continua restrita a `is_developer()`.
-- ✅ Nenhuma RLS nova necessária — já uso `service_role` server-side com validação prévia.
-- ✅ Funciona **retroativamente** para todos os 151 PDFs já indexados.
-
----
-
-## Arquivos afetados
-
-1. `supabase/functions/dev-list-pdfs/index.ts` — adicionar fallback via `laudos`.
-2. `src/components/dev-panel/DevOriginalFiles.tsx` — adicionar colunas + busca opcional.
-
-Sem migrações. Sem novas tabelas. Sem novos secrets.
-
----
-
-## Resultado esperado
-
-A tabela de arquivos do usuário passará de:
-
+### Erro 1 — `processar-autos/index.ts:1543`
 ```
-[arquivo.pdf] [25/04/2026 14:32] [completed] [⬇]
-[arquivo.pdf] [25/04/2026 14:18] [completed] [⬇]
+Type 'Record<string, string>' is missing the following properties from type 
+'{ resumo_peticao: string; resumo_contestacao: string; ... }'
 ```
 
-Para:
+**Causa:** A variável `results` é populada dinamicamente em loop e tipada como `Record<string, string>`, mas a função declara retorno estrito com 9 campos nomeados.
 
-```
-[arquivo.pdf] [VALDEMIR LIMA SILVA] [0000629-58.2025.5.19.0061] [25/04/2026 14:32] [completed] [⬇]
-[arquivo.pdf] [JOÃO DA SILVA]       [0001234-56.2025.5.19.0061] [25/04/2026 14:18] [completed] [⬇]
+**Correção:** Fazer cast explícito no retorno, garantindo defaults para cada campo:
+```typescript
+return {
+  resumos: {
+    resumo_peticao: results.resumo_peticao ?? '',
+    resumo_contestacao: results.resumo_contestacao ?? '',
+    descricao_doencas: results.descricao_doencas ?? '',
+    nexo_causal: results.nexo_causal ?? '',
+    incapacidade: results.incapacidade ?? '',
+    referencias_bibliograficas: results.referencias_bibliograficas ?? '',
+    quesitos_juizo: results.quesitos_juizo ?? '',
+    quesitos_reclamante: results.quesitos_reclamante ?? '',
+    quesitos_reclamada: results.quesitos_reclamada ?? '',
+  },
+  aiInfo: { /* mantém como está */ }
+};
 ```
 
-Identificação visual instantânea, mesmo com dezenas de uploads no mesmo dia.
+### Erro 2 — `processar-autos/index.ts:2574`
+```
+Property 'text' does not exist on type 'object'.
+```
+
+**Causa:** `tryFixTruncatedJson()` retorna `object | null`. Acessar `.text` requer narrowing.
+
+**Correção:** Adicionar type guard inline:
+```typescript
+const parsedAny = parsed as any;
+const textoOCR = mistralRawText || parsedAny?.text || extractedData?.textos_brutos?.peticao_inicial || '';
+```
+
+---
+
+## Garantias de segurança
+
+1. **Zero alteração de comportamento runtime.** Ambas correções são puramente de tipagem (defaults `?? ''` que já era o comportamento esperado, e cast `as any` em uma única linha).
+2. **Não toca em prompts, lógica de IA, OCR, fluxo de extração ou banco.**
+3. **Não afeta dados existentes** — o `?? ''` apenas garante que se um resumo falhou, o campo vira string vazia (que já era o comportamento implícito do código atual).
+4. **Destrava deploy das funções `dev-list-pdfs` e `dev-download-pdf`**, ativando a aba "Arquivos Originais" do DevPanel.
+
+## Arquivos modificados
+
+- `supabase/functions/processar-autos/index.ts` (2 edits cirúrgicos: linhas ~1542-1551 e linha 2574)
+
+## Resultado esperado após aprovação
+
+- Build volta a passar.
+- Aba "Arquivos Originais" no DevPanel passa a funcionar (lista usuários, mostra PDFs com Reclamante/Processo, gera links de download).
+- Correção dos quesitos DOCX/PDF segue funcionando (já está em produção via frontend).
+- Pipeline `processar-autos` segue 100% inalterada em comportamento.

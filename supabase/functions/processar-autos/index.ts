@@ -1540,7 +1540,17 @@ const results: Record<string, string> = {
   }
 
   return {
-    resumos: results,
+    resumos: {
+      resumo_peticao: results.resumo_peticao ?? '',
+      resumo_contestacao: results.resumo_contestacao ?? '',
+      descricao_doencas: results.descricao_doencas ?? '',
+      nexo_causal: results.nexo_causal ?? '',
+      incapacidade: results.incapacidade ?? '',
+      referencias_bibliograficas: results.referencias_bibliograficas ?? '',
+      quesitos_juizo: results.quesitos_juizo ?? '',
+      quesitos_reclamante: results.quesitos_reclamante ?? '',
+      quesitos_reclamada: results.quesitos_reclamada ?? '',
+    },
     aiInfo: {
       provider: aiConfig.provider,
       model: aiConfig.model,
@@ -2571,7 +2581,7 @@ async function processarPDFBackground(
             extractedData = ensureValidStructure(parsed);
             
             // Preservar texto integral para busca de quesitos (sem fatiamento)
-            const textoOCR = mistralRawText || parsed?.text || extractedData?.textos_brutos?.peticao_inicial || '';
+            const textoOCR = mistralRawText || (parsed as any)?.text || extractedData?.textos_brutos?.peticao_inicial || '';
             if (textoOCR && textoOCR.length > 1000) {
               (extractedData as any)._rawTextTail = textoOCR;
               console.log(`[processar-autos] Preserved full text for quesitos (mistral-ocr): ${textoOCR.length} chars`);
