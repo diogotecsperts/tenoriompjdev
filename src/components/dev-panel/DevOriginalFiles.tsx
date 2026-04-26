@@ -74,10 +74,7 @@ export function DevOriginalFiles() {
     setLoadingFiles(true);
     setFiles([]);
     try {
-      const { data, error } = await supabase.functions.invoke("dev-list-pdfs", {
-        body: undefined,
-      });
-      // GET with query param
+      // GET com query param para listar PDFs do usuário
       const url = `/functions/v1/dev-list-pdfs?user_id=${user.id}`;
       const session = (await supabase.auth.getSession()).data.session;
       const res = await fetch(
