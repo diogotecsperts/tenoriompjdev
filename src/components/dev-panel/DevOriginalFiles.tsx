@@ -112,19 +112,31 @@ export function DevOriginalFiles() {
       const url = (data as any)?.url;
       if (!url) throw new Error("URL não retornada");
 
-      // Force download via blob to preserve filename
-      const resp = await fetch(url);
-      const blob = await resp.blob();
-      const a = document.createElement("a");
-      const objUrl = URL.createObjectURL(blob);
-      a.href = objUrl;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(objUrl);
-
-      toast({ title: "Download iniciado", description: fileName });
+      // Camada 1: tenta blob (preserva nome exato do arquivo).
+      // Camada 2 (fallback): se o ambiente bloqueia fetch cross-origin
+      // ao storage (ex.: proxy do iframe de preview do Lovable),
+      // abre a signed URL em nova aba para download nativo do navegador.
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const a = document.createElement("a");
+        const objUrl = URL.createObjectURL(blob);
+        a.href = objUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(objUrl);
+        toast({ title: "Download iniciado", description: fileName });
+      } catch (fetchErr) {
+        // Fallback resiliente: download nativo via nova aba.
+        window.open(url, "_blank", "noopener,noreferrer");
+        toast({
+          title: "Download iniciado",
+          description: `${fileName} (aberto em nova aba)`,
+        });
+      }
     } catch (e: any) {
       toast({
         title: "Erro no download",
