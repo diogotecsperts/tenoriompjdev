@@ -1,80 +1,77 @@
-# Plano Combinado — DevPanel "Arquivos Originais" + Correção dos Quesitos
+## Objetivo
 
-Dois ajustes **totalmente isolados** do pipeline de produção. Nada do que existe hoje (importação, IA, geração de laudo, exportação) muda comportamento. Cumpre a diretriz de **Isolamento Total**.
-
----
-
-## PARTE 1 — Aba "Arquivos Originais" no DevPanel
-
-### Objetivo
-Permitir que você (developer) acesse, sem solicitar manualmente, qualquer PDF original já enviado por qualquer usuário, organizados por perito e espelhando o histórico de laudos.
-
-### Avaliação de viabilidade e segurança
-- **Dados já existem**: bucket `processos-pdf` (privado) tem ~379 arquivos, todos preservados (nenhum auto-delete). Tabela `import_jobs` mantém `file_path` ligado ao `user_id`.
-- **Acesso restrito**: a função usará `is_developer()` (RPC já existente) + `SUPABASE_SERVICE_ROLE_KEY` para gerar **signed URLs temporárias (1h)**. O bucket continua privado.
-- **Risco zero ao app**: nenhuma alteração em `processar-autos`, `extrair-texto-pdf`, `LaudoContext`, RLS de tabelas de produção, schema, prompts ou pipelines de IA. É uma "leitura paralela".
-- **Reflexão automática dos PDFs pré-existentes**: sim, basta listar `import_jobs` (todos os 151 registros já estão lá com `file_path`).
-
-### Arquivos a criar
-
-| Arquivo | Função |
-|---|---|
-| `supabase/functions/dev-list-pdfs/index.ts` | Lista `import_jobs` agrupados por usuário (com filtro opcional `user_id`). Valida JWT + `is_developer()` server-side. Retorna metadados (path, criado_em, status, laudo vinculado se houver). |
-| `supabase/functions/dev-download-pdf/index.ts` | Recebe `{ file_path }`, valida developer, gera signed URL de 1h via service_role e retorna `{ url, expires_at }`. |
-| `src/components/dev-panel/DevOriginalFiles.tsx` | UI da aba. Tela 1: grid de usuários (nome, email, MED###, total de PDFs). Tela 2 (ao clicar): tabela espelhando o histórico — data de upload, nome do arquivo, processo (se vinculado a laudo), status do job, badge "✓ Laudo gerado", botão **Baixar** (chama `dev-download-pdf` e abre em nova aba). |
-
-### Arquivos a editar (mínimo, cirúrgico)
-
-| Arquivo | Alteração |
-|---|---|
-| `src/pages/DevPanel.tsx` | Adicionar 1 item ao array `navItems` ("Arquivos Originais", ícone `FileArchive`), 1 case no `switch`, 1 entrada no type `DevTab`. ~4 linhas. |
-| `supabase/config.toml` | Adicionar `[functions.dev-list-pdfs]` e `[functions.dev-download-pdf]` com `verify_jwt = true`. |
-
-### Arquivos NÃO tocados
-`LaudoContext.tsx`, `processar-autos`, `extrair-texto-pdf`, `regerar-campo-pdf`, `gerar-quesitos`, prompts, schema do banco, RLS de qualquer tabela de produção, exportadores DOCX/PDF, `ImportarAutosDialog`, todas as seções do laudo.
-
-### Segurança
-- Validação dupla: JWT do Supabase + `is_developer()` em **toda** request das duas functions (rejeita 403 caso contrário).
-- Bucket permanece **privado**.
-- Signed URLs expiram em 1h (não são públicas, não ficam em log).
-- Sem RPC nova, sem mudança em policies existentes.
-- Auditável: cada chamada loga em `backend_logs` (tabela já existente).
-
-### Reflexão dos PDFs pré-existentes
-Automática — a UI lê `import_jobs` direto. Os 120 PDFs do Diogo + 31 do Bruno aparecem imediatamente após deploy, agrupados.
+Adicionar **nome do reclamante (paciente)** e **número do processo** à listagem de PDFs originais no DevPanel → "Arquivos Originais", facilitando a localização visual dos arquivos quando houver múltiplos uploads no mesmo dia. Nenhuma informação atual será removida — apenas enriquecida.
 
 ---
 
-## PARTE 2 — Correção dos Quesitos no DOCX/PDF (pendente da rodada anterior)
+## Diagnóstico
 
-### Diagnóstico confirmado
-Em `src/utils/generateLaudoDOCX.ts` e `src/utils/generateLaudoPDF.ts`, o regex `/\[.{3,}\]/` dentro de `PLACEHOLDER_PATTERNS` marca como "vazio" qualquer campo que contenha colchetes em qualquer posição (ex.: `[CID-10]`, `[anotação do perito]`), suprimindo o conteúdo inteiro. É por isso que "Quesitos da Reclamada" some completamente do DOCX do laudo do VALDEMIR (mais de 14k caracteres válidos sendo escondidos).
+A edge function `dev-list-pdfs` **já retorna** os campos `reclamante` e `processo` no objeto `files[]` (extraídos de `import_jobs.result`), mas o componente `DevOriginalFiles.tsx` ignora esses campos ao renderizar a tabela.
 
-### Correção cirúrgica
-Trocar **uma linha** em cada um dos dois arquivos:
-- **De:** `/\[.{3,}\]/`
-- **Para:** `/^\s*\[.{3,}\]\s*$/` (só suprime se o campo INTEIRO for um placeholder isolado)
-
-Mantém `/\[INSERIR/i` para continuar pegando placeholders explícitos da IA.
-
-### Arquivos a editar
-- `src/utils/generateLaudoDOCX.ts` — 1 linha
-- `src/utils/generateLaudoPDF.ts` — 1 linha
-
-### Arquivos NÃO tocados
-Prompts, edge functions, `LaudoContext`, schema, seções, IA.
-
-### Impacto esperado
-- "Quesitos da Reclamada" passa a aparecer no DOCX/PDF do VALDEMIR e dos outros 5 laudos afetados.
-- "Quesitos do Reclamante" continuará exibindo "Quesitos do Reclamante não identificados nos autos" quando o PDF realmente não trouxer perguntas — esse texto vem da IA, é resposta legítima, não bug.
+Adicionalmente, alguns jobs antigos podem não ter populado esses campos no `result` (falhas parciais, formatos legados). Para garantir cobertura máxima, vou adicionar um **fallback opcional** cruzando com a tabela `laudos` quando o reclamante não estiver no `import_jobs.result`.
 
 ---
 
-## Resumo de risco
+## Mudanças propostas
 
-| Item | Risco para produção |
-|---|---|
-| Aba Arquivos Originais | **Zero** — funções novas isoladas, bucket continua privado, sem mudança em tabelas de produção. |
-| Correção Quesitos DOCX/PDF | **Mínimo** — regex mais restritiva, só deixa de suprimir conteúdo válido. Comportamento de placeholders explícitos preservado. |
+### 1. `supabase/functions/dev-list-pdfs/index.ts` (refinamento do fallback)
 
-Aprove para eu executar as duas partes na mesma rodada, ou diga se prefere uma de cada vez.
+- Após buscar `import_jobs`, fazer uma segunda query enxuta em `laudos` (filtrada pelo `user_id`) selecionando apenas `processo_numero` e `reclamante`.
+- Construir um `Map<processo_numero, reclamante>` em memória.
+- Para cada `file`, se `reclamante` ou `processo` vierem nulos do `import_jobs.result`, tentar enriquecer:
+  - Extrair o número do processo do nome do arquivo (regex `/\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4}/`) como fallback de `processo`.
+  - Cruzar com o Map de laudos para preencher `reclamante`.
+- Custo: **1 query SQL adicional por requisição** (irrelevante, executa apenas quando o dev abre a tela do usuário).
+- Segurança: nada muda — ainda valida JWT + `is_developer()`.
+
+### 2. `src/components/dev-panel/DevOriginalFiles.tsx` (UI)
+
+Na tabela de arquivos do usuário (segunda tela), adicionar **duas novas colunas** entre "Arquivo" e "Data":
+
+| Arquivo | **Reclamante** | **Processo** | Data | Status | Ações |
+
+- **Reclamante**: exibe `f.reclamante` ou `—` (em `text-muted-foreground` quando ausente).
+- **Processo**: exibe `f.processo` em `font-mono text-xs` ou `—` quando ausente.
+- A coluna "Arquivo" mantém o nome técnico do PDF (não remove informação existente).
+- Largura da tabela continua confortável no viewport atual (2060px).
+
+Opcional (UX bônus): adicionar um campo de busca local no topo da tabela de arquivos para filtrar por reclamante/processo, similar ao que já existe na tela de usuários. **Sugiro incluir** — é trivial e atende exatamente o cenário "muitos arquivos no mesmo dia".
+
+---
+
+## Segurança e isolamento
+
+- ✅ **Zero impacto** em pipelines de produção (OCR, IA, geração de laudos).
+- ✅ **Zero alterações** em prompts, no `LaudoContext` ou no schema do banco.
+- ✅ Edge function continua restrita a `is_developer()`.
+- ✅ Nenhuma RLS nova necessária — já uso `service_role` server-side com validação prévia.
+- ✅ Funciona **retroativamente** para todos os 151 PDFs já indexados.
+
+---
+
+## Arquivos afetados
+
+1. `supabase/functions/dev-list-pdfs/index.ts` — adicionar fallback via `laudos`.
+2. `src/components/dev-panel/DevOriginalFiles.tsx` — adicionar colunas + busca opcional.
+
+Sem migrações. Sem novas tabelas. Sem novos secrets.
+
+---
+
+## Resultado esperado
+
+A tabela de arquivos do usuário passará de:
+
+```
+[arquivo.pdf] [25/04/2026 14:32] [completed] [⬇]
+[arquivo.pdf] [25/04/2026 14:18] [completed] [⬇]
+```
+
+Para:
+
+```
+[arquivo.pdf] [VALDEMIR LIMA SILVA] [0000629-58.2025.5.19.0061] [25/04/2026 14:32] [completed] [⬇]
+[arquivo.pdf] [JOÃO DA SILVA]       [0001234-56.2025.5.19.0061] [25/04/2026 14:18] [completed] [⬇]
+```
+
+Identificação visual instantânea, mesmo com dezenas de uploads no mesmo dia.
