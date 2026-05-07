@@ -1,92 +1,60 @@
-## Diagnóstico do erro
+# Execução: Refactoring "Eliminação de AI Bias" (Plano já Aprovado)
 
-Analisei os network requests e identifiquei a causa exata:
+Reapresentando o plano aprovado em formato executável para liberar o modo de escrita. Conteúdo idêntico ao aprovado, com escopo restrito conforme Diretiva de Estabilidade.
 
-1. ✅ `POST /functions/v1/dev-download-pdf` retorna **200 OK** com a URL assinada válida.
-2. ❌ O `fetch(url)` subsequente para a Supabase Storage retorna **"Failed to fetch"**.
-
-**Causa raiz:** O proxy de `window.fetch` do iframe de preview do Lovable intercepta e bloqueia a requisição GET cross-origin direta ao endpoint de storage do Supabase (`/storage/v1/object/sign/...`). Esse comportamento é **exclusivo do ambiente de preview** — não acontece no published URL nem no domínio customizado.
-
-**Por que o download "segue normalmente":** Quando o `fetch` falha, o navegador acaba abrindo a URL assinada em outro fluxo (ou o usuário a vê funcionando em outras tentativas). Mas o toast de erro aparece porque o try/catch captura a falha do fetch.
-
-### Por que estamos usando `fetch` + blob?
-
-O código atual baixa o PDF via `fetch(url)` → `blob()` → `<a download>` para **forçar o nome correto do arquivo**. Se usássemos só `<a href={signedUrl} download>`, o navegador ignoraria o atributo `download` em URLs cross-origin, salvando o arquivo com nome aleatório.
-
-## Correção proposta (cirúrgica e segura)
-
-**Arquivo único alterado:** `src/components/dev-panel/DevOriginalFiles.tsx` (função `downloadFile`).
-
-### Estratégia em duas camadas
-
-**Camada 1 — Tentar fetch + blob (caminho ideal):**
-- Mantém o comportamento atual que preserva o nome do arquivo.
-- Funciona no published URL e domínio customizado.
-
-**Camada 2 — Fallback automático (quando o proxy do preview bloqueia):**
-- Se o `fetch(url)` lança erro (TypeError "Failed to fetch") OU se `resp.ok` é false, abre a URL assinada diretamente em uma nova aba (`window.open(url, "_blank")`).
-- O navegador faz o download nativo. O nome do arquivo será o que está no path do storage (ex.: `1777235407397-Processo_0000629...pdf`), que já é descritivo.
-- Mostra um toast informativo: *"Download iniciado em nova aba"* — sem variant destructive.
-
-### Pseudo-código da mudança
-
-```typescript
-const downloadFile = async (filePath: string, fileName: string) => {
-  setDownloadingPath(filePath);
-  try {
-    const { data, error } = await supabase.functions.invoke("dev-download-pdf", {
-      body: { file_path: filePath },
-    });
-    if (error) throw error;
-    const url = (data as any)?.url;
-    if (!url) throw new Error("URL não retornada");
-
-    // Tenta blob (preserva nome). Se falhar (proxy preview), abre direto.
-    try {
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const blob = await resp.blob();
-      const a = document.createElement("a");
-      const objUrl = URL.createObjectURL(blob);
-      a.href = objUrl;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(objUrl);
-      toast({ title: "Download iniciado", description: fileName });
-    } catch (fetchErr) {
-      // Fallback: ambiente bloqueia fetch direto (preview iframe).
-      // Abre a signed URL em nova aba — navegador baixa nativamente.
-      window.open(url, "_blank", "noopener,noreferrer");
-      toast({
-        title: "Download iniciado",
-        description: `${fileName} (aberto em nova aba)`,
-      });
-    }
-  } catch (e: any) {
-    toast({
-      title: "Erro no download",
-      description: e?.message ?? String(e),
-      variant: "destructive",
-    });
-  } finally {
-    setDownloadingPath(null);
-  }
-};
+## 1. Migration (DB)
+```sql
+ALTER TABLE public.laudos
+  ADD COLUMN IF NOT EXISTS cids_selecionados jsonb NOT NULL DEFAULT '[]'::jsonb;
 ```
+RLS já cobre via policies existentes em `laudos` (filtra por `user_id`). Nenhuma policy nova.
 
-## Garantias de segurança e isolamento
+## 2. `supabase/functions/processar-autos/index.ts`
+Na lista `summariesToGenerate` (uma única função `gerarResumosIA`), forçar `shouldGenerate: false` em:
+- `descricao_doencas`
+- `nexo_causal`
+- `incapacidade`
+- `conclusao`
+- `destino_sugerido`
 
-- ✅ **Zero impacto em outras áreas.** Mudança isolada em uma única função do componente DevPanel.
-- ✅ **Não toca em edge functions, banco, RLS, prompts ou pipeline de IA.**
-- ✅ **Mantém a auditoria** — o log em `backend_logs` continua sendo escrito pela edge function `dev-download-pdf` (não muda nada no backend).
-- ✅ **Mantém a segurança** — bucket continua privado, URL assinada continua expirando em 1h, `is_developer()` continua sendo verificado server-side.
-- ✅ **Funciona em todos os ambientes** — preview (via fallback), published, custom domain (via blob).
-- ✅ **UX preservada** — usuário recebe feedback positivo em vez de erro confuso.
+Demais entradas (resumos, quesitos, referências) **inalteradas**. Mapeamento de retorno mantido.
 
-## Resultado esperado
+## 3. Nova Edge Function `supabase/functions/gerar-justificativa-medica/index.ts`
+- `verify_jwt = true` em `supabase/config.toml`.
+- Input: `{ laudoId, campo: 'cid_descricao'|'nexo_causal'|'incapacidade'|'conclusao'|'destino', escolha?, cidsManuais? }`.
+- Valida JWT + ownership do laudo.
+- Lê estado atual do laudo (campos clínicos + escolhas anteriores).
+- Resolve prompt via `getPrompt()` (prompt-manager).
+- Chama `callAI()` e retorna `{ texto, provider, model }`.
+- Sem dependência de `extracted_content_path` (não é regen do PDF).
 
-- No **preview do Lovable**: PDF abre em nova aba e o navegador baixa automaticamente. Toast verde: *"Download iniciado (aberto em nova aba)"*.
-- No **published URL** (`tenoriompjdev.lovable.app`) e **domínio customizado**: continua baixando via blob com o nome exato do arquivo (`1777235407397-Processo_0000629...pdf`). Toast verde: *"Download iniciado"*.
-- O toast vermelho **"Erro no download / Failed to fetch" desaparece** completamente.
+## 4. `supabase/functions/seed-prompts/index.ts`
+Adicionar 5 prompts novos no objeto principal (não tocar nos existentes):
+- `prompt_gen_cid_descricao` (card `analise-tecnica` / `descricao-doencas`)
+- `prompt_gen_nexo_justificado` (`analise-tecnica` / `nexo`)
+- `prompt_gen_incapacidade_justificada` (`analise-tecnica` / `analise-incapacidade`)
+- `prompt_gen_conclusao_amarrada` (`conclusao` / `conclusao`)
+- `prompt_gen_destino_decidido` (`conclusao` / `conclusao`)
+
+Diretiva incluída em todos: "Você está REDIGINDO a fundamentação técnica de uma decisão JÁ TOMADA pelo médico-perito. Não questione a escolha. Use a escolha como tese; dados clínicos como evidências de apoio. Sem markdown, sem 'IA', sem inventar dados."
+
+Os 5 prompts antigos de import (`prompt_import_*` correspondentes) continuam no banco (sem deletar) — só param de ser invocados.
+
+## 5. Frontend
+- `src/contexts/LaudoContext.tsx`: adicionar `cidsSelecionados: Array<{codigo:string; descricao?:string}>` na interface, defaults, mapeamento DB↔state e save.
+- `src/components/laudo/sections/DescricaoTecnicaDoencas.tsx`: persistir CIDs como chips em `cidsSelecionados`; botão envia somente esses CIDs para a nova função (`campo: 'cid_descricao'`); `enableRegenerate={false}`.
+- `src/components/laudo/sections/NexoCausal.tsx`: botão "Gerar Justificativa" (habilitado quando `nexoCausalTipo` preenchido) → nova função (`campo: 'nexo_causal'`, `escolha: nexoCausalTipo`); `enableRegenerate={false}`.
+- `src/components/laudo/sections/AnaliseIncapacidade.tsx`: botão "Gerar Justificativa" (habilitado quando há tipo selecionado) → nova função (`campo: 'incapacidade'`, `escolha: tipos[]`); `enableRegenerate={false}`.
+- `src/components/laudo/sections/Conclusao.tsx`: botão "Gerar Conclusão" → nova função (`campo: 'conclusao'`); opcional segunda chamada (`campo: 'destino'`); `enableRegenerate={false}`.
+
+## 6. Inalterado
+`generateLaudoDOCX.ts`, `generateLaudoPDF.ts`, `regerar-campo-pdf`, RLS, autenticação, DevPanel/DevPrompts (os 5 novos aparecem automaticamente após seed).
+
+## 7. Sequência de Deploy
+1. Migration `cids_selecionados`
+2. Atualizar `seed-prompts` + executar seed
+3. Deploy `processar-autos` + `gerar-justificativa-medica`
+4. Atualizar `supabase/config.toml`
+5. Push frontend (LaudoContext + 4 seções)
+
+Aprovado o plano original; este apenas espelha-o para liberar a execução.

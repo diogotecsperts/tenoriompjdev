@@ -385,6 +385,7 @@ export type Database = {
           assistente_tecnico_reclamante: string | null
           atestados_detalhados: Json | null
           auxilio_terceiros: string | null
+          cids_selecionados: Json
           conclusao_analise: string | null
           conclusao_cid: string | null
           conclusao_destino: string | null
@@ -458,6 +459,7 @@ export type Database = {
           assistente_tecnico_reclamante?: string | null
           atestados_detalhados?: Json | null
           auxilio_terceiros?: string | null
+          cids_selecionados?: Json
           conclusao_analise?: string | null
           conclusao_cid?: string | null
           conclusao_destino?: string | null
@@ -531,6 +533,7 @@ export type Database = {
           assistente_tecnico_reclamante?: string | null
           atestados_detalhados?: Json | null
           auxilio_terceiros?: string | null
+          cids_selecionados?: Json
           conclusao_analise?: string | null
           conclusao_cid?: string | null
           conclusao_destino?: string | null

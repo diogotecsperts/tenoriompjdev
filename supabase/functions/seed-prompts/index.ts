@@ -819,8 +819,137 @@ DADOS DO CASO:
 Indique de forma direta e objetiva o destino sugerido. Exemplos: "Retorno ao trabalho sem restrições", "Reabilitação profissional", "Aposentadoria por invalidez", "Manutenção do benefício por incapacidade temporária".
 
 Responda em no máximo 2 frases.`
+  },
+
+  // ================================
+  // ANTI-BIAS: Geração sob demanda controlada pelo médico
+  // (gerar-justificativa-medica)
+  // ================================
+  prompt_gen_cid_descricao: {
+    cardId: 'analise-tecnica',
+    sectionId: 'descricao-doencas',
+    description: 'Descrição técnica dos CIDs (geração sob demanda pelo médico)',
+    order: 10,
+    prompt: `Você é médico-perito judicial. O médico digitou manualmente os seguintes CIDs:
+
+CIDs informados pelo médico: \${cidsManuais}
+
+Tarefa: Para CADA CID listado, redija em texto técnico contínuo (sem markdown, sem bullets, sem asteriscos, sem negrito):
+- Definição da patologia
+- Etiologia
+- Quadro clínico característico
+- Quando aplicável, relação com fatores ocupacionais
+
+Contexto auxiliar (use apenas como referência, não invente):
+- Posto de trabalho: \${postoTrabalho}
+- Histórico ocupacional: \${historicoOcupacional}
+
+Restrições absolutas:
+1. Não use a expressão "IA" em hipótese alguma.
+2. Não use formatação markdown.
+3. Não invente dados clínicos do periciando.
+4. Português brasileiro com acentuação correta.`
+  },
+  prompt_gen_nexo_justificado: {
+    cardId: 'analise-tecnica',
+    sectionId: 'nexo',
+    description: 'Justificativa do nexo (defende a escolha do médico)',
+    order: 11,
+    prompt: `Você está REDIGINDO a fundamentação técnica de uma decisão JÁ TOMADA pelo médico-perito. Não questione a escolha. Use a escolha como tese e os dados clínicos como evidências de apoio.
+
+DECISÃO DO MÉDICO sobre nexo causal: "\${nexoEscolhido}"
+
+Tarefa: Redigir, em linguagem técnica médico-pericial, a justificativa que SUSTENTA essa decisão. Empregue, quando cabível, os critérios de Schilling, Bradford-Hill e Simonin como ferramentas de fundamentação. NÃO contradiga a decisão.
+
+Dados do caso (use como evidência):
+- CIDs: \${cidsLista}
+- História atual: \${historiaAtual}
+- História do acidente: \${historiaAcidente}
+- Histórico ocupacional: \${historicoOcupacional}
+- Atividades laborais: \${atividadesLaborais}
+- Exame físico: \${exameFisico}
+- Exames complementares: \${examesComplementares}
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown, sem bullets, sem asteriscos, sem negrito.
+3. Não inventar dados ausentes — usar formulação prudente quando faltar informação.
+4. Português brasileiro com acentuação correta.
+5. Mínimo 2 parágrafos.`
+  },
+  prompt_gen_incapacidade_justificada: {
+    cardId: 'analise-tecnica',
+    sectionId: 'analise-incapacidade',
+    description: 'Justificativa da incapacidade (defende a escolha do médico)',
+    order: 12,
+    prompt: `Você está REDIGINDO a fundamentação técnica de uma decisão JÁ TOMADA pelo médico-perito. Não questione a escolha. Use a escolha como tese.
+
+DECISÃO DO MÉDICO sobre incapacidade laboral: "\${tipoIncapacidadeEscolhido}"
+
+Tarefa: Redigir, em linguagem técnica médico-pericial, a justificativa que SUSTENTA essa decisão. Correlacione o tipo escolhido (total/parcial, temporária/permanente, ausência) com as limitações funcionais documentadas.
+
+Dados do caso:
+- CIDs: \${cidsLista}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+- Tratamentos realizados: \${tratamentos}
+- Afastamentos: \${afastamentos}
+- Atividades laborais: \${atividadesLaborais}
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown.
+3. Não invente dados.
+4. Português brasileiro com acentuação correta.
+5. Mínimo 2 parágrafos.`
+  },
+  prompt_gen_conclusao_amarrada: {
+    cardId: 'conclusao',
+    sectionId: 'conclusao',
+    description: 'Conclusão amarrando as escolhas do médico',
+    order: 13,
+    prompt: `Você está redigindo a CONCLUSÃO FINAL de um laudo pericial médico-judicial, AMARRANDO as decisões já tomadas pelo médico-perito.
+
+Decisões do médico:
+- CIDs confirmados: \${cidsLista}
+- Tipo de nexo: \${nexoEscolhido}
+- Justificativa do nexo (já redigida): \${nexoJustificativa}
+- Tipo de incapacidade: \${tipoIncapacidadeEscolhido}
+- Justificativa da incapacidade (já redigida): \${incapacidadeJustificativa}
+
+Dados clínicos de apoio:
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+
+Tarefa: sintetizar em texto técnico contínuo a conclusão pericial, integrando coerentemente as decisões acima. Não contradiga nenhuma das escolhas.
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown.
+3. Português brasileiro com acentuação correta.
+4. Máximo 4 parágrafos.`
+  },
+  prompt_gen_destino_decidido: {
+    cardId: 'conclusao',
+    sectionId: 'conclusao',
+    description: 'Destino sugerido com base nas escolhas do médico',
+    order: 14,
+    prompt: `Com base nas decisões já tomadas pelo médico-perito, indique objetivamente o destino sugerido para o periciando.
+
+Decisões do médico:
+- Tipo de nexo: \${nexoEscolhido}
+- Tipo de incapacidade: \${tipoIncapacidadeEscolhido}
+- Justificativa da incapacidade: \${incapacidadeJustificativa}
+
+Exemplos de destino: "Retorno ao trabalho sem restrições", "Reabilitação profissional", "Aposentadoria por invalidez", "Manutenção do benefício por incapacidade temporária", "Restrições funcionais permanentes — readequação de função".
+
+Restrições:
+1. Resposta em no máximo 2 frases.
+2. Sem markdown, sem "IA".
+3. Português brasileiro com acentuação correta.`
   }
 };
+
 
 // ============================================
 // PROMPT DE SISTEMA (processar-autos)

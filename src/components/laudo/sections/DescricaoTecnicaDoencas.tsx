@@ -3,10 +3,11 @@ import { useLaudo } from "@/contexts/LaudoContext";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LaudoTextareaAIField } from "@/components/laudo/LaudoTextareaAIField";
 import { toast } from "@/hooks/use-toast";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Sparkles, Loader2, X, Plus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 
 export function DescricaoTecnicaDoencas() {
@@ -14,59 +15,92 @@ export function DescricaoTecnicaDoencas() {
   const [cidValue, setCidValue] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Reset estado local quando trocar de laudo (corrige bug de vazamento de dados)
   useEffect(() => {
     setCidValue("");
   }, [currentLaudo?.id]);
 
   if (!currentLaudo) return null;
 
-  // Check if laudo has PDF source for regeneration
-  const hasPdfSource = !!(currentLaudo.aiMetadata as any)?.pdfFilePath || 
-                       !!(currentLaudo.aiMetadata as any)?.importJobId;
+  const cidsSelecionados = currentLaudo.cidsSelecionados ?? [];
 
-  // Nova lógica: Gerar descrição técnica via IA para os CIDs inseridos
+  const parseCidsInput = (raw: string): string[] => {
+    return raw
+      .split(/[,;\n]+/)
+      .map((c) => c.trim().toUpperCase())
+      .filter((c) => c.length > 0);
+  };
+
+  const addCidsFromInput = () => {
+    const novos = parseCidsInput(cidValue);
+    if (novos.length === 0) return;
+    const existentes = new Set(cidsSelecionados.map((c) => c.codigo.toUpperCase()));
+    const merged = [
+      ...cidsSelecionados,
+      ...novos
+        .filter((codigo) => !existentes.has(codigo))
+        .map((codigo) => ({ codigo })),
+    ];
+    updateLaudo({ cidsSelecionados: merged });
+    setCidValue("");
+  };
+
+  const removeCid = (codigo: string) => {
+    updateLaudo({
+      cidsSelecionados: cidsSelecionados.filter(
+        (c) => c.codigo.toUpperCase() !== codigo.toUpperCase()
+      ),
+    });
+  };
+
   const handleGenerateCidDescription = async () => {
-    if (!cidValue.trim()) {
+    // Permitir gerar com base na lista persistida OU no input atual
+    const fromInput = parseCidsInput(cidValue);
+    const cidsParaEnviar = fromInput.length > 0
+      ? fromInput
+      : cidsSelecionados.map((c) => c.codigo);
+
+    if (cidsParaEnviar.length === 0) {
       toast({
         variant: "destructive",
-        title: "CID não informado",
-        description: "Digite um ou mais códigos CID separados por vírgula (ex: M54.5, G56.0)",
+        title: "Nenhum CID informado",
+        description: "Digite um ou mais códigos CID (separe por vírgula) ou adicione na lista antes de gerar.",
       });
       return;
     }
 
-    setIsGenerating(true);
+    // Se veio do input, persiste antes de chamar a IA
+    if (fromInput.length > 0) {
+      const existentes = new Set(cidsSelecionados.map((c) => c.codigo.toUpperCase()));
+      const merged = [
+        ...cidsSelecionados,
+        ...fromInput
+          .filter((codigo) => !existentes.has(codigo))
+          .map((codigo) => ({ codigo })),
+      ];
+      updateLaudo({ cidsSelecionados: merged });
+    }
 
+    setIsGenerating(true);
     try {
-      // Chama a edge function para gerar descrição técnica dos CIDs
-      const { data, error } = await supabase.functions.invoke('gerar-resumos', {
+      const { data, error } = await supabase.functions.invoke('gerar-justificativa-medica', {
         body: {
-          tipo: 'descricao_cid',
-          contexto: {
-            cids: cidValue.trim(),
-            postoTrabalho: currentLaudo.descricaoAtividadesLaborais || '',
-            historicoOcupacional: currentLaudo.historicoOcupacional || '',
-          }
+          laudoId: currentLaudo.id,
+          campo: 'cid_descricao',
+          cidsManuais: cidsParaEnviar,
         }
       });
 
       if (error) throw error;
 
       if (data?.texto) {
-        // APPEND: Adiciona o novo texto ao final do campo existente
         const existingContent = currentLaudo.descricaoTecnicaDoencas || '';
         const separator = existingContent.trim() ? '\n\n---\n\n' : '';
         const newContent = existingContent + separator + data.texto;
-        
         updateLaudo({ descricaoTecnicaDoencas: newContent });
-        
-        // Limpa o campo de CID após sucesso
         setCidValue("");
-        
         toast({
-          title: "Descrição gerada com sucesso",
-          description: `Descrição técnica dos CIDs (${cidValue.trim()}) adicionada ao campo.`,
+          title: "Descrição gerada",
+          description: `Descrição técnica adicionada para: ${cidsParaEnviar.join(', ')}.`,
         });
       }
     } catch (error) {
@@ -74,7 +108,7 @@ export function DescricaoTecnicaDoencas() {
       toast({
         variant: "destructive",
         title: "Erro ao gerar descrição",
-        description: error instanceof Error ? error.message : "Erro desconhecido ao buscar informações do CID.",
+        description: error instanceof Error ? error.message : "Erro desconhecido.",
       });
     } finally {
       setIsGenerating(false);
@@ -86,43 +120,74 @@ export function DescricaoTecnicaDoencas() {
       <CardHeader>
         <CardTitle>Descrição Técnica das Doenças</CardTitle>
         <CardDescription>
-          Insira os códigos CID para gerar automaticamente a descrição técnica das patologias
+          Você (médico) digita os CIDs aplicáveis. A IA apenas redige a descrição técnica dos códigos informados.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* CID Input Section - Nova lógica com geração via IA */}
-        <div className="flex items-end gap-2 p-3 bg-muted/50 rounded-lg border">
-          <div className="flex-1 space-y-1.5">
-            <Label htmlFor="cidInput" className="text-sm font-medium">
-              Inserir CID(s)
-            </Label>
-            <Input
-              id="cidInput"
-              value={cidValue}
-              onChange={(e) => setCidValue(e.target.value)}
-              placeholder="Ex: M54.5, G56.0, M75.1"
-              className="h-9"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !isGenerating && cidValue.trim()) {
-                  handleGenerateCidDescription();
-                }
-              }}
-            />
+        <div className="space-y-3 p-3 bg-muted/50 rounded-lg border">
+          <div className="flex items-end gap-2">
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="cidInput" className="text-sm font-medium">
+                Inserir CID(s)
+              </Label>
+              <Input
+                id="cidInput"
+                value={cidValue}
+                onChange={(e) => setCidValue(e.target.value)}
+                placeholder="Ex: M54.5, G56.0, M75.1"
+                className="h-9"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && cidValue.trim()) {
+                    e.preventDefault();
+                    addCidsFromInput();
+                  }
+                }}
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={addCidsFromInput}
+              disabled={!cidValue.trim()}
+              className="gap-1 h-9"
+              type="button"
+            >
+              <Plus className="h-4 w-4" /> Adicionar
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleGenerateCidDescription}
+              disabled={isGenerating || (cidsSelecionados.length === 0 && !cidValue.trim())}
+              className="gap-2 h-9"
+              type="button"
+            >
+              {isGenerating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              {isGenerating ? "Gerando..." : "Gerar Descrição"}
+            </Button>
           </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleGenerateCidDescription}
-            disabled={isGenerating || !cidValue.trim()}
-            className="gap-2 h-9"
-          >
-            {isGenerating ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
-            {isGenerating ? "Gerando..." : "Gerar Descrição"}
-          </Button>
+
+          {cidsSelecionados.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {cidsSelecionados.map((cid) => (
+                <Badge key={cid.codigo} variant="secondary" className="gap-1 pr-1">
+                  <span>{cid.codigo}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeCid(cid.codigo)}
+                    className="rounded-full p-0.5 hover:bg-destructive/20"
+                    aria-label={`Remover ${cid.codigo}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          )}
         </div>
 
         <LaudoTextareaAIField
@@ -130,13 +195,13 @@ export function DescricaoTecnicaDoencas() {
           label="Descrição Técnica"
           value={currentLaudo.descricaoTecnicaDoencas || ""}
           onChange={(value) => updateLaudo({ descricaoTecnicaDoencas: value })}
-          placeholder="Use o campo acima para inserir códigos CID e gerar automaticamente a descrição técnica das doenças. Cada CID adicionado será empilhado aqui com sua definição, etiologia e características clínicas."
+          placeholder="Adicione CIDs acima e clique em Gerar Descrição. O texto técnico será acumulado neste campo."
           rows={12}
           enableEnhance={true}
-          enableRegenerate={true}
+          enableRegenerate={false}
           fieldKey="descricaoTecnicaDoencas"
           laudoId={currentLaudo.id}
-          hasPdfSource={hasPdfSource}
+          hasPdfSource={false}
         />
       </CardContent>
     </Card>
