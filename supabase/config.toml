@@ -33,3 +33,6 @@ verify_jwt = true
 
 [functions.dev-download-pdf]
 verify_jwt = true
+
+[functions.gerar-justificativa-medica]
+verify_jwt = true
