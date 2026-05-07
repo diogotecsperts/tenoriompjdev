@@ -88,6 +88,8 @@ export interface LaudoData {
   analiseIncapacidadeLaboral: string;
   referenciasBibliograficas: string;
   resumoPericia: string; // Sugestões de IA para a perícia (uso interno)
+  // Anti-bias: lista canônica de CIDs digitados pelo médico
+  cidsSelecionados: Array<{ codigo: string; descricao?: string }>;
   // AI metadata for tracking import AI usage
   aiMetadata?: AIMetadata;
 }
@@ -228,6 +230,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           analiseIncapacidadeLaboral: (dbLaudo as any).analise_incapacidade_laboral || "",
           referenciasBibliograficas: (dbLaudo as any).referencias_bibliograficas || "",
           resumoPericia: (dbLaudo as any).resumo_pericia || "",
+          cidsSelecionados: Array.isArray((dbLaudo as any).cids_selecionados) ? (dbLaudo as any).cids_selecionados : [],
           aiMetadata: (dbLaudo as any).ai_metadata || undefined,
           peritoLogoUrl: "",
         }));
@@ -346,6 +349,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
       analiseIncapacidadeLaboral: '',
       referenciasBibliograficas: '',
       resumoPericia: '',
+      cidsSelecionados: [],
     };
 
     return newLaudo;
@@ -445,6 +449,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           analiseIncapacidadeLaboral: '',
           referenciasBibliograficas: (data as any).referencias_bibliograficas || '',
           resumoPericia: '',
+          cidsSelecionados: [],
         };
         
         setCurrentLaudo(newLaudo);
@@ -543,6 +548,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
           analiseIncapacidadeLaboral: (data as any).analise_incapacidade_laboral || '',
           referenciasBibliograficas: (data as any).referencias_bibliograficas || '',
           resumoPericia: (data as any).resumo_pericia || '',
+          cidsSelecionados: Array.isArray((data as any).cids_selecionados) ? (data as any).cids_selecionados : [],
           aiMetadata: (data as any).ai_metadata || undefined,
         };
         
@@ -641,6 +647,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
             analise_incapacidade_laboral: currentLaudo.analiseIncapacidadeLaboral,
             referencias_bibliograficas: currentLaudo.referenciasBibliograficas,
             resumo_pericia: currentLaudo.resumoPericia,
+            cids_selecionados: currentLaudo.cidsSelecionados ?? [],
           } as any)
           .select()
           .single();
@@ -728,6 +735,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
             analise_incapacidade_laboral: currentLaudo.analiseIncapacidadeLaboral,
             referencias_bibliograficas: currentLaudo.referenciasBibliograficas,
             resumo_pericia: currentLaudo.resumoPericia,
+            cids_selecionados: currentLaudo.cidsSelecionados ?? [],
           } as any)
           .eq('id', currentLaudo.id)
           .eq('user_id', user.id);
