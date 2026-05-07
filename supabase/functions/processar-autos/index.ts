@@ -1314,13 +1314,15 @@ const results: Record<string, string> = {
   // PRIORITY ORDER: Most critical summaries first, least critical last
   // If the function crashes mid-way, the most important summaries are already saved
   const summariesToGenerate: Array<{ tipo: string; shouldGenerate: boolean; step: string; progress: number }> = [
-    // PRIORITY 1: Technical-scientific summaries (most important)
-    { tipo: 'descricao_doencas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando descrição técnica das doenças...', progress: 50 },
-    { tipo: 'nexo_causal', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Analisando nexo causal...', progress: 58 },
-    { tipo: 'incapacidade', shouldGenerate: !!contexto.cids || !!contexto.examesComplementares || hasHistoryContext || hasMedicalContext, step: 'Analisando incapacidade laboral...', progress: 66 },
-    // PRIORITY 1.5: Conclusão e destino (fallback para campos frequentemente vazios)
-    { tipo: 'conclusao', shouldGenerate: !contexto.conclusao || contexto.conclusao.length < 50 || contexto.conclusao === 'Não informado', step: 'Gerando análise conclusiva...', progress: 72 },
-    { tipo: 'destino_sugerido', shouldGenerate: !contexto.destinoSugerido || (contexto.destinoSugerido || '').length < 5, step: 'Definindo destino sugerido...', progress: 74 },
+    // ANTI-BIAS POLICY: Os 4 campos clínicos críticos (CIDs/doenças, nexo, incapacidade, conclusão/destino)
+    // NÃO são mais gerados na importação. O médico decide manualmente na UI e usa a edge function
+    // gerar-justificativa-medica para redigir o texto sob demanda. Mantidos com shouldGenerate:false
+    // por compatibilidade do pipeline e telemetria.
+    { tipo: 'descricao_doencas', shouldGenerate: false, step: 'Descrição de doenças (geração sob demanda pelo médico)', progress: 50 },
+    { tipo: 'nexo_causal', shouldGenerate: false, step: 'Nexo causal (geração sob demanda pelo médico)', progress: 58 },
+    { tipo: 'incapacidade', shouldGenerate: false, step: 'Incapacidade (geração sob demanda pelo médico)', progress: 66 },
+    { tipo: 'conclusao', shouldGenerate: false, step: 'Conclusão (geração sob demanda pelo médico)', progress: 72 },
+    { tipo: 'destino_sugerido', shouldGenerate: false, step: 'Destino (geração sob demanda pelo médico)', progress: 74 },
     // PRIORITY 2: Case summaries (only if content is substantial — prevents hallucination)
     { tipo: 'resumo_peticao', shouldGenerate: isContentSufficient(contexto.peticaoInicial), step: 'Gerando resumo da petição inicial...', progress: 78 },
     { tipo: 'resumo_contestacao', shouldGenerate: isContentSufficient(contexto.contestacao), step: 'Gerando resumo da contestação...', progress: 82 },
