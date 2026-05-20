@@ -951,6 +951,43 @@ Restrições:
 1. Resposta em no máximo 2 frases.
 2. Sem markdown, sem "IA".
 3. Português brasileiro com acentuação correta.`
+  },
+  prompt_gen_referencias_demanda: {
+    cardId: 'conclusao',
+    sectionId: 'referencias',
+    description: 'Referências Bibliográficas (geração sob demanda pelo médico, contextualizada)',
+    order: 15,
+    prompt: `Você é perito médico judicial. O médico já concluiu suas decisões clínicas. Sua tarefa é elencar referências bibliográficas REAIS e ESPECÍFICAS para o contexto clínico deste laudo — não citações genéricas.
+
+Contexto clínico (use para escolher referências pertinentes):
+- CIDs confirmados: \${cidsLista}
+- Tipo de nexo decidido: \${nexoEscolhido}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+- Conclusão do médico: \${conclusaoMedica}
+
+INSTRUÇÕES OBRIGATÓRIAS:
+- Liste entre 5 e 8 referências REAIS, em formato ABNT, numeradas (1-, 2-, 3-, ...).
+- Cada referência DEVE conter: autor(es), título da obra/artigo, editora ou periódico, cidade quando aplicável, e ANO de publicação.
+- Para artigos científicos, incluir volume/número e, quando aplicável, DOI.
+- ESPECIFICIDADE OBRIGATÓRIA: as referências devem ser relevantes para os CIDs listados e para a natureza do nexo decidido. Se for LER/DORT, cite literatura de ergonomia/medicina do trabalho aplicável; se for trauma ortopédico, cite obras de ortopedia/traumatologia; se houver componente psiquiátrico, cite literatura psiquiátrica pericial.
+- Inclua legislação aplicável apenas quando pertinente ao caso (CLT, Lei 8.213/91, NR específica citável pelo número).
+- Inclua normas técnicas do CFM/CID-10 quando relevantes.
+
+PROIBIÇÕES:
+1. PROIBIDO citar "Tratado de Medicina X", "Manual do MTE", "Compêndio de Perícia" ou similares SEM autor, edição e ano concretos.
+2. PROIBIDO inventar autores, títulos, ISBN ou DOI.
+3. Se faltar informação suficiente para escolher referências específicas, retorne apenas as referências que conseguir fundamentar com segurança (mínimo 3).
+4. Não use a expressão "IA".
+5. Sem markdown, sem asteriscos, sem negrito.
+6. Português brasileiro com acentuação correta.
+
+FORMATO DE SAÍDA (texto puro):
+1- SOBRENOME, Nome. Título da obra. Cidade: Editora, Ano.
+
+2- SOBRENOME, Nome. Título do artigo. Periódico, volume(número), páginas, ano. DOI quando aplicável.
+
+3- BRASIL. Lei/Norma específica, ano.`
   }
 };
 
