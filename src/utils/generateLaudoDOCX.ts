@@ -552,6 +552,9 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   if (!isFieldEmpty(laudo.processoNumero)) judicialParagraphs.push(createLabeledField("Processo nº", laudo.processoNumero!));
   if (!isFieldEmpty(laudo.reclamante)) judicialParagraphs.push(createLabeledField("Reclamante", laudo.reclamante!));
   if (!isFieldEmpty(laudo.reclamada)) judicialParagraphs.push(createLabeledField("Reclamada", laudo.reclamada!));
+  const peritoLine = buildPeritoIdLine(laudo);
+  if (peritoLine) judicialParagraphs.push(createLabeledField("Perito Judicial", peritoLine));
+
   judicialParagraphs.push(new Paragraph({ spacing: { after: 300 } }));
   paragraphs.push(...judicialParagraphs);
 
