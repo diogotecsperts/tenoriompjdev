@@ -254,6 +254,7 @@ function buildContext(laudo: any, body: ReqBody): Record<string, string> {
     afastamentos: laudo.afastamentos || '',
     atividadesLaborais: laudo.descricao_atividades_laborais || '',
     postoTrabalho: laudo.descricao_posto_trabalho || laudo.descricao_atividades_laborais || '',
+    conclusaoMedica: laudo.conclusao_analise || '',
   };
 }
 
