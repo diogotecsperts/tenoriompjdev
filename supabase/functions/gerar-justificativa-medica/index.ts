@@ -23,7 +23,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-type Campo = 'cid_descricao' | 'nexo_causal' | 'incapacidade' | 'conclusao' | 'destino';
+type Campo = 'cid_descricao' | 'nexo_causal' | 'incapacidade' | 'conclusao' | 'destino' | 'referencias';
 
 interface ReqBody {
   laudoId: string;
@@ -62,6 +62,12 @@ const FIELD_TO_PROMPT: Record<Campo, { id: string; description: string; cardId: 
     description: 'Destino sugerido com base nas escolhas do médico',
     cardId: 'conclusao',
     sectionId: 'conclusao',
+  },
+  referencias: {
+    id: 'prompt_gen_referencias_demanda',
+    description: 'Referências Bibliográficas (geração sob demanda pelo médico, contextualizada)',
+    cardId: 'conclusao',
+    sectionId: 'referencias',
   },
 };
 
