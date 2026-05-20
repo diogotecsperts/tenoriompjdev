@@ -14,6 +14,25 @@ export function ReferenciasBibliograficas() {
 
   if (!currentLaudo) return null;
 
+  const extractErrorMessage = (err: unknown, fallback: string): string => {
+    let msg = fallback;
+    if (err instanceof Error) msg = err.message;
+    else if (typeof err === 'string') msg = err;
+    else if (err && typeof err === 'object') {
+      const anyErr = err as any;
+      msg = anyErr?.context?.error || anyErr?.error || anyErr?.message || fallback;
+    }
+    // A mensagem pode conter JSON embutido vindo da Edge Function (ex: 'Edge function returned 400: {"error":"..."}')
+    try {
+      const match = typeof msg === 'string' ? msg.match(/\{[\s\S]*\}/) : null;
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        if (parsed?.error) msg = parsed.error;
+      }
+    } catch { /* ignora falha de parse */ }
+    return msg || fallback;
+  };
+
   const handleGerarReferencias = async () => {
     if (!currentLaudo.id) {
       toast.error("Salve o laudo antes de gerar as referências.");
@@ -21,33 +40,42 @@ export function ReferenciasBibliograficas() {
     }
     setIsLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke('gerar-justificativa-medica', {
-        body: {
-          laudoId: currentLaudo.id,
-          campo: 'referencias',
-        }
-      });
+      let response: { data?: any; error?: any } | undefined;
 
-      if (error) {
-        // Edge function pode retornar 400 com message contextual
-        const msg = (error as any)?.context?.error || (error as any)?.message || 'Erro ao gerar referências.';
-        throw new Error(msg);
+      // Captura erros lançados diretamente pelo client do Supabase
+      try {
+        response = await supabase.functions.invoke('gerar-justificativa-medica', {
+          body: {
+            laudoId: currentLaudo.id,
+            campo: 'referencias',
+          }
+        });
+      } catch (invokeErr) {
+        console.warn('[ReferenciasBibliograficas] invoke lançou erro:', invokeErr);
+        toast.error(extractErrorMessage(invokeErr, 'Erro ao gerar referências. Tente novamente.'));
+        return;
       }
 
-      if (data?.error) {
-        throw new Error(data.error);
+      if (response?.error) {
+        toast.error(extractErrorMessage(response.error, 'Erro ao gerar referências.'));
+        return;
       }
 
-      if (data?.texto) {
-        updateLaudo({ referenciasBibliograficas: data.texto });
+      if (response?.data?.error) {
+        toast.error(extractErrorMessage(response.data.error, 'Erro ao gerar referências.'));
+        return;
+      }
+
+      if (response?.data?.texto) {
+        updateLaudo({ referenciasBibliograficas: response.data.texto });
         toast.success('Referências geradas com sucesso!');
       } else {
-        throw new Error('Resposta vazia da IA');
+        toast.error('Resposta vazia. Tente novamente.');
       }
     } catch (error) {
-      console.error('Erro ao gerar referências:', error);
-      const message = error instanceof Error ? error.message : 'Erro ao gerar referências. Tente novamente.';
-      toast.error(message);
+      // Última linha de defesa — garante que a tela nunca quebre
+      console.error('Erro inesperado ao gerar referências:', error);
+      toast.error(extractErrorMessage(error, 'Erro ao gerar referências. Tente novamente.'));
     } finally {
       setIsLoading(false);
     }
