@@ -1441,9 +1441,10 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               <AlertDescription>
                 Alguns campos não puderam ser extraídos automaticamente. 
                 O documento pode estar incompleto ou muito extenso para processar completamente.
-                {aiUsage && aiUsage.summaries.count < 5 && (
+                {aiUsage && aiUsage.summaries.count < EXPECTED_AUTO_SUMMARIES && (
                   <span className="block mt-1 font-medium">
-                    Apenas {aiUsage.summaries.count} de 5 resumos foram gerados.
+                    Apenas {aiUsage.summaries.count} de {EXPECTED_AUTO_SUMMARIES} resumos automáticos foram gerados.
+                    Os demais campos são preenchidos sob demanda no editor.
                   </span>
                 )}
               </AlertDescription>
