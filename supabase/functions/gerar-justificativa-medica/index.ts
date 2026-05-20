@@ -318,7 +318,7 @@ serve(async (req) => {
         id, user_id,
         cids_selecionados,
         nexo_causal_tipo, nexo_causal_justificativa,
-        conclusao_status,
+        conclusao_status, conclusao_analise,
         analise_incapacidade_laboral,
         historia_atual, historia_acidente, historico_ocupacional,
         exame_fisico, exames_complementares,
