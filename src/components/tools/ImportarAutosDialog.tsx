@@ -1403,10 +1403,15 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     const { filled, total } = countFilledFields();
     const percentage = Math.round((filled / total) * 100);
 
-    // Check for incomplete extraction
+    // Após a refatoração AI Bias, apenas 2 resumos são auto-gerados durante o import:
+    // resumo_peticao e resumo_contestacao. Os demais campos (justificativas, conclusão,
+    // destino, quesitos, referências) são gerados sob demanda pelo médico no editor.
+    const EXPECTED_AUTO_SUMMARIES = 2;
+
+    // Só marca como incompleto se houve falha real (zero resumos ou provider inválido).
     const isIncompleteExtraction = aiUsage && (
-      aiUsage.summaries.count < 3 || 
-      aiUsage.summaries.provider === 'none'
+      aiUsage.summaries.provider === 'none' ||
+      aiUsage.summaries.count === 0
     );
 
     return (
