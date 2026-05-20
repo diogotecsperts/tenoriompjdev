@@ -76,11 +76,14 @@ const DEFAULT_PROMPTS: Record<Campo, string> = {
 
 CIDs informados pelo médico: \${cidsManuais}
 
+ESCOPO ESTRITO DESTA SEÇÃO:
+Você deve APENAS descrever a literatura médica da doença. É ESTRITAMENTE PROIBIDO emitir qualquer juízo de valor, concluir sobre a existência ou inexistência de incapacidade, opinar sobre nexo causal ou julgar o caso concreto nesta seção. Limite-se rigorosamente à descrição técnica da patologia conforme literatura médica.
+
 Tarefa: Para CADA CID listado, redija em texto técnico contínuo (sem markdown, sem bullets, sem asteriscos, sem negrito):
 - Definição da patologia
 - Etiologia
 - Quadro clínico característico
-- Quando aplicável, relação com fatores ocupacionais
+- Quando aplicável, relação com fatores ocupacionais (em termos GENÉRICOS da literatura, jamais aplicada ao periciando)
 
 Contexto auxiliar (use apenas como referência, não invente):
 - Posto de trabalho: \${postoTrabalho}
@@ -90,7 +93,8 @@ Restrições absolutas:
 1. Não use a expressão "IA" em hipótese alguma.
 2. Não use formatação markdown.
 3. Não invente dados clínicos do periciando.
-4. Português brasileiro com acentuação correta.`,
+4. Não emita conclusões periciais — apenas descrição de literatura.
+5. Português brasileiro com acentuação correta.`,
 
   nexo_causal: `Você está REDIGINDO a fundamentação técnica de uma decisão JÁ TOMADA pelo médico-perito. Não questione a escolha. Use a escolha como tese e os dados clínicos como evidências de apoio.
 
