@@ -515,20 +515,37 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   // ========== IDENTIFICAÇÃO DO PERITO (topo da página 1) ==========
   // Renderizado como primeiro parágrafo do corpo — aparece naturalmente apenas na página 1.
   // Dados vêm do laudo (frozen-at-creation), garantindo multi-tenant e histórico correto.
-  const peritoIdLine = buildPeritoIdLine(laudo);
-  if (peritoIdLine) {
+  const peritoId = buildPeritoIdLine(laudo);
+  if (peritoId) {
     paragraphs.push(
       new Paragraph({
         children: [
           new TextRun({
-            text: peritoIdLine,
+            text: peritoId.label,
+            bold: true,
             size: FONT.sizeSmall,
-            color: COLORS.muted,
+            color: COLORS.primary,
+            font: FONT.name,
+          }),
+          new TextRun({
+            text: peritoId.value,
+            break: 1,
+            size: 18, // 9pt
+            color: COLORS.text,
             font: FONT.name,
           }),
         ],
         alignment: AlignmentType.RIGHT,
-        spacing: { before: 0, after: 120 },
+        indent: { left: 5400 }, // ~9000 twips reservaria 1/3 da direita; 5400 mantém respiro
+        spacing: { before: 200, after: 240 },
+        border: {
+          bottom: {
+            style: BorderStyle.SINGLE,
+            size: 4,
+            color: COLORS.primary,
+            space: 4,
+          },
+        },
       })
     );
   }
