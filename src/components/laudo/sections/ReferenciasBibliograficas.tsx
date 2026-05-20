@@ -14,37 +14,40 @@ export function ReferenciasBibliograficas() {
 
   if (!currentLaudo) return null;
 
-  const handleBuscarNovamente = async () => {
+  const handleGerarReferencias = async () => {
+    if (!currentLaudo.id) {
+      toast.error("Salve o laudo antes de gerar as referências.");
+      return;
+    }
     setIsLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke('gerar-resumos', {
+      const { data, error } = await supabase.functions.invoke('gerar-justificativa-medica', {
         body: {
-          tipo: 'referencias_bibliograficas',
-          contexto: {
-            cids: currentLaudo.conclusaoCID || '',
-            postoTrabalho: currentLaudo.descricaoAtividadesLaborais || '',
-            atividadesLaborais: currentLaudo.descricaoAtividadesLaborais || '',
-            historicoOcupacional: currentLaudo.historicoOcupacional || '',
-            tratamentos: currentLaudo.tratamentos || '',
-            examesComplementares: currentLaudo.examesComplementares || '',
-            nexoCausal: currentLaudo.nexoCausalJustificativa || '',
-            conclusao: currentLaudo.conclusaoAnalise || '',
-            metodologia: currentLaudo.metodologiaPericial || '',
-          }
+          laudoId: currentLaudo.id,
+          campo: 'referencias',
         }
       });
 
-      if (error) throw error;
-      
+      if (error) {
+        // Edge function pode retornar 400 com message contextual
+        const msg = (error as any)?.context?.error || (error as any)?.message || 'Erro ao gerar referências.';
+        throw new Error(msg);
+      }
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
       if (data?.texto) {
         updateLaudo({ referenciasBibliograficas: data.texto });
-        toast.success('Referências atualizadas com sucesso!');
+        toast.success('Referências geradas com sucesso!');
       } else {
         throw new Error('Resposta vazia da IA');
       }
     } catch (error) {
       console.error('Erro ao gerar referências:', error);
-      toast.error('Erro ao gerar referências. Tente novamente.');
+      const message = error instanceof Error ? error.message : 'Erro ao gerar referências. Tente novamente.';
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
@@ -55,17 +58,17 @@ export function ReferenciasBibliograficas() {
       <CardHeader>
         <CardTitle>Referências Bibliográficas</CardTitle>
         <CardDescription>
-          Literatura técnico-científica utilizada como embasamento do laudo
+          Clique em "Gerar Referências" para que a IA produza referências reais e específicas ao contexto clínico do laudo. A IA usa CIDs, Anamnese, Exame Físico e Conclusão como contexto.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label htmlFor="referenciasBibliograficas">Referências</Label>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={handleBuscarNovamente}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleGerarReferencias}
               disabled={isLoading}
               className="h-8 text-xs"
             >
@@ -74,14 +77,14 @@ export function ReferenciasBibliograficas() {
               ) : (
                 <Sparkles className="mr-1 h-3 w-3" />
               )}
-              Buscar novamente
+              Gerar Referências
             </Button>
           </div>
           <Textarea
             id="referenciasBibliograficas"
             value={currentLaudo.referenciasBibliograficas || ""}
             onChange={(e) => updateLaudo({ referenciasBibliograficas: e.target.value })}
-            placeholder="As referências serão geradas automaticamente após importar um PDF ou clique em 'Buscar novamente'..."
+            placeholder="Preencha ao menos os CIDs ou a Conclusão e clique em Gerar Referências, ou redija manualmente."
             rows={8}
           />
         </div>
