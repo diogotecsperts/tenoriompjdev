@@ -1403,10 +1403,15 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     const { filled, total } = countFilledFields();
     const percentage = Math.round((filled / total) * 100);
 
-    // Check for incomplete extraction
+    // Após a refatoração AI Bias, apenas 2 resumos são auto-gerados durante o import:
+    // resumo_peticao e resumo_contestacao. Os demais campos (justificativas, conclusão,
+    // destino, quesitos, referências) são gerados sob demanda pelo médico no editor.
+    const EXPECTED_AUTO_SUMMARIES = 2;
+
+    // Só marca como incompleto se houve falha real (zero resumos ou provider inválido).
     const isIncompleteExtraction = aiUsage && (
-      aiUsage.summaries.count < 3 || 
-      aiUsage.summaries.provider === 'none'
+      aiUsage.summaries.provider === 'none' ||
+      aiUsage.summaries.count === 0
     );
 
     return (
@@ -1436,9 +1441,10 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               <AlertDescription>
                 Alguns campos não puderam ser extraídos automaticamente. 
                 O documento pode estar incompleto ou muito extenso para processar completamente.
-                {aiUsage && aiUsage.summaries.count < 5 && (
+                {aiUsage && aiUsage.summaries.count < EXPECTED_AUTO_SUMMARIES && (
                   <span className="block mt-1 font-medium">
-                    Apenas {aiUsage.summaries.count} de 5 resumos foram gerados.
+                    Apenas {aiUsage.summaries.count} de {EXPECTED_AUTO_SUMMARIES} resumos automáticos foram gerados.
+                    Os demais campos são preenchidos sob demanda no editor.
                   </span>
                 )}
               </AlertDescription>
@@ -1532,14 +1538,14 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                 {aiUsage.summaries.count > 0 ? (
                   <div className={cn(
                     "text-xs flex items-center gap-1 mt-1",
-                    aiUsage.summaries.count >= 3 ? "text-green-500" : "text-yellow-500"
+                    aiUsage.summaries.count >= EXPECTED_AUTO_SUMMARIES ? "text-green-500" : "text-yellow-500"
                   )}>
-                    {aiUsage.summaries.count >= 3 ? (
+                    {aiUsage.summaries.count >= EXPECTED_AUTO_SUMMARIES ? (
                       <CheckCircle2 className="h-3 w-3" />
                     ) : (
                       <AlertTriangle className="h-3 w-3" />
                     )}
-                    {aiUsage.summaries.count} de 5 textos gerados
+                    {aiUsage.summaries.count} de {EXPECTED_AUTO_SUMMARIES} resumos automáticos
                   </div>
                 ) : (
                   <div className="text-xs text-yellow-500 flex items-center gap-1 mt-1">
