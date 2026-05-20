@@ -339,6 +339,17 @@ serve(async (req) => {
       });
     }
 
+    // Validação adicional pós-load: referências exigem ao menos CIDs OU conclusão preenchidos
+    if (body.campo === 'referencias') {
+      const hasCids = Array.isArray(laudo.cids_selecionados) && laudo.cids_selecionados.length > 0;
+      const hasConclusao = !!(laudo.conclusao_analise && String(laudo.conclusao_analise).trim().length > 0);
+      if (!hasCids && !hasConclusao) {
+        return new Response(JSON.stringify({ error: 'Preencha ao menos os CIDs ou a Conclusão antes de gerar referências.' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
     const meta = FIELD_TO_PROMPT[body.campo];
     const ctx = buildContext(laudo, body);
 
