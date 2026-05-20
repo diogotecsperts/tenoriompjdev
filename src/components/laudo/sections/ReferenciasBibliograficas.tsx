@@ -38,11 +38,20 @@ export function ReferenciasBibliograficas() {
       toast.error("Salve o laudo antes de gerar as referências.");
       return;
     }
+
+    // Validação client-side ANTES de chamar a Edge Function.
+    // Evita o 400 do backend que dispara o overlay de Runtime Error do preview.
+    const cids = (currentLaudo.conclusaoCID || "").trim();
+    const conclusao = (currentLaudo.conclusaoAnalise || "").trim();
+    if (!cids && !conclusao) {
+      toast.error("Preencha ao menos os CIDs ou a Conclusão antes de gerar referências.");
+      return;
+    }
+
     setIsLoading(true);
     try {
       let response: { data?: any; error?: any } | undefined;
 
-      // Captura erros lançados diretamente pelo client do Supabase
       try {
         response = await supabase.functions.invoke('gerar-justificativa-medica', {
           body: {
@@ -73,7 +82,6 @@ export function ReferenciasBibliograficas() {
         toast.error('Resposta vazia. Tente novamente.');
       }
     } catch (error) {
-      // Última linha de defesa — garante que a tela nunca quebre
       console.error('Erro inesperado ao gerar referências:', error);
       toast.error(extractErrorMessage(error, 'Erro ao gerar referências. Tente novamente.'));
     } finally {
