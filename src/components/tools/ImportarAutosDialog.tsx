@@ -1538,14 +1538,14 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                 {aiUsage.summaries.count > 0 ? (
                   <div className={cn(
                     "text-xs flex items-center gap-1 mt-1",
-                    aiUsage.summaries.count >= 3 ? "text-green-500" : "text-yellow-500"
+                    aiUsage.summaries.count >= EXPECTED_AUTO_SUMMARIES ? "text-green-500" : "text-yellow-500"
                   )}>
-                    {aiUsage.summaries.count >= 3 ? (
+                    {aiUsage.summaries.count >= EXPECTED_AUTO_SUMMARIES ? (
                       <CheckCircle2 className="h-3 w-3" />
                     ) : (
                       <AlertTriangle className="h-3 w-3" />
                     )}
-                    {aiUsage.summaries.count} de 5 textos gerados
+                    {aiUsage.summaries.count} de {EXPECTED_AUTO_SUMMARIES} resumos automáticos
                   </div>
                 ) : (
                   <div className="text-xs text-yellow-500 flex items-center gap-1 mt-1">
