@@ -173,6 +173,32 @@ Restrições:
 1. Resposta em no máximo 2 frases.
 2. Sem markdown, sem "IA".
 3. Português brasileiro com acentuação correta.`,
+
+  referencias: `Você é perito médico judicial. O médico já concluiu suas decisões clínicas. Sua tarefa é elencar referências bibliográficas REAIS e ESPECÍFICAS para o contexto clínico deste laudo — não citações genéricas.
+
+Contexto clínico (use para escolher referências pertinentes):
+- CIDs confirmados: \${cidsLista}
+- Tipo de nexo decidido: \${nexoEscolhido}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+- Conclusão do médico: \${conclusaoMedica}
+
+INSTRUÇÕES OBRIGATÓRIAS:
+- Liste entre 5 e 8 referências REAIS, em formato ABNT, numeradas (1-, 2-, 3-, ...).
+- Cada referência DEVE conter: autor(es), título, editora ou periódico, cidade quando aplicável, e ANO.
+- Para artigos científicos, incluir volume/número e, quando aplicável, DOI.
+- ESPECIFICIDADE OBRIGATÓRIA: referências relevantes aos CIDs e à natureza do nexo decidido.
+- Inclua legislação aplicável apenas quando pertinente ao caso (CLT, Lei 8.213/91, NR específica).
+
+PROIBIÇÕES:
+1. PROIBIDO citar "Tratado de Medicina X" ou "Manual do MTE" SEM autor, edição e ano concretos.
+2. PROIBIDO inventar autores, títulos, ISBN ou DOI.
+3. Se faltar contexto, retorne apenas as referências que conseguir fundamentar com segurança (mínimo 3).
+4. Não use a expressão "IA".
+5. Sem markdown.
+6. Português brasileiro com acentuação correta.
+
+FORMATO DE SAÍDA (texto puro, numerado "1- ", "2- ", ...):`,
 };
 
 const SYSTEM_PROMPT =
