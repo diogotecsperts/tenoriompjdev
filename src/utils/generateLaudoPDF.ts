@@ -56,6 +56,27 @@ let pageLayout: PageLayout = { ...DEFAULT_LAYOUT };
 
 // ========== FUNÇÕES AUXILIARES ==========
 
+// Monta linha de identificação do Perito Judicial para topo da página 1 do PDF.
+// Mesma lógica do DOCX — usa dados frozen no laudo (multi-tenant nativo).
+const buildPeritoIdLine = (laudo: LaudoData): string | null => {
+  const nome = (laudo.peritoNome || "").trim();
+  const crm = (laudo.peritoCRM || "").trim();
+  if (!nome && !crm) return null;
+
+  let crmFmt = "";
+  if (crm) {
+    const m1 = crm.match(/^(\d+)\s*[\/\-]?\s*([A-Za-z]{2})$/);
+    const m2 = !m1 ? crm.match(/^([A-Za-z]{2})\s*[\/\-]?\s*(\d+)$/) : null;
+    if (m1) crmFmt = `CRM/${m1[2].toUpperCase()} ${m1[1]}`;
+    else if (m2) crmFmt = `CRM/${m2[1].toUpperCase()} ${m2[2]}`;
+    else crmFmt = `CRM ${crm}`;
+  }
+
+  const left = nome ? `Perito Judicial: ${nome}` : "Perito Judicial";
+  return crmFmt ? `${left} - ${crmFmt}` : left;
+};
+
+
 // Padrões que indicam campo técnico/vazio que NÃO deve aparecer no documento
 const PLACEHOLDER_PATTERNS = [
   /\[INSERIR/i,              // [INSERIR algo] em qualquer posição
@@ -618,7 +639,18 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // ========== PÁGINA 1 - INÍCIO DO CONTEÚDO ==========
   let y = pageLayout.contentStartY;
-  
+
+  // Identificação do Perito Judicial (topo da página 1 — multi-tenant via dados frozen no laudo)
+  const peritoIdLine = buildPeritoIdLine(laudo);
+  if (peritoIdLine) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
+    doc.text(peritoIdLine, PAGE.width - MARGINS.right, y, { align: "right" });
+    doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+    y += 6;
+  }
+
   // Endereçamento judicial
   y = addJudicialAddress(doc, laudo, y);
   

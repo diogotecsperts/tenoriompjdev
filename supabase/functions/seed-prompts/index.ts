@@ -834,11 +834,14 @@ Responda em no máximo 2 frases.`
 
 CIDs informados pelo médico: \${cidsManuais}
 
+ESCOPO ESTRITO DESTA SEÇÃO:
+Você deve APENAS descrever a literatura médica da doença. É ESTRITAMENTE PROIBIDO emitir qualquer juízo de valor, concluir sobre a existência ou inexistência de incapacidade, opinar sobre nexo causal ou julgar o caso concreto nesta seção. Limite-se rigorosamente à descrição técnica da patologia conforme literatura médica.
+
 Tarefa: Para CADA CID listado, redija em texto técnico contínuo (sem markdown, sem bullets, sem asteriscos, sem negrito):
 - Definição da patologia
 - Etiologia
 - Quadro clínico característico
-- Quando aplicável, relação com fatores ocupacionais
+- Quando aplicável, relação com fatores ocupacionais (em termos GENÉRICOS da literatura, jamais aplicada ao periciando)
 
 Contexto auxiliar (use apenas como referência, não invente):
 - Posto de trabalho: \${postoTrabalho}
@@ -848,7 +851,8 @@ Restrições absolutas:
 1. Não use a expressão "IA" em hipótese alguma.
 2. Não use formatação markdown.
 3. Não invente dados clínicos do periciando.
-4. Português brasileiro com acentuação correta.`
+4. Não emita conclusões periciais — apenas descrição de literatura.
+5. Português brasileiro com acentuação correta.`
   },
   prompt_gen_nexo_justificado: {
     cardId: 'analise-tecnica',
@@ -947,6 +951,43 @@ Restrições:
 1. Resposta em no máximo 2 frases.
 2. Sem markdown, sem "IA".
 3. Português brasileiro com acentuação correta.`
+  },
+  prompt_gen_referencias_demanda: {
+    cardId: 'conclusao',
+    sectionId: 'referencias',
+    description: 'Referências Bibliográficas (geração sob demanda pelo médico, contextualizada)',
+    order: 15,
+    prompt: `Você é perito médico judicial. O médico já concluiu suas decisões clínicas. Sua tarefa é elencar referências bibliográficas REAIS e ESPECÍFICAS para o contexto clínico deste laudo — não citações genéricas.
+
+Contexto clínico (use para escolher referências pertinentes):
+- CIDs confirmados: \${cidsLista}
+- Tipo de nexo decidido: \${nexoEscolhido}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+- Conclusão do médico: \${conclusaoMedica}
+
+INSTRUÇÕES OBRIGATÓRIAS:
+- Liste entre 5 e 8 referências REAIS, em formato ABNT, numeradas (1-, 2-, 3-, ...).
+- Cada referência DEVE conter: autor(es), título da obra/artigo, editora ou periódico, cidade quando aplicável, e ANO de publicação.
+- Para artigos científicos, incluir volume/número e, quando aplicável, DOI.
+- ESPECIFICIDADE OBRIGATÓRIA: as referências devem ser relevantes para os CIDs listados e para a natureza do nexo decidido. Se for LER/DORT, cite literatura de ergonomia/medicina do trabalho aplicável; se for trauma ortopédico, cite obras de ortopedia/traumatologia; se houver componente psiquiátrico, cite literatura psiquiátrica pericial.
+- Inclua legislação aplicável apenas quando pertinente ao caso (CLT, Lei 8.213/91, NR específica citável pelo número).
+- Inclua normas técnicas do CFM/CID-10 quando relevantes.
+
+PROIBIÇÕES:
+1. PROIBIDO citar "Tratado de Medicina X", "Manual do MTE", "Compêndio de Perícia" ou similares SEM autor, edição e ano concretos.
+2. PROIBIDO inventar autores, títulos, ISBN ou DOI.
+3. Se faltar informação suficiente para escolher referências específicas, retorne apenas as referências que conseguir fundamentar com segurança (mínimo 3).
+4. Não use a expressão "IA".
+5. Sem markdown, sem asteriscos, sem negrito.
+6. Português brasileiro com acentuação correta.
+
+FORMATO DE SAÍDA (texto puro):
+1- SOBRENOME, Nome. Título da obra. Cidade: Editora, Ano.
+
+2- SOBRENOME, Nome. Título do artigo. Periódico, volume(número), páginas, ano. DOI quando aplicável.
+
+3- BRASIL. Lei/Norma específica, ano.`
   }
 };
 

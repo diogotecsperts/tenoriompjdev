@@ -1330,8 +1330,8 @@ const results: Record<string, string> = {
     { tipo: 'quesitos_juizo', shouldGenerate: false, step: 'Respondendo quesitos do Juízo...', progress: 86 },
     { tipo: 'quesitos_reclamante', shouldGenerate: false, step: 'Respondendo quesitos do Reclamante...', progress: 88 },
     { tipo: 'quesitos_reclamada', shouldGenerate: false, step: 'Respondendo quesitos da Reclamada...', progress: 90 },
-    // PRIORITY 3: Least critical (database has default value for this field)
-    { tipo: 'referencias_bibliograficas', shouldGenerate: !!contexto.cids || hasHistoryContext || hasMedicalContext, step: 'Gerando referências bibliográficas...', progress: 92 }
+    // PRIORITY 3: Referências bibliográficas — geração sob demanda pelo médico (anti-bias)
+    { tipo: 'referencias_bibliograficas', shouldGenerate: false, step: 'Referências (geração sob demanda pelo médico)', progress: 92 }
   ];
 
   // Log which summaries will be generated vs skipped

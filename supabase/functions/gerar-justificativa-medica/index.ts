@@ -23,7 +23,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-type Campo = 'cid_descricao' | 'nexo_causal' | 'incapacidade' | 'conclusao' | 'destino';
+type Campo = 'cid_descricao' | 'nexo_causal' | 'incapacidade' | 'conclusao' | 'destino' | 'referencias';
 
 interface ReqBody {
   laudoId: string;
@@ -63,6 +63,12 @@ const FIELD_TO_PROMPT: Record<Campo, { id: string; description: string; cardId: 
     cardId: 'conclusao',
     sectionId: 'conclusao',
   },
+  referencias: {
+    id: 'prompt_gen_referencias_demanda',
+    description: 'Referências Bibliográficas (geração sob demanda pelo médico, contextualizada)',
+    cardId: 'conclusao',
+    sectionId: 'referencias',
+  },
 };
 
 const DEFAULT_PROMPTS: Record<Campo, string> = {
@@ -70,11 +76,14 @@ const DEFAULT_PROMPTS: Record<Campo, string> = {
 
 CIDs informados pelo médico: \${cidsManuais}
 
+ESCOPO ESTRITO DESTA SEÇÃO:
+Você deve APENAS descrever a literatura médica da doença. É ESTRITAMENTE PROIBIDO emitir qualquer juízo de valor, concluir sobre a existência ou inexistência de incapacidade, opinar sobre nexo causal ou julgar o caso concreto nesta seção. Limite-se rigorosamente à descrição técnica da patologia conforme literatura médica.
+
 Tarefa: Para CADA CID listado, redija em texto técnico contínuo (sem markdown, sem bullets, sem asteriscos, sem negrito):
 - Definição da patologia
 - Etiologia
 - Quadro clínico característico
-- Quando aplicável, relação com fatores ocupacionais
+- Quando aplicável, relação com fatores ocupacionais (em termos GENÉRICOS da literatura, jamais aplicada ao periciando)
 
 Contexto auxiliar (use apenas como referência, não invente):
 - Posto de trabalho: \${postoTrabalho}
@@ -84,7 +93,8 @@ Restrições absolutas:
 1. Não use a expressão "IA" em hipótese alguma.
 2. Não use formatação markdown.
 3. Não invente dados clínicos do periciando.
-4. Português brasileiro com acentuação correta.`,
+4. Não emita conclusões periciais — apenas descrição de literatura.
+5. Português brasileiro com acentuação correta.`,
 
   nexo_causal: `Você está REDIGINDO a fundamentação técnica de uma decisão JÁ TOMADA pelo médico-perito. Não questione a escolha. Use a escolha como tese e os dados clínicos como evidências de apoio.
 
@@ -163,6 +173,32 @@ Restrições:
 1. Resposta em no máximo 2 frases.
 2. Sem markdown, sem "IA".
 3. Português brasileiro com acentuação correta.`,
+
+  referencias: `Você é perito médico judicial. O médico já concluiu suas decisões clínicas. Sua tarefa é elencar referências bibliográficas REAIS e ESPECÍFICAS para o contexto clínico deste laudo — não citações genéricas.
+
+Contexto clínico (use para escolher referências pertinentes):
+- CIDs confirmados: \${cidsLista}
+- Tipo de nexo decidido: \${nexoEscolhido}
+- História atual: \${historiaAtual}
+- Exame físico: \${exameFisico}
+- Conclusão do médico: \${conclusaoMedica}
+
+INSTRUÇÕES OBRIGATÓRIAS:
+- Liste entre 5 e 8 referências REAIS, em formato ABNT, numeradas (1-, 2-, 3-, ...).
+- Cada referência DEVE conter: autor(es), título, editora ou periódico, cidade quando aplicável, e ANO.
+- Para artigos científicos, incluir volume/número e, quando aplicável, DOI.
+- ESPECIFICIDADE OBRIGATÓRIA: referências relevantes aos CIDs e à natureza do nexo decidido.
+- Inclua legislação aplicável apenas quando pertinente ao caso (CLT, Lei 8.213/91, NR específica).
+
+PROIBIÇÕES:
+1. PROIBIDO citar "Tratado de Medicina X" ou "Manual do MTE" SEM autor, edição e ano concretos.
+2. PROIBIDO inventar autores, títulos, ISBN ou DOI.
+3. Se faltar contexto, retorne apenas as referências que conseguir fundamentar com segurança (mínimo 3).
+4. Não use a expressão "IA".
+5. Sem markdown.
+6. Português brasileiro com acentuação correta.
+
+FORMATO DE SAÍDA (texto puro, numerado "1- ", "2- ", ...):`,
 };
 
 const SYSTEM_PROMPT =
@@ -218,6 +254,7 @@ function buildContext(laudo: any, body: ReqBody): Record<string, string> {
     afastamentos: laudo.afastamentos || '',
     atividadesLaborais: laudo.descricao_atividades_laborais || '',
     postoTrabalho: laudo.descricao_posto_trabalho || laudo.descricao_atividades_laborais || '',
+    conclusaoMedica: laudo.conclusao_analise || '',
   };
 }
 
@@ -281,7 +318,7 @@ serve(async (req) => {
         id, user_id,
         cids_selecionados,
         nexo_causal_tipo, nexo_causal_justificativa,
-        conclusao_status,
+        conclusao_status, conclusao_analise,
         analise_incapacidade_laboral,
         historia_atual, historia_acidente, historico_ocupacional,
         exame_fisico, exames_complementares,
@@ -300,6 +337,17 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Acesso negado' }), {
         status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    // Validação adicional pós-load: referências exigem ao menos CIDs OU conclusão preenchidos
+    if (body.campo === 'referencias') {
+      const hasCids = Array.isArray(laudo.cids_selecionados) && laudo.cids_selecionados.length > 0;
+      const hasConclusao = !!(laudo.conclusao_analise && String(laudo.conclusao_analise).trim().length > 0);
+      if (!hasCids && !hasConclusao) {
+        return new Response(JSON.stringify({ error: 'Preencha ao menos os CIDs ou a Conclusão antes de gerar referências.' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
     }
 
     const meta = FIELD_TO_PROMPT[body.campo];

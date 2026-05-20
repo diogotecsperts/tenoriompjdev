@@ -50,6 +50,7 @@ export function DadosVitima() {
                 <SelectValue placeholder="Selecione" />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="analfabeto">Analfabeto</SelectItem>
                 <SelectItem value="fundamental">Ensino Fundamental</SelectItem>
                 <SelectItem value="medio">Ensino Médio</SelectItem>
                 <SelectItem value="superior">Ensino Superior</SelectItem>

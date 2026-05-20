@@ -43,6 +43,29 @@ const FONT = {
 
 // ========== FUNÇÕES AUXILIARES ==========
 
+// Monta linha de identificação do Perito Judicial para topo da página 1.
+// Usa dados já frozen no laudo (peritoNome / peritoCRM) — multi-tenant nativo.
+// Formato: "Perito Judicial: <Nome> - CRM/<UF> <Número>". Se CRM não casar com
+// padrão "12345/SP" (ou variantes), usa "CRM <valor>" como fallback seguro.
+const buildPeritoIdLine = (laudo: LaudoData): string | null => {
+  const nome = (laudo.peritoNome || "").trim();
+  const crm = (laudo.peritoCRM || "").trim();
+  if (!nome && !crm) return null;
+
+  let crmFmt = "";
+  if (crm) {
+    const m1 = crm.match(/^(\d+)\s*[\/\-]?\s*([A-Za-z]{2})$/);
+    const m2 = !m1 ? crm.match(/^([A-Za-z]{2})\s*[\/\-]?\s*(\d+)$/) : null;
+    if (m1) crmFmt = `CRM/${m1[2].toUpperCase()} ${m1[1]}`;
+    else if (m2) crmFmt = `CRM/${m2[1].toUpperCase()} ${m2[2]}`;
+    else crmFmt = `CRM ${crm}`;
+  }
+
+  const left = nome ? `Perito Judicial: ${nome}` : "Perito Judicial";
+  return crmFmt ? `${left} - ${crmFmt}` : left;
+};
+
+
 // Padrões que indicam campo técnico/vazio que NÃO deve aparecer no documento
 const PLACEHOLDER_PATTERNS = [
   /\[INSERIR/i,              // [INSERIR algo] em qualquer posição
@@ -484,6 +507,27 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   try {
     footerDimensions = await getImageDimensions("/timbrado-rodape.png");
   } catch { /* usa padrão */ }
+
+  // ========== IDENTIFICAÇÃO DO PERITO (topo da página 1) ==========
+  // Renderizado como primeiro parágrafo do corpo — aparece naturalmente apenas na página 1.
+  // Dados vêm do laudo (frozen-at-creation), garantindo multi-tenant e histórico correto.
+  const peritoIdLine = buildPeritoIdLine(laudo);
+  if (peritoIdLine) {
+    paragraphs.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: peritoIdLine,
+            size: FONT.sizeSmall,
+            color: COLORS.muted,
+            font: FONT.name,
+          }),
+        ],
+        alignment: AlignmentType.RIGHT,
+        spacing: { before: 0, after: 120 },
+      })
+    );
+  }
 
   // ========== ENDEREÇAMENTO JUDICIAL ==========
   // Operação D: sem fallbacks literais — campos vazios simplesmente não aparecem
