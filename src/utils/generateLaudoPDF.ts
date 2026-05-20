@@ -618,7 +618,18 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   // ========== PÁGINA 1 - INÍCIO DO CONTEÚDO ==========
   let y = pageLayout.contentStartY;
-  
+
+  // Identificação do Perito Judicial (topo da página 1 — multi-tenant via dados frozen no laudo)
+  const peritoIdLine = buildPeritoIdLine(laudo);
+  if (peritoIdLine) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
+    doc.text(peritoIdLine, PAGE.width - MARGINS.right, y, { align: "right" });
+    doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+    y += 6;
+  }
+
   // Endereçamento judicial
   y = addJudicialAddress(doc, laudo, y);
   
