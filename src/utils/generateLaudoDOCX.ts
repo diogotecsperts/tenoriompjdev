@@ -47,10 +47,14 @@ const FONT = {
 // Usa dados já frozen no laudo (peritoNome / peritoCRM) — multi-tenant nativo.
 // Formato: "Perito Judicial: <Nome> - CRM/<UF> <Número>". Se CRM não casar com
 // padrão "12345/SP" (ou variantes), usa "CRM <valor>" como fallback seguro.
-const buildPeritoIdLine = (laudo: LaudoData): string | null => {
-  const nome = (laudo.peritoNome || "").trim();
+const buildPeritoIdLine = (laudo: LaudoData): { label: string; value: string } | null => {
+  const nomeRaw = (laudo.peritoNome || "").trim();
   const crm = (laudo.peritoCRM || "").trim();
-  if (!nome && !crm) return null;
+  if (!nomeRaw && !crm) return null;
+
+  // Prefixar Dr./Dra. apenas se ainda não vier no nome
+  const hasPrefix = /^dr[a]?\.?\s/i.test(nomeRaw);
+  const nome = nomeRaw && !hasPrefix ? `Dr. ${nomeRaw}` : nomeRaw;
 
   let crmFmt = "";
   if (crm) {
@@ -61,8 +65,8 @@ const buildPeritoIdLine = (laudo: LaudoData): string | null => {
     else crmFmt = `CRM ${crm}`;
   }
 
-  const left = nome ? `Perito Judicial: ${nome}` : "Perito Judicial";
-  return crmFmt ? `${left} - ${crmFmt}` : left;
+  const value = nome && crmFmt ? `${nome} \u2014 ${crmFmt}` : (nome || crmFmt);
+  return { label: "PERITO JUDICIAL", value };
 };
 
 

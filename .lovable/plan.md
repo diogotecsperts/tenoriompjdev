@@ -1,34 +1,63 @@
-## Avaliação do plano do Gemini
+## Diagnóstico
 
-**Verdadeiro:** O `FunctionsHttpError` do Supabase quando há `status !== 2xx` é o que dispara o overlay de Runtime Error do preview do Lovable — o overlay observa respostas 4xx/5xx de `fetch` antes mesmo do nosso `try/catch` rodar, independente de termos `throw` ou não.
+A linha de identificação do perito no topo do DOCX (`generateLaudoDOCX.ts`, linhas 514-530) é renderizada como parágrafo solto em 8pt cinza claro, alinhada à direita, sem separador. No print, parece um comentário órfão flutuando entre o timbrado e o "EXCELENTÍSSIMO(A) SENHOR(A)...", quebrando a hierarquia institucional.
 
-**Falso/insuficiente:** O plano do Gemini só repete o que já está implementado no nosso `ReferenciasBibliograficas.tsx` — `try/catch`, `extractErrorMessage`, `return` sem `throw`. **Isso não resolve**, porque o overlay do preview intercepta a resposta HTTP 4xx antes do JavaScript do componente conseguir tratar. Já confirmamos isso na prática: o erro continua aparecendo mesmo com toda a blindagem.
+Problemas:
+1. 8pt cinza claro → parece rascunho, não identificação oficial.
+2. Sem separador → cola visualmente no endereçamento judicial.
+3. Texto corrido numa única linha → rótulo e conteúdo competem.
+4. Espaçamento mínimo (before: 0, after: 120) → sem respiro.
 
-**Seguro?** Aplicar o plano do Gemini é seguro (não quebra nada), mas é **inócuo** — não vai resolver o crash visual.
+## Fonte de dados (já confirmada)
 
-## Causa raiz real (descoberta agora)
+`peritoNome` / `peritoCRM` são puxados automaticamente do `profiles` do usuário logado no momento da criação do laudo (`LaudoContext.createLaudo`, linhas 362-380) e ficam frozen-at-creation. Multi-tenant correto, sem hardcode. O plano abaixo só muda apresentação visual — zero alteração na fonte de dados.
 
-A correção que apliquei antes (validar no cliente antes de chamar a função) é a abordagem certa, mas eu validei os campos **errados**:
+## Plano de correção (1 arquivo, escopo cirúrgico)
 
-- Apliquei: `currentLaudo.conclusaoCID` + `currentLaudo.conclusaoAnalise`
-- Backend valida: `cids_selecionados` (array) + `conclusao_analise`
+**Arquivo:** `src/utils/generateLaudoDOCX.ts`, bloco linhas 514-530 + ajuste pequeno em `buildPeritoIdLine` (linhas 50-66).
 
-Mapeando para o frontend, o backend equivale a `currentLaudo.cidsSelecionados` (array) e `currentLaudo.conclusaoAnalise`. O campo `conclusaoCID` é um input de texto livre separado e **não conta** para a validação do backend.
+### Novo padrão visual
 
-Resultado: meu guard atual nunca dispara porque ou o `conclusaoCID` tinha algum texto, ou o `conclusaoAnalise` tinha algo, mas o `cidsSelecionados` continuava vazio → a chamada vai pro backend → 400 → overlay.
+Bloco institucional discreto no canto superior direito, com duas linhas e separador:
 
-## Plano de correção (perfeitamente seguro)
+- **Rótulo "PERITO JUDICIAL"** em ALL CAPS, 8pt, bold, cor `primary` (#1B3665).
+- **Quebra de linha** dentro do mesmo parágrafo (`break: 1` no segundo `TextRun`).
+- **Nome + CRM** em 9pt, peso normal, cor `text` (#1F2937).
+- **Borda inferior** fina (½ pt) cor `primary` no parágrafo → separador sutil que ancora o bloco.
+- **Espaçamento** `before: 200, after: 240` → respira em relação ao timbrado e ao endereçamento judicial.
+- **Indent esquerdo** ~9000 twips → bloco ocupa só o terço direito da página, reforçando que é metadado.
+- **Travessão "—"** (em dash) entre nome e CRM em vez de hífen.
+- **Prefixo "Dr./Dra."** só se já não vier no `peritoNome` (regex `/^dr[a]?\.?\s/i`).
 
-1. **Único arquivo alterado:** `src/components/laudo/sections/ReferenciasBibliograficas.tsx`
-2. **Trocar a validação client-side** para espelhar exatamente a regra do backend:
-   - `hasCids = Array.isArray(currentLaudo.cidsSelecionados) && currentLaudo.cidsSelecionados.length > 0`
-   - `hasConclusao = !!(currentLaudo.conclusaoAnalise && currentLaudo.conclusaoAnalise.trim().length > 0)`
-   - Se `!hasCids && !hasConclusao` → `toast.error(...)` + `return` (sem chamar `supabase.functions.invoke`)
-3. **Manter** todo o `try/catch` + `extractErrorMessage` já existentes como rede de segurança para outros 4xx que o backend ainda possa retornar (ex.: 401, 403, 404 "Laudo não encontrado").
-4. **Não mexer** no backend, na Edge Function, nem em qualquer outro componente.
+### Layout resultante
 
-## Detalhes técnicos
+```text
+                                              PERITO JUDICIAL
+                                       Dr. Diogo Silva — CRM/AL 123456
+                                       ─────────────────────────────
+EXCELENTÍSSIMO(A) SENHOR(A) DOUTOR(A) JUIZ(A) DE DIREITO DA
+2A VARA DO TRABALHO DE ARAPIRACA - AL
+```
 
-- Escopo: 1 arquivo, frontend puro, ~6 linhas alteradas no `handleGerarReferencias`.
-- Risco: zero — só estamos antecipando uma validação que já existe no backend e bloqueando a chamada HTTP quando ela seria garantidamente rejeitada.
-- Verificação: depois da edit, basta apertar "Gerar Referências" sem CIDs nem Conclusão. Esperado: só o toast vermelho, sem overlay de Runtime Error, sem blank screen.
+### Detalhes técnicos
+
+- Refatorar `buildPeritoIdLine` para retornar `{ label: "PERITO JUDICIAL", value: "Dr. Nome — CRM/UF 12345" } | null`. Manter fallback de CRM já existente.
+- Substituir o `Paragraph` único por um `Paragraph` com dois `TextRun` (rótulo + `break: 1` + valor) + `border.bottom: { style: BorderStyle.SINGLE, size: 4, color: COLORS.primary, space: 4 }`.
+- `BorderStyle` já está importado.
+- Quando ambos vazios → retorna `null` → bloco simplesmente desaparece (comportamento atual preservado).
+
+### Fora de escopo
+
+- Não mexer no header flutuante (timbrado), no endereçamento judicial, no PDF, nem em outros componentes.
+- Não alterar dados no banco nem em `LaudoContext`.
+- Não tocar em `generateLaudoPDF.ts` (espelhar no PDF depois é decisão separada).
+
+### Verificação pós-edit
+
+Exportar o laudo atual e conferir no Word:
+1. Bloco no canto superior direito, abaixo do timbrado, com respiro.
+2. "PERITO JUDICIAL" em caixa-alta azul; nome + CRM logo abaixo em preto.
+3. Linha fina azul separa do "EXCELENTÍSSIMO".
+4. Laudos sem nome/CRM no banco → bloco não aparece, documento começa direto no endereçamento.
+
+Risco: zero — alteração puramente visual isolada a ~15 linhas.
