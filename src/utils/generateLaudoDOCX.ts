@@ -47,10 +47,14 @@ const FONT = {
 // Usa dados já frozen no laudo (peritoNome / peritoCRM) — multi-tenant nativo.
 // Formato: "Perito Judicial: <Nome> - CRM/<UF> <Número>". Se CRM não casar com
 // padrão "12345/SP" (ou variantes), usa "CRM <valor>" como fallback seguro.
-const buildPeritoIdLine = (laudo: LaudoData): string | null => {
-  const nome = (laudo.peritoNome || "").trim();
+const buildPeritoIdLine = (laudo: LaudoData): { label: string; value: string } | null => {
+  const nomeRaw = (laudo.peritoNome || "").trim();
   const crm = (laudo.peritoCRM || "").trim();
-  if (!nome && !crm) return null;
+  if (!nomeRaw && !crm) return null;
+
+  // Prefixar Dr./Dra. apenas se ainda não vier no nome
+  const hasPrefix = /^dr[a]?\.?\s/i.test(nomeRaw);
+  const nome = nomeRaw && !hasPrefix ? `Dr. ${nomeRaw}` : nomeRaw;
 
   let crmFmt = "";
   if (crm) {
@@ -61,8 +65,8 @@ const buildPeritoIdLine = (laudo: LaudoData): string | null => {
     else crmFmt = `CRM ${crm}`;
   }
 
-  const left = nome ? `Perito Judicial: ${nome}` : "Perito Judicial";
-  return crmFmt ? `${left} - ${crmFmt}` : left;
+  const value = nome && crmFmt ? `${nome} \u2014 ${crmFmt}` : (nome || crmFmt);
+  return { label: "PERITO JUDICIAL", value };
 };
 
 
@@ -511,20 +515,37 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   // ========== IDENTIFICAÇÃO DO PERITO (topo da página 1) ==========
   // Renderizado como primeiro parágrafo do corpo — aparece naturalmente apenas na página 1.
   // Dados vêm do laudo (frozen-at-creation), garantindo multi-tenant e histórico correto.
-  const peritoIdLine = buildPeritoIdLine(laudo);
-  if (peritoIdLine) {
+  const peritoId = buildPeritoIdLine(laudo);
+  if (peritoId) {
     paragraphs.push(
       new Paragraph({
         children: [
           new TextRun({
-            text: peritoIdLine,
+            text: peritoId.label,
+            bold: true,
             size: FONT.sizeSmall,
-            color: COLORS.muted,
+            color: COLORS.primary,
+            font: FONT.name,
+          }),
+          new TextRun({
+            text: peritoId.value,
+            break: 1,
+            size: 18, // 9pt
+            color: COLORS.text,
             font: FONT.name,
           }),
         ],
         alignment: AlignmentType.RIGHT,
-        spacing: { before: 0, after: 120 },
+        indent: { left: 5400 }, // ~9000 twips reservaria 1/3 da direita; 5400 mantém respiro
+        spacing: { before: 200, after: 240 },
+        border: {
+          bottom: {
+            style: BorderStyle.SINGLE,
+            size: 4,
+            color: COLORS.primary,
+            space: 4,
+          },
+        },
       })
     );
   }
