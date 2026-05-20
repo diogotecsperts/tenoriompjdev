@@ -1,24 +1,34 @@
-## Objetivo
-Eliminar o crash da tela ao clicar em "Gerar Referências" sem CIDs/Conclusão, exibindo apenas uma notificação amigável com a mensagem de validação já retornada pelo backend.
+## Avaliação do plano do Gemini
 
-## Plano
-1. Revisar o fluxo do botão "Gerar Referências" e blindar o handler para que nenhum erro da chamada `gerar-justificativa-medica` escape como exceção não tratada.
-2. Ajustar a extração da mensagem de erro no frontend para cobrir os formatos reais retornados pela chamada (`error`, `data.error`, string serializada e objetos do client).
-3. Garantir que o clique não dispare nenhum caminho paralelo que promova o 400 a erro global (ex.: submit implícito do botão ou promise rejeitada fora do `catch`).
-4. Validar o comportamento no preview: ao faltar CIDs/Conclusão, deve aparecer só o toast amigável; a tela não pode entrar em Runtime Error nem blank screen.
+**Verdadeiro:** O `FunctionsHttpError` do Supabase quando há `status !== 2xx` é o que dispara o overlay de Runtime Error do preview do Lovable — o overlay observa respostas 4xx/5xx de `fetch` antes mesmo do nosso `try/catch` rodar, independente de termos `throw` ou não.
 
-## Diagnóstico atual
-- O backend está correto: a função retorna `400` com a mensagem esperada.
-- A rede confirma isso, então o problema está no frontend.
-- O componente `ReferenciasBibliograficas.tsx` já tenta tratar o erro, mas ainda existe um caminho em que o `400` está chegando ao capturador global como erro não tratado.
-- O suspeito principal é um escape de promise/rejeição paralela no fluxo do clique, não a validação da Edge Function em si.
+**Falso/insuficiente:** O plano do Gemini só repete o que já está implementado no nosso `ReferenciasBibliograficas.tsx` — `try/catch`, `extractErrorMessage`, `return` sem `throw`. **Isso não resolve**, porque o overlay do preview intercepta a resposta HTTP 4xx antes do JavaScript do componente conseguir tratar. Já confirmamos isso na prática: o erro continua aparecendo mesmo com toda a blindagem.
+
+**Seguro?** Aplicar o plano do Gemini é seguro (não quebra nada), mas é **inócuo** — não vai resolver o crash visual.
+
+## Causa raiz real (descoberta agora)
+
+A correção que apliquei antes (validar no cliente antes de chamar a função) é a abordagem certa, mas eu validei os campos **errados**:
+
+- Apliquei: `currentLaudo.conclusaoCID` + `currentLaudo.conclusaoAnalise`
+- Backend valida: `cids_selecionados` (array) + `conclusao_analise`
+
+Mapeando para o frontend, o backend equivale a `currentLaudo.cidsSelecionados` (array) e `currentLaudo.conclusaoAnalise`. O campo `conclusaoCID` é um input de texto livre separado e **não conta** para a validação do backend.
+
+Resultado: meu guard atual nunca dispara porque ou o `conclusaoCID` tinha algum texto, ou o `conclusaoAnalise` tinha algo, mas o `cidsSelecionados` continuava vazio → a chamada vai pro backend → 400 → overlay.
+
+## Plano de correção (perfeitamente seguro)
+
+1. **Único arquivo alterado:** `src/components/laudo/sections/ReferenciasBibliograficas.tsx`
+2. **Trocar a validação client-side** para espelhar exatamente a regra do backend:
+   - `hasCids = Array.isArray(currentLaudo.cidsSelecionados) && currentLaudo.cidsSelecionados.length > 0`
+   - `hasConclusao = !!(currentLaudo.conclusaoAnalise && currentLaudo.conclusaoAnalise.trim().length > 0)`
+   - Se `!hasCids && !hasConclusao` → `toast.error(...)` + `return` (sem chamar `supabase.functions.invoke`)
+3. **Manter** todo o `try/catch` + `extractErrorMessage` já existentes como rede de segurança para outros 4xx que o backend ainda possa retornar (ex.: 401, 403, 404 "Laudo não encontrado").
+4. **Não mexer** no backend, na Edge Function, nem em qualquer outro componente.
 
 ## Detalhes técnicos
-- Arquivo principal: `src/components/laudo/sections/ReferenciasBibliograficas.tsx`
-- Arquivos de apoio para validação do comportamento global: `src/components/GlobalErrorListener.tsx`, `src/components/ErrorBoundary.tsx`
-- Escopo: frontend apenas, sem alterar backend/função
-- Resultado esperado:
-  - sem CIDs/Conclusão: toast com a mensagem de validação
-  - sem crash
-  - sem blank screen
-  - sem Runtime Error visível ao usuário
+
+- Escopo: 1 arquivo, frontend puro, ~6 linhas alteradas no `handleGerarReferencias`.
+- Risco: zero — só estamos antecipando uma validação que já existe no backend e bloqueando a chamada HTTP quando ela seria garantidamente rejeitada.
+- Verificação: depois da edit, basta apertar "Gerar Referências" sem CIDs nem Conclusão. Esperado: só o toast vermelho, sem overlay de Runtime Error, sem blank screen.

@@ -40,10 +40,12 @@ export function ReferenciasBibliograficas() {
     }
 
     // Validação client-side ANTES de chamar a Edge Function.
-    // Evita o 400 do backend que dispara o overlay de Runtime Error do preview.
-    const cids = (currentLaudo.conclusaoCID || "").trim();
-    const conclusao = (currentLaudo.conclusaoAnalise || "").trim();
-    if (!cids && !conclusao) {
+    // Espelha exatamente a validação do backend (cids_selecionados + conclusao_analise).
+    // Evita o 400 que dispara o overlay de Runtime Error do preview.
+    const hasCids = Array.isArray((currentLaudo as any).cidsSelecionados)
+      && (currentLaudo as any).cidsSelecionados.length > 0;
+    const hasConclusao = !!(currentLaudo.conclusaoAnalise && currentLaudo.conclusaoAnalise.trim().length > 0);
+    if (!hasCids && !hasConclusao) {
       toast.error("Preencha ao menos os CIDs ou a Conclusão antes de gerar referências.");
       return;
     }
