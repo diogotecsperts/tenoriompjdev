@@ -511,43 +511,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
     footerDimensions = await getImageDimensions("/timbrado-rodape.png");
   } catch { /* usa padrão */ }
 
-  // ========== IDENTIFICAÇÃO DO PERITO (topo da página 1) ==========
-  // Renderizado como primeiro parágrafo do corpo — aparece naturalmente apenas na página 1.
-  // Dados vêm do laudo (frozen-at-creation), garantindo multi-tenant e histórico correto.
-  const peritoId = buildPeritoIdLine(laudo);
-  if (peritoId) {
-    paragraphs.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: peritoId.label,
-            bold: true,
-            size: FONT.sizeSmall,
-            color: COLORS.primary,
-            font: FONT.name,
-          }),
-          new TextRun({
-            text: peritoId.value,
-            break: 1,
-            size: 18, // 9pt
-            color: COLORS.text,
-            font: FONT.name,
-          }),
-        ],
-        alignment: AlignmentType.RIGHT,
-        indent: { left: 5400 }, // ~9000 twips reservaria 1/3 da direita; 5400 mantém respiro
-        spacing: { before: 200, after: 240 },
-        border: {
-          bottom: {
-            style: BorderStyle.SINGLE,
-            size: 4,
-            color: COLORS.primary,
-            space: 4,
-          },
-        },
-      })
-    );
-  }
+
 
   // ========== ENDEREÇAMENTO JUDICIAL ==========
   // Operação D: sem fallbacks literais — campos vazios simplesmente não aparecem
