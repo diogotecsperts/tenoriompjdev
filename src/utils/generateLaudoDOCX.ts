@@ -47,12 +47,11 @@ const FONT = {
 // Usa dados já frozen no laudo (peritoNome / peritoCRM) — multi-tenant nativo.
 // Formato: "Perito Judicial: <Nome> - CRM/<UF> <Número>". Se CRM não casar com
 // padrão "12345/SP" (ou variantes), usa "CRM <valor>" como fallback seguro.
-const buildPeritoIdLine = (laudo: LaudoData): { label: string; value: string } | null => {
+const buildPeritoIdLine = (laudo: LaudoData): string | null => {
   const nomeRaw = (laudo.peritoNome || "").trim();
   const crm = (laudo.peritoCRM || "").trim();
   if (!nomeRaw && !crm) return null;
 
-  // Prefixar Dr./Dra. apenas se ainda não vier no nome
   const hasPrefix = /^dr[a]?\.?\s/i.test(nomeRaw);
   const nome = nomeRaw && !hasPrefix ? `Dr. ${nomeRaw}` : nomeRaw;
 
@@ -65,9 +64,9 @@ const buildPeritoIdLine = (laudo: LaudoData): { label: string; value: string } |
     else crmFmt = `CRM ${crm}`;
   }
 
-  const value = nome && crmFmt ? `${nome} \u2014 ${crmFmt}` : (nome || crmFmt);
-  return { label: "PERITO JUDICIAL", value };
+  return nome && crmFmt ? `${nome} \u2014 ${crmFmt}` : (nome || crmFmt);
 };
+
 
 
 // Padrões que indicam campo técnico/vazio que NÃO deve aparecer no documento
@@ -512,43 +511,7 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
     footerDimensions = await getImageDimensions("/timbrado-rodape.png");
   } catch { /* usa padrão */ }
 
-  // ========== IDENTIFICAÇÃO DO PERITO (topo da página 1) ==========
-  // Renderizado como primeiro parágrafo do corpo — aparece naturalmente apenas na página 1.
-  // Dados vêm do laudo (frozen-at-creation), garantindo multi-tenant e histórico correto.
-  const peritoId = buildPeritoIdLine(laudo);
-  if (peritoId) {
-    paragraphs.push(
-      new Paragraph({
-        children: [
-          new TextRun({
-            text: peritoId.label,
-            bold: true,
-            size: FONT.sizeSmall,
-            color: COLORS.primary,
-            font: FONT.name,
-          }),
-          new TextRun({
-            text: peritoId.value,
-            break: 1,
-            size: 18, // 9pt
-            color: COLORS.text,
-            font: FONT.name,
-          }),
-        ],
-        alignment: AlignmentType.RIGHT,
-        indent: { left: 5400 }, // ~9000 twips reservaria 1/3 da direita; 5400 mantém respiro
-        spacing: { before: 200, after: 240 },
-        border: {
-          bottom: {
-            style: BorderStyle.SINGLE,
-            size: 4,
-            color: COLORS.primary,
-            space: 4,
-          },
-        },
-      })
-    );
-  }
+
 
   // ========== ENDEREÇAMENTO JUDICIAL ==========
   // Operação D: sem fallbacks literais — campos vazios simplesmente não aparecem
@@ -589,6 +552,9 @@ export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
   if (!isFieldEmpty(laudo.processoNumero)) judicialParagraphs.push(createLabeledField("Processo nº", laudo.processoNumero!));
   if (!isFieldEmpty(laudo.reclamante)) judicialParagraphs.push(createLabeledField("Reclamante", laudo.reclamante!));
   if (!isFieldEmpty(laudo.reclamada)) judicialParagraphs.push(createLabeledField("Reclamada", laudo.reclamada!));
+  const peritoLine = buildPeritoIdLine(laudo);
+  if (peritoLine) judicialParagraphs.push(createLabeledField("Perito Judicial", peritoLine));
+
   judicialParagraphs.push(new Paragraph({ spacing: { after: 300 } }));
   paragraphs.push(...judicialParagraphs);
 
