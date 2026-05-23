@@ -6,6 +6,7 @@ import { AiStubButton } from "./AiStubButton";
 
 export function HistoriaSection() {
   const { laudo, updateLaudo, updatePrevData } = useLaudoPrev();
+  const l: any = laudo;
   if (!laudo) return null;
 
   return (
@@ -38,7 +39,7 @@ export function HistoriaSection() {
             <Label className="text-xs">História da doença atual</Label>
             <Textarea
               rows={4}
-              value={laudo.historia_atual ?? ""}
+              value={l.historia_atual ?? ""}
               onChange={(e) => updateLaudo({ historia_atual: e.target.value } as any)}
             />
           </div>
