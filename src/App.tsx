@@ -19,7 +19,10 @@ import Dashboard from "./pages/Dashboard";
 import Historico from "./pages/Historico";
 import PrevidenciarioHome from "./pages/previdenciario/PrevidenciarioHome";
 import PrevidenciarioHistorico from "./pages/previdenciario/PrevidenciarioHistorico";
+import PrevidenciarioLaudoEditor from "./pages/previdenciario/PrevidenciarioLaudoEditor";
+import NewPrevidenciarioLaudo from "./pages/previdenciario/NewPrevidenciarioLaudo";
 import { PrevidenciarioLayout } from "./components/previdenciario/PrevidenciarioLayout";
+import { LaudoPrevidenciarioProvider } from "./contexts/previdenciario/LaudoPrevidenciarioContext";
 
 import LaudoEditor from "./pages/LaudoEditor";
 import Configuracoes from "./pages/Configuracoes";
@@ -71,6 +74,34 @@ function AppRoutes() {
               <PrevidenciarioLayout>
                 <PrevidenciarioHistorico />
               </PrevidenciarioLayout>
+            </ModuleProtectedRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/previdenciario/laudo/new"
+        element={
+          <ProtectedRoute>
+            <ModuleProtectedRoute module="previdenciario">
+              <LaudoPrevidenciarioProvider>
+                <PrevidenciarioLayout>
+                  <NewPrevidenciarioLaudo />
+                </PrevidenciarioLayout>
+              </LaudoPrevidenciarioProvider>
+            </ModuleProtectedRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/previdenciario/laudo/:id"
+        element={
+          <ProtectedRoute>
+            <ModuleProtectedRoute module="previdenciario">
+              <LaudoPrevidenciarioProvider>
+                <PrevidenciarioLayout>
+                  <PrevidenciarioLaudoEditor />
+                </PrevidenciarioLayout>
+              </LaudoPrevidenciarioProvider>
             </ModuleProtectedRoute>
           </ProtectedRoute>
         }

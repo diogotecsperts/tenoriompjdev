@@ -112,12 +112,9 @@ export default function PrevidenciarioHistorico() {
             />
             Atualizar
           </Button>
-          <Button size="sm" disabled>
+          <Button size="sm" onClick={() => navigate("/previdenciario/laudo/new")}>
             <FilePlus2 className="h-4 w-4 mr-1.5" />
             Novo laudo
-            <span className="ml-2 text-[10px] uppercase tracking-wider bg-primary-foreground/20 px-1.5 py-0.5 rounded">
-              Em breve
-            </span>
           </Button>
         </div>
       </div>
@@ -187,7 +184,11 @@ export default function PrevidenciarioHistorico() {
                 {filtered.map((l) => {
                   const status = l.status ?? "rascunho";
                   return (
-                    <TableRow key={l.id} className="cursor-not-allowed opacity-90">
+                    <TableRow
+                      key={l.id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => navigate(`/previdenciario/laudo/${l.id}`)}
+                    >
                       <TableCell className="font-medium">{l.title}</TableCell>
                       <TableCell>
                         <Badge

@@ -89,12 +89,13 @@ export default function PrevidenciarioHome() {
           </p>
         </div>
 
-        <Button size="lg" disabled className="shadow-sm">
+        <Button
+          size="lg"
+          className="shadow-sm"
+          onClick={() => navigate("/previdenciario/laudo/new")}
+        >
           <FilePlus2 className="h-4 w-4 mr-2" />
           Novo laudo
-          <span className="ml-2 text-[10px] uppercase tracking-wider bg-primary-foreground/20 px-1.5 py-0.5 rounded">
-            Em breve
-          </span>
         </Button>
       </div>
 
