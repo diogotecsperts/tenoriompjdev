@@ -149,13 +149,11 @@ export default function Hub() {
                 key={mod.id}
                 className={cn(
                   "transition-all border-2 h-full",
-                  enabled && !isPrev
+                  enabled
                     ? "hover:border-primary hover:shadow-lg cursor-pointer"
-                    : isPrev
-                      ? "opacity-70 border-dashed cursor-not-allowed"
-                      : "opacity-60 border-dashed cursor-not-allowed"
+                    : "opacity-60 border-dashed cursor-not-allowed"
                 )}
-                onClick={() => enabled && !isPrev && navigate(mod.route)}
+                onClick={() => enabled && navigate(mod.route)}
               >
                 <CardContent className="p-8 flex flex-col h-full">
                   <div className="flex items-start justify-between mb-6">
@@ -197,22 +195,19 @@ export default function Hub() {
                   <p className="text-sm text-muted-foreground leading-relaxed mb-6 flex-1">
                     {mod.description}
                   </p>
-                  {isPrev ? (
-                    <Button className="w-full" variant="secondary" disabled>
-                      Módulo em construção
-                    </Button>
-                  ) : enabled ? (
-                    <Button className="w-full" variant="default">
-                      Acessar módulo
+                  {enabled ? (
+                    <Button className="w-full" variant={isPrev ? "secondary" : "default"}>
+                      {isPrev ? "Acessar módulo (beta)" : "Acessar módulo"}
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
                   ) : (
                     <Button className="w-full" variant="outline" disabled>
-                      Solicite acesso ao administrador
+                      {isPrev ? "Módulo em construção" : "Solicite acesso ao administrador"}
                     </Button>
                   )}
                 </CardContent>
               </Card>
+
             );
           })}
         </div>
