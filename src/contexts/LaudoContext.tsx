@@ -161,6 +161,7 @@ export function LaudoProvider({ children }: { children: ReactNode }) {
         .from("laudos")
         .select("*")
         .eq("user_id", user.id)
+        .eq("tipo_laudo", "trabalhista") // Fase 5.2 — isolamento defensivo entre módulos
         .order("updated_at", { ascending: false });
 
       if (error) throw error;
