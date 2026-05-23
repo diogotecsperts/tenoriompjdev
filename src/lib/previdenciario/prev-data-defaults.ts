@@ -119,6 +119,7 @@ export function getDefaultPrevData(): PrevData {
     enquadramento: { leis_aplicaveis: [], fundamentacao: "" },
     conclusao_prev: { parecer: "", beneficio_recomendado: "", texto_final: "" },
     quesitos: { juizo: "", autor: "", inss: "" },
+    cids_descricao_tecnica: "",
   };
 }
 
