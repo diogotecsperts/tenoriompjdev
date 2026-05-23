@@ -1,0 +1,1 @@
+ALTER TABLE public.laudos ADD COLUMN IF NOT EXISTS prev_data jsonb NOT NULL DEFAULT '{}'::jsonb;
