@@ -37,6 +37,7 @@ import { DevAIEfficiency } from "@/components/dev-panel/DevAIEfficiency";
 import { DevPrompts } from "@/components/dev-panel/DevPrompts";
 import { DevAccessHistory } from "@/components/dev-panel/DevAccessHistory";
 import { DevOriginalFiles } from "@/components/dev-panel/DevOriginalFiles";
+import { DevUserModules } from "@/components/dev-panel/DevUserModules";
 
 type DevTab = "dashboard" | "users" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "settings";
 
