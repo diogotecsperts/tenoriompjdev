@@ -78,6 +78,7 @@ export interface PrevData {
     autor: string;
     inss: string;
   };
+  cids_descricao_tecnica: string;
 }
 
 export function getDefaultPrevData(): PrevData {
