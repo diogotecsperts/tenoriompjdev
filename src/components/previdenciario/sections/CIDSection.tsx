@@ -14,7 +14,7 @@ interface CidItem {
 }
 
 export function CIDSection() {
-  const { laudo, updateLaudo } = useLaudoPrev();
+  const { laudo, updateLaudo, updatePrevData } = useLaudoPrev();
   const [novo, setNovo] = useState<CidItem>({ codigo: "", descricao: "" });
 
   if (!laudo) return null;
