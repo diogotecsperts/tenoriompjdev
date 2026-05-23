@@ -38,7 +38,17 @@ export function EnquadramentoSection() {
               Dispositivos legais aplicáveis ao caso.
             </p>
           </div>
-          <AiStubButton label="Gerar fundamentação" />
+          <AiGenerateButton
+            laudoId={laudo.id}
+            campo="prev_enquadramento"
+            disabledReason={
+              !enq.leis_aplicaveis || enq.leis_aplicaveis.length === 0
+                ? "Selecione ao menos uma lei aplicável antes de gerar a fundamentação."
+                : null
+            }
+            label="Gerar fundamentação"
+            onGenerated={(t) => updatePrevData("enquadramento", { fundamentacao: t })}
+          />
         </div>
 
         <div className="space-y-2">
