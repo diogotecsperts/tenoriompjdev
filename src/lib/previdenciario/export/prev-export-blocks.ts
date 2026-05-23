@@ -4,10 +4,15 @@
  * - Zero "IA" / "Inteligência Artificial" / markdown no output.
  * - Bold no fonte → CAPS no destino (sem **).
  * - Omissão total de campos vazios.
+ *
+ * IMPORTANTE: Os headings retornados NÃO contêm numeração — a numeração
+ * dinâmica (1, 2, 3…) é aplicada pelos builders DOCX/PDF apenas sobre os
+ * blocos não-vazios efetivamente renderizados, garantindo sequência contínua.
  */
 
 import { PrevData } from "@/lib/previdenciario/prev-data-defaults";
 import { LaudoPrev } from "@/contexts/previdenciario/LaudoPrevidenciarioContext";
+import { PREV_BIBLIOGRAPHIC_FALLBACK } from "./prev-references";
 
 export function isEmpty(v: any): boolean {
   if (v === null || v === undefined) return true;
@@ -21,18 +26,14 @@ export function isEmpty(v: any): boolean {
 export function sanitizeText(input: string | null | undefined): string {
   if (!input) return "";
   let s = String(input);
-  // Remover ocorrências de "IA" e "Inteligência Artificial"
   s = s.replace(/\binteligência artificial\b/gi, "análise técnica");
   s = s.replace(/\bIA\b/g, "análise técnica");
-  // Markdown headings
   s = s.replace(/^#{1,6}\s+/gm, "");
-  // Bold/italic markdown → CAPS para bold, remove italic markers
   s = s.replace(/\*\*\*(.+?)\*\*\*/g, (_, t) => String(t).toUpperCase());
   s = s.replace(/\*\*(.+?)\*\*/g, (_, t) => String(t).toUpperCase());
   s = s.replace(/__(.+?)__/g, (_, t) => String(t).toUpperCase());
   s = s.replace(/\*(.+?)\*/g, "$1");
   s = s.replace(/_(.+?)_/g, "$1");
-  // Bullets markdown
   s = s.replace(/^\s*[-*]\s+/gm, "• ");
   return s.trim();
 }
@@ -91,37 +92,24 @@ export function parecerLabel(v: string) {
 }
 
 export interface Block {
-  heading: string; // título da seção (será caps no DOCX/PDF)
-  lines: string[]; // linhas de texto já sanitizadas
+  heading: string; // SEM numeração — builder injeta o número dinâmico
+  lines: string[]; // linhas já sanitizadas
 }
 
 /**
- * Constrói a sequência de blocos do laudo previdenciário,
+ * Constrói a sequência de blocos numeráveis do laudo previdenciário,
  * omitindo seções inteiras quando não houver conteúdo.
+ *
+ * Observação: o bloco de identificação processual (vara, processo, segurado,
+ * INSS, perito) NÃO faz parte desta lista — é renderizado separadamente
+ * pelos builders como invocação ao juízo, antes da seção 1.
  */
 export function buildPrevBlocks(laudo: LaudoPrev): Block[] {
   const l: any = laudo;
   const pd: PrevData = laudo.prev_data;
   const blocks: Block[] = [];
 
-  // 1. Identificação
-  const identLines: string[] = [];
-  if (!isEmpty(l.perito_nome)) identLines.push(`Perito: ${l.perito_nome}`);
-  if (!isEmpty(l.perito_crm)) identLines.push(`CRM: ${l.perito_crm}`);
-  if (!isEmpty(l.perito_especialidade))
-    identLines.push(`Especialidade: ${l.perito_especialidade}`);
-  if (!isEmpty(l.processo_numero))
-    identLines.push(`Processo: ${l.processo_numero}`);
-  if (!isEmpty(l.processo_vara)) identLines.push(`Vara: ${l.processo_vara}`);
-  if (!isEmpty(l.reclamante)) identLines.push(`Segurado: ${l.reclamante}`);
-  if (!isEmpty(l.reclamada)) identLines.push(`Parte ré: ${l.reclamada}`);
-  if (!isEmpty(l.data_pericia))
-    identLines.push(`Data da perícia: ${formatDateBR(l.data_pericia)}`);
-  if (!isEmpty(l.local_pericia))
-    identLines.push(`Local da perícia: ${l.local_pericia}`);
-  if (identLines.length) blocks.push({ heading: "1. Identificação", lines: identLines });
-
-  // 2. Dados do Segurado
+  // 1. Dados do Segurado
   const segLines: string[] = [];
   if (!isEmpty(l.vitima_nome)) segLines.push(`Nome: ${l.vitima_nome}`);
   if (!isEmpty(l.vitima_nascimento))
@@ -145,9 +133,9 @@ export function buildPrevBlocks(laudo: LaudoPrev): Block[] {
     segLines.push(
       `Data da última contribuição: ${formatDateBR(pd.segurado.data_ultima_contribuicao)}`,
     );
-  if (segLines.length) blocks.push({ heading: "2. Dados do Segurado", lines: segLines });
+  if (segLines.length) blocks.push({ heading: "Dados do Segurado", lines: segLines });
 
-  // 3. Benefício Pleiteado
+  // 2. Benefício Pleiteado
   const benLines: string[] = [];
   if (!isEmpty(pd.beneficio.tipo))
     benLines.push(`Espécie: ${beneficioLabel(pd.beneficio.tipo)}`);
@@ -157,39 +145,39 @@ export function buildPrevBlocks(laudo: LaudoPrev): Block[] {
   if (!isEmpty(pd.beneficio.dcb)) benLines.push(`DCB: ${formatDateBR(pd.beneficio.dcb)}`);
   if (!isEmpty(pd.beneficio.motivo_cessacao))
     benLines.push(`Motivo da cessação: ${pd.beneficio.motivo_cessacao}`);
-  if (benLines.length) blocks.push({ heading: "3. Benefício Pleiteado", lines: benLines });
+  if (benLines.length) blocks.push({ heading: "Benefício Pleiteado", lines: benLines });
 
-  // 4. Objetivo
+  // 3. Objetivo
   if (!isEmpty(l.objetivo_pericia))
     blocks.push({
-      heading: "4. Objetivo da Perícia",
+      heading: "Objetivo da Perícia",
       lines: [sanitizeText(l.objetivo_pericia)],
     });
 
-  // 5. Metodologia
+  // 4. Metodologia
   if (!isEmpty(l.metodologia_pericial))
     blocks.push({
-      heading: "5. Metodologia Pericial",
+      heading: "Metodologia Pericial",
       lines: [sanitizeText(l.metodologia_pericial)],
     });
 
-  // 6. Documentos
+  // 5. Documentos
   if (Array.isArray(l.documentos) && l.documentos.length > 0)
     blocks.push({
-      heading: "6. Documentos Avaliados",
+      heading: "Documentos Avaliados",
       lines: l.documentos.map((d: string) => `• ${sanitizeText(d)}`),
     });
 
-  // 7. Resumos
+  // 6. Resumos
   const resLines: string[] = [];
   if (!isEmpty(l.resumo_peticao_inicial))
     resLines.push(`PETIÇÃO INICIAL:\n${sanitizeText(l.resumo_peticao_inicial)}`);
   if (!isEmpty(l.resumo_contestacao))
     resLines.push(`CONTESTAÇÃO / INSS:\n${sanitizeText(l.resumo_contestacao)}`);
   if (resLines.length)
-    blocks.push({ heading: "7. Resumo Administrativo / Processual", lines: resLines });
+    blocks.push({ heading: "Resumo Administrativo / Processual", lines: resLines });
 
-  // 8. História Clínica
+  // 7. História Clínica
   const histClinLines: string[] = [];
   if (!isEmpty(pd.historia_clinica_prev))
     histClinLines.push(sanitizeText(pd.historia_clinica_prev));
@@ -202,18 +190,18 @@ export function buildPrevBlocks(laudo: LaudoPrev): Block[] {
   if (!isEmpty(l.afastamentos))
     histClinLines.push(`AFASTAMENTOS:\n${sanitizeText(l.afastamentos)}`);
   if (histClinLines.length)
-    blocks.push({ heading: "8. História Clínica", lines: histClinLines });
+    blocks.push({ heading: "História Clínica", lines: histClinLines });
 
-  // 9. História Laboral
+  // 8. História Laboral
   const histLabLines: string[] = [];
   if (!isEmpty(pd.historia_laboral_prev))
     histLabLines.push(sanitizeText(pd.historia_laboral_prev));
   if (!isEmpty(l.historico_ocupacional))
     histLabLines.push(sanitizeText(l.historico_ocupacional));
   if (histLabLines.length)
-    blocks.push({ heading: "9. História Laboral", lines: histLabLines });
+    blocks.push({ heading: "História Laboral", lines: histLabLines });
 
-  // 10. Exame Físico e Complementares
+  // 9. Exame Pericial
   const exameLines: string[] = [];
   if (!isEmpty(l.exame_fisico))
     exameLines.push(`EXAME FÍSICO:\n${sanitizeText(l.exame_fisico)}`);
@@ -222,9 +210,9 @@ export function buildPrevBlocks(laudo: LaudoPrev): Block[] {
   if (!isEmpty(l.exames_complementares))
     exameLines.push(`EXAMES COMPLEMENTARES:\n${sanitizeText(l.exames_complementares)}`);
   if (exameLines.length)
-    blocks.push({ heading: "10. Exame Pericial", lines: exameLines });
+    blocks.push({ heading: "Exame Pericial", lines: exameLines });
 
-  // 11. Diagnóstico (CIDs)
+  // 10. Diagnóstico
   const cidLines: string[] = [];
   const cidsArr: any[] = Array.isArray(l.cids_selecionados) ? l.cids_selecionados : [];
   cidsArr.forEach((c) => {
@@ -233,9 +221,9 @@ export function buildPrevBlocks(laudo: LaudoPrev): Block[] {
   if (!isEmpty(l.descricao_tecnica_doencas))
     cidLines.push(`\n${sanitizeText(l.descricao_tecnica_doencas)}`);
   if (cidLines.length)
-    blocks.push({ heading: "11. Diagnóstico (CID-10)", lines: cidLines });
+    blocks.push({ heading: "Diagnóstico (CID-10)", lines: cidLines });
 
-  // 12. Análise da Incapacidade
+  // 11. Análise da Incapacidade
   const inc = pd.incapacidade;
   const incLines: string[] = [];
   if (!isEmpty(inc.existe)) incLines.push(`Existe incapacidade: ${inc.existe}`);
@@ -256,16 +244,16 @@ export function buildPrevBlocks(laudo: LaudoPrev): Block[] {
   if (!isEmpty(inc.justificativa))
     incLines.push(`\nJUSTIFICATIVA GERAL:\n${sanitizeText(inc.justificativa)}`);
   if (incLines.length)
-    blocks.push({ heading: "12. Análise da Incapacidade", lines: incLines });
+    blocks.push({ heading: "Análise da Incapacidade", lines: incLines });
 
-  // 13. Nexo Previdenciário
+  // 12. Nexo Previdenciário
   const nxLines: string[] = [];
   if (!isEmpty(pd.nexo.tipo)) nxLines.push(`Tipo de nexo: ${nexoLabel(pd.nexo.tipo)}`);
   if (!isEmpty(pd.nexo.justificativa))
     nxLines.push(`\n${sanitizeText(pd.nexo.justificativa)}`);
-  if (nxLines.length) blocks.push({ heading: "13. Nexo Previdenciário", lines: nxLines });
+  if (nxLines.length) blocks.push({ heading: "Nexo Previdenciário", lines: nxLines });
 
-  // 14. Enquadramento Legal
+  // 13. Enquadramento Legal
   const enqLines: string[] = [];
   if (pd.enquadramento.leis_aplicaveis.length > 0) {
     enqLines.push("Dispositivos legais aplicáveis:");
@@ -274,9 +262,9 @@ export function buildPrevBlocks(laudo: LaudoPrev): Block[] {
   if (!isEmpty(pd.enquadramento.fundamentacao))
     enqLines.push(`\n${sanitizeText(pd.enquadramento.fundamentacao)}`);
   if (enqLines.length)
-    blocks.push({ heading: "14. Enquadramento Legal", lines: enqLines });
+    blocks.push({ heading: "Enquadramento Legal", lines: enqLines });
 
-  // 15. Conclusão
+  // 14. Conclusão
   const conc = pd.conclusao_prev;
   const concLines: string[] = [];
   if (!isEmpty(conc.parecer)) concLines.push(`Parecer: ${parecerLabel(conc.parecer)}`);
@@ -285,9 +273,9 @@ export function buildPrevBlocks(laudo: LaudoPrev): Block[] {
   if (!isEmpty(conc.texto_final))
     concLines.push(`\n${sanitizeText(conc.texto_final)}`);
   if (concLines.length)
-    blocks.push({ heading: "15. Conclusão Previdenciária", lines: concLines });
+    blocks.push({ heading: "Conclusão Previdenciária", lines: concLines });
 
-  // 16. Quesitos
+  // 15. Quesitos
   const ques: string[] = [];
   if (!isEmpty(l.quesitos_juizo))
     ques.push(`QUESITOS DO JUÍZO:\n${sanitizeText(l.quesitos_juizo)}`);
@@ -295,21 +283,27 @@ export function buildPrevBlocks(laudo: LaudoPrev): Block[] {
     ques.push(`\nQUESITOS DO AUTOR:\n${sanitizeText(l.quesitos_reclamante)}`);
   if (!isEmpty(l.quesitos_reclamada))
     ques.push(`\nQUESITOS DO INSS / PARTE RÉ:\n${sanitizeText(l.quesitos_reclamada)}`);
-  if (ques.length) blocks.push({ heading: "16. Quesitos", lines: ques });
+  if (ques.length) blocks.push({ heading: "Quesitos", lines: ques });
 
-  // 17. Honorários
+  // 16. Honorários
   if (!isEmpty(l.valor_honorarios) && Number(l.valor_honorarios) > 0)
     blocks.push({
-      heading: "17. Honorários Periciais",
+      heading: "Honorários Periciais",
       lines: [`Valor arbitrado: R$ ${Number(l.valor_honorarios).toFixed(2).replace(".", ",")}`],
     });
 
-  // 18. Referências
-  if (!isEmpty(l.referencias_bibliograficas))
+  // 17. Referências Bibliográficas (com fallback previdenciário)
+  if (!isEmpty(l.referencias_bibliograficas)) {
     blocks.push({
-      heading: "18. Referências Bibliográficas",
+      heading: "Referências Bibliográficas",
       lines: [sanitizeText(l.referencias_bibliograficas)],
     });
+  } else {
+    blocks.push({
+      heading: "Referências Bibliográficas",
+      lines: PREV_BIBLIOGRAPHIC_FALLBACK.map((r) => `• ${r}`),
+    });
+  }
 
   return blocks;
 }
