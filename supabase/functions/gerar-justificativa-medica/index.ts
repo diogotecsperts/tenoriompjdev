@@ -550,7 +550,8 @@ serve(async (req) => {
         historia_atual, historia_acidente, historico_ocupacional,
         exame_fisico, exames_complementares,
         tratamentos, afastamentos,
-        descricao_atividades_laborais, descricao_posto_trabalho
+        descricao_atividades_laborais, descricao_posto_trabalho,
+        prev_data
       `)
       .eq('id', body.laudoId)
       .single();
