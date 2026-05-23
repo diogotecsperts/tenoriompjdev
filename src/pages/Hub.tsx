@@ -154,7 +154,7 @@ export default function Hub() {
                 )}
                 onClick={() => enabled && navigate(mod.route)}
               >
-                <CardContent className="p-8">
+                <CardContent className="p-8 flex flex-col h-full">
                   <div className="flex items-start justify-between mb-6">
                     <div
                       className={cn(
@@ -172,7 +172,7 @@ export default function Hub() {
                     )}
                   </div>
                   <h3 className="text-xl font-bold text-foreground mb-2">{mod.title}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed mb-6">
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-6 flex-1">
                     {mod.description}
                   </p>
                   {enabled ? (
