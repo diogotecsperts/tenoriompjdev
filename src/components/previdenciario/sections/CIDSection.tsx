@@ -92,21 +92,32 @@ export function CIDSection() {
 
       <Card>
         <CardContent className="p-6 space-y-4">
-          <div>
-            <h2 className="text-lg font-semibold text-foreground">Descrição Técnica das Doenças</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Fundamentação médica detalhada de cada quadro nosológico.
-            </p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Descrição Técnica das Doenças</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Fundamentação médica detalhada de cada quadro nosológico.
+              </p>
+            </div>
+            <AiGenerateButton
+              laudoId={laudo.id}
+              campo="prev_cid_descricao"
+              cidsManuais={cids.map((c) => `${c.codigo}${c.descricao ? " — " + c.descricao : ""}`)}
+              disabledReason={cids.length === 0 ? "Adicione ao menos um CID antes de gerar a descrição." : null}
+              label="Gerar descrição"
+              onGenerated={(t) => updatePrevData("cids_descricao_tecnica" as any, t as any)}
+            />
           </div>
           <Textarea
             rows={6}
-            value={l.descricao_tecnica_doencas ?? ""}
+            value={laudo.prev_data.cids_descricao_tecnica || ""}
             onChange={(e) =>
-              updateLaudo({ descricao_tecnica_doencas: e.target.value } as any)
+              updatePrevData("cids_descricao_tecnica" as any, e.target.value as any)
             }
           />
         </CardContent>
       </Card>
+
     </div>
   );
 }
