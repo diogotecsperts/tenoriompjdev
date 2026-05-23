@@ -219,14 +219,14 @@ export default function Hub() {
       </main>
 
       <footer className="text-center text-xs text-muted-foreground py-4 border-t">
-        by{" "}
+        Produto desenvolvido por{" "}
         <a
-          href="https://tecsperts.com"
+          href="https://nova.tecsperts.com"
           target="_blank"
           rel="noopener noreferrer"
-          className="hover:text-foreground"
+          className="hover:text-foreground underline underline-offset-2"
         >
-          tecsperts
+          Tecsperts tecnologia
         </a>
       </footer>
     </div>
