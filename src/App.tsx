@@ -79,6 +79,34 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/previdenciario/laudo/new"
+        element={
+          <ProtectedRoute>
+            <ModuleProtectedRoute module="previdenciario">
+              <LaudoPrevidenciarioProvider>
+                <PrevidenciarioLayout>
+                  <NewPrevidenciarioLaudo />
+                </PrevidenciarioLayout>
+              </LaudoPrevidenciarioProvider>
+            </ModuleProtectedRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/previdenciario/laudo/:id"
+        element={
+          <ProtectedRoute>
+            <ModuleProtectedRoute module="previdenciario">
+              <LaudoPrevidenciarioProvider>
+                <PrevidenciarioLayout>
+                  <PrevidenciarioLaudoEditor />
+                </PrevidenciarioLayout>
+              </LaudoPrevidenciarioProvider>
+            </ModuleProtectedRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/dashboard"
         element={
           <ProtectedWithLayout>
