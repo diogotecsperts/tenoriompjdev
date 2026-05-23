@@ -112,12 +112,9 @@ export default function PrevidenciarioHistorico() {
             />
             Atualizar
           </Button>
-          <Button size="sm" disabled>
+          <Button size="sm" onClick={() => navigate("/previdenciario/laudo/new")}>
             <FilePlus2 className="h-4 w-4 mr-1.5" />
             Novo laudo
-            <span className="ml-2 text-[10px] uppercase tracking-wider bg-primary-foreground/20 px-1.5 py-0.5 rounded">
-              Em breve
-            </span>
           </Button>
         </div>
       </div>
