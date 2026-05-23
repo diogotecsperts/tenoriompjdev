@@ -147,7 +147,7 @@ export default function Hub() {
               <Card
                 key={mod.id}
                 className={cn(
-                  "transition-all border-2",
+                  "transition-all border-2 h-full",
                   enabled
                     ? "hover:border-primary hover:shadow-lg cursor-pointer"
                     : "opacity-60 border-dashed cursor-not-allowed"
