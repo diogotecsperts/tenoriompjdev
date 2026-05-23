@@ -432,13 +432,28 @@ function buildContext(laudo: any, body: ReqBody): Record<string, string> {
     ? asString(body.escolha)
     : (laudo.nexo_causal_tipo || '');
 
+  // ===== Previdenciário: extrair do prev_data =====
+  const prev = (laudo.prev_data && typeof laudo.prev_data === 'object') ? laudo.prev_data : {};
+  const pInc = prev.incapacidade || {};
+  const pNexo = prev.nexo || {};
+  const pEnq = prev.enquadramento || {};
+  const pConc = prev.conclusao_prev || {};
+  const pSeg = prev.segurado || {};
+  const pBen = prev.beneficio || {};
+
+  // Para campos prev_*, a escolha do médico vem por prev_data (não por body.escolha),
+  // pois o salvamento automático já persiste antes da geração.
+  const isPrev = body.campo.startsWith('prev_');
+  const prevNexoEscolhido = isPrev ? (pNexo.tipo || '') : '';
+  const leisAplicaveis = Array.isArray(pEnq.leis_aplicaveis) ? pEnq.leis_aplicaveis.join('; ') : '';
+
   return {
     cidsManuais,
     cidsLista,
-    nexoEscolhido,
-    nexoJustificativa: laudo.nexo_causal_justificativa || '',
+    nexoEscolhido: isPrev ? prevNexoEscolhido : nexoEscolhido,
+    nexoJustificativa: isPrev ? (pNexo.justificativa || '') : (laudo.nexo_causal_justificativa || ''),
     tipoIncapacidadeEscolhido,
-    incapacidadeJustificativa: laudo.analise_incapacidade_laboral || '',
+    incapacidadeJustificativa: isPrev ? (pInc.justificativa || '') : (laudo.analise_incapacidade_laboral || ''),
     historiaAtual: laudo.historia_atual || '',
     historiaAcidente: laudo.historia_acidente || '',
     historicoOcupacional: laudo.historico_ocupacional || '',
@@ -449,6 +464,24 @@ function buildContext(laudo: any, body: ReqBody): Record<string, string> {
     atividadesLaborais: laudo.descricao_atividades_laborais || '',
     postoTrabalho: laudo.descricao_posto_trabalho || laudo.descricao_atividades_laborais || '',
     conclusaoMedica: laudo.conclusao_analise || '',
+
+    // ----- Previdenciário -----
+    historiaClinicaPrev: prev.historia_clinica_prev || '',
+    historiaLaboralPrev: prev.historia_laboral_prev || '',
+    qualidadeSegurado: pSeg.qualidade_segurado || '',
+    ultimaAtividade: pSeg.ultima_atividade || '',
+    incExiste: pInc.existe || '',
+    incTipo: pInc.tipo || '',
+    incGrau: pInc.grau || '',
+    incAbrangencia: pInc.abrangencia || '',
+    incDII: pInc.dii || '',
+    incReabilitacao: pInc.susceptivel_reabilitacao || '',
+    incAuxilio: pInc.necessita_auxilio_terceiros || '',
+    leisAplicaveis,
+    enquadramentoFundamentacao: pEnq.fundamentacao || '',
+    parecerFinal: pConc.parecer || '',
+    beneficioRecomendado: pConc.beneficio_recomendado || '',
+    beneficioTipo: pBen.tipo || '',
   };
 }
 
