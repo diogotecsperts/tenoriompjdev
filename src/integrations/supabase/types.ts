@@ -438,6 +438,7 @@ export type Database = {
           resumo_peticao_inicial: string | null
           status: string | null
           tabela_susep: string | null
+          tipo_laudo: Database["public"]["Enums"]["app_module"]
           title: string
           tratamentos: string | null
           updated_at: string | null
@@ -512,6 +513,7 @@ export type Database = {
           resumo_peticao_inicial?: string | null
           status?: string | null
           tabela_susep?: string | null
+          tipo_laudo?: Database["public"]["Enums"]["app_module"]
           title?: string
           tratamentos?: string | null
           updated_at?: string | null
@@ -586,6 +588,7 @@ export type Database = {
           resumo_peticao_inicial?: string | null
           status?: string | null
           tabela_susep?: string | null
+          tipo_laudo?: Database["public"]["Enums"]["app_module"]
           title?: string
           tratamentos?: string | null
           updated_at?: string | null
@@ -737,6 +740,33 @@ export type Database = {
         }
         Relationships: []
       }
+      user_modules: {
+        Row: {
+          created_at: string
+          enabled: boolean
+          id: string
+          module: Database["public"]["Enums"]["app_module"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          module: Database["public"]["Enums"]["app_module"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          module?: Database["public"]["Enums"]["app_module"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_presence: {
         Row: {
           is_online: boolean | null
@@ -837,6 +867,13 @@ export type Database = {
           total_laudos: number
         }[]
       }
+      has_module: {
+        Args: {
+          _module: Database["public"]["Enums"]["app_module"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
@@ -848,6 +885,7 @@ export type Database = {
       is_developer: { Args: never; Returns: boolean }
     }
     Enums: {
+      app_module: "trabalhista" | "previdenciario"
       app_role: "admin" | "user" | "developer"
       forma_pagamento:
         | "pix"
@@ -991,6 +1029,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      app_module: ["trabalhista", "previdenciario"],
       app_role: ["admin", "user", "developer"],
       forma_pagamento: [
         "pix",

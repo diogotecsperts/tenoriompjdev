@@ -39,7 +39,7 @@ export default function Login() {
           }
         }
         setIsNavigating(true);
-        navigate("/dashboard", { replace: true });
+        navigate("/hub", { replace: true });
       }
     };
     checkDevAndNavigate();

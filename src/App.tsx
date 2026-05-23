@@ -9,12 +9,15 @@ import { LaudoProvider } from "@/contexts/LaudoContext";
 import { NavigationGuardProvider } from "@/contexts/NavigationGuardContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { DevProtectedRoute } from "@/components/DevProtectedRoute";
+import { ModuleProtectedRoute } from "@/components/ModuleProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GlobalErrorListener } from "@/components/GlobalErrorListener";
 import Login from "./pages/Login";
+import Hub from "./pages/Hub";
 import Dashboard from "./pages/Dashboard";
 import Historico from "./pages/Historico";
+import PrevidenciarioHome from "./pages/previdenciario/PrevidenciarioHome";
 
 import LaudoEditor from "./pages/LaudoEditor";
 import Configuracoes from "./pages/Configuracoes";
@@ -38,6 +41,24 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Login />} />
+      <Route
+        path="/hub"
+        element={
+          <ProtectedRoute>
+            <Hub />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/previdenciario"
+        element={
+          <ProtectedRoute>
+            <ModuleProtectedRoute module="previdenciario">
+              <PrevidenciarioHome />
+            </ModuleProtectedRoute>
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/dashboard"
         element={
