@@ -18,6 +18,8 @@ import Hub from "./pages/Hub";
 import Dashboard from "./pages/Dashboard";
 import Historico from "./pages/Historico";
 import PrevidenciarioHome from "./pages/previdenciario/PrevidenciarioHome";
+import PrevidenciarioHistorico from "./pages/previdenciario/PrevidenciarioHistorico";
+import { PrevidenciarioLayout } from "./components/previdenciario/PrevidenciarioLayout";
 
 import LaudoEditor from "./pages/LaudoEditor";
 import Configuracoes from "./pages/Configuracoes";
