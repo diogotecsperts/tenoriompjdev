@@ -51,7 +51,7 @@ export default function PrevidenciarioLaudoEditor() {
     getPrevSectionById(activeSection)?.section.label ?? activeSection;
 
   return (
-    <div className="flex flex-1 min-h-0">
+    <div className="flex h-[calc(100vh-3.5rem)] min-h-0">
       <PrevidenciarioSidebar
         activeSection={activeSection}
         onSelect={(_, sectionId) => setActiveSection(sectionId)}
