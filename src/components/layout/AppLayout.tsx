@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   Menu,
   Terminal,
+  Grid3x3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -245,6 +246,23 @@ export function AppLayout({ children }: AppLayoutProps) {
         </div>
 
         <div className="space-y-1">
+          <Link
+            to="/hub"
+            onClick={(e) => {
+              if (isGuarded && location.pathname.startsWith("/laudo/")) {
+                e.preventDefault();
+                if (!requestNavigation("/hub")) return;
+              }
+              setMobileOpen(false);
+            }}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+              "text-muted-foreground hover:bg-muted hover:text-foreground"
+            )}
+          >
+            <Grid3x3 className="h-4 w-4 flex-shrink-0" />
+            {!collapsed && <span>Hub de Módulos</span>}
+          </Link>
           <Link
             to="/configuracoes"
             onClick={(e) => {
