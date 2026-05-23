@@ -425,6 +425,7 @@ export type Database = {
           perito_nome: string | null
           perito_telefone: string | null
           planejamento: string[] | null
+          prev_data: Json
           processo_numero: string | null
           processo_vara: string | null
           quesitos_juizo: string | null
@@ -500,6 +501,7 @@ export type Database = {
           perito_nome?: string | null
           perito_telefone?: string | null
           planejamento?: string[] | null
+          prev_data?: Json
           processo_numero?: string | null
           processo_vara?: string | null
           quesitos_juizo?: string | null
@@ -575,6 +577,7 @@ export type Database = {
           perito_nome?: string | null
           perito_telefone?: string | null
           planejamento?: string[] | null
+          prev_data?: Json
           processo_numero?: string | null
           processo_vara?: string | null
           quesitos_juizo?: string | null
