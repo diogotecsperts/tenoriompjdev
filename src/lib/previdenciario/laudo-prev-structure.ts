@@ -85,6 +85,7 @@ export const LAUDO_PREV_CARDS_STRUCTURE: PrevCard[] = [
     sections: [
       { id: "conclusao-prev", label: "Conclusão Previdenciária" },
       { id: "quesitos-prev", label: "Quesitos" },
+      { id: "honorarios", label: "Honorários e Logística" },
     ],
   },
   {

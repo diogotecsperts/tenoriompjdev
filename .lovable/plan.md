@@ -1,239 +1,153 @@
-# Fases 5.4 + 5.5 — SSOT Previdenciário, Contexto e Esqueleto do Editor
+# Plano Revisado — Fases 5.6 e 5.7 (Execução Imediata) + 5.8 (Diferida)
 
-## 1. Princípios de modelagem
-
-- **Reaproveitar colunas nativas de `laudos`** sempre que o campo for semanticamente igual ao Trabalhista (perito, processo, vítima, anamnese, exame físico, CIDs, conclusão). Zero migração nova.
-- **Tudo que é estritamente INSS/BPC vai para `prev_data` (jsonb)** — isolado, versionado, sem poluir o schema do Trabalhista.
-- **`tipo_laudo = 'previdenciario'`** é setado no insert pelo Context (nunca pelo usuário, nunca pela UI).
-- **Zero edição** em `LaudoContext`, `LaudoEditor`, exporters ou edge functions do Trabalhista.
+Correção arquitetural do Gemini incorporada: **reúso total** da Edge Function `gerar-justificativa-medica`, princípio **"Médico Decide / IA Redige"**, e **zero geração automática** de campos críticos na importação.
 
 ---
 
-## 2. Mapeamento de campos: Colunas nativas vs. `prev_data`
+## ESCOPO DE EXECUÇÃO AGORA: Fases 5.6 e 5.7
 
-### 2.1 Campos REAPROVEITADOS de colunas nativas (já existem em `laudos`)
+### Fase 5.6 — Seções Funcionais do Editor Previdenciário
 
-| Categoria | Coluna nativa | Uso no Previdenciário |
-|---|---|---|
-| Perito | `perito_nome`, `perito_crm`, `perito_especialidade`, `perito_email`, `perito_telefone`, `perito_endereco` | Idêntico |
-| Processo | `processo_numero`, `processo_vara`, `reclamante`, `reclamada` | `reclamante` = segurado; `reclamada` = INSS |
-| Datas/local | `data_pericia`, `local_pericia` | Idêntico |
-| Segurado | `vitima_nome`, `vitima_nascimento`, `vitima_escolaridade`, `vitima_profissao`, `vitima_dominancia` | Idêntico (rótulo "Segurado" na UI) |
-| Clínica | `historia_atual`, `antecedentes`, `tratamentos`, `afastamentos` | Idêntico |
-| Exames | `laudos_medicos`, `exames_complementares`, `exame_fisico` | Idêntico |
-| Diagnóstico | `cids_selecionados` (jsonb), `diagnostico_cids` (jsonb) | Idêntico |
-| Documentos | `documentos` (text[]), `atestados_detalhados` (jsonb) | Idêntico |
-| Resumo | `resumo_peticao_inicial` | Reusado como "Resumo da petição/recurso administrativo" |
-| Metodologia | `metodologia_pericial`, `objetivo_pericia` | Texto-padrão previdenciário (novo default na UI) |
-| Referências | `referencias_bibliograficas` | Idêntico (com bibliografia prev) |
-| Honorários | `valor_honorarios` | Idêntico |
-| Metadados | `title`, `status`, `ai_metadata`, `anotacoes` | Idêntico |
-| Conclusão (genérica) | `conclusao_cid`, `conclusao_analise`, `conclusao_justificativa` | Reaproveitadas para texto livre |
+Substituir 100% dos `PlaceholderSection` por componentes reais. Cada campo mapeado a coluna nativa de `laudos` OU chave em `prev_data`.
 
-### 2.2 Campos EXCLUSIVOS Previdenciário → `prev_data` (jsonb)
+#### 5.6.1 — `SeguradoSection.tsx`
+- **Nativos:** `vitima_nome`, `vitima_nascimento`, `vitima_profissao`, `vitima_escolaridade`, `vitima_dominancia`
+- **`prev_data.segurado`:** `rg`, `cpf`, `nit_pis`, `endereco`, `qualidade_segurado` (select), `ultima_atividade`, `data_ultima_contribuicao`
+- **Card secundário Benefício** (`prev_data.beneficio`): tipo (B31/B32/B91/B92/BPC-LOAS), `nb_numero`, `der`, `dib`, `dcb`, `motivo_cessacao`
 
-```ts
-type PrevData = {
-  // --- Benefício pleiteado ---
-  beneficio: {
-    tipo: 'B31' | 'B32' | 'B91' | 'B92' | 'BPC_LOAS' | 'isencao_IR' | 'majoracao_25' | '';
-    nb_numero: string;          // Nº do benefício
-    der: string;                // Data de Entrada do Requerimento (ISO date)
-    dib: string;                // Data de Início do Benefício
-    dcb: string;                // Data de Cessação do Benefício (se houver)
-    motivo_cessacao: string;
-  };
+#### 5.6.2 — `HistoriaSection.tsx`
+- **Nativos:** `historia_atual`, `antecedentes`, `tratamentos`, `afastamentos`, `historico_ocupacional`
+- **`prev_data`:** `historia_clinica_prev`, `historia_laboral_prev`
+- Botão "Gerar Resumo" (stub — sem handler ativo)
 
-  // --- Segurado (complementos previdenciários) ---
-  segurado: {
-    rg: string;
-    cpf: string;
-    nit_pis: string;
-    endereco: string;
-    estado_civil: string;
-    qualidade_segurado: 'empregado' | 'contribuinte_individual' | 'facultativo' | 'segurado_especial' | 'desempregado_periodo_graca' | '';
-    ultima_atividade: string;
-    data_ultima_contribuicao: string;
-  };
+#### 5.6.3 — `ExameSection.tsx`
+- **Nativos:** `exame_fisico`, `exames_complementares`, `laudos_medicos`, `documentos`, `atestados_detalhados`
 
-  // --- História clínica/laboral previdenciária ---
-  historia_clinica_prev: string;     // versão prev (livre, separada do trabalhista)
-  historia_laboral_prev: string;     // trajetória ocupacional resumida
+#### 5.6.4 — `CIDSection.tsx`
+- **Nativos:** `cids_selecionados`, `diagnostico_cids`, `descricao_tecnica_doencas`
+- Reaproveita `src/lib/cid-data.ts` (leitura)
+- Lógica `[DB]` laranja preservada
 
-  // --- Análise de incapacidade (NÚCLEO PREVIDENCIÁRIO) ---
-  incapacidade: {
-    existe: 'sim' | 'nao' | 'parcial' | '';
-    tipo: 'temporaria' | 'permanente' | '';
-    grau: 'parcial' | 'total' | '';
-    abrangencia: 'uniprofissional' | 'multiprofissional' | 'omniprofissional' | '';
-    dii: string;                      // Data de Início da Incapacidade
-    dii_justificativa: string;
-    data_recuperacao_estimada: string;
-    susceptivel_reabilitacao: 'sim' | 'nao' | 'inconclusivo' | '';
-    necessita_auxilio_terceiros: 'sim' | 'nao' | '';
-    justificativa: string;
-  };
+#### 5.6.5 — `NexoIncapacidadeSection.tsx` (CORE)
+- **Médico preenche** (selects/inputs): `existe`, `tipo` (temporária/permanente/indefinida), `grau` (parcial/total), `abrangencia` (uni/multi/omniprofissional), `dii`, `data_recuperacao_estimada`, `susceptivel_reabilitacao`, `necessita_auxilio_terceiros`
+- **Textareas de justificativa** (vazios): `dii_justificativa`, `justificativa` geral
+- Botão "Gerar Justificativa" ao lado de cada textarea (stub)
 
-  // --- Nexo (técnico/previdenciário) ---
-  nexo: {
-    tipo: 'comum' | 'tecnico_NTEP' | 'profissional' | 'sem_nexo' | '';
-    justificativa: string;
-  };
+#### 5.6.6 — `EnquadramentoSection.tsx`
+- **`prev_data.enquadramento`:** `leis_aplicaveis` (multi-select: Lei 8.213/91 art. 42/59/86, LOAS art. 20, Decreto 3.048/99), `fundamentacao` (textarea + botão stub)
 
-  // --- Enquadramento legal ---
-  enquadramento: {
-    leis_aplicaveis: string[];        // ex: 'Lei 8.213/91 art. 42', 'Decreto 3.048/99 art. 43'
-    fundamentacao: string;
-  };
+#### 5.6.7 — `QuesitosSection.tsx`
+- **Nativos:** `quesitos_juizo`, `quesitos_reclamante` (UI: "Quesitos do Autor"), `quesitos_reclamada` (UI: "Quesitos do INSS/Réu")
+- Botão "Responder Quesitos" (stub)
+- Formatação respeita `quesitos-logic-and-formatting`
 
-  // --- Conclusão previdenciária estruturada ---
-  conclusao_prev: {
-    parecer: 'apto' | 'incapaz_temporario' | 'incapaz_permanente_total' | 'incapaz_permanente_parcial' | 'inconclusivo' | '';
-    beneficio_recomendado: string;    // ex: "Concessão de B31"
-    texto_final: string;
-  };
+#### 5.6.8 — `ConclusaoSection.tsx`
+- **Nativos:** `conclusao_analise`, `conclusao_incapacidade`, `conclusao_status`, `conclusao_justificativa`, `conclusao_destino`
+- **`prev_data.conclusao_prev`:** síntese específica
+- Botão "Gerar Conclusão" (stub)
 
-  // --- Quesitos (judiciais INSS) ---
-  quesitos: {
-    juizo: string;
-    autor: string;
-    inss: string;
-  };
-};
-```
+#### 5.6.9 — `HonorariosSection.tsx`
+- **Nativos:** `valor_honorarios`, `local_pericia`, `data_pericia`, `anotacoes`
 
-> Toda escrita usa **merge raso** (`{ ...laudo.prev_data, [grupo]: { ...grupo, [campo]: valor } }`) para nunca sobrescrever sub-objetos por engano.
-
-### 2.3 Arquivo `src/lib/previdenciario/laudo-prev-structure.ts`
-
-Mesmo padrão do `laudo-structure.ts` (SSOT), com `LAUDO_PREV_CARDS_STRUCTURE`:
-
-```text
-1. Preliminares       → perito | processo | objetivo | documentos
-2. Resumo Administrativo → resumo-adm | metodologia-prev
-3. Segurado            → identificacao | qualidade-segurado | beneficio
-4. História            → historia-clinica | historia-laboral | antecedentes | tratamentos
-5. Exame               → laudos-medicos | exames-complementares | exame-fisico
-6. Análise Técnica     → cids | nexo-prev | incapacidade | enquadramento-legal
-7. Conclusão           → conclusao-prev | quesitos-prev
-8. Referências         → referencias
-```
-
-Helpers espelhados (`getCardById`, `getNextSection`, etc.) — namespace isolado, **sem importar** nada do `laudo-structure.ts`.
+**Padrão dos botões stub:** `<Button disabled variant="outline" title="Disponível em breve"><Sparkles /> Gerar...</Button>` — visualmente prontos, sem handler.
 
 ---
 
-## 3. `LaudoPrevidenciarioContext.tsx` (gestão de estado)
+### Fase 5.7 — Exportação DOCX/PDF Previdenciária
 
-Localização: `src/contexts/previdenciario/LaudoPrevidenciarioContext.tsx`
+#### 5.7.1 — Estrutura Isolada
+- Criar `src/lib/previdenciario/export/`:
+  - `docx-builder-prev.ts`
+  - `pdf-builder-prev.ts`
+  - `prev-export-orchestrator.ts`
+- **Zero imports** de `src/lib/export/` (Trabalhista)
+- Reutiliza apenas utilitários puros: `accentuation-dictionary`, `isFieldEmpty`, `debugField`
 
-### 3.1 Shape
+#### 5.7.2 — Template Documental
+- Cabeçalho: "LAUDO PERICIAL MÉDICO — PERÍCIA PREVIDENCIÁRIA"
+- Ordem de seções: Identificação → Benefício Pleiteado → Histórico Clínico/Laboral → Exame Físico → Diagnóstico (CIDs) → **Análise de Incapacidade** → Enquadramento Legal → Conclusão → Quesitos → Honorários
+- Compliance total:
+  - `laudo-export-compliance-standards`: zero "IA", zero markdown
+  - `expert-rigor-standards-v2`: omissão via `isFieldEmpty`
+  - `export-text-formatting-standards`: bold → CAPS, quebras de linha em quesitos
+  - `laudo-export-docx-specifications`: A4, EMUs em headers
 
-```ts
-interface LaudoPrev extends Tables<'laudos'> {
-  prev_data: PrevData;  // tipado forte (jsonb no banco)
-}
-```
+#### 5.7.3 — Integração no Editor
+- Dropdown "Exportar" em `PrevidenciarioLaudoEditor.tsx` → DOCX | PDF
+- Validação: smoke test com laudo fictício completo + QA visual de todas as páginas
 
-### 3.2 Operações principais
+---
 
-| Operação | Comportamento |
+## FASE 5.8 — DIFERIDA (revisão pós-validação visual)
+
+**Arquitetura aprovada (Gemini):** "Médico Decide / IA Redige" + reúso de `gerar-justificativa-medica`.
+
+Quando autorizada, a 5.8 fará apenas:
+
+1. **Estender `supabase/functions/gerar-justificativa-medica/index.ts`:**
+   - Adicionar novos campos ao `FIELD_TO_PROMPT`:
+     - `prev_incapacidade_justificativa` → `prompt_gen_prev_incapacidade`
+     - `prev_dii_justificativa` → `prompt_gen_prev_dii`
+     - `prev_enquadramento` → `prompt_gen_prev_enquadramento`
+     - `prev_conclusao` → `prompt_gen_prev_conclusao`
+     - `prev_quesitos_resposta` → `prompt_gen_prev_quesitos`
+     - `prev_resumo_historia` → `prompt_gen_prev_historia`
+   - Estender `buildContext()` para injetar variáveis `{prev_*}` quando `tipo_laudo === 'previdenciario'`
+
+2. **Inserir 6 prompts em `system_config`** (não-destrutivo, via `supabase--insert`)
+
+3. **Estender `interpolationContext`** em `src/lib/prompt-interpolation/` com bloco `prev` (beneficio, incapacidade, segurado.qualidade) — respeitando `prompt-interpolation-context-mapping`
+
+4. **Ativar handlers nos botões stub** da 5.6 — cada um chama `gerar-justificativa-medica` com `field` e `laudoId`, recebe texto, popula textarea correspondente
+
+5. **Garantias herdadas (sem código novo):**
+   - Anti-alucinação (proibir inferir benefício pela profissão)
+   - Mínimo 50 chars + diacríticos
+   - Logging em `ai_usage_logs` já existente
+   - Override por `user_settings.ai_provider/model` já existente
+
+6. **Importação:** CIDs, Nexo, Incapacidade, Conclusão, Enquadramento **nascem vazios**. Apenas `resumo_peticao_inicial` e `resumo_contestacao` podem ser auto-extraídos (respeitando `zero-touch-import-requirement`).
+
+7. **DevPanel:** estender `prompt-coverage-monitoring-and-alerts` para reconhecer prefixo `prev_`.
+
+---
+
+## Garantias Arquiteturais
+
+| Garantia | Mecanismo |
 |---|---|
-| `createLaudo()` | `insert` com **`tipo_laudo: 'previdenciario'` forçado**, `prev_data: getDefaultPrevData()`, `user_id: auth.uid()`, `title: 'Novo Laudo Previdenciário'`. Retorna `id` para navegação. |
-| `loadLaudo(id)` | `select().eq('id', id).eq('tipo_laudo', 'previdenciario').single()` — garante isolamento mesmo se URL for adulterada. Se retorna `null` → redireciona para `/previdenciario/historico`. |
-| `updateLaudo(patch)` | Debounce 800ms. Se `patch` contém chave de `prev_data`, faz merge raso. **Nunca permite mudar `tipo_laudo`** (whitelist de campos editáveis). |
-| `updatePrevData(group, patch)` | Helper específico: `prev_data[group] = { ...prev_data[group], ...patch }`. |
-| `deleteLaudo(id)` | Mesmo filtro defensivo `.eq('tipo_laudo', 'previdenciario')`. |
-
-### 3.3 Guardas de segurança no Context
-
-```ts
-// Whitelist — tipo_laudo NUNCA é editável pela UI
-const FORBIDDEN_FIELDS = ['tipo_laudo', 'user_id', 'id', 'created_at'];
-const sanitizedPatch = Object.fromEntries(
-  Object.entries(patch).filter(([k]) => !FORBIDDEN_FIELDS.includes(k))
-);
-```
-
-### 3.4 Integração com `NavigationGuardContext`
-
-Reaproveitar o existente (já é genérico, marca `isDirty`). Zero alteração no guard.
+| Zero impacto Trabalhista | Todo código novo em `src/{...}/previdenciario/`. Zero edição em `LaudoContext.tsx`, `LaudoEditor.tsx`, `src/lib/export/`, `src/components/laudo/`. |
+| Zero nova Edge Function | 5.8 estende a existente — DRY preservado. |
+| Médico Decide / IA Redige | Stubs de 5.6 já assumem esse contrato: textareas vazias + botão ao lado, nunca preenchimento automático no load. |
+| Isolamento de dados | `.eq('tipo_laudo', 'previdenciario')` em 100% das leituras/escritas. |
+| Zero migrations em 5.6/5.7 | `prev_data` já existe (criado na 5.3). 5.8 usa apenas `INSERT` em `system_config`. |
+| Rollback | Excluir pasta `previdenciario/` + 2 rotas + 6 linhas de `system_config` (quando 5.8 for ativada). |
 
 ---
 
-## 4. Esqueleto do `PrevidenciarioLaudoEditor` (Fase 5.5)
+## Sequenciamento
 
-### 4.1 Roteamento (em `App.tsx`)
-
-```text
-/previdenciario/laudo/new  → cria e redireciona para /previdenciario/laudo/:id
-/previdenciario/laudo/:id  → editor
-```
-
-Ambas envolvidas em: `ProtectedRoute → ModuleProtectedRoute("previdenciario") → PrevidenciarioLayout → LaudoPrevidenciarioProvider → PrevidenciarioLaudoEditor`.
-
-### 4.2 Fluxo "Novo Laudo"
-
-1. Usuário clica "Novo Laudo" em `/previdenciario` ou `/previdenciario/historico`.
-2. Navega para `/previdenciario/laudo/new`.
-3. Componente `NewPrevidenciarioLaudo` chama `createLaudo()` → recebe `id` → `navigate(/previdenciario/laudo/${id}, { replace: true })`.
-4. Editor monta, carrega via `loadLaudo(id)` (filtro defensivo aplica).
-
-### 4.3 Estrutura visual do editor (skeleton apenas nesta fase)
-
-- **Layout**: clone visual do `LaudoEditor.tsx` (sidebar de seções à esquerda, conteúdo à direita, header com título editável + status + ações).
-- **Sidebar**: gerada a partir de `LAUDO_PREV_CARDS_STRUCTURE`.
-- **Conteúdo**: `renderSection(sectionId)` retorna `<PlaceholderSection sectionId={id} label={label} />` para TODAS as seções nesta fase. Apenas duas seções funcionais como prova de fluxo:
-  - **`perito`** → reusa visualmente um form simples (read-only do perfil) — mesmo padrão do Trabalhista.
-  - **`processo`** → 4 inputs (processo_numero, processo_vara, reclamante=segurado, reclamada=INSS) para validar que o `updateLaudo` persiste e o `loadLaudo` recupera corretamente.
-- **Sem export, sem IA, sem CIDs especiais** nesta fase — esses entram em 5.6/5.7/5.8.
-
-### 4.4 Componentes novos criados
-
-```
-src/contexts/previdenciario/LaudoPrevidenciarioContext.tsx
-src/lib/previdenciario/laudo-prev-structure.ts
-src/lib/previdenciario/prev-data-defaults.ts        (getDefaultPrevData())
-src/pages/previdenciario/PrevidenciarioLaudoEditor.tsx
-src/pages/previdenciario/NewPrevidenciarioLaudo.tsx (cria + redireciona)
-src/components/previdenciario/PrevidenciarioSidebar.tsx
-src/components/previdenciario/sections/PlaceholderSection.tsx
-src/components/previdenciario/sections/PeritoSection.tsx       (funcional, read-only)
-src/components/previdenciario/sections/ProcessoSection.tsx     (funcional, CRUD)
-```
-
-### 4.5 Pontos de integração com Histórico/Home (já existentes)
-
-- `PrevidenciarioHome` e `PrevidenciarioHistorico`: botão "Novo Laudo" passa a apontar para `/previdenciario/laudo/new`.
-- `PrevidenciarioHistorico`: linha clicável → `/previdenciario/laudo/:id`.
-- **Nenhuma alteração** em arquivos do Trabalhista.
+1. **Executar agora:** 5.6 + 5.7 em uma única leva → entregar editor visualmente completo + exportadores funcionando
+2. **Validação do usuário:** preencher laudo previdenciário real, exportar DOCX + PDF, validar compliance
+3. **Aprovar 5.8 separadamente** após validação visual → ativar IA sob demanda
 
 ---
 
-## 5. Garantias desta fase
+## Arquivos a Criar/Editar (5.6 + 5.7)
 
-- 0 migrações de banco (a coluna `prev_data` já existe; apenas começa a ser populada).
-- 0 edições em arquivos do Trabalhista.
-- 0 dependência cruzada com `LaudoContext` ou `laudo-structure.ts`.
-- `tipo_laudo='previdenciario'` é imutável a partir do Context.
-- Filtro defensivo `.eq('tipo_laudo', 'previdenciario')` em **todo** read/update/delete do Context.
-- Rollback = deletar a pasta `previdenciario/` + remover 2 rotas em `App.tsx`.
+**Novos (`src/components/previdenciario/sections/`):**
+- `SeguradoSection.tsx`, `HistoriaSection.tsx`, `ExameSection.tsx`, `CIDSection.tsx`, `NexoIncapacidadeSection.tsx`, `EnquadramentoSection.tsx`, `QuesitosSection.tsx`, `ConclusaoSection.tsx`, `HonorariosSection.tsx`
 
----
+**Novos (`src/lib/previdenciario/export/`):**
+- `docx-builder-prev.ts`, `pdf-builder-prev.ts`, `prev-export-orchestrator.ts`
 
-## 6. Validação ao final da fase
+**Estendidos:**
+- `src/lib/previdenciario/prev-data-defaults.ts` (campos de benefício/enquadramento se faltarem)
+- `src/pages/previdenciario/PrevidenciarioLaudoEditor.tsx` (registro de seções + dropdown Exportar)
 
-1. Trabalhista: smoke test completo (criar laudo, editar, exportar) — deve permanecer 100% igual.
-2. Previdenciário: criar laudo em branco, preencher `processo`, recarregar a página, validar persistência.
-3. SQL spot-check (via DevPanel ou query): novo registro tem `tipo_laudo='previdenciario'` e `prev_data` populado com defaults.
-4. Tentar manualmente via DevTools alterar `tipo_laudo` no patch — deve ser bloqueado pelo whitelist.
+**NÃO tocados (garantia):**
+- Tudo em `src/components/laudo/`, `src/pages/Editor*`, `src/lib/export/`, `src/contexts/LaudoContext.tsx`, `supabase/functions/gerar-justificativa-medica/` (em 5.6/5.7)
 
 ---
 
-## 7. O que fica para depois (não entra nesta fase)
-
-- 5.6: Implementação real das seções (formulários completos de incapacidade, benefício, enquadramento legal).
-- 5.7: Export DOCX/PDF previdenciário.
-- 5.8: Prompts IA específicos (import de processo INSS, geração de nexo previdenciário, etc.).
-
-Aguardo aprovação da modelagem de dados (seção 2) e da estratégia do Context (seção 3) para iniciar a codificação.
+**Aguardando aprovação** para iniciar execução das Fases 5.6 + 5.7 nesta leva única.
