@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2 } from "lucide-react";
 import { useLaudoPrev } from "@/contexts/previdenciario/LaudoPrevidenciarioContext";
+import { AiGenerateButton } from "./AiGenerateButton";
 
 interface CidItem {
   codigo: string;
