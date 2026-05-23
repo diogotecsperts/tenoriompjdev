@@ -56,7 +56,21 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ModuleProtectedRoute module="previdenciario">
-              <PrevidenciarioHome />
+              <PrevidenciarioLayout>
+                <PrevidenciarioHome />
+              </PrevidenciarioLayout>
+            </ModuleProtectedRoute>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/previdenciario/historico"
+        element={
+          <ProtectedRoute>
+            <ModuleProtectedRoute module="previdenciario">
+              <PrevidenciarioLayout>
+                <PrevidenciarioHistorico />
+              </PrevidenciarioLayout>
             </ModuleProtectedRoute>
           </ProtectedRoute>
         }
