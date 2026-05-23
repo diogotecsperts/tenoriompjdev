@@ -1,190 +1,239 @@
+# Fases 5.4 + 5.5 — SSOT Previdenciário, Contexto e Esqueleto do Editor
 
-# Plano Arquitetural — Hub Multi-Módulos (Trabalhista + Previdenciário)
+## 1. Princípios de modelagem
 
-## 1. Crítica ao plano original (antes de aprovar a execução)
-
-Antes de detalhar a solução, preciso te alertar sobre **dois pontos do plano do Gemini que, se executados como descritos, geram risco real de quebra do módulo Trabalhista** — exatamente o que sua regra máxima proíbe:
-
-### 1.1 Mover o app atual de `/` para `/trabalhista` é a abordagem mais perigosa possível
-
-Hoje existem **rotas hardcoded espalhadas por todo o código**:
-
-- `AppLayout.tsx`: `/dashboard`, `/laudo/new`, `/historico`, `/financeiro`, `/impugnacao`, `/configuracoes`, `/dev-panel`
-- `Dashboard.tsx`: 4 `navigate('/historico'|'/financeiro')`
-- `Historico.tsx`: 2 `navigate('/laudo/new')`
-- `Login.tsx`, `AuthContext.tsx`, `DevPanel.tsx`, `ProtectedRoute.tsx`, `DevProtectedRoute.tsx`, `NotFound.tsx`: redirects para `/`, `/dashboard`
-- `NavigationGuardContext`: compara `location.pathname.startsWith("/laudo/")` — quebraria com `/trabalhista/laudo/`
-- `LaudoEditor` usa `useParams` em `/laudo/:id` — qualquer mudança de prefixo precisa propagar
-- Testes em `src/test/navigation.test.tsx` referenciam `/dashboard`, `/historico`
-- Bookmarks dos usuários já em produção (`https://brunobetav2.tecsperts.com/dashboard`, `/historico`, etc.) **quebrariam**
-
-Renomear tudo para `/trabalhista/*` exigiria editar **18+ arquivos críticos** e cada um é um ponto de falha silenciosa. **Recomendo NÃO mover**.
-
-### 1.2 `array modulos_acessiveis` em `profiles` é frágil
-Arrays em `jsonb`/`text[]` são chatos de filtrar via RLS e de manter no DevPanel. Uma tabela relacional `user_modules` é trivial, mais segura e auditável.
+- **Reaproveitar colunas nativas de `laudos`** sempre que o campo for semanticamente igual ao Trabalhista (perito, processo, vítima, anamnese, exame físico, CIDs, conclusão). Zero migração nova.
+- **Tudo que é estritamente INSS/BPC vai para `prev_data` (jsonb)** — isolado, versionado, sem poluir o schema do Trabalhista.
+- **`tipo_laudo = 'previdenciario'`** é setado no insert pelo Context (nunca pelo usuário, nunca pela UI).
+- **Zero edição** em `LaudoContext`, `LaudoEditor`, exporters ou edge functions do Trabalhista.
 
 ---
 
-## 2. Proposta revisada (segura, reversível, zero-impacto no Trabalhista)
+## 2. Mapeamento de campos: Colunas nativas vs. `prev_data`
 
-### Princípio: **aditivo, nunca substitutivo**
+### 2.1 Campos REAPROVEITADOS de colunas nativas (já existem em `laudos`)
 
-O Trabalhista permanece **literalmente intacto** nas rotas atuais. O Hub e o Previdenciário são **adicionados ao lado**, não por cima.
-
----
-
-## 3. Arquitetura de Roteamento
-
-```text
-/                       → Login (inalterado)
-/hub                    → NOVO: Hub de módulos (pós-login)
-/dashboard              → Trabalhista (INALTERADO — é o "home" do módulo trabalhista)
-/laudo/new, /laudo/:id  → Trabalhista (INALTERADO)
-/historico              → Trabalhista (INALTERADO)
-/financeiro             → Trabalhista (INALTERADO)
-/impugnacao             → Trabalhista (INALTERADO)
-/configuracoes          → Compartilhado (INALTERADO)
-/dev-panel              → Compartilhado (INALTERADO)
-
-/previdenciario                  → NOVO: home do módulo previdenciário
-/previdenciario/laudo/new        → NOVO
-/previdenciario/laudo/:id        → NOVO
-/previdenciario/historico        → NOVO
-...etc (namespace próprio, isolado)
-```
-
-**Por que NÃO mover Trabalhista para `/trabalhista/*`:**
-- Zero edição em `AppLayout`, `Dashboard`, `Historico`, `Login`, `AuthContext`, `LaudoEditor`, `NavigationGuard`, testes
-- Bookmarks/URLs publicadas continuam funcionando
-- Rollback do Hub = 1 linha (mudar redirect pós-login de `/hub` para `/dashboard`)
-
-**O que muda em redirecionamento:**
-- `Login.tsx`: `navigate("/dashboard")` → `navigate("/hub")` (1 linha)
-- `AuthContext.logout`: continua `navigate("/")` (inalterado)
-- `DevPanel "Dashboard Médico"`: passa a apontar para `/hub` (1 linha)
-
-### 3.1 Hub `/hub` (novo)
-Componente novo `src/pages/Hub.tsx` dentro de `AppLayout` (ou layout próprio mais limpo, sem sidebar Trabalhista — recomendo **layout próprio** para o Hub não “vazar” o menu Trabalhista). Renderiza cards dos módulos que o usuário tem permissão:
-
-```text
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│ Trabalhista  │  │Previdenciário│  │ (futuro: Cível)│
-│ → /dashboard │  │→/previdencia.│  │   bloqueado   │
-└──────────────┘  └──────────────┘  └──────────────┘
-```
-
-### 3.2 Layout do Previdenciário
-Novo `PrevidenciarioLayout` (clone visual do `AppLayout` mas com seu próprio `mainMenuItems` apontando para `/previdenciario/*`). **Não reutilizar `AppLayout` direto** para não criar acoplamento bidirecional — duplicar o shell é mais barato a longo prazo do que parametrizar.
-
-Botão “Trocar de módulo” em ambos os layouts → volta para `/hub`.
-
----
-
-## 4. Migração mínima de Banco de Dados
-
-### 4.1 Tabela `user_modules` (nova — relacional, RLS-friendly)
-```sql
-CREATE TYPE app_module AS ENUM ('trabalhista', 'previdenciario');
-
-CREATE TABLE public.user_modules (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  module app_module NOT NULL,
-  enabled boolean NOT NULL DEFAULT true,
-  created_at timestamptz DEFAULT now(),
-  UNIQUE(user_id, module)
-);
-ALTER TABLE public.user_modules ENABLE ROW LEVEL SECURITY;
-
--- Função SECURITY DEFINER (evita recursão RLS)
-CREATE FUNCTION public.has_module(_uid uuid, _mod app_module)
-RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public AS $$
-  SELECT EXISTS (SELECT 1 FROM public.user_modules
-                 WHERE user_id=_uid AND module=_mod AND enabled=true)
-$$;
-
--- Policies: usuário lê o próprio; developer/admin gerencia tudo
-```
-
-**Backfill seguro (zero quebra)**: dar `trabalhista=true` a TODOS os usuários existentes:
-```sql
-INSERT INTO user_modules (user_id, module, enabled)
-SELECT id, 'trabalhista', true FROM profiles
-ON CONFLICT DO NOTHING;
-```
-E adicionar ao `handle_new_user()` trigger: novo usuário ganha `trabalhista` automático. **Resultado: nenhum usuário existente perde acesso a nada.**
-
-### 4.2 Coluna `tipo_laudo` em `laudos` (mínima, com default seguro)
-```sql
-ALTER TABLE public.laudos
-  ADD COLUMN tipo_laudo app_module NOT NULL DEFAULT 'trabalhista';
-CREATE INDEX idx_laudos_user_tipo ON laudos(user_id, tipo_laudo);
-```
-
-- Default `'trabalhista'` → **todos os 100% dos laudos atuais ficam marcados como trabalhistas** sem nenhum UPDATE em massa retroativo.
-- O frontend Trabalhista atual **não precisa filtrar nada** (continua lendo todos os `laudos` do user — só verá os dele, e como todos novos do módulo são `trabalhista`, nada muda visualmente). Para isolamento futuro, podemos adicionar `.eq('tipo_laudo','trabalhista')` nas queries do Historico/Dashboard em fase 2 — **opcional e reversível**.
-- O Previdenciário sempre insere com `tipo_laudo='previdenciario'` e sempre filtra por isso.
-
-### 4.3 RLS de `laudos` — **não muda**
-Continua `auth.uid() = user_id`. O `tipo_laudo` é filtro de aplicação, não de segurança (o dono é o mesmo).
-
-### 4.4 Edge functions — **zero alterações na fase 1**
-`processar-autos`, `gerar-justificativa-medica`, `gerar-quesitos`, `gerar-resumos` etc. continuam idênticas. Quando o Previdenciário precisar de lógica específica, adicionaremos um parâmetro opcional `tipo_laudo` no payload (default `'trabalhista'`) — totalmente retrocompatível.
-
----
-
-## 5. Controle no DevPanel
-
-Nova aba **“Módulos por Usuário”** em `DevPanel`:
-- Lista usuários (já existe em `DevUsersList`)
-- Por linha: toggles `[ Trabalhista ] [ Previdenciário ]` que fazem UPSERT em `user_modules`
-- Protegido por `is_developer()` (RLS já cuida)
-- **Não toca em nada existente** — é uma aba adicional
-
----
-
-## 6. Guardas de acesso por módulo
-
-Novo wrapper `<ModuleProtectedRoute module="previdenciario">` que:
-1. Reusa `ProtectedRoute` (auth)
-2. Chama RPC `has_module(auth.uid(), 'previdenciario')`
-3. Se falso → redireciona pra `/hub` com toast “Módulo não habilitado”
-
-O `/dashboard` (Trabalhista) **opcionalmente** ganha o mesmo guard com `module="trabalhista"`. Como o backfill dá `trabalhista=true` a todos, isso não bloqueia ninguém — mas dá ao DevPanel o poder de revogar acesso depois.
-
----
-
-## 7. Sequência de execução proposta (fases pequenas e validáveis)
-
-| Fase | Escopo | Risco | Reversível? |
-|------|--------|-------|-------------|
-| **F1** | Migração SQL: `user_modules` + `tipo_laudo` + backfill + trigger | Baixo | Sim (drop) |
-| **F2** | DevPanel: aba “Módulos por Usuário” | Zero (aditivo) | Sim |
-| **F3** | Página `/hub` + redirect pós-login `Login.tsx` (1 linha) | Baixo | Sim (reverter linha) |
-| **F4** | `PrevidenciarioLayout` + rotas `/previdenciario/*` (páginas placeholder) | Zero (não toca Trabalhista) | Sim |
-| **F5** | Implementação real das telas Previdenciárias | Isolado | Sim |
-
-**Após cada fase**: smoke test no Trabalhista (login → dashboard → criar laudo → importar autos → exportar DOCX). Só avança se 100% verde.
-
----
-
-## 8. Pontos onde divirjo do plano original — resumo executivo
-
-| Ponto do Gemini | Minha recomendação | Motivo |
+| Categoria | Coluna nativa | Uso no Previdenciário |
 |---|---|---|
-| Mover app para `/trabalhista` | **Manter rotas atuais** | 18+ arquivos editados = risco real de quebra; bookmarks em produção quebram |
-| Array `modulos_acessiveis` em `profiles` | **Tabela `user_modules` + função `has_module()`** | RLS limpa, auditável, performance |
-| Adicionar `tipo_laudo` (concordo) | **Concordo, com `DEFAULT 'trabalhista'` + backfill implícito** | Zero migração de dados retroativa |
-| Hub como nova rota inicial (concordo) | **Concordo, em `/hub` com layout próprio** | Não polui sidebar Trabalhista |
+| Perito | `perito_nome`, `perito_crm`, `perito_especialidade`, `perito_email`, `perito_telefone`, `perito_endereco` | Idêntico |
+| Processo | `processo_numero`, `processo_vara`, `reclamante`, `reclamada` | `reclamante` = segurado; `reclamada` = INSS |
+| Datas/local | `data_pericia`, `local_pericia` | Idêntico |
+| Segurado | `vitima_nome`, `vitima_nascimento`, `vitima_escolaridade`, `vitima_profissao`, `vitima_dominancia` | Idêntico (rótulo "Segurado" na UI) |
+| Clínica | `historia_atual`, `antecedentes`, `tratamentos`, `afastamentos` | Idêntico |
+| Exames | `laudos_medicos`, `exames_complementares`, `exame_fisico` | Idêntico |
+| Diagnóstico | `cids_selecionados` (jsonb), `diagnostico_cids` (jsonb) | Idêntico |
+| Documentos | `documentos` (text[]), `atestados_detalhados` (jsonb) | Idêntico |
+| Resumo | `resumo_peticao_inicial` | Reusado como "Resumo da petição/recurso administrativo" |
+| Metodologia | `metodologia_pericial`, `objetivo_pericia` | Texto-padrão previdenciário (novo default na UI) |
+| Referências | `referencias_bibliograficas` | Idêntico (com bibliografia prev) |
+| Honorários | `valor_honorarios` | Idêntico |
+| Metadados | `title`, `status`, `ai_metadata`, `anotacoes` | Idêntico |
+| Conclusão (genérica) | `conclusao_cid`, `conclusao_analise`, `conclusao_justificativa` | Reaproveitadas para texto livre |
+
+### 2.2 Campos EXCLUSIVOS Previdenciário → `prev_data` (jsonb)
+
+```ts
+type PrevData = {
+  // --- Benefício pleiteado ---
+  beneficio: {
+    tipo: 'B31' | 'B32' | 'B91' | 'B92' | 'BPC_LOAS' | 'isencao_IR' | 'majoracao_25' | '';
+    nb_numero: string;          // Nº do benefício
+    der: string;                // Data de Entrada do Requerimento (ISO date)
+    dib: string;                // Data de Início do Benefício
+    dcb: string;                // Data de Cessação do Benefício (se houver)
+    motivo_cessacao: string;
+  };
+
+  // --- Segurado (complementos previdenciários) ---
+  segurado: {
+    rg: string;
+    cpf: string;
+    nit_pis: string;
+    endereco: string;
+    estado_civil: string;
+    qualidade_segurado: 'empregado' | 'contribuinte_individual' | 'facultativo' | 'segurado_especial' | 'desempregado_periodo_graca' | '';
+    ultima_atividade: string;
+    data_ultima_contribuicao: string;
+  };
+
+  // --- História clínica/laboral previdenciária ---
+  historia_clinica_prev: string;     // versão prev (livre, separada do trabalhista)
+  historia_laboral_prev: string;     // trajetória ocupacional resumida
+
+  // --- Análise de incapacidade (NÚCLEO PREVIDENCIÁRIO) ---
+  incapacidade: {
+    existe: 'sim' | 'nao' | 'parcial' | '';
+    tipo: 'temporaria' | 'permanente' | '';
+    grau: 'parcial' | 'total' | '';
+    abrangencia: 'uniprofissional' | 'multiprofissional' | 'omniprofissional' | '';
+    dii: string;                      // Data de Início da Incapacidade
+    dii_justificativa: string;
+    data_recuperacao_estimada: string;
+    susceptivel_reabilitacao: 'sim' | 'nao' | 'inconclusivo' | '';
+    necessita_auxilio_terceiros: 'sim' | 'nao' | '';
+    justificativa: string;
+  };
+
+  // --- Nexo (técnico/previdenciário) ---
+  nexo: {
+    tipo: 'comum' | 'tecnico_NTEP' | 'profissional' | 'sem_nexo' | '';
+    justificativa: string;
+  };
+
+  // --- Enquadramento legal ---
+  enquadramento: {
+    leis_aplicaveis: string[];        // ex: 'Lei 8.213/91 art. 42', 'Decreto 3.048/99 art. 43'
+    fundamentacao: string;
+  };
+
+  // --- Conclusão previdenciária estruturada ---
+  conclusao_prev: {
+    parecer: 'apto' | 'incapaz_temporario' | 'incapaz_permanente_total' | 'incapaz_permanente_parcial' | 'inconclusivo' | '';
+    beneficio_recomendado: string;    // ex: "Concessão de B31"
+    texto_final: string;
+  };
+
+  // --- Quesitos (judiciais INSS) ---
+  quesitos: {
+    juizo: string;
+    autor: string;
+    inss: string;
+  };
+};
+```
+
+> Toda escrita usa **merge raso** (`{ ...laudo.prev_data, [grupo]: { ...grupo, [campo]: valor } }`) para nunca sobrescrever sub-objetos por engano.
+
+### 2.3 Arquivo `src/lib/previdenciario/laudo-prev-structure.ts`
+
+Mesmo padrão do `laudo-structure.ts` (SSOT), com `LAUDO_PREV_CARDS_STRUCTURE`:
+
+```text
+1. Preliminares       → perito | processo | objetivo | documentos
+2. Resumo Administrativo → resumo-adm | metodologia-prev
+3. Segurado            → identificacao | qualidade-segurado | beneficio
+4. História            → historia-clinica | historia-laboral | antecedentes | tratamentos
+5. Exame               → laudos-medicos | exames-complementares | exame-fisico
+6. Análise Técnica     → cids | nexo-prev | incapacidade | enquadramento-legal
+7. Conclusão           → conclusao-prev | quesitos-prev
+8. Referências         → referencias
+```
+
+Helpers espelhados (`getCardById`, `getNextSection`, etc.) — namespace isolado, **sem importar** nada do `laudo-structure.ts`.
 
 ---
 
-## 9. O que esse plano **garante**
+## 3. `LaudoPrevidenciarioContext.tsx` (gestão de estado)
 
-- **0 (zero) edições** em: `LaudoEditor`, `LaudoContext`, `AppLayout`, `Dashboard`, `Historico`, `Financeiro`, `Impugnacao`, `Configuracoes`, `NavigationGuard`, edge functions, exporters DOCX/PDF
-- **0 UPDATEs retroativos** em laudos existentes
-- **0 mudança** nas RLS atuais de `laudos`/`profiles`
-- **0 quebra** de URLs/bookmarks em produção
-- Rollback total possível a qualquer momento drop-ando 2 objetos (`user_modules`, `tipo_laudo`) e revertendo 1 linha em `Login.tsx`
+Localização: `src/contexts/previdenciario/LaudoPrevidenciarioContext.tsx`
 
-Aguardando sua aprovação para iniciar pela **Fase 1 (migração SQL)**.
+### 3.1 Shape
+
+```ts
+interface LaudoPrev extends Tables<'laudos'> {
+  prev_data: PrevData;  // tipado forte (jsonb no banco)
+}
+```
+
+### 3.2 Operações principais
+
+| Operação | Comportamento |
+|---|---|
+| `createLaudo()` | `insert` com **`tipo_laudo: 'previdenciario'` forçado**, `prev_data: getDefaultPrevData()`, `user_id: auth.uid()`, `title: 'Novo Laudo Previdenciário'`. Retorna `id` para navegação. |
+| `loadLaudo(id)` | `select().eq('id', id).eq('tipo_laudo', 'previdenciario').single()` — garante isolamento mesmo se URL for adulterada. Se retorna `null` → redireciona para `/previdenciario/historico`. |
+| `updateLaudo(patch)` | Debounce 800ms. Se `patch` contém chave de `prev_data`, faz merge raso. **Nunca permite mudar `tipo_laudo`** (whitelist de campos editáveis). |
+| `updatePrevData(group, patch)` | Helper específico: `prev_data[group] = { ...prev_data[group], ...patch }`. |
+| `deleteLaudo(id)` | Mesmo filtro defensivo `.eq('tipo_laudo', 'previdenciario')`. |
+
+### 3.3 Guardas de segurança no Context
+
+```ts
+// Whitelist — tipo_laudo NUNCA é editável pela UI
+const FORBIDDEN_FIELDS = ['tipo_laudo', 'user_id', 'id', 'created_at'];
+const sanitizedPatch = Object.fromEntries(
+  Object.entries(patch).filter(([k]) => !FORBIDDEN_FIELDS.includes(k))
+);
+```
+
+### 3.4 Integração com `NavigationGuardContext`
+
+Reaproveitar o existente (já é genérico, marca `isDirty`). Zero alteração no guard.
+
+---
+
+## 4. Esqueleto do `PrevidenciarioLaudoEditor` (Fase 5.5)
+
+### 4.1 Roteamento (em `App.tsx`)
+
+```text
+/previdenciario/laudo/new  → cria e redireciona para /previdenciario/laudo/:id
+/previdenciario/laudo/:id  → editor
+```
+
+Ambas envolvidas em: `ProtectedRoute → ModuleProtectedRoute("previdenciario") → PrevidenciarioLayout → LaudoPrevidenciarioProvider → PrevidenciarioLaudoEditor`.
+
+### 4.2 Fluxo "Novo Laudo"
+
+1. Usuário clica "Novo Laudo" em `/previdenciario` ou `/previdenciario/historico`.
+2. Navega para `/previdenciario/laudo/new`.
+3. Componente `NewPrevidenciarioLaudo` chama `createLaudo()` → recebe `id` → `navigate(/previdenciario/laudo/${id}, { replace: true })`.
+4. Editor monta, carrega via `loadLaudo(id)` (filtro defensivo aplica).
+
+### 4.3 Estrutura visual do editor (skeleton apenas nesta fase)
+
+- **Layout**: clone visual do `LaudoEditor.tsx` (sidebar de seções à esquerda, conteúdo à direita, header com título editável + status + ações).
+- **Sidebar**: gerada a partir de `LAUDO_PREV_CARDS_STRUCTURE`.
+- **Conteúdo**: `renderSection(sectionId)` retorna `<PlaceholderSection sectionId={id} label={label} />` para TODAS as seções nesta fase. Apenas duas seções funcionais como prova de fluxo:
+  - **`perito`** → reusa visualmente um form simples (read-only do perfil) — mesmo padrão do Trabalhista.
+  - **`processo`** → 4 inputs (processo_numero, processo_vara, reclamante=segurado, reclamada=INSS) para validar que o `updateLaudo` persiste e o `loadLaudo` recupera corretamente.
+- **Sem export, sem IA, sem CIDs especiais** nesta fase — esses entram em 5.6/5.7/5.8.
+
+### 4.4 Componentes novos criados
+
+```
+src/contexts/previdenciario/LaudoPrevidenciarioContext.tsx
+src/lib/previdenciario/laudo-prev-structure.ts
+src/lib/previdenciario/prev-data-defaults.ts        (getDefaultPrevData())
+src/pages/previdenciario/PrevidenciarioLaudoEditor.tsx
+src/pages/previdenciario/NewPrevidenciarioLaudo.tsx (cria + redireciona)
+src/components/previdenciario/PrevidenciarioSidebar.tsx
+src/components/previdenciario/sections/PlaceholderSection.tsx
+src/components/previdenciario/sections/PeritoSection.tsx       (funcional, read-only)
+src/components/previdenciario/sections/ProcessoSection.tsx     (funcional, CRUD)
+```
+
+### 4.5 Pontos de integração com Histórico/Home (já existentes)
+
+- `PrevidenciarioHome` e `PrevidenciarioHistorico`: botão "Novo Laudo" passa a apontar para `/previdenciario/laudo/new`.
+- `PrevidenciarioHistorico`: linha clicável → `/previdenciario/laudo/:id`.
+- **Nenhuma alteração** em arquivos do Trabalhista.
+
+---
+
+## 5. Garantias desta fase
+
+- 0 migrações de banco (a coluna `prev_data` já existe; apenas começa a ser populada).
+- 0 edições em arquivos do Trabalhista.
+- 0 dependência cruzada com `LaudoContext` ou `laudo-structure.ts`.
+- `tipo_laudo='previdenciario'` é imutável a partir do Context.
+- Filtro defensivo `.eq('tipo_laudo', 'previdenciario')` em **todo** read/update/delete do Context.
+- Rollback = deletar a pasta `previdenciario/` + remover 2 rotas em `App.tsx`.
+
+---
+
+## 6. Validação ao final da fase
+
+1. Trabalhista: smoke test completo (criar laudo, editar, exportar) — deve permanecer 100% igual.
+2. Previdenciário: criar laudo em branco, preencher `processo`, recarregar a página, validar persistência.
+3. SQL spot-check (via DevPanel ou query): novo registro tem `tipo_laudo='previdenciario'` e `prev_data` populado com defaults.
+4. Tentar manualmente via DevTools alterar `tipo_laudo` no patch — deve ser bloqueado pelo whitelist.
+
+---
+
+## 7. O que fica para depois (não entra nesta fase)
+
+- 5.6: Implementação real das seções (formulários completos de incapacidade, benefício, enquadramento legal).
+- 5.7: Export DOCX/PDF previdenciário.
+- 5.8: Prompts IA específicos (import de processo INSS, geração de nexo previdenciário, etc.).
+
+Aguardo aprovação da modelagem de dados (seção 2) e da estratégia do Context (seção 3) para iniciar a codificação.
