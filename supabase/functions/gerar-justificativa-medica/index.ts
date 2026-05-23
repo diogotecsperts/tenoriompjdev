@@ -23,7 +23,20 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-type Campo = 'cid_descricao' | 'nexo_causal' | 'incapacidade' | 'conclusao' | 'destino' | 'referencias';
+type Campo =
+  | 'cid_descricao'
+  | 'nexo_causal'
+  | 'incapacidade'
+  | 'conclusao'
+  | 'destino'
+  | 'referencias'
+  // ===== Fase 5.8 — Previdenciário (Médico Decide / IA Redige) =====
+  | 'prev_cid_descricao'
+  | 'prev_nexo'
+  | 'prev_incapacidade_global'
+  | 'prev_dii_justificativa'
+  | 'prev_enquadramento'
+  | 'prev_conclusao';
 
 interface ReqBody {
   laudoId: string;
