@@ -82,6 +82,43 @@ const FIELD_TO_PROMPT: Record<Campo, { id: string; description: string; cardId: 
     cardId: 'conclusao',
     sectionId: 'referencias',
   },
+  // ===== Previdenciário =====
+  prev_cid_descricao: {
+    id: 'prompt_gen_prev_cid_descricao',
+    description: 'PREV: Descrição técnica dos CIDs (sob demanda)',
+    cardId: 'analise-tecnica',
+    sectionId: 'cids',
+  },
+  prev_nexo: {
+    id: 'prompt_gen_prev_nexo',
+    description: 'PREV: Justificativa do nexo previdenciário (defende escolha do médico)',
+    cardId: 'analise-tecnica',
+    sectionId: 'nexo-prev',
+  },
+  prev_incapacidade_global: {
+    id: 'prompt_gen_prev_incapacidade_global',
+    description: 'PREV: Justificativa global da incapacidade (defende escolha do médico)',
+    cardId: 'analise-tecnica',
+    sectionId: 'incapacidade',
+  },
+  prev_dii_justificativa: {
+    id: 'prompt_gen_prev_dii_justificativa',
+    description: 'PREV: Justificativa da Data de Início da Incapacidade (DII)',
+    cardId: 'analise-tecnica',
+    sectionId: 'incapacidade',
+  },
+  prev_enquadramento: {
+    id: 'prompt_gen_prev_enquadramento',
+    description: 'PREV: Fundamentação técnico-jurídica do enquadramento legal escolhido',
+    cardId: 'analise-tecnica',
+    sectionId: 'enquadramento-legal',
+  },
+  prev_conclusao: {
+    id: 'prompt_gen_prev_conclusao',
+    description: 'PREV: Texto final da conclusão previdenciária amarrada às decisões',
+    cardId: 'conclusao',
+    sectionId: 'conclusao-prev',
+  },
 };
 
 const DEFAULT_PROMPTS: Record<Campo, string> = {
