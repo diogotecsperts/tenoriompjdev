@@ -3,7 +3,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { useLaudoPrev } from "@/contexts/previdenciario/LaudoPrevidenciarioContext";
-import { AiStubButton } from "./AiStubButton";
+import { AiGenerateButton } from "./AiGenerateButton";
 
 const LEIS = [
   { v: "Lei 8.213/91 art. 42 — Aposentadoria por invalidez", l: "Lei 8.213/91, art. 42 — Aposentadoria por invalidez" },
