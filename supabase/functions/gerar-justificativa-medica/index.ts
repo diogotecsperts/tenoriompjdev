@@ -633,6 +633,7 @@ serve(async (req) => {
       }
     }
 
+    const meta = FIELD_TO_PROMPT[body.campo];
     const ctx = buildContext(laudo, body);
 
     const interpolatedPrompt = await getPrompt(
