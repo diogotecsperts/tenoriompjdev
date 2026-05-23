@@ -184,7 +184,11 @@ export default function PrevidenciarioHistorico() {
                 {filtered.map((l) => {
                   const status = l.status ?? "rascunho";
                   return (
-                    <TableRow key={l.id} className="cursor-not-allowed opacity-90">
+                    <TableRow
+                      key={l.id}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => navigate(`/previdenciario/laudo/${l.id}`)}
+                    >
                       <TableCell className="font-medium">{l.title}</TableCell>
                       <TableCell>
                         <Badge
