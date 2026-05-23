@@ -177,10 +177,10 @@ export default function DevPanel() {
               "w-full justify-start gap-3",
               sidebarCollapsed && "justify-center px-2"
             )}
-            onClick={() => navigate("/dashboard")}
+            onClick={() => navigate("/hub")}
           >
             <Stethoscope className="h-5 w-5 flex-shrink-0" />
-            {!sidebarCollapsed && <span>Dashboard Médico</span>}
+            {!sidebarCollapsed && <span>Hub de Módulos</span>}
           </Button>
           <Button
             variant="ghost"
