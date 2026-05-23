@@ -39,7 +39,7 @@ import { DevAccessHistory } from "@/components/dev-panel/DevAccessHistory";
 import { DevOriginalFiles } from "@/components/dev-panel/DevOriginalFiles";
 import { DevUserModules } from "@/components/dev-panel/DevUserModules";
 
-type DevTab = "dashboard" | "users" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "settings";
+type DevTab = "dashboard" | "users" | "user-modules" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -50,6 +50,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "users", label: "Usuários", icon: Users },
+  { id: "user-modules", label: "Módulos por Usuário", icon: LayoutDashboard },
   { id: "logs", label: "AI Analytics", icon: FileText },
   { id: "backend-logs", label: "Servidor & Jobs", icon: Server },
   { id: "errors", label: "UI Reports", icon: AlertTriangle },
@@ -80,6 +81,8 @@ export default function DevPanel() {
         return <DevDashboard />;
       case "users":
         return <DevUsersList />;
+      case "user-modules":
+        return <DevUserModules />;
       case "logs":
         return <DevLogs />;
       case "backend-logs":
