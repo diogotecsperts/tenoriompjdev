@@ -249,6 +249,150 @@ PROIBIÇÕES:
 6. Português brasileiro com acentuação correta.
 
 FORMATO DE SAÍDA (texto puro, numerado "1- ", "2- ", ...):`,
+
+  // ===================== PREVIDENCIÁRIO =====================
+
+  prev_cid_descricao: `Você é médico-perito judicial atuando em perícia PREVIDENCIÁRIA. O médico digitou os seguintes CIDs:
+
+CIDs informados pelo médico: \${cidsManuais}
+
+ESCOPO ESTRITO:
+Apenas descreva tecnicamente cada patologia listada conforme literatura médica. É PROIBIDO concluir sobre incapacidade, nexo previdenciário ou opinar sobre o caso concreto.
+
+Para CADA CID, em texto técnico contínuo (sem markdown, sem bullets, sem negrito):
+- Definição da patologia
+- Etiologia
+- Quadro clínico característico
+- Impacto funcional típico (em termos GENÉRICOS da literatura, jamais aplicado ao periciando)
+
+Contexto auxiliar (apenas referência, não inventar):
+- História clínica: \${historiaClinicaPrev}
+- História laboral: \${historiaLaboralPrev}
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown, sem asteriscos, sem bullets.
+3. Não invente dados clínicos do periciando.
+4. Português brasileiro com acentuação correta.`,
+
+  prev_nexo: `Você está REDIGINDO a fundamentação técnica do nexo previdenciário JÁ DECIDIDO pelo médico-perito. Não questione a decisão.
+
+DECISÃO DO MÉDICO sobre nexo previdenciário: "\${nexoEscolhido}"
+(Categorias possíveis: comum, técnico/NTEP, profissional/ocupacional, ausência de nexo.)
+
+Tarefa: redigir, em linguagem técnica médico-pericial, a justificativa que SUSTENTA essa decisão à luz da Lei 8.213/91 (art. 21-A — NTEP), Decreto 3.048/99, e quando cabível dos critérios de Schilling, Bradford-Hill e Simonin.
+
+Dados do caso:
+- CIDs: \${cidsLista}
+- História clínica previdenciária: \${historiaClinicaPrev}
+- História laboral previdenciária: \${historiaLaboralPrev}
+- Qualidade de segurado: \${qualidadeSegurado}
+- Última atividade: \${ultimaAtividade}
+- Exame físico: \${exameFisico}
+- Exames complementares: \${examesComplementares}
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown, sem bullets, sem negrito.
+3. Não inventar dados — se faltar informação, formulação prudente.
+4. Português brasileiro com acentuação correta.
+5. Mínimo 2 parágrafos.`,
+
+  prev_incapacidade_global: `Você está REDIGINDO a justificativa técnica global da incapacidade laboral JÁ DECIDIDA pelo médico-perito em perícia previdenciária. Não contradiga a decisão.
+
+DECISÕES DO MÉDICO (use como tese):
+- Existe incapacidade? "\${incExiste}"
+- Tipo: "\${incTipo}" (temporária / permanente)
+- Grau: "\${incGrau}" (parcial / total)
+- Abrangência: "\${incAbrangencia}" (uniprofissional / multiprofissional / omniprofissional)
+- Suscetível à reabilitação: "\${incReabilitacao}"
+- Necessita auxílio de terceiros: "\${incAuxilio}"
+
+Tarefa: redigir a fundamentação que SUSTENTA essa combinação, correlacionando-a com as limitações funcionais documentadas e com a natureza das atividades laborais. Aborde a abrangência (a capacidade alcança apenas a atual atividade, várias atividades ou qualquer atividade) e a possibilidade de reabilitação profissional.
+
+Dados clínicos de apoio:
+- CIDs: \${cidsLista}
+- História clínica previdenciária: \${historiaClinicaPrev}
+- História laboral previdenciária: \${historiaLaboralPrev}
+- Exame físico: \${exameFisico}
+- Tratamentos: \${tratamentos}
+- Afastamentos: \${afastamentos}
+- Última atividade: \${ultimaAtividade}
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown.
+3. Não invente dados.
+4. Português brasileiro com acentuação correta.
+5. Mínimo 2 parágrafos.`,
+
+  prev_dii_justificativa: `Você está REDIGINDO a fundamentação técnica da Data de Início da Incapacidade (DII) JÁ FIXADA pelo médico-perito.
+
+DECISÃO DO MÉDICO:
+- DII fixada: "\${incDII}"
+- Tipo de incapacidade: "\${incTipo}"
+- Grau: "\${incGrau}"
+
+Tarefa: redigir em parágrafo técnico a fundamentação da DII, ancorando-a em marcos clínicos objetivos (primeiro atestado, primeiro afastamento, exame de imagem ou laboratorial, internação, cirurgia, agravamento documentado). Se não houver marco objetivo, fundamentar pelo conjunto probatório clínico e exame pericial atual.
+
+Dados de apoio:
+- CIDs: \${cidsLista}
+- História clínica previdenciária: \${historiaClinicaPrev}
+- Tratamentos: \${tratamentos}
+- Afastamentos: \${afastamentos}
+- Exames complementares: \${examesComplementares}
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown, sem bullets.
+3. Não invente datas — use apenas as presentes no contexto ou formulação prudente.
+4. Português brasileiro com acentuação correta.
+5. 1 a 2 parágrafos.`,
+
+  prev_enquadramento: `Você está redigindo a FUNDAMENTAÇÃO TÉCNICO-JURÍDICA do enquadramento legal selecionado pelo médico-perito em perícia previdenciária.
+
+LEIS APLICÁVEIS SELECIONADAS PELO MÉDICO: \${leisAplicaveis}
+
+Tarefa: articular, em texto técnico contínuo, a correlação entre os achados periciais e cada dispositivo legal selecionado. Para cada dispositivo, esclareça por que os requisitos legais estão ou não preenchidos à luz das decisões já tomadas.
+
+Decisões já tomadas (use como base — não contradiga):
+- Existe incapacidade: \${incExiste} / Tipo: \${incTipo} / Grau: \${incGrau} / Abrangência: \${incAbrangencia}
+- Tipo de nexo: \${nexoEscolhido}
+- Suscetível à reabilitação: \${incReabilitacao}
+- Auxílio de terceiros: \${incAuxilio}
+- CIDs: \${cidsLista}
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown, sem bullets, sem negrito.
+3. Não invente dispositivos legais além dos selecionados.
+4. Português brasileiro com acentuação correta.
+5. 2 a 4 parágrafos.`,
+
+  prev_conclusao: `Você está redigindo o TEXTO FINAL DA CONCLUSÃO previdenciária, AMARRANDO todas as decisões já tomadas pelo médico-perito.
+
+DECISÕES DO MÉDICO (use como tese — não contradiga):
+- Parecer final: "\${parecerFinal}"
+- Benefício recomendado: "\${beneficioRecomendado}"
+- Existe incapacidade: \${incExiste} / Tipo: \${incTipo} / Grau: \${incGrau} / Abrangência: \${incAbrangencia}
+- DII: \${incDII}
+- Suscetível à reabilitação: \${incReabilitacao}
+- Auxílio de terceiros: \${incAuxilio}
+- Tipo de nexo: \${nexoEscolhido}
+- CIDs confirmados: \${cidsLista}
+
+Justificativas já redigidas (use para integrar coerentemente):
+- Justificativa do nexo: \${nexoJustificativa}
+- Justificativa da incapacidade: \${incapacidadeJustificativa}
+- Fundamentação do enquadramento: \${enquadramentoFundamentacao}
+
+Tarefa: sintetizar em texto técnico-pericial contínuo a conclusão final do laudo previdenciário, integrando todas as decisões acima de forma harmônica e indicando objetivamente o destino do periciando (apto / reabilitação / auxílio-doença / aposentadoria por invalidez / BPC etc.) conforme o parecer final escolhido.
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown, sem bullets.
+3. Português brasileiro com acentuação correta.
+4. Máximo 4 parágrafos.`,
 };
 
 const SYSTEM_PROMPT =
