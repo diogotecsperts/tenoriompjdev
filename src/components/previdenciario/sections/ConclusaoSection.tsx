@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useLaudoPrev } from "@/contexts/previdenciario/LaudoPrevidenciarioContext";
-import { AiStubButton } from "./AiStubButton";
+import { AiGenerateButton } from "./AiGenerateButton";
 
 const PARECERES = [
   { v: "apto", l: "Apto — sem incapacidade laboral" },
