@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useLaudoPrev } from "@/contexts/previdenciario/LaudoPrevidenciarioContext";
-import { AiStubButton } from "./AiStubButton";
+import { AiGenerateButton } from "./AiGenerateButton";
 
 const EXISTE = [
   { v: "sim", l: "Sim — há incapacidade" },
@@ -63,7 +63,14 @@ export function NexoIncapacidadeSection() {
                 Vínculo entre a doença e a atividade laboral.
               </p>
             </div>
-            <AiStubButton label="Gerar justificativa do nexo" />
+            <AiGenerateButton
+              laudoId={laudo.id}
+              campo="prev_nexo"
+              escolha={nx.tipo}
+              disabledReason={!nx.tipo ? "Selecione o tipo de nexo antes de gerar a justificativa." : null}
+              label="Gerar justificativa do nexo"
+              onGenerated={(t) => updatePrevData("nexo", { justificativa: t })}
+            />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -99,10 +106,16 @@ export function NexoIncapacidadeSection() {
             <div>
               <h2 className="text-lg font-semibold text-foreground">Análise da Incapacidade</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                O perito decide a estrutura técnica; a IA apenas redigirá as justificativas (Fase 5.8).
+                O perito decide a estrutura técnica; a IA redige a justificativa.
               </p>
             </div>
-            <AiStubButton label="Gerar justificativa global" />
+            <AiGenerateButton
+              laudoId={laudo.id}
+              campo="prev_incapacidade_global"
+              disabledReason={!inc.existe ? "Defina se existe incapacidade antes de gerar a justificativa." : null}
+              label="Gerar justificativa global"
+              onGenerated={(t) => updatePrevData("incapacidade", { justificativa: t })}
+            />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -205,7 +218,13 @@ export function NexoIncapacidadeSection() {
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <Label className="text-xs">Justificativa da DII</Label>
-              <AiStubButton label="Gerar justificativa da DII" />
+              <AiGenerateButton
+                laudoId={laudo.id}
+                campo="prev_dii_justificativa"
+                disabledReason={!inc.dii ? "Informe a DII antes de gerar a justificativa." : null}
+                label="Gerar justificativa da DII"
+                onGenerated={(t) => updatePrevData("incapacidade", { dii_justificativa: t })}
+              />
             </div>
             <Textarea
               rows={4}
