@@ -218,8 +218,12 @@ export function buildPrevBlocks(laudo: LaudoPrev): Block[] {
   cidsArr.forEach((c) => {
     if (c?.codigo) cidLines.push(`• ${c.codigo} — ${c.descricao || ""}`.trim());
   });
-  if (!isEmpty(l.descricao_tecnica_doencas))
-    cidLines.push(`\n${sanitizeText(l.descricao_tecnica_doencas)}`);
+  // Preferir o campo isolado previdenciário; cair no legado se vazio.
+  const descTec = !isEmpty(pd.cids_descricao_tecnica)
+    ? pd.cids_descricao_tecnica
+    : (l.descricao_tecnica_doencas || "");
+  if (!isEmpty(descTec))
+    cidLines.push(`\n${sanitizeText(descTec)}`);
   if (cidLines.length)
     blocks.push({ heading: "Diagnóstico (CID-10)", lines: cidLines });
 

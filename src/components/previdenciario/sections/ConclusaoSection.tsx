@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useLaudoPrev } from "@/contexts/previdenciario/LaudoPrevidenciarioContext";
-import { AiStubButton } from "./AiStubButton";
+import { AiGenerateButton } from "./AiGenerateButton";
 
 const PARECERES = [
   { v: "apto", l: "Apto — sem incapacidade laboral" },
@@ -35,7 +35,13 @@ export function ConclusaoSection() {
               Parecer final sintetizando a análise pericial.
             </p>
           </div>
-          <AiStubButton label="Gerar conclusão" />
+          <AiGenerateButton
+            laudoId={laudo.id}
+            campo="prev_conclusao"
+            disabledReason={!c.parecer ? "Selecione o parecer final antes de gerar a conclusão." : null}
+            label="Gerar conclusão"
+            onGenerated={(t) => updatePrevData("conclusao_prev", { texto_final: t })}
+          />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

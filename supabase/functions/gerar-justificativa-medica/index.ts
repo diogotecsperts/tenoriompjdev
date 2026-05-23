@@ -23,7 +23,20 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-type Campo = 'cid_descricao' | 'nexo_causal' | 'incapacidade' | 'conclusao' | 'destino' | 'referencias';
+type Campo =
+  | 'cid_descricao'
+  | 'nexo_causal'
+  | 'incapacidade'
+  | 'conclusao'
+  | 'destino'
+  | 'referencias'
+  // ===== Fase 5.8 — Previdenciário (Médico Decide / IA Redige) =====
+  | 'prev_cid_descricao'
+  | 'prev_nexo'
+  | 'prev_incapacidade_global'
+  | 'prev_dii_justificativa'
+  | 'prev_enquadramento'
+  | 'prev_conclusao';
 
 interface ReqBody {
   laudoId: string;
@@ -68,6 +81,43 @@ const FIELD_TO_PROMPT: Record<Campo, { id: string; description: string; cardId: 
     description: 'Referências Bibliográficas (geração sob demanda pelo médico, contextualizada)',
     cardId: 'conclusao',
     sectionId: 'referencias',
+  },
+  // ===== Previdenciário =====
+  prev_cid_descricao: {
+    id: 'prompt_gen_prev_cid_descricao',
+    description: 'PREV: Descrição técnica dos CIDs (sob demanda)',
+    cardId: 'analise-tecnica',
+    sectionId: 'cids',
+  },
+  prev_nexo: {
+    id: 'prompt_gen_prev_nexo',
+    description: 'PREV: Justificativa do nexo previdenciário (defende escolha do médico)',
+    cardId: 'analise-tecnica',
+    sectionId: 'nexo-prev',
+  },
+  prev_incapacidade_global: {
+    id: 'prompt_gen_prev_incapacidade_global',
+    description: 'PREV: Justificativa global da incapacidade (defende escolha do médico)',
+    cardId: 'analise-tecnica',
+    sectionId: 'incapacidade',
+  },
+  prev_dii_justificativa: {
+    id: 'prompt_gen_prev_dii_justificativa',
+    description: 'PREV: Justificativa da Data de Início da Incapacidade (DII)',
+    cardId: 'analise-tecnica',
+    sectionId: 'incapacidade',
+  },
+  prev_enquadramento: {
+    id: 'prompt_gen_prev_enquadramento',
+    description: 'PREV: Fundamentação técnico-jurídica do enquadramento legal escolhido',
+    cardId: 'analise-tecnica',
+    sectionId: 'enquadramento-legal',
+  },
+  prev_conclusao: {
+    id: 'prompt_gen_prev_conclusao',
+    description: 'PREV: Texto final da conclusão previdenciária amarrada às decisões',
+    cardId: 'conclusao',
+    sectionId: 'conclusao-prev',
   },
 };
 
@@ -199,6 +249,150 @@ PROIBIÇÕES:
 6. Português brasileiro com acentuação correta.
 
 FORMATO DE SAÍDA (texto puro, numerado "1- ", "2- ", ...):`,
+
+  // ===================== PREVIDENCIÁRIO =====================
+
+  prev_cid_descricao: `Você é médico-perito judicial atuando em perícia PREVIDENCIÁRIA. O médico digitou os seguintes CIDs:
+
+CIDs informados pelo médico: \${cidsManuais}
+
+ESCOPO ESTRITO:
+Apenas descreva tecnicamente cada patologia listada conforme literatura médica. É PROIBIDO concluir sobre incapacidade, nexo previdenciário ou opinar sobre o caso concreto.
+
+Para CADA CID, em texto técnico contínuo (sem markdown, sem bullets, sem negrito):
+- Definição da patologia
+- Etiologia
+- Quadro clínico característico
+- Impacto funcional típico (em termos GENÉRICOS da literatura, jamais aplicado ao periciando)
+
+Contexto auxiliar (apenas referência, não inventar):
+- História clínica: \${historiaClinicaPrev}
+- História laboral: \${historiaLaboralPrev}
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown, sem asteriscos, sem bullets.
+3. Não invente dados clínicos do periciando.
+4. Português brasileiro com acentuação correta.`,
+
+  prev_nexo: `Você está REDIGINDO a fundamentação técnica do nexo previdenciário JÁ DECIDIDO pelo médico-perito. Não questione a decisão.
+
+DECISÃO DO MÉDICO sobre nexo previdenciário: "\${nexoEscolhido}"
+(Categorias possíveis: comum, técnico/NTEP, profissional/ocupacional, ausência de nexo.)
+
+Tarefa: redigir, em linguagem técnica médico-pericial, a justificativa que SUSTENTA essa decisão à luz da Lei 8.213/91 (art. 21-A — NTEP), Decreto 3.048/99, e quando cabível dos critérios de Schilling, Bradford-Hill e Simonin.
+
+Dados do caso:
+- CIDs: \${cidsLista}
+- História clínica previdenciária: \${historiaClinicaPrev}
+- História laboral previdenciária: \${historiaLaboralPrev}
+- Qualidade de segurado: \${qualidadeSegurado}
+- Última atividade: \${ultimaAtividade}
+- Exame físico: \${exameFisico}
+- Exames complementares: \${examesComplementares}
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown, sem bullets, sem negrito.
+3. Não inventar dados — se faltar informação, formulação prudente.
+4. Português brasileiro com acentuação correta.
+5. Mínimo 2 parágrafos.`,
+
+  prev_incapacidade_global: `Você está REDIGINDO a justificativa técnica global da incapacidade laboral JÁ DECIDIDA pelo médico-perito em perícia previdenciária. Não contradiga a decisão.
+
+DECISÕES DO MÉDICO (use como tese):
+- Existe incapacidade? "\${incExiste}"
+- Tipo: "\${incTipo}" (temporária / permanente)
+- Grau: "\${incGrau}" (parcial / total)
+- Abrangência: "\${incAbrangencia}" (uniprofissional / multiprofissional / omniprofissional)
+- Suscetível à reabilitação: "\${incReabilitacao}"
+- Necessita auxílio de terceiros: "\${incAuxilio}"
+
+Tarefa: redigir a fundamentação que SUSTENTA essa combinação, correlacionando-a com as limitações funcionais documentadas e com a natureza das atividades laborais. Aborde a abrangência (a capacidade alcança apenas a atual atividade, várias atividades ou qualquer atividade) e a possibilidade de reabilitação profissional.
+
+Dados clínicos de apoio:
+- CIDs: \${cidsLista}
+- História clínica previdenciária: \${historiaClinicaPrev}
+- História laboral previdenciária: \${historiaLaboralPrev}
+- Exame físico: \${exameFisico}
+- Tratamentos: \${tratamentos}
+- Afastamentos: \${afastamentos}
+- Última atividade: \${ultimaAtividade}
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown.
+3. Não invente dados.
+4. Português brasileiro com acentuação correta.
+5. Mínimo 2 parágrafos.`,
+
+  prev_dii_justificativa: `Você está REDIGINDO a fundamentação técnica da Data de Início da Incapacidade (DII) JÁ FIXADA pelo médico-perito.
+
+DECISÃO DO MÉDICO:
+- DII fixada: "\${incDII}"
+- Tipo de incapacidade: "\${incTipo}"
+- Grau: "\${incGrau}"
+
+Tarefa: redigir em parágrafo técnico a fundamentação da DII, ancorando-a em marcos clínicos objetivos (primeiro atestado, primeiro afastamento, exame de imagem ou laboratorial, internação, cirurgia, agravamento documentado). Se não houver marco objetivo, fundamentar pelo conjunto probatório clínico e exame pericial atual.
+
+Dados de apoio:
+- CIDs: \${cidsLista}
+- História clínica previdenciária: \${historiaClinicaPrev}
+- Tratamentos: \${tratamentos}
+- Afastamentos: \${afastamentos}
+- Exames complementares: \${examesComplementares}
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown, sem bullets.
+3. Não invente datas — use apenas as presentes no contexto ou formulação prudente.
+4. Português brasileiro com acentuação correta.
+5. 1 a 2 parágrafos.`,
+
+  prev_enquadramento: `Você está redigindo a FUNDAMENTAÇÃO TÉCNICO-JURÍDICA do enquadramento legal selecionado pelo médico-perito em perícia previdenciária.
+
+LEIS APLICÁVEIS SELECIONADAS PELO MÉDICO: \${leisAplicaveis}
+
+Tarefa: articular, em texto técnico contínuo, a correlação entre os achados periciais e cada dispositivo legal selecionado. Para cada dispositivo, esclareça por que os requisitos legais estão ou não preenchidos à luz das decisões já tomadas.
+
+Decisões já tomadas (use como base — não contradiga):
+- Existe incapacidade: \${incExiste} / Tipo: \${incTipo} / Grau: \${incGrau} / Abrangência: \${incAbrangencia}
+- Tipo de nexo: \${nexoEscolhido}
+- Suscetível à reabilitação: \${incReabilitacao}
+- Auxílio de terceiros: \${incAuxilio}
+- CIDs: \${cidsLista}
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown, sem bullets, sem negrito.
+3. Não invente dispositivos legais além dos selecionados.
+4. Português brasileiro com acentuação correta.
+5. 2 a 4 parágrafos.`,
+
+  prev_conclusao: `Você está redigindo o TEXTO FINAL DA CONCLUSÃO previdenciária, AMARRANDO todas as decisões já tomadas pelo médico-perito.
+
+DECISÕES DO MÉDICO (use como tese — não contradiga):
+- Parecer final: "\${parecerFinal}"
+- Benefício recomendado: "\${beneficioRecomendado}"
+- Existe incapacidade: \${incExiste} / Tipo: \${incTipo} / Grau: \${incGrau} / Abrangência: \${incAbrangencia}
+- DII: \${incDII}
+- Suscetível à reabilitação: \${incReabilitacao}
+- Auxílio de terceiros: \${incAuxilio}
+- Tipo de nexo: \${nexoEscolhido}
+- CIDs confirmados: \${cidsLista}
+
+Justificativas já redigidas (use para integrar coerentemente):
+- Justificativa do nexo: \${nexoJustificativa}
+- Justificativa da incapacidade: \${incapacidadeJustificativa}
+- Fundamentação do enquadramento: \${enquadramentoFundamentacao}
+
+Tarefa: sintetizar em texto técnico-pericial contínuo a conclusão final do laudo previdenciário, integrando todas as decisões acima de forma harmônica e indicando objetivamente o destino do periciando (apto / reabilitação / auxílio-doença / aposentadoria por invalidez / BPC etc.) conforme o parecer final escolhido.
+
+Restrições absolutas:
+1. Não use a expressão "IA".
+2. Sem markdown, sem bullets.
+3. Português brasileiro com acentuação correta.
+4. Máximo 4 parágrafos.`,
 };
 
 const SYSTEM_PROMPT =
@@ -238,13 +432,28 @@ function buildContext(laudo: any, body: ReqBody): Record<string, string> {
     ? asString(body.escolha)
     : (laudo.nexo_causal_tipo || '');
 
+  // ===== Previdenciário: extrair do prev_data =====
+  const prev = (laudo.prev_data && typeof laudo.prev_data === 'object') ? laudo.prev_data : {};
+  const pInc = prev.incapacidade || {};
+  const pNexo = prev.nexo || {};
+  const pEnq = prev.enquadramento || {};
+  const pConc = prev.conclusao_prev || {};
+  const pSeg = prev.segurado || {};
+  const pBen = prev.beneficio || {};
+
+  // Para campos prev_*, a escolha do médico vem por prev_data (não por body.escolha),
+  // pois o salvamento automático já persiste antes da geração.
+  const isPrev = body.campo.startsWith('prev_');
+  const prevNexoEscolhido = isPrev ? (pNexo.tipo || '') : '';
+  const leisAplicaveis = Array.isArray(pEnq.leis_aplicaveis) ? pEnq.leis_aplicaveis.join('; ') : '';
+
   return {
     cidsManuais,
     cidsLista,
-    nexoEscolhido,
-    nexoJustificativa: laudo.nexo_causal_justificativa || '',
+    nexoEscolhido: isPrev ? prevNexoEscolhido : nexoEscolhido,
+    nexoJustificativa: isPrev ? (pNexo.justificativa || '') : (laudo.nexo_causal_justificativa || ''),
     tipoIncapacidadeEscolhido,
-    incapacidadeJustificativa: laudo.analise_incapacidade_laboral || '',
+    incapacidadeJustificativa: isPrev ? (pInc.justificativa || '') : (laudo.analise_incapacidade_laboral || ''),
     historiaAtual: laudo.historia_atual || '',
     historiaAcidente: laudo.historia_acidente || '',
     historicoOcupacional: laudo.historico_ocupacional || '',
@@ -255,6 +464,24 @@ function buildContext(laudo: any, body: ReqBody): Record<string, string> {
     atividadesLaborais: laudo.descricao_atividades_laborais || '',
     postoTrabalho: laudo.descricao_posto_trabalho || laudo.descricao_atividades_laborais || '',
     conclusaoMedica: laudo.conclusao_analise || '',
+
+    // ----- Previdenciário -----
+    historiaClinicaPrev: prev.historia_clinica_prev || '',
+    historiaLaboralPrev: prev.historia_laboral_prev || '',
+    qualidadeSegurado: pSeg.qualidade_segurado || '',
+    ultimaAtividade: pSeg.ultima_atividade || '',
+    incExiste: pInc.existe || '',
+    incTipo: pInc.tipo || '',
+    incGrau: pInc.grau || '',
+    incAbrangencia: pInc.abrangencia || '',
+    incDII: pInc.dii || '',
+    incReabilitacao: pInc.susceptivel_reabilitacao || '',
+    incAuxilio: pInc.necessita_auxilio_terceiros || '',
+    leisAplicaveis,
+    enquadramentoFundamentacao: pEnq.fundamentacao || '',
+    parecerFinal: pConc.parecer || '',
+    beneficioRecomendado: pConc.beneficio_recomendado || '',
+    beneficioTipo: pBen.tipo || '',
   };
 }
 
@@ -323,7 +550,8 @@ serve(async (req) => {
         historia_atual, historia_acidente, historico_ocupacional,
         exame_fisico, exames_complementares,
         tratamentos, afastamentos,
-        descricao_atividades_laborais, descricao_posto_trabalho
+        descricao_atividades_laborais, descricao_posto_trabalho,
+        prev_data
       `)
       .eq('id', body.laudoId)
       .single();
@@ -347,6 +575,61 @@ serve(async (req) => {
         return new Response(JSON.stringify({ error: 'Preencha ao menos os CIDs ou a Conclusão antes de gerar referências.' }), {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
+      }
+    }
+
+    // ===== Validações pós-load para campos PREVIDENCIÁRIOS =====
+    if (body.campo.startsWith('prev_')) {
+      const prev = (laudo as any).prev_data || {};
+      const pInc = prev.incapacidade || {};
+      const pNexo = prev.nexo || {};
+      const pEnq = prev.enquadramento || {};
+      const pConc = prev.conclusao_prev || {};
+      const hasCids = Array.isArray(laudo.cids_selecionados) && laudo.cids_selecionados.length > 0;
+
+      switch (body.campo) {
+        case 'prev_cid_descricao':
+          if ((!body.cidsManuais || body.cidsManuais.length === 0) && !hasCids) {
+            return new Response(JSON.stringify({ error: 'Adicione ao menos um CID antes de gerar a descrição.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          break;
+        case 'prev_nexo':
+          if (!pNexo.tipo) {
+            return new Response(JSON.stringify({ error: 'Selecione o tipo de nexo previdenciário antes de gerar a justificativa.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          break;
+        case 'prev_incapacidade_global':
+          if (!pInc.existe) {
+            return new Response(JSON.stringify({ error: 'Defina se existe incapacidade antes de gerar a justificativa.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          break;
+        case 'prev_dii_justificativa':
+          if (!pInc.dii) {
+            return new Response(JSON.stringify({ error: 'Informe a DII antes de gerar a justificativa.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          break;
+        case 'prev_enquadramento':
+          if (!Array.isArray(pEnq.leis_aplicaveis) || pEnq.leis_aplicaveis.length === 0) {
+            return new Response(JSON.stringify({ error: 'Selecione ao menos uma lei aplicável antes de gerar a fundamentação.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          break;
+        case 'prev_conclusao':
+          if (!pConc.parecer) {
+            return new Response(JSON.stringify({ error: 'Selecione o parecer final antes de gerar a conclusão.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          break;
       }
     }
 

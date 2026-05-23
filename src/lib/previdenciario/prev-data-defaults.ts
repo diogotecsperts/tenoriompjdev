@@ -78,6 +78,7 @@ export interface PrevData {
     autor: string;
     inss: string;
   };
+  cids_descricao_tecnica: string;
 }
 
 export function getDefaultPrevData(): PrevData {
@@ -118,6 +119,7 @@ export function getDefaultPrevData(): PrevData {
     enquadramento: { leis_aplicaveis: [], fundamentacao: "" },
     conclusao_prev: { parecer: "", beneficio_recomendado: "", texto_final: "" },
     quesitos: { juizo: "", autor: "", inss: "" },
+    cids_descricao_tecnica: "",
   };
 }
 
