@@ -142,40 +142,66 @@ export default function Hub() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
           {MODULES.map((mod) => {
             const enabled = allowed.has(mod.id);
+            const isPrev = mod.id === "previdenciario";
             const Icon = mod.icon;
             return (
               <Card
                 key={mod.id}
                 className={cn(
                   "transition-all border-2 h-full",
-                  enabled
+                  enabled && !isPrev
                     ? "hover:border-primary hover:shadow-lg cursor-pointer"
-                    : "opacity-60 border-dashed cursor-not-allowed"
+                    : isPrev
+                      ? "opacity-70 border-dashed cursor-not-allowed"
+                      : "opacity-60 border-dashed cursor-not-allowed"
                 )}
-                onClick={() => enabled && navigate(mod.route)}
+                onClick={() => enabled && !isPrev && navigate(mod.route)}
               >
                 <CardContent className="p-8 flex flex-col h-full">
                   <div className="flex items-start justify-between mb-6">
                     <div
                       className={cn(
                         "h-14 w-14 rounded-2xl flex items-center justify-center",
-                        enabled ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+                        isPrev
+                          ? "bg-muted text-muted-foreground"
+                          : enabled
+                            ? "bg-primary/10 text-primary"
+                            : "bg-muted text-muted-foreground"
                       )}
                     >
                       <Icon className="h-7 w-7" />
                     </div>
-                    {!enabled && (
+                    {isPrev ? (
+                      <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                        </span>
+                        Em construção
+                      </div>
+                    ) : !enabled ? (
                       <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted px-2.5 py-1 rounded-full">
                         <Lock className="h-3 w-3" />
                         Bloqueado
                       </div>
-                    )}
+                    ) : null}
                   </div>
-                  <h3 className="text-xl font-bold text-foreground mb-2">{mod.title}</h3>
+                  <h3 className="text-xl font-bold text-foreground mb-2">
+                    {mod.title}
+                    {isPrev && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground align-middle">
+                        (beta)
+                      </span>
+                    )}
+                  </h3>
                   <p className="text-sm text-muted-foreground leading-relaxed mb-6 flex-1">
                     {mod.description}
                   </p>
-                  {enabled ? (
+                  {isPrev ? (
+                    <Button className="w-full" variant="secondary" disabled>
+                      Módulo em construção
+                    </Button>
+                  ) : enabled ? (
                     <Button className="w-full" variant="default">
                       Acessar módulo
                       <ArrowRight className="ml-2 h-4 w-4" />
