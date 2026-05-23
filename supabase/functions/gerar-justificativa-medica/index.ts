@@ -578,7 +578,61 @@ serve(async (req) => {
       }
     }
 
-    const meta = FIELD_TO_PROMPT[body.campo];
+    // ===== Validações pós-load para campos PREVIDENCIÁRIOS =====
+    if (body.campo.startsWith('prev_')) {
+      const prev = (laudo as any).prev_data || {};
+      const pInc = prev.incapacidade || {};
+      const pNexo = prev.nexo || {};
+      const pEnq = prev.enquadramento || {};
+      const pConc = prev.conclusao_prev || {};
+      const hasCids = Array.isArray(laudo.cids_selecionados) && laudo.cids_selecionados.length > 0;
+
+      switch (body.campo) {
+        case 'prev_cid_descricao':
+          if ((!body.cidsManuais || body.cidsManuais.length === 0) && !hasCids) {
+            return new Response(JSON.stringify({ error: 'Adicione ao menos um CID antes de gerar a descrição.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          break;
+        case 'prev_nexo':
+          if (!pNexo.tipo) {
+            return new Response(JSON.stringify({ error: 'Selecione o tipo de nexo previdenciário antes de gerar a justificativa.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          break;
+        case 'prev_incapacidade_global':
+          if (!pInc.existe) {
+            return new Response(JSON.stringify({ error: 'Defina se existe incapacidade antes de gerar a justificativa.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          break;
+        case 'prev_dii_justificativa':
+          if (!pInc.dii) {
+            return new Response(JSON.stringify({ error: 'Informe a DII antes de gerar a justificativa.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          break;
+        case 'prev_enquadramento':
+          if (!Array.isArray(pEnq.leis_aplicaveis) || pEnq.leis_aplicaveis.length === 0) {
+            return new Response(JSON.stringify({ error: 'Selecione ao menos uma lei aplicável antes de gerar a fundamentação.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          break;
+        case 'prev_conclusao':
+          if (!pConc.parecer) {
+            return new Response(JSON.stringify({ error: 'Selecione o parecer final antes de gerar a conclusão.' }), {
+              status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+          }
+          break;
+      }
+    }
+
     const ctx = buildContext(laudo, body);
 
     const interpolatedPrompt = await getPrompt(
