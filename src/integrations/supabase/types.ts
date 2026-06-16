@@ -674,6 +674,139 @@ export type Database = {
         }
         Relationships: []
       }
+      prev_documentos: {
+        Row: {
+          created_at: string
+          data: string | null
+          id: string
+          ordem: number
+          pericia_id: string
+          resumo: string | null
+          tipo: string
+          trecho_original: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          data?: string | null
+          id?: string
+          ordem?: number
+          pericia_id: string
+          resumo?: string | null
+          tipo: string
+          trecho_original?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          data?: string | null
+          id?: string
+          ordem?: number
+          pericia_id?: string
+          resumo?: string | null
+          tipo?: string
+          trecho_original?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prev_documentos_pericia_id_fkey"
+            columns: ["pericia_id"]
+            isOneToOne: false
+            referencedRelation: "prev_pericias"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prev_pautas: {
+        Row: {
+          cidade: string | null
+          created_at: string
+          data: string
+          id: string
+          local: string
+          observacoes: string | null
+          uf: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          cidade?: string | null
+          created_at?: string
+          data: string
+          id?: string
+          local: string
+          observacoes?: string | null
+          uf?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          cidade?: string | null
+          created_at?: string
+          data?: string
+          id?: string
+          local?: string
+          observacoes?: string | null
+          uf?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      prev_pericias: {
+        Row: {
+          created_at: string
+          id: string
+          ordem: number
+          pauta_id: string
+          pdf_path: string | null
+          pdf_processado: boolean
+          periciado_nome: string | null
+          prelaudo_data: Json
+          prev_extracao: Json
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          ordem?: number
+          pauta_id: string
+          pdf_path?: string | null
+          pdf_processado?: boolean
+          periciado_nome?: string | null
+          prelaudo_data?: Json
+          prev_extracao?: Json
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          ordem?: number
+          pauta_id?: string
+          pdf_path?: string | null
+          pdf_processado?: boolean
+          periciado_nome?: string | null
+          prelaudo_data?: Json
+          prev_extracao?: Json
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prev_pericias_pauta_id_fkey"
+            columns: ["pauta_id"]
+            isOneToOne: false
+            referencedRelation: "prev_pautas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
