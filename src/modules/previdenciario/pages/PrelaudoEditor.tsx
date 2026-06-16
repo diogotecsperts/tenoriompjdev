@@ -266,17 +266,10 @@ export default function PrelaudoEditor() {
               <span className="text-xs text-muted-foreground">
                 Etapa {currentDef.ordem} de {PRELAUDO_STEPS.length}
               </span>
-              <Button size="sm" onClick={goNext} disabled={currentIdx >= 4}>
+              <Button size="sm" onClick={goNext} disabled={currentIdx >= PRELAUDO_STEPS.length - 1}>
                 Próxima <ChevronRight className="h-4 w-4 ml-1" />
               </Button>
             </div>
-
-            {currentIdx >= 4 && (
-              <Card className="mt-6 p-4 border-dashed flex items-center gap-3 text-sm text-muted-foreground">
-                <Construction className="h-5 w-5 text-amber-500 shrink-0" />
-                As etapas 6 a 10 (estado mental, ectoscopia, ortopédico, CID, conclusão) serão entregues na Fase E.
-              </Card>
-            )}
           </div>
         </div>
 
