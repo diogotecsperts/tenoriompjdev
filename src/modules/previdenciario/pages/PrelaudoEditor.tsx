@@ -11,11 +11,13 @@ import {
   ChevronRight,
   Sparkles,
   Construction,
+  FileDown,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-import { getPericia, updatePericia, setPericiaStatus } from "../api/pautas";
+import { getPericia, updatePericia, setPericiaStatus, getPauta } from "../api/pautas";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
-import type { PrevPericia } from "../types";
+import type { PrevPericia, PrevPauta } from "../types";
+import { downloadPrelaudoPdf } from "../lib/export/prelaudo-pdf";
 import {
   PRELAUDO_STEPS,
   EMPTY_PRELAUDO,
