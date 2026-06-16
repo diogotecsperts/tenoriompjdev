@@ -57,49 +57,33 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ModuleProtectedRoute module="previdenciario">
-              <PrevidenciarioLayout>
-                <PrevidenciarioHome />
-              </PrevidenciarioLayout>
+              <PrevLayout>
+                <PautaList />
+              </PrevLayout>
             </ModuleProtectedRoute>
           </ProtectedRoute>
         }
       />
       <Route
-        path="/previdenciario/historico"
+        path="/previdenciario/pauta/:pautaId"
         element={
           <ProtectedRoute>
             <ModuleProtectedRoute module="previdenciario">
-              <PrevidenciarioLayout>
-                <PrevidenciarioHistorico />
-              </PrevidenciarioLayout>
+              <PrevLayout>
+                <PautaDetalhe />
+              </PrevLayout>
             </ModuleProtectedRoute>
           </ProtectedRoute>
         }
       />
       <Route
-        path="/previdenciario/laudo/new"
+        path="/previdenciario/pericia/:periciaId"
         element={
           <ProtectedRoute>
             <ModuleProtectedRoute module="previdenciario">
-              <LaudoPrevidenciarioProvider>
-                <PrevidenciarioLayout>
-                  <NewPrevidenciarioLaudo />
-                </PrevidenciarioLayout>
-              </LaudoPrevidenciarioProvider>
-            </ModuleProtectedRoute>
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/previdenciario/laudo/:id"
-        element={
-          <ProtectedRoute>
-            <ModuleProtectedRoute module="previdenciario">
-              <LaudoPrevidenciarioProvider>
-                <PrevidenciarioLayout>
-                  <PrevidenciarioLaudoEditor />
-                </PrevidenciarioLayout>
-              </LaudoPrevidenciarioProvider>
+              <PrevLayout>
+                <PrelaudoEditor />
+              </PrevLayout>
             </ModuleProtectedRoute>
           </ProtectedRoute>
         }
