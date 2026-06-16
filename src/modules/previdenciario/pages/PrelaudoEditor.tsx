@@ -258,6 +258,10 @@ export default function PrelaudoEditor() {
           )}
         </div>
 
+        <Button variant="outline" size="sm" onClick={handleExportPdf}>
+          <FileDown className="h-4 w-4 mr-1.5" /> Exportar PDF
+        </Button>
+
         <Button
           variant="default"
           size="sm"
