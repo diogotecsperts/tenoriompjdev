@@ -30,6 +30,11 @@ import { Step02Queixa } from "../components/steps/Step02Queixa";
 import { Step03Medicacao } from "../components/steps/Step03Medicacao";
 import { Step04Acompanhamento } from "../components/steps/Step04Acompanhamento";
 import { Step05Comorbidades } from "../components/steps/Step05Comorbidades";
+import { Step06EstadoMental } from "../components/steps/Step06EstadoMental";
+import { Step07Ectoscopia } from "../components/steps/Step07Ectoscopia";
+import { Step08Ortopedico } from "../components/steps/Step08Ortopedico";
+import { Step09Cid } from "../components/steps/Step09Cid";
+import { Step10Conclusao } from "../components/steps/Step10Conclusao";
 
 const AUTOSAVE_MS = 900;
 
