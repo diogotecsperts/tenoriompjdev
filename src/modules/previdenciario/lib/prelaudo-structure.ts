@@ -200,6 +200,11 @@ export function mergeFromExtracao(
     medicacao: { itens: [], ...(current?.medicacao || {}) },
     acompanhamento: { ...(current?.acompanhamento || {}) },
     comorbidades: { lista: [], ...(current?.comorbidades || {}) },
+    estado_mental: { ...(current?.estado_mental || {}) },
+    ectoscopia: { ...(current?.ectoscopia || {}) },
+    exame_ortopedico: { ...(current?.exame_ortopedico || {}) },
+    cid: { itens: [], ...(current?.cid || {}) },
+    conclusao: { ...(current?.conclusao || {}) },
   };
   if (!extracao) return base;
 
