@@ -29,12 +29,74 @@ export const PRELAUDO_STEPS: StepDef[] = [
   { id: "medicacao",         ordem: 3,  label: "Medicação em uso",     short: "Medicação", implemented: true  },
   { id: "acompanhamento",    ordem: 4,  label: "Acompanhamento médico",short: "Acomp.",    implemented: true  },
   { id: "comorbidades",      ordem: 5,  label: "Comorbidades",         short: "Comorb.",   implemented: true  },
-  { id: "estado_mental",     ordem: 6,  label: "Estado mental",        short: "Mental",    implemented: false },
-  { id: "ectoscopia",        ordem: 7,  label: "Ectoscopia / Geral",   short: "Ectosc.",   implemented: false },
-  { id: "exame_ortopedico",  ordem: 8,  label: "Exame ortopédico",     short: "Ortop.",    implemented: false },
-  { id: "cid",               ordem: 9,  label: "CID-10",               short: "CID",       implemented: false },
-  { id: "conclusao",         ordem: 10, label: "Conclusão",            short: "Concl.",    implemented: false },
+  { id: "estado_mental",     ordem: 6,  label: "Estado mental",        short: "Mental",    implemented: true  },
+  { id: "ectoscopia",        ordem: 7,  label: "Ectoscopia / Geral",   short: "Ectosc.",   implemented: true  },
+  { id: "exame_ortopedico",  ordem: 8,  label: "Exame ortopédico",     short: "Ortop.",    implemented: true  },
+  { id: "cid",               ordem: 9,  label: "CID-10",               short: "CID",       implemented: true  },
+  { id: "conclusao",         ordem: 10, label: "Conclusão",            short: "Concl.",    implemented: true  },
 ];
+
+// ---------- Steps 6-10 schemas ----------
+
+export interface EstadoMentalData {
+  orientacao: string;          // orientado / desorientado
+  humor: string;               // eutímico / deprimido / ansioso
+  afeto: string;
+  pensamento: string;          // curso, conteúdo
+  memoria: string;
+  atencao: string;
+  juizo_critica: string;
+  observacoes: string;
+}
+
+export interface EctoscopiaData {
+  estado_geral: string;        // bom / regular / mau
+  hidratacao: string;
+  corado: string;
+  acianotico: string;
+  anicterico: string;
+  marcha: string;
+  postura: string;
+  peso: string;
+  altura: string;
+  imc: string;
+  pressao_arterial: string;
+  observacoes: string;
+}
+
+export interface ExameOrtopedicoData {
+  segmento_avaliado: string;   // cervical, lombar, ombro D, joelho E, etc.
+  inspecao: string;
+  palpacao: string;
+  amplitude_movimento: string;
+  forca_muscular: string;      // grau 0-5
+  reflexos: string;
+  testes_especiais: string;
+  manobras: string;
+  observacoes: string;
+}
+
+export interface CidItem {
+  codigo: string;              // ex: M54.5
+  descricao: string;
+  principal: boolean;
+}
+export interface CidData {
+  itens: CidItem[];
+  observacoes: string;
+}
+
+export interface ConclusaoData {
+  diagnostico: string;
+  nexo_causal: "sim" | "nao" | "parcial" | "";
+  nexo_justificativa: string;
+  incapacidade: "total" | "parcial" | "ausente" | "";
+  temporalidade: "temporaria" | "permanente" | "";
+  data_inicio_incapacidade: string;
+  prazo_reavaliacao: string;
+  reabilitacao_indicada: "sim" | "nao" | "";
+  consideracoes_finais: string;
+}
 
 // =====================================================================
 // Schema do prelaudo_data (jsonb persistido em prev_pericias)
