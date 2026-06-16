@@ -251,5 +251,20 @@ export function mergeFromExtracao(
     base.comorbidades.texto = extracao.comorbidades;
   }
 
+  // CIDs sugeridos pela IA
+  if ((!base.cid.itens || base.cid.itens.length === 0) && Array.isArray(extracao.cids)) {
+    base.cid.itens = extracao.cids.map((c: any, i: number) => {
+      if (typeof c === "string") {
+        const m = c.match(/^([A-Z]\d{2}(?:\.\d)?)\s*[-–:]?\s*(.*)$/);
+        return { codigo: m?.[1] || c, descricao: m?.[2] || "", principal: i === 0 };
+      }
+      return {
+        codigo: c?.codigo || "",
+        descricao: c?.descricao || "",
+        principal: c?.principal ?? i === 0,
+      };
+    });
+  }
+
   return base;
 }
