@@ -210,9 +210,25 @@ export default function PautaDetalhe() {
             )}
           </div>
 
-          <Button onClick={() => setNovaOpen(true)}>
-            <Plus className="h-4 w-4 mr-1.5" /> Nova perícia
-          </Button>
+          <div className="flex items-center gap-2">
+            {pendentes.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={() => void handleProcessarLote()}
+                disabled={processandoLote}
+              >
+                {processandoLote ? (
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4 mr-1.5" />
+                )}
+                Processar pendentes ({pendentes.length})
+              </Button>
+            )}
+            <Button onClick={() => setNovaOpen(true)}>
+              <Plus className="h-4 w-4 mr-1.5" /> Nova perícia
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -300,6 +316,24 @@ export default function PautaDetalhe() {
                     {p.pdf_path ? "Trocar PDF" : "Anexar PDF"}
                   </span>
                 </label>
+
+                {p.pdf_path && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-[11px]"
+                    onClick={() => void handleProcessar(p)}
+                    disabled={processandoIds.has(p.id) || processandoLote}
+                    title={p.pdf_processado ? "Reprocessar com IA" : "Processar com IA"}
+                  >
+                    {processandoIds.has(p.id) ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5 mr-1" />
+                    )}
+                    {p.pdf_processado ? "Reprocessar" : "Processar"}
+                  </Button>
+                )}
 
                 <Button
                   variant="ghost"
