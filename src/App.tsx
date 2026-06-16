@@ -17,12 +17,10 @@ import Login from "./pages/Login";
 import Hub from "./pages/Hub";
 import Dashboard from "./pages/Dashboard";
 import Historico from "./pages/Historico";
-import PrevidenciarioHome from "./pages/previdenciario/PrevidenciarioHome";
-import PrevidenciarioHistorico from "./pages/previdenciario/PrevidenciarioHistorico";
-import PrevidenciarioLaudoEditor from "./pages/previdenciario/PrevidenciarioLaudoEditor";
-import NewPrevidenciarioLaudo from "./pages/previdenciario/NewPrevidenciarioLaudo";
-import { PrevidenciarioLayout } from "./components/previdenciario/PrevidenciarioLayout";
-import { LaudoPrevidenciarioProvider } from "./contexts/previdenciario/LaudoPrevidenciarioContext";
+import PautaList from "./modules/previdenciario/pages/PautaList";
+import PautaDetalhe from "./modules/previdenciario/pages/PautaDetalhe";
+import PrelaudoEditor from "./modules/previdenciario/pages/PrelaudoEditor";
+import { PrevLayout } from "./modules/previdenciario/components/PrevLayout";
 
 import LaudoEditor from "./pages/LaudoEditor";
 import Configuracoes from "./pages/Configuracoes";
