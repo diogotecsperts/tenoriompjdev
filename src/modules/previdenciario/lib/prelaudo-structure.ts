@@ -163,12 +163,11 @@ export interface PrelaudoData {
   medicacao: Partial<MedicacaoData>;
   acompanhamento: Partial<AcompanhamentoData>;
   comorbidades: Partial<ComorbidadesData>;
-  // Steps 6-10 (placeholders para Fase E)
-  estado_mental?: Record<string, any>;
-  ectoscopia?: Record<string, any>;
-  exame_ortopedico?: Record<string, any>;
-  cid?: Record<string, any>;
-  conclusao?: Record<string, any>;
+  estado_mental: Partial<EstadoMentalData>;
+  ectoscopia: Partial<EctoscopiaData>;
+  exame_ortopedico: Partial<ExameOrtopedicoData>;
+  cid: Partial<CidData>;
+  conclusao: Partial<ConclusaoData>;
 }
 
 export const EMPTY_PRELAUDO: PrelaudoData = {
@@ -177,6 +176,11 @@ export const EMPTY_PRELAUDO: PrelaudoData = {
   medicacao: { itens: [] },
   acompanhamento: {},
   comorbidades: { lista: [] },
+  estado_mental: {},
+  ectoscopia: {},
+  exame_ortopedico: {},
+  cid: { itens: [] },
+  conclusao: {},
 };
 
 /**
