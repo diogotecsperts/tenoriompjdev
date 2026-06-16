@@ -11,11 +11,13 @@ import {
   ChevronRight,
   Sparkles,
   Construction,
+  FileDown,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-import { getPericia, updatePericia, setPericiaStatus } from "../api/pautas";
+import { getPericia, updatePericia, setPericiaStatus, getPauta } from "../api/pautas";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
-import type { PrevPericia } from "../types";
+import type { PrevPericia, PrevPauta } from "../types";
+import { downloadPrelaudoPdf } from "../lib/export/prelaudo-pdf";
 import {
   PRELAUDO_STEPS,
   EMPTY_PRELAUDO,
@@ -43,6 +45,7 @@ export default function PrelaudoEditor() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [pericia, setPericia] = useState<PrevPericia | null>(null);
+  const [pauta, setPauta] = useState<PrevPauta | null>(null);
   const [data, setData] = useState<PrelaudoData>(EMPTY_PRELAUDO);
   const [currentStep, setCurrentStep] = useState<StepId>("identificacao");
   const [savedAt, setSavedAt] = useState<Date | null>(null);
@@ -68,6 +71,7 @@ export default function PrelaudoEditor() {
           p.prev_extracao as Record<string, any>,
         );
         setData(initial);
+        getPauta(p.pauta_id).then(setPauta).catch(() => {});
       } catch (err: any) {
         toast({ variant: "destructive", title: "Erro", description: err.message });
       } finally {
@@ -127,6 +131,25 @@ export default function PrelaudoEditor() {
       toast({ title: "Perícia concluída" });
     } catch (err: any) {
       toast({ variant: "destructive", title: "Erro", description: err.message });
+    }
+  };
+
+  const handleExportPdf = async () => {
+    if (!pericia) return;
+    try {
+      await persist();
+      const localStr = pauta
+        ? [pauta.local, pauta.cidade, pauta.uf].filter(Boolean).join(" — ")
+        : "";
+      downloadPrelaudoPdf(data, {
+        periciado: pericia.periciado_nome || data.identificacao?.nome || "",
+        dataPericia: pauta?.data || new Date().toISOString().slice(0, 10),
+        local: localStr,
+        numeroProcesso: data.identificacao?.numero_processo || "",
+      });
+      toast({ title: "PDF gerado" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Erro ao exportar", description: err.message });
     }
   };
 
@@ -234,6 +257,10 @@ export default function PrelaudoEditor() {
             <span>—</span>
           )}
         </div>
+
+        <Button variant="outline" size="sm" onClick={handleExportPdf}>
+          <FileDown className="h-4 w-4 mr-1.5" /> Exportar PDF
+        </Button>
 
         <Button
           variant="default"
