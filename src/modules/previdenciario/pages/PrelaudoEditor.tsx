@@ -331,6 +331,49 @@ function renderStep(
           }
         />
       );
+    case "estado_mental":
+      return (
+        <Step06EstadoMental
+          value={data.estado_mental}
+          onChange={(patch) =>
+            setData((d) => ({ ...d, estado_mental: { ...d.estado_mental, ...patch } }))
+          }
+        />
+      );
+    case "ectoscopia":
+      return (
+        <Step07Ectoscopia
+          value={data.ectoscopia}
+          onChange={(patch) =>
+            setData((d) => ({ ...d, ectoscopia: { ...d.ectoscopia, ...patch } }))
+          }
+        />
+      );
+    case "exame_ortopedico":
+      return (
+        <Step08Ortopedico
+          value={data.exame_ortopedico}
+          onChange={(patch) =>
+            setData((d) => ({ ...d, exame_ortopedico: { ...d.exame_ortopedico, ...patch } }))
+          }
+        />
+      );
+    case "cid":
+      return (
+        <Step09Cid
+          value={data.cid}
+          onChange={(patch) => setData((d) => ({ ...d, cid: { ...d.cid, ...patch } }))}
+        />
+      );
+    case "conclusao":
+      return (
+        <Step10Conclusao
+          value={data.conclusao}
+          onChange={(patch) =>
+            setData((d) => ({ ...d, conclusao: { ...d.conclusao, ...patch } }))
+          }
+        />
+      );
     default:
       return (
         <Card className="p-8 text-center border-dashed">
