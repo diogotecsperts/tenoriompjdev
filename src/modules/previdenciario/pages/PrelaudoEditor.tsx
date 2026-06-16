@@ -145,6 +145,11 @@ export default function PrelaudoEditor() {
       data.comorbidades?.historico_familiar
     )
       s.add("comorbidades");
+    if (Object.values(data.estado_mental || {}).some(Boolean)) s.add("estado_mental");
+    if (Object.values(data.ectoscopia || {}).some(Boolean)) s.add("ectoscopia");
+    if (Object.values(data.exame_ortopedico || {}).some(Boolean)) s.add("exame_ortopedico");
+    if ((data.cid?.itens?.length ?? 0) > 0 || data.cid?.observacoes) s.add("cid");
+    if (Object.values(data.conclusao || {}).some(Boolean)) s.add("conclusao");
     return s;
   }, [data]);
 
