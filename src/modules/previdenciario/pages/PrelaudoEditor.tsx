@@ -45,6 +45,7 @@ export default function PrelaudoEditor() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [pericia, setPericia] = useState<PrevPericia | null>(null);
+  const [pauta, setPauta] = useState<PrevPauta | null>(null);
   const [data, setData] = useState<PrelaudoData>(EMPTY_PRELAUDO);
   const [currentStep, setCurrentStep] = useState<StepId>("identificacao");
   const [savedAt, setSavedAt] = useState<Date | null>(null);
@@ -70,6 +71,7 @@ export default function PrelaudoEditor() {
           p.prev_extracao as Record<string, any>,
         );
         setData(initial);
+        getPauta(p.pauta_id).then(setPauta).catch(() => {});
       } catch (err: any) {
         toast({ variant: "destructive", title: "Erro", description: err.message });
       } finally {
