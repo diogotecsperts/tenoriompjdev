@@ -134,6 +134,25 @@ export default function PrelaudoEditor() {
     }
   };
 
+  const handleExportPdf = async () => {
+    if (!pericia) return;
+    try {
+      await persist();
+      const localStr = pauta
+        ? [pauta.local, pauta.cidade, pauta.uf].filter(Boolean).join(" — ")
+        : "";
+      downloadPrelaudoPdf(data, {
+        periciado: pericia.periciado_nome || data.identificacao?.nome || "",
+        dataPericia: pauta?.data || new Date().toISOString().slice(0, 10),
+        local: localStr,
+        numeroProcesso: data.identificacao?.numero_processo || "",
+      });
+      toast({ title: "PDF gerado" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Erro ao exportar", description: err.message });
+    }
+  };
+
   // Steps completos = qualquer chave preenchida
   const completed = useMemo(() => {
     const s = new Set<StepId>();
