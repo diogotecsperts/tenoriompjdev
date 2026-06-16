@@ -30,6 +30,11 @@ import { Step02Queixa } from "../components/steps/Step02Queixa";
 import { Step03Medicacao } from "../components/steps/Step03Medicacao";
 import { Step04Acompanhamento } from "../components/steps/Step04Acompanhamento";
 import { Step05Comorbidades } from "../components/steps/Step05Comorbidades";
+import { Step06EstadoMental } from "../components/steps/Step06EstadoMental";
+import { Step07Ectoscopia } from "../components/steps/Step07Ectoscopia";
+import { Step08Ortopedico } from "../components/steps/Step08Ortopedico";
+import { Step09Cid } from "../components/steps/Step09Cid";
+import { Step10Conclusao } from "../components/steps/Step10Conclusao";
 
 const AUTOSAVE_MS = 900;
 
@@ -140,6 +145,11 @@ export default function PrelaudoEditor() {
       data.comorbidades?.historico_familiar
     )
       s.add("comorbidades");
+    if (Object.values(data.estado_mental || {}).some(Boolean)) s.add("estado_mental");
+    if (Object.values(data.ectoscopia || {}).some(Boolean)) s.add("ectoscopia");
+    if (Object.values(data.exame_ortopedico || {}).some(Boolean)) s.add("exame_ortopedico");
+    if ((data.cid?.itens?.length ?? 0) > 0 || data.cid?.observacoes) s.add("cid");
+    if (Object.values(data.conclusao || {}).some(Boolean)) s.add("conclusao");
     return s;
   }, [data]);
 
@@ -256,17 +266,10 @@ export default function PrelaudoEditor() {
               <span className="text-xs text-muted-foreground">
                 Etapa {currentDef.ordem} de {PRELAUDO_STEPS.length}
               </span>
-              <Button size="sm" onClick={goNext} disabled={currentIdx >= 4}>
+              <Button size="sm" onClick={goNext} disabled={currentIdx >= PRELAUDO_STEPS.length - 1}>
                 Próxima <ChevronRight className="h-4 w-4 ml-1" />
               </Button>
             </div>
-
-            {currentIdx >= 4 && (
-              <Card className="mt-6 p-4 border-dashed flex items-center gap-3 text-sm text-muted-foreground">
-                <Construction className="h-5 w-5 text-amber-500 shrink-0" />
-                As etapas 6 a 10 (estado mental, ectoscopia, ortopédico, CID, conclusão) serão entregues na Fase E.
-              </Card>
-            )}
           </div>
         </div>
 
@@ -325,6 +328,49 @@ function renderStep(
           value={data.comorbidades}
           onChange={(patch) =>
             setData((d) => ({ ...d, comorbidades: { ...d.comorbidades, ...patch } }))
+          }
+        />
+      );
+    case "estado_mental":
+      return (
+        <Step06EstadoMental
+          value={data.estado_mental}
+          onChange={(patch) =>
+            setData((d) => ({ ...d, estado_mental: { ...d.estado_mental, ...patch } }))
+          }
+        />
+      );
+    case "ectoscopia":
+      return (
+        <Step07Ectoscopia
+          value={data.ectoscopia}
+          onChange={(patch) =>
+            setData((d) => ({ ...d, ectoscopia: { ...d.ectoscopia, ...patch } }))
+          }
+        />
+      );
+    case "exame_ortopedico":
+      return (
+        <Step08Ortopedico
+          value={data.exame_ortopedico}
+          onChange={(patch) =>
+            setData((d) => ({ ...d, exame_ortopedico: { ...d.exame_ortopedico, ...patch } }))
+          }
+        />
+      );
+    case "cid":
+      return (
+        <Step09Cid
+          value={data.cid}
+          onChange={(patch) => setData((d) => ({ ...d, cid: { ...d.cid, ...patch } }))}
+        />
+      );
+    case "conclusao":
+      return (
+        <Step10Conclusao
+          value={data.conclusao}
+          onChange={(patch) =>
+            setData((d) => ({ ...d, conclusao: { ...d.conclusao, ...patch } }))
           }
         />
       );

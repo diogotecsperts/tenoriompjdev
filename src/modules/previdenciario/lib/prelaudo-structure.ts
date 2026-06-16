@@ -29,12 +29,74 @@ export const PRELAUDO_STEPS: StepDef[] = [
   { id: "medicacao",         ordem: 3,  label: "Medicação em uso",     short: "Medicação", implemented: true  },
   { id: "acompanhamento",    ordem: 4,  label: "Acompanhamento médico",short: "Acomp.",    implemented: true  },
   { id: "comorbidades",      ordem: 5,  label: "Comorbidades",         short: "Comorb.",   implemented: true  },
-  { id: "estado_mental",     ordem: 6,  label: "Estado mental",        short: "Mental",    implemented: false },
-  { id: "ectoscopia",        ordem: 7,  label: "Ectoscopia / Geral",   short: "Ectosc.",   implemented: false },
-  { id: "exame_ortopedico",  ordem: 8,  label: "Exame ortopédico",     short: "Ortop.",    implemented: false },
-  { id: "cid",               ordem: 9,  label: "CID-10",               short: "CID",       implemented: false },
-  { id: "conclusao",         ordem: 10, label: "Conclusão",            short: "Concl.",    implemented: false },
+  { id: "estado_mental",     ordem: 6,  label: "Estado mental",        short: "Mental",    implemented: true  },
+  { id: "ectoscopia",        ordem: 7,  label: "Ectoscopia / Geral",   short: "Ectosc.",   implemented: true  },
+  { id: "exame_ortopedico",  ordem: 8,  label: "Exame ortopédico",     short: "Ortop.",    implemented: true  },
+  { id: "cid",               ordem: 9,  label: "CID-10",               short: "CID",       implemented: true  },
+  { id: "conclusao",         ordem: 10, label: "Conclusão",            short: "Concl.",    implemented: true  },
 ];
+
+// ---------- Steps 6-10 schemas ----------
+
+export interface EstadoMentalData {
+  orientacao: string;          // orientado / desorientado
+  humor: string;               // eutímico / deprimido / ansioso
+  afeto: string;
+  pensamento: string;          // curso, conteúdo
+  memoria: string;
+  atencao: string;
+  juizo_critica: string;
+  observacoes: string;
+}
+
+export interface EctoscopiaData {
+  estado_geral: string;        // bom / regular / mau
+  hidratacao: string;
+  corado: string;
+  acianotico: string;
+  anicterico: string;
+  marcha: string;
+  postura: string;
+  peso: string;
+  altura: string;
+  imc: string;
+  pressao_arterial: string;
+  observacoes: string;
+}
+
+export interface ExameOrtopedicoData {
+  segmento_avaliado: string;   // cervical, lombar, ombro D, joelho E, etc.
+  inspecao: string;
+  palpacao: string;
+  amplitude_movimento: string;
+  forca_muscular: string;      // grau 0-5
+  reflexos: string;
+  testes_especiais: string;
+  manobras: string;
+  observacoes: string;
+}
+
+export interface CidItem {
+  codigo: string;              // ex: M54.5
+  descricao: string;
+  principal: boolean;
+}
+export interface CidData {
+  itens: CidItem[];
+  observacoes: string;
+}
+
+export interface ConclusaoData {
+  diagnostico: string;
+  nexo_causal: "sim" | "nao" | "parcial" | "";
+  nexo_justificativa: string;
+  incapacidade: "total" | "parcial" | "ausente" | "";
+  temporalidade: "temporaria" | "permanente" | "";
+  data_inicio_incapacidade: string;
+  prazo_reavaliacao: string;
+  reabilitacao_indicada: "sim" | "nao" | "";
+  consideracoes_finais: string;
+}
 
 // =====================================================================
 // Schema do prelaudo_data (jsonb persistido em prev_pericias)
@@ -101,12 +163,11 @@ export interface PrelaudoData {
   medicacao: Partial<MedicacaoData>;
   acompanhamento: Partial<AcompanhamentoData>;
   comorbidades: Partial<ComorbidadesData>;
-  // Steps 6-10 (placeholders para Fase E)
-  estado_mental?: Record<string, any>;
-  ectoscopia?: Record<string, any>;
-  exame_ortopedico?: Record<string, any>;
-  cid?: Record<string, any>;
-  conclusao?: Record<string, any>;
+  estado_mental: Partial<EstadoMentalData>;
+  ectoscopia: Partial<EctoscopiaData>;
+  exame_ortopedico: Partial<ExameOrtopedicoData>;
+  cid: Partial<CidData>;
+  conclusao: Partial<ConclusaoData>;
 }
 
 export const EMPTY_PRELAUDO: PrelaudoData = {
@@ -115,6 +176,11 @@ export const EMPTY_PRELAUDO: PrelaudoData = {
   medicacao: { itens: [] },
   acompanhamento: {},
   comorbidades: { lista: [] },
+  estado_mental: {},
+  ectoscopia: {},
+  exame_ortopedico: {},
+  cid: { itens: [] },
+  conclusao: {},
 };
 
 /**
@@ -134,6 +200,11 @@ export function mergeFromExtracao(
     medicacao: { itens: [], ...(current?.medicacao || {}) },
     acompanhamento: { ...(current?.acompanhamento || {}) },
     comorbidades: { lista: [], ...(current?.comorbidades || {}) },
+    estado_mental: { ...(current?.estado_mental || {}) },
+    ectoscopia: { ...(current?.ectoscopia || {}) },
+    exame_ortopedico: { ...(current?.exame_ortopedico || {}) },
+    cid: { itens: [], ...(current?.cid || {}) },
+    conclusao: { ...(current?.conclusao || {}) },
   };
   if (!extracao) return base;
 
@@ -178,6 +249,21 @@ export function mergeFromExtracao(
   // Comorbidades narrativa
   if (!base.comorbidades.texto && typeof extracao.comorbidades === "string") {
     base.comorbidades.texto = extracao.comorbidades;
+  }
+
+  // CIDs sugeridos pela IA
+  if ((!base.cid.itens || base.cid.itens.length === 0) && Array.isArray(extracao.cids)) {
+    base.cid.itens = extracao.cids.map((c: any, i: number) => {
+      if (typeof c === "string") {
+        const m = c.match(/^([A-Z]\d{2}(?:\.\d)?)\s*[-–:]?\s*(.*)$/);
+        return { codigo: m?.[1] || c, descricao: m?.[2] || "", principal: i === 0 };
+      }
+      return {
+        codigo: c?.codigo || "",
+        descricao: c?.descricao || "",
+        principal: c?.principal ?? i === 0,
+      };
+    });
   }
 
   return base;
