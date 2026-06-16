@@ -1,0 +1,275 @@
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  ArrowLeft,
+  Plus,
+  Loader2,
+  FileText,
+  Trash2,
+  CalendarDays,
+  MapPin,
+  ChevronUp,
+  ChevronDown,
+  User,
+  Upload,
+} from "lucide-react";
+import { toast } from "@/hooks/use-toast";
+import {
+  getPauta,
+  listPericias,
+  deletePericia,
+  updatePericia,
+  uploadPericiaPdf,
+} from "../api/pautas";
+import { NovaPericiaDialog } from "../components/NovaPericiaDialog";
+import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
+import type { PrevPauta, PrevPericia } from "../types";
+import { useAuth } from "@/contexts/AuthContext";
+
+function formatData(iso: string) {
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+export default function PautaDetalhe() {
+  const { pautaId } = useParams<{ pautaId: string }>();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [pauta, setPauta] = useState<PrevPauta | null>(null);
+  const [pericias, setPericias] = useState<PrevPericia[]>([]);
+  const [novaOpen, setNovaOpen] = useState(false);
+
+  const reload = async () => {
+    if (!pautaId) return;
+    setLoading(true);
+    try {
+      const [p, list] = await Promise.all([getPauta(pautaId), listPericias(pautaId)]);
+      setPauta(p);
+      setPericias(list);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Erro ao carregar", description: err.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void reload();
+  }, [pautaId]);
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Excluir esta perícia? Esta ação não pode ser desfeita.")) return;
+    try {
+      await deletePericia(id);
+      toast({ title: "Perícia excluída" });
+      void reload();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Erro", description: err.message });
+    }
+  };
+
+  const move = async (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= pericias.length) return;
+    const a = pericias[idx];
+    const b = pericias[target];
+    try {
+      await Promise.all([
+        updatePericia(a.id, { ordem: b.ordem }),
+        updatePericia(b.id, { ordem: a.ordem }),
+      ]);
+      void reload();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Erro ao reordenar", description: err.message });
+    }
+  };
+
+  const handleUploadPdf = async (pericia: PrevPericia, file: File) => {
+    if (!user) return;
+    try {
+      const path = await uploadPericiaPdf(user.id, pericia.id, file);
+      await updatePericia(pericia.id, { pdf_path: path, pdf_processado: false });
+      toast({ title: "PDF anexado" });
+      void reload();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Erro no upload", description: err.message });
+    }
+  };
+
+  const proximaOrdem = pericias.length > 0
+    ? Math.max(...pericias.map((p) => p.ordem)) + 1
+    : 0;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!pauta) {
+    return (
+      <div className="max-w-4xl mx-auto p-6">
+        <p className="text-muted-foreground">Pauta não encontrada.</p>
+        <Button variant="ghost" className="mt-3" onClick={() => navigate("/previdenciario")}>
+          <ArrowLeft className="h-4 w-4 mr-1.5" /> Voltar
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto p-6 space-y-6">
+      <div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate("/previdenciario")}
+          className="mb-3 -ml-2"
+        >
+          <ArrowLeft className="h-4 w-4 mr-1.5" /> Pautas
+        </Button>
+
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">{pauta.local}</h1>
+            <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <CalendarDays className="h-3.5 w-3.5" /> {formatData(pauta.data)}
+              </span>
+              {(pauta.cidade || pauta.uf) && (
+                <span className="flex items-center gap-1">
+                  <MapPin className="h-3.5 w-3.5" />
+                  {[pauta.cidade, pauta.uf].filter(Boolean).join(" / ")}
+                </span>
+              )}
+              <Badge variant="outline" className="text-[10px]">
+                {pericias.length} perícia{pericias.length === 1 ? "" : "s"}
+              </Badge>
+            </div>
+            {pauta.observacoes && (
+              <p className="text-xs text-muted-foreground mt-2 max-w-2xl">{pauta.observacoes}</p>
+            )}
+          </div>
+
+          <Button onClick={() => setNovaOpen(true)}>
+            <Plus className="h-4 w-4 mr-1.5" /> Nova perícia
+          </Button>
+        </div>
+      </div>
+
+      {pericias.length === 0 ? (
+        <Card className="p-10 text-center border-dashed">
+          <User className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+          <h3 className="text-base font-semibold text-foreground">Nenhuma perícia ainda</h3>
+          <p className="text-sm text-muted-foreground mt-1 mb-4">
+            Adicione a primeira perícia desta pauta.
+          </p>
+          <Button onClick={() => setNovaOpen(true)}>
+            <Plus className="h-4 w-4 mr-1.5" /> Nova perícia
+          </Button>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {pericias.map((p, idx) => (
+            <Card key={p.id} className="p-3 hover:border-primary/40 transition">
+              <div className="flex items-center gap-3">
+                <div className="flex flex-col items-center">
+                  <button
+                    onClick={() => void move(idx, -1)}
+                    disabled={idx === 0}
+                    className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-20"
+                    title="Subir"
+                  >
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  </button>
+                  <span className="text-xs font-mono font-semibold text-foreground py-0.5">
+                    {idx + 1}
+                  </span>
+                  <button
+                    onClick={() => void move(idx, 1)}
+                    disabled={idx === pericias.length - 1}
+                    className="h-5 w-5 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-20"
+                    title="Descer"
+                  >
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                <button
+                  onClick={() => navigate(`/previdenciario/pericia/${p.id}`)}
+                  className="flex-1 min-w-0 text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-foreground truncate">
+                      {p.periciado_nome || <span className="italic text-muted-foreground">Sem nome</span>}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={`text-[10px] ${PERICIA_STATUS_COLOR[p.status]}`}
+                    >
+                      {PERICIA_STATUS_LABEL[p.status]}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-3 mt-0.5 text-[11px] text-muted-foreground">
+                    {p.pdf_path ? (
+                      <span className="flex items-center gap-1">
+                        <FileText className="h-3 w-3" />
+                        PDF anexado
+                        {p.pdf_processado && (
+                          <span className="text-emerald-600 ml-1">• processado</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="italic">Sem PDF</span>
+                    )}
+                  </div>
+                </button>
+
+                <label className="cursor-pointer">
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleUploadPdf(p, f);
+                      e.target.value = "";
+                    }}
+                  />
+                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
+                    <Upload className="h-3 w-3" />
+                    {p.pdf_path ? "Trocar PDF" : "Anexar PDF"}
+                  </span>
+                </label>
+
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => void handleDelete(p.id)}
+                  title="Excluir"
+                >
+                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <NovaPericiaDialog
+        open={novaOpen}
+        onOpenChange={setNovaOpen}
+        pautaId={pauta.id}
+        proximaOrdem={proximaOrdem}
+        onCreated={reload}
+      />
+    </div>
+  );
+}
