@@ -15,6 +15,7 @@ import {
   ChevronDown,
   User,
   Upload,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -24,6 +25,7 @@ import {
   updatePericia,
   uploadPericiaPdf,
 } from "../api/pautas";
+import { preProcessarPericia } from "../api/processar";
 import { NovaPericiaDialog } from "../components/NovaPericiaDialog";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
 import type { PrevPauta, PrevPericia } from "../types";
@@ -42,6 +44,8 @@ export default function PautaDetalhe() {
   const [pauta, setPauta] = useState<PrevPauta | null>(null);
   const [pericias, setPericias] = useState<PrevPericia[]>([]);
   const [novaOpen, setNovaOpen] = useState(false);
+  const [processandoIds, setProcessandoIds] = useState<Set<string>>(new Set());
+  const [processandoLote, setProcessandoLote] = useState(false);
 
   const reload = async () => {
     if (!pautaId) return;
@@ -104,6 +108,55 @@ export default function PautaDetalhe() {
     ? Math.max(...pericias.map((p) => p.ordem)) + 1
     : 0;
 
+  const pendentes = pericias.filter((p) => p.pdf_path && !p.pdf_processado);
+
+  const handleProcessar = async (pericia: PrevPericia) => {
+    if (!pericia.pdf_path) {
+      toast({ variant: "destructive", title: "Sem PDF", description: "Anexe um PDF primeiro." });
+      return;
+    }
+    setProcessandoIds((s) => new Set(s).add(pericia.id));
+    try {
+      const r = await preProcessarPericia(pericia.id);
+      toast({
+        title: "Processado com IA",
+        description: `${r.pages} págs · ${r.documentosCriados} doc(s) · ${r.provider}/${r.model}`,
+      });
+      void reload();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Erro IA", description: err.message });
+    } finally {
+      setProcessandoIds((s) => {
+        const n = new Set(s);
+        n.delete(pericia.id);
+        return n;
+      });
+    }
+  };
+
+  const handleProcessarLote = async () => {
+    if (pendentes.length === 0) return;
+    setProcessandoLote(true);
+    let ok = 0;
+    let fail = 0;
+    for (const p of pendentes) {
+      try {
+        await preProcessarPericia(p.id);
+        ok++;
+      } catch (err: any) {
+        console.error("[lote] falha em", p.id, err);
+        fail++;
+      }
+    }
+    setProcessandoLote(false);
+    toast({
+      title: "Lote concluído",
+      description: `${ok} processada(s)${fail ? ` · ${fail} falha(s)` : ""}.`,
+      variant: fail ? "destructive" : "default",
+    });
+    void reload();
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -157,9 +210,25 @@ export default function PautaDetalhe() {
             )}
           </div>
 
-          <Button onClick={() => setNovaOpen(true)}>
-            <Plus className="h-4 w-4 mr-1.5" /> Nova perícia
-          </Button>
+          <div className="flex items-center gap-2">
+            {pendentes.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={() => void handleProcessarLote()}
+                disabled={processandoLote}
+              >
+                {processandoLote ? (
+                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4 mr-1.5" />
+                )}
+                Processar pendentes ({pendentes.length})
+              </Button>
+            )}
+            <Button onClick={() => setNovaOpen(true)}>
+              <Plus className="h-4 w-4 mr-1.5" /> Nova perícia
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -247,6 +316,24 @@ export default function PautaDetalhe() {
                     {p.pdf_path ? "Trocar PDF" : "Anexar PDF"}
                   </span>
                 </label>
+
+                {p.pdf_path && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-[11px]"
+                    onClick={() => void handleProcessar(p)}
+                    disabled={processandoIds.has(p.id) || processandoLote}
+                    title={p.pdf_processado ? "Reprocessar com IA" : "Processar com IA"}
+                  >
+                    {processandoIds.has(p.id) ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5 mr-1" />
+                    )}
+                    {p.pdf_processado ? "Reprocessar" : "Processar"}
+                  </Button>
+                )}
 
                 <Button
                   variant="ghost"
