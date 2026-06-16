@@ -36,3 +36,8 @@ verify_jwt = true
 
 [functions.gerar-justificativa-medica]
 verify_jwt = true
+
+[functions.prev-pre-processar]
+verify_jwt = true
+wall_clock_limit = 300
+
