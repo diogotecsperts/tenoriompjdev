@@ -285,7 +285,7 @@ Deno.serve(async (req: Request) => {
 
     // 4) Extração estruturada via IA configurada no DevPanel
     const aiConfig = await getAIConfig();
-    const ocrText = ocr.text.length > 180_000 ? ocr.text.slice(0, 180_000) : ocr.text;
+    const ocrText = trimOcrPreservingTail(ocr.text, 180_000);
 
     const userPrompt = await getPrompt(
       "prompt_prev_extracao_processo",
@@ -301,15 +301,25 @@ Deno.serve(async (req: Request) => {
     const aiResp = await callAI(aiConfig, SYSTEM_PROMPT, userPrompt, {
       userId,
       promptType: "prev_extracao_processo",
-      maxOutputTokens: 8000,
+      maxOutputTokens: 32000,
       jsonMode: true,
     });
 
-    const parsed = tryParseJson(aiResp.text);
+    if (looksTruncated(aiResp.text)) {
+      console.warn(
+        `[prev-pre-processar] AI output looks truncated (len=${aiResp.text.length}); attempting repair.`,
+      );
+    }
+
+    const parsed = parseAIJson(aiResp.text);
     if (!parsed) {
       console.error("[prev-pre-processar] JSON parse failed. Raw head:", aiResp.text.slice(0, 400));
+      console.error("[prev-pre-processar] Raw tail:", aiResp.text.slice(-400));
       return new Response(
-        JSON.stringify({ error: "A IA retornou conteúdo fora do formato esperado. Tente novamente." }),
+        JSON.stringify({
+          error:
+            "A IA devolveu JSON incompleto (provavelmente saída truncada). Tente novamente; se persistir, reduza o PDF ou avise o suporte.",
+        }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
