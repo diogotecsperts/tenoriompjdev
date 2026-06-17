@@ -83,24 +83,100 @@ TEXTO OCR DO PROCESSO:
 const SYSTEM_PROMPT =
   'Você extrai dados objetivos de processos judiciais previdenciários e devolve APENAS JSON válido, sem markdown e sem texto adicional. É proibido usar a expressão "IA".';
 
-function tryParseJson(raw: string): any | null {
+/**
+ * Reduz texto OCR preservando cabeça e cauda (quesitos costumam ficar no fim).
+ */
+function trimOcrPreservingTail(text: string, maxChars = 180_000): string {
+  if (text.length <= maxChars) return text;
+  const headSize = Math.floor(maxChars * 0.66);
+  const tailSize = maxChars - headSize;
+  const head = text.slice(0, headSize);
+  const tail = text.slice(-tailSize);
+  return `${head}\n\n[...trecho omitido por limite de contexto...]\n\n${tail}`;
+}
+
+/**
+ * Detecta sinais de truncamento na saída da IA (chaves/colchetes desbalanceados,
+ * string aberta, ausência de '}' final).
+ */
+function looksTruncated(s: string): boolean {
+  const t = s.trim();
+  if (!t.endsWith("}") && !t.endsWith("]")) return true;
+  let open = 0, close = 0, bOpen = 0, bClose = 0;
+  let inStr = false, esc = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\") { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{") open++;
+    else if (c === "}") close++;
+    else if (c === "[") bOpen++;
+    else if (c === "]") bClose++;
+  }
+  return inStr || open !== close || bOpen !== bClose;
+}
+
+/**
+ * Parser robusto de JSON com reparo em cascata (8 etapas).
+ * Inspirado no padrão `tryFixTruncatedJson` do processar-autos (trabalhista),
+ * reimplementado localmente para manter isolamento do módulo previdenciário.
+ */
+function parseAIJson(raw: string): any | null {
   if (!raw) return null;
   let s = raw.trim();
-  // strip markdown fences
+
+  // 1) strip de fences ``` / ```json
   if (s.startsWith("```")) {
     s = s.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
   }
-  // grab first {...} block if needed
+
+  // 2) localiza primeiro '{'
   const first = s.indexOf("{");
-  const last = s.lastIndexOf("}");
-  if (first >= 0 && last > first) {
-    s = s.slice(first, last + 1);
+  if (first < 0) return null;
+  s = s.slice(first);
+
+  // tentativa direta
+  try { return JSON.parse(s); } catch { /* segue para reparo */ }
+
+  // 3) limpa caracteres de controle (preserva \n \r \t)
+  let repaired = s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+
+  // 4) remove vírgulas penduradas
+  repaired = repaired.replace(/,\s*([}\]])/g, "$1");
+
+  // 5) se string final aberta, fecha aspas; balanceia [] e {}
+  let inStr = false, esc = false;
+  let curly = 0, square = 0;
+  for (let i = 0; i < repaired.length; i++) {
+    const c = repaired[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\") { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{") curly++;
+    else if (c === "}") curly--;
+    else if (c === "[") square++;
+    else if (c === "]") square--;
   }
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
+  if (inStr) repaired += '"';
+  // remove vírgula final solta antes de fechar
+  repaired = repaired.replace(/,\s*$/, "");
+  while (square-- > 0) repaired += "]";
+  while (curly-- > 0) repaired += "}";
+
+  // 6) nova tentativa
+  try { return JSON.parse(repaired); } catch { /* segue */ }
+
+  // 7) fallback: corta no último '}' que produz parse válido
+  for (let i = repaired.lastIndexOf("}"); i > 0; i = repaired.lastIndexOf("}", i - 1)) {
+    const candidate = repaired.slice(0, i + 1).replace(/,\s*([}\]])/g, "$1");
+    try { return JSON.parse(candidate); } catch { /* continua */ }
   }
+
+  // 8) falhou
+  return null;
 }
 
 Deno.serve(async (req: Request) => {
@@ -209,7 +285,7 @@ Deno.serve(async (req: Request) => {
 
     // 4) Extração estruturada via IA configurada no DevPanel
     const aiConfig = await getAIConfig();
-    const ocrText = ocr.text.length > 180_000 ? ocr.text.slice(0, 180_000) : ocr.text;
+    const ocrText = trimOcrPreservingTail(ocr.text, 180_000);
 
     const userPrompt = await getPrompt(
       "prompt_prev_extracao_processo",
@@ -225,15 +301,25 @@ Deno.serve(async (req: Request) => {
     const aiResp = await callAI(aiConfig, SYSTEM_PROMPT, userPrompt, {
       userId,
       promptType: "prev_extracao_processo",
-      maxOutputTokens: 8000,
+      maxOutputTokens: 32000,
       jsonMode: true,
     });
 
-    const parsed = tryParseJson(aiResp.text);
+    if (looksTruncated(aiResp.text)) {
+      console.warn(
+        `[prev-pre-processar] AI output looks truncated (len=${aiResp.text.length}); attempting repair.`,
+      );
+    }
+
+    const parsed = parseAIJson(aiResp.text);
     if (!parsed) {
       console.error("[prev-pre-processar] JSON parse failed. Raw head:", aiResp.text.slice(0, 400));
+      console.error("[prev-pre-processar] Raw tail:", aiResp.text.slice(-400));
       return new Response(
-        JSON.stringify({ error: "A IA retornou conteúdo fora do formato esperado. Tente novamente." }),
+        JSON.stringify({
+          error:
+            "A IA devolveu JSON incompleto (provavelmente saída truncada). Tente novamente; se persistir, reduza o PDF ou avise o suporte.",
+        }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
