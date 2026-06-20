@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
       function_name: "dev-download-pdf",
       level: "info",
       message: `Developer ${user.email} requested download`,
-      metadata: { file_path: filePath, developer_id: user.id },
+      metadata: { file_path: filePath, bucket, developer_id: user.id },
     });
 
     return new Response(
