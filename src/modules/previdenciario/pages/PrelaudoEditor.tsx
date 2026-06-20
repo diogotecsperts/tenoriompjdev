@@ -12,12 +12,15 @@ import {
   Sparkles,
   Construction,
   FileDown,
+  ArrowLeftRight,
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import { getPericia, updatePericia, setPericiaStatus, getPauta } from "../api/pautas";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
 import type { PrevPericia, PrevPauta } from "../types";
 import { downloadPrelaudoPdf } from "../lib/export/prelaudo-pdf";
+import { downloadPrelaudoDocx } from "../lib/export/prelaudo-docx";
 import {
   PRELAUDO_STEPS,
   EMPTY_PRELAUDO,
