@@ -12,12 +12,15 @@ import {
   Sparkles,
   Construction,
   FileDown,
+  ArrowLeftRight,
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
 import { getPericia, updatePericia, setPericiaStatus, getPauta } from "../api/pautas";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
 import type { PrevPericia, PrevPauta } from "../types";
 import { downloadPrelaudoPdf } from "../lib/export/prelaudo-pdf";
+import { downloadPrelaudoDocx } from "../lib/export/prelaudo-docx";
 import {
   PRELAUDO_STEPS,
   EMPTY_PRELAUDO,
@@ -50,6 +53,8 @@ export default function PrelaudoEditor() {
   const [currentStep, setCurrentStep] = useState<StepId>("identificacao");
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
+  const [exportFormat, setExportFormat] = useState<"pdf" | "docx">("pdf");
+  const [exporting, setExporting] = useState(false);
   const dirtyRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFirstSaveRef = useRef(true);
@@ -134,22 +139,31 @@ export default function PrelaudoEditor() {
     }
   };
 
-  const handleExportPdf = async () => {
+  const handleExport = async () => {
     if (!pericia) return;
+    setExporting(true);
     try {
       await persist();
       const localStr = pauta
         ? [pauta.local, pauta.cidade, pauta.uf].filter(Boolean).join(" — ")
         : "";
-      downloadPrelaudoPdf(data, {
+      const meta = {
         periciado: pericia.periciado_nome || data.identificacao?.nome || "",
         dataPericia: pauta?.data || new Date().toISOString().slice(0, 10),
         local: localStr,
         numeroProcesso: data.identificacao?.numero_processo || "",
-      });
-      toast({ title: "PDF gerado" });
+      };
+      if (exportFormat === "pdf") {
+        await downloadPrelaudoPdf(data, meta);
+        toast({ title: "PDF gerado" });
+      } else {
+        await downloadPrelaudoDocx(data, meta);
+        toast({ title: "DOCX gerado" });
+      }
     } catch (err: any) {
       toast({ variant: "destructive", title: "Erro ao exportar", description: err.message });
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -258,9 +272,45 @@ export default function PrelaudoEditor() {
           )}
         </div>
 
-        <Button variant="outline" size="sm" onClick={handleExportPdf}>
-          <FileDown className="h-4 w-4 mr-1.5" /> Exportar PDF
-        </Button>
+        {/* Export Button with Format Toggle (mesmo padrão do módulo Trabalhista) */}
+        <div className="flex items-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            disabled={exporting}
+            className="rounded-r-none border-r-0"
+          >
+            {exporting ? (
+              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+            ) : (
+              <FileDown className="h-4 w-4 mr-1.5" />
+            )}
+            <span className="hidden sm:inline">
+              Baixar em {exportFormat.toUpperCase()}
+            </span>
+          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setExportFormat((prev) => (prev === "pdf" ? "docx" : "pdf"))
+                  }
+                  className="rounded-l-none px-2"
+                  disabled={exporting}
+                >
+                  <ArrowLeftRight className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Alternar para {exportFormat === "pdf" ? "DOCX" : "PDF"}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
 
         <Button
           variant="default"
