@@ -318,7 +318,7 @@ serve(async (req) => {
     for (const result of results) {
       if (result.status === "fulfilled") {
         const { key, text, label } = result.value;
-        response[fieldMap[key]] = text.trim();
+        response[fieldMap[key]] = normalizarQuesitos(text);
         successCount++;
         console.log(`[gerar-quesitos] ${label}: OK (${text.length} chars)`);
       } else {
