@@ -323,6 +323,29 @@ export default function PrelaudoEditor() {
           )}
         </div>
 
+        {/* View Mode Toggle (mesmo padrão do módulo Trabalhista) */}
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={handleViewModeToggle}
+                className="h-9 w-9"
+              >
+                {viewMode === "paginated" ? (
+                  <Scroll className="h-4 w-4" />
+                ) : (
+                  <LayoutGrid className="h-4 w-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{viewMode === "paginated" ? "Modo scroll infinito" : "Modo paginado"}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
         {/* Export Button with Format Toggle (mesmo padrão do módulo Trabalhista) */}
         <div className="flex items-center">
           <Button
