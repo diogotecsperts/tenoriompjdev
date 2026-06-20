@@ -134,10 +134,29 @@ export default function PautaDetalhe() {
         n.delete(pericia.id);
         return n;
       });
+      finish();
     }
   };
 
   const handleProcessarLote = async () => {
+    if (pendentes.length === 0) return;
+    setProcessandoLote(true);
+    setLoteProgresso({ done: 0, total: pendentes.length });
+    let ok = 0;
+    let fail = 0;
+    for (let i = 0; i < pendentes.length; i++) {
+      const p = pendentes[i];
+      try {
+        await preProcessarPericia(p.id);
+        ok++;
+      } catch (err: any) {
+        console.error("[lote] falha em", p.id, err);
+        fail++;
+      }
+      setLoteProgresso({ done: i + 1, total: pendentes.length });
+    }
+    setProcessandoLote(false);
+    finish();
     if (pendentes.length === 0) return;
     setProcessandoLote(true);
     let ok = 0;
