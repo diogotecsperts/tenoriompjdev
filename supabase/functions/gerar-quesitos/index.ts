@@ -112,8 +112,18 @@ DADOS CLÍNICOS DO PERITO (use EXCLUSIVAMENTE estes dados para responder):
 - Antecedentes: \${antecedentes}
 - Laudos Médicos: \${laudosMedicos}
 
-Se NÃO encontrar quesitos da Reclamada no processo, retorne UNICAMENTE: "Quesitos da Reclamada não identificados nos autos."`,
+Se NÃO encontrar quesitos da Reclamada no processo, retorne UNICAMENTE: "Quesitos da Reclamada não identificados nos autos."${FORMATO_BLOCO}`,
 };
+
+// Normalizador defensivo: garante que QUESITO N: e RESPOSTA: comecem em linha própria
+function normalizarQuesitos(txt: string): string {
+  if (!txt) return txt;
+  return txt
+    .replace(/([^\n])\s*(QUESITO\s*\d+\s*:)/gi, "$1\n\n$2")
+    .replace(/([^\n])\s*(RESPOSTA\s*:)/gi, "$1\nRESPOSTA:")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
