@@ -13,9 +13,13 @@ import {
   Construction,
   FileDown,
   ArrowLeftRight,
+  Scroll,
+  LayoutGrid,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
+import { useScrollSpy } from "@/hooks/useScrollSpy";
+
 import { getPericia, updatePericia, setPericiaStatus, getPauta } from "../api/pautas";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
 import type { PrevPericia, PrevPauta } from "../types";
@@ -42,6 +46,8 @@ import { Step09Cid } from "../components/steps/Step09Cid";
 import { Step10Conclusao } from "../components/steps/Step10Conclusao";
 
 const AUTOSAVE_MS = 900;
+const VIEW_MODE_STORAGE_KEY = "prev-prelaudo-view-mode";
+type ViewMode = "paginated" | "infinite";
 
 export default function PrelaudoEditor() {
   const { periciaId } = useParams<{ periciaId: string }>();
@@ -55,9 +61,40 @@ export default function PrelaudoEditor() {
   const [saving, setSaving] = useState(false);
   const [exportFormat, setExportFormat] = useState<"pdf" | "docx">("pdf");
   const [exporting, setExporting] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (typeof window === "undefined") return "paginated";
+    const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+    return (stored as ViewMode) || "paginated";
+  });
   const dirtyRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFirstSaveRef = useRef(true);
+  const mainContentRef = useRef<HTMLDivElement | null>(null);
+
+  const sectionIds = useMemo(
+    () => PRELAUDO_STEPS.filter((s) => s.implemented).map((s) => `step-${s.id}`),
+    [],
+  );
+
+  const { activeId: scrollSpyActiveId, scrollToSection } = useScrollSpy({
+    sectionIds,
+    offset: 120,
+    enabled: viewMode === "infinite",
+    scrollContainerRef: mainContentRef,
+  });
+
+  useEffect(() => {
+    if (viewMode !== "infinite" || !scrollSpyActiveId) return;
+    const id = scrollSpyActiveId.replace("step-", "") as StepId;
+    setCurrentStep((prev) => (prev !== id ? id : prev));
+  }, [scrollSpyActiveId, viewMode]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, viewMode);
+    }
+  }, [viewMode]);
+
 
   // Load
   useEffect(() => {
@@ -209,6 +246,20 @@ export default function PrelaudoEditor() {
     }
   };
 
+  const handleStepSelect = (id: StepId) => {
+    if (viewMode === "infinite") {
+      setCurrentStep(id);
+      scrollToSection(`step-${id}`);
+    } else {
+      setCurrentStep(id);
+    }
+  };
+
+  const handleViewModeToggle = () => {
+    setViewMode((prev) => (prev === "paginated" ? "infinite" : "paginated"));
+  };
+
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -272,6 +323,29 @@ export default function PrelaudoEditor() {
           )}
         </div>
 
+        {/* View Mode Toggle (mesmo padrão do módulo Trabalhista) */}
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={handleViewModeToggle}
+                className="h-9 w-9"
+              >
+                {viewMode === "paginated" ? (
+                  <Scroll className="h-4 w-4" />
+                ) : (
+                  <LayoutGrid className="h-4 w-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{viewMode === "paginated" ? "Modo scroll infinito" : "Modo paginado"}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
         {/* Export Button with Format Toggle (mesmo padrão do módulo Trabalhista) */}
         <div className="flex items-center">
           <Button
@@ -324,31 +398,51 @@ export default function PrelaudoEditor() {
 
       {/* Body: nav | editor | painel */}
       <div className="flex-1 flex overflow-hidden">
-        <StepNav current={currentStep} completed={completed} onSelect={setCurrentStep} />
+        <StepNav current={currentStep} completed={completed} onSelect={handleStepSelect} />
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+        <div ref={mainContentRef} className="flex-1 overflow-y-auto custom-scrollbar p-6">
           <div className="max-w-3xl mx-auto">
-            {renderStep(currentStep, data, setData)}
+            {viewMode === "paginated" ? (
+              <>
+                {renderStep(currentStep, data, setData)}
 
-            {/* Footer nav */}
-            <div className="mt-8 pt-4 border-t border-border flex items-center justify-between">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={goPrev}
-                disabled={currentIdx === 0}
-              >
-                <ChevronLeft className="h-4 w-4 mr-1" /> Anterior
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                Etapa {currentDef.ordem} de {PRELAUDO_STEPS.length}
-              </span>
-              <Button size="sm" onClick={goNext} disabled={currentIdx >= PRELAUDO_STEPS.length - 1}>
-                Próxima <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
+                {/* Footer nav */}
+                <div className="mt-8 pt-4 border-t border-border flex items-center justify-between">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goPrev}
+                    disabled={currentIdx === 0}
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-1" /> Anterior
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Etapa {currentDef.ordem} de {PRELAUDO_STEPS.length}
+                  </span>
+                  <Button size="sm" onClick={goNext} disabled={currentIdx >= PRELAUDO_STEPS.length - 1}>
+                    Próxima <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-10 pb-12">
+                {PRELAUDO_STEPS.filter((s) => s.implemented).map((s) => (
+                  <section
+                    key={s.id}
+                    id={`step-${s.id}`}
+                    className="scroll-mt-24 space-y-3"
+                  >
+                    <h2 className="text-lg font-semibold text-foreground border-b border-border pb-2">
+                      {s.ordem}. {s.label}
+                    </h2>
+                    {renderStep(s.id, data, setData)}
+                  </section>
+                ))}
+              </div>
+            )}
           </div>
         </div>
+
 
         <PainelLateralProcesso
           extracao={pericia.prev_extracao as Record<string, any>}
