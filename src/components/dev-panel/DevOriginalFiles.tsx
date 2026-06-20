@@ -241,7 +241,8 @@ export function DevOriginalFiles() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Arquivo</TableHead>
-                    <TableHead>Reclamante</TableHead>
+                    <TableHead>Módulo</TableHead>
+                    <TableHead>Periciado</TableHead>
                     <TableHead>Processo</TableHead>
                     <TableHead>Data</TableHead>
                     <TableHead>Status</TableHead>
@@ -250,7 +251,7 @@ export function DevOriginalFiles() {
                 </TableHeader>
                 <TableBody>
                   {filteredFiles.map((f) => (
-                    <TableRow key={f.job_id}>
+                    <TableRow key={`${f.module ?? "trab"}-${f.job_id}`}>
                       <TableCell className="font-mono text-xs max-w-xs truncate">
                         {f.file_name}
                       </TableCell>
