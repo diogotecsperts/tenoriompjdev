@@ -9,26 +9,44 @@ import { Database } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
  import { cn } from "@/lib/utils";
 import { LAUDO_CARDS_STRUCTURE, EXPECTED_PROMPT_TYPES, PromptType, FIXED_CONFIG_SECTIONS } from "@/lib/laudo-structure";
- 
- interface PromptConfig {
-   id: string;
-   cardId?: string;
-   sectionId?: string;
-   description?: string;
- }
- 
- interface CoverageChecklistProps {
-   prompts: PromptConfig[];
- }
- 
- function getPromptType(promptId: string): PromptType | null {
-   if (promptId.startsWith('prompt_import_')) return 'import';
-   if (promptId.startsWith('prompt_gen_')) return 'gen';
-   if (promptId.startsWith('prompt_regen_')) return 'regen';
-   return null;
- }
- 
- export function CoverageChecklist({ prompts }: CoverageChecklistProps) {
+
+interface CardLike {
+  id: string;
+  label: string;
+  sections: { id: string; label: string }[];
+}
+
+interface PromptConfig {
+  id: string;
+  cardId?: string;
+  sectionId?: string;
+  description?: string;
+}
+
+interface CoverageChecklistProps {
+  prompts: PromptConfig[];
+  /** Estrutura de cards para verificação. Default = Trabalhista (compat). */
+  structure?: CardLike[];
+  /** Mapa de tipos esperados. Default = Trabalhista (compat). */
+  expectedTypes?: Record<string, PromptType[]>;
+  /** Mapa de seções "fixas" (gerenciadas via system_config). Default = Trabalhista. */
+  fixedConfig?: Record<string, string>;
+}
+
+function getPromptType(promptId: string): PromptType | null {
+  if (promptId.startsWith('prompt_import_')) return 'import';
+  if (promptId.startsWith('prompt_gen_')) return 'gen';
+  if (promptId.startsWith('prompt_regen_')) return 'regen';
+  if (promptId.startsWith('prompt_prev_')) return 'import';
+  return null;
+}
+
+export function CoverageChecklist({
+  prompts,
+  structure = LAUDO_CARDS_STRUCTURE,
+  expectedTypes = EXPECTED_PROMPT_TYPES,
+  fixedConfig = FIXED_CONFIG_SECTIONS,
+}: CoverageChecklistProps) {
    const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
  
    // Build coverage data
@@ -48,53 +66,53 @@ import { LAUDO_CARDS_STRUCTURE, EXPECTED_PROMPT_TYPES, PromptType, FIXED_CONFIG_
        }
      });
  
-     // Build coverage for each card
-     return LAUDO_CARDS_STRUCTURE.map(card => {
-       const sections = card.sections.map(section => {
-         const expectedTypes = EXPECTED_PROMPT_TYPES[section.id] || [];
-         const existingByType = promptsBySectionAndType[section.id] || { import: [], gen: [], regen: [] };
-         
-         const typeStatus: Record<PromptType, { expected: boolean; count: number; prompts: PromptConfig[] }> = {
-           import: {
-             expected: expectedTypes.includes('import'),
-             count: existingByType.import.length,
-             prompts: existingByType.import,
-           },
-           gen: {
-             expected: expectedTypes.includes('gen'),
-             count: existingByType.gen.length,
-             prompts: existingByType.gen,
-           },
-           regen: {
-             expected: expectedTypes.includes('regen'),
-             count: existingByType.regen.length,
-             prompts: existingByType.regen,
-           },
-         };
- 
-         const isComplete = expectedTypes.every(t => typeStatus[t].count > 0);
-         const hasNoExpectations = expectedTypes.length === 0;
- 
-         return {
-           ...section,
-           typeStatus,
-           isComplete,
-           hasNoExpectations,
-         };
-       });
- 
-       const completeSections = sections.filter(s => s.isComplete || s.hasNoExpectations).length;
-       const isCardComplete = completeSections === sections.length;
- 
-       return {
-         ...card,
-         sections,
-         completeSections,
-         totalSections: sections.length,
-         isCardComplete,
-       };
-     });
-   }, [prompts]);
+      // Build coverage for each card
+      return structure.map(card => {
+        const sections = card.sections.map(section => {
+          const expected = expectedTypes[section.id] || [];
+          const existingByType = promptsBySectionAndType[section.id] || { import: [], gen: [], regen: [] };
+
+          const typeStatus: Record<PromptType, { expected: boolean; count: number; prompts: PromptConfig[] }> = {
+            import: {
+              expected: expected.includes('import'),
+              count: existingByType.import.length,
+              prompts: existingByType.import,
+            },
+            gen: {
+              expected: expected.includes('gen'),
+              count: existingByType.gen.length,
+              prompts: existingByType.gen,
+            },
+            regen: {
+              expected: expected.includes('regen'),
+              count: existingByType.regen.length,
+              prompts: existingByType.regen,
+            },
+          };
+
+          const isComplete = expected.every(t => typeStatus[t].count > 0);
+          const hasNoExpectations = expected.length === 0;
+
+          return {
+            ...section,
+            typeStatus,
+            isComplete,
+            hasNoExpectations,
+          };
+        });
+
+        const completeSections = sections.filter(s => s.isComplete || s.hasNoExpectations).length;
+        const isCardComplete = completeSections === sections.length;
+
+        return {
+          ...card,
+          sections,
+          completeSections,
+          totalSections: sections.length,
+          isCardComplete,
+        };
+      });
+    }, [prompts, structure, expectedTypes]);
  
    const toggleCard = (cardId: string) => {
      setExpandedCards(prev => {
@@ -198,7 +216,7 @@ import { LAUDO_CARDS_STRUCTURE, EXPECTED_PROMPT_TYPES, PromptType, FIXED_CONFIG_
                                : "text-foreground"
                            )}>
                              {section.label}
-                              {section.hasNoExpectations && FIXED_CONFIG_SECTIONS[section.id] && (
+                              {section.hasNoExpectations && fixedConfig[section.id] && (
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <span className="ml-1 text-amber-600 dark:text-amber-400 inline-flex items-center gap-0.5 cursor-help">
@@ -214,9 +232,9 @@ import { LAUDO_CARDS_STRUCTURE, EXPECTED_PROMPT_TYPES, PromptType, FIXED_CONFIG_
                                   </TooltipContent>
                                 </Tooltip>
                               )}
-                              {section.hasNoExpectations && !FIXED_CONFIG_SECTIONS[section.id] && (
+                              {section.hasNoExpectations && !fixedConfig[section.id] && (
                                 <span className="ml-1 text-muted-foreground">(preenchimento manual)</span>
-                             )}
+                              )}
                            </div>
                            {!section.hasNoExpectations && (
                              <div className="flex gap-3 ml-2">

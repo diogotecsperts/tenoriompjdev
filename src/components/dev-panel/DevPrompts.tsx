@@ -17,7 +17,7 @@ import { Info } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { cn } from "@/lib/utils";
 import { PromptEditor } from "./PromptEditor";
-import { LAUDO_CARDS_STRUCTURE, PROMPT_ONLY_CARDS, FIXED_CONFIG_SECTIONS } from "@/lib/laudo-structure";
+import { PROMPT_MODULE_LIST, PROMPT_MODULES, readActiveModule, persistActiveModule, type PromptModule } from "@/lib/prompts-modules-registry";
 import { useScrollSpy } from "@/hooks/useScrollSpy";
 import { CoverageAlert } from "./CoverageAlert";
 import { CoverageChecklist } from "./CoverageChecklist";
@@ -62,7 +62,7 @@ interface UpdatesResult {
   totalHardcoded: number;
 }
 
-// Map card IDs to icons
+// Map card IDs to icons (Trabalhista — usado quando o módulo ativo não fornece o ícone)
 const cardIcons: Record<string, React.ComponentType<{
   className?: string;
 }>> = {
@@ -78,17 +78,6 @@ const cardIcons: Record<string, React.ComponentType<{
   _global: Sparkles,
   impugnacao: Scale
 };
-
-// Build LAUDO_STRUCTURE from shared module
-const LAUDO_STRUCTURE = [...LAUDO_CARDS_STRUCTURE, ...PROMPT_ONLY_CARDS].map(card => ({
-  id: card.id,
-  title: card.label,
-  icon: cardIcons[card.id] || FileText,
-  sections: card.sections.map(s => ({
-    id: s.id,
-    label: s.label
-  }))
-}));
 
 // ============================================
 // PROMPT TYPE UTILITIES
@@ -132,12 +121,31 @@ function getPromptType(promptId: string): {
 // ============================================
 
 export function DevPrompts() {
+  const [activeModule, setActiveModuleState] = useState<PromptModule>(() => readActiveModule());
+  const activeModuleConfig = PROMPT_MODULES[activeModule];
+
+  // Estrutura de cards/seções renderizada pelo DevPrompts no módulo ativo.
+  // Trabalhista combina cards do laudo + cards "prompt-only" (System/Global/Impugnação).
+  const LAUDO_STRUCTURE = useMemo(() => {
+    const merged = [...activeModuleConfig.cards, ...activeModuleConfig.promptCards];
+    return merged.map(card => ({
+      id: card.id,
+      title: card.label,
+      icon: activeModuleConfig.cardIcons[card.id] || cardIcons[card.id] || FileText,
+      sections: card.sections.map(s => ({ id: s.id, label: s.label }))
+    }));
+  }, [activeModuleConfig]);
+
+  const currentFixedConfig = activeModuleConfig.fixedConfig;
+  const currentExpectedTypes = activeModuleConfig.expectedTypes;
+  const currentCards = activeModuleConfig.cards;
+
   const [prompts, setPrompts] = useState<PromptConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set(LAUDO_STRUCTURE.map(c => c.id)));
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(() => new Set(LAUDO_STRUCTURE.map(c => c.id)));
   const [selectedPrompt, setSelectedPrompt] = useState<PromptConfig | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"classified" | "unclassified">("classified");
@@ -153,8 +161,23 @@ export function DevPrompts() {
   } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Get all section IDs for scroll spy
-  const allSectionIds = useMemo(() => LAUDO_STRUCTURE.flatMap(card => card.sections.map(s => `section-${s.id}`)), []);
+  // Troca de módulo: persiste, reseta busca/expansão/tab para evitar estado órfão.
+  const setActiveModule = (m: PromptModule) => {
+    if (m === activeModule) return;
+    persistActiveModule(m);
+    setActiveModuleState(m);
+    setSearchTerm("");
+    setActiveTab("classified");
+    const next = PROMPT_MODULES[m];
+    const allCardIds = [...next.cards, ...next.promptCards].map(c => c.id);
+    setExpandedCards(new Set(allCardIds));
+  };
+
+  // Get all section IDs for scroll spy (depende do módulo ativo)
+  const allSectionIds = useMemo(
+    () => LAUDO_STRUCTURE.flatMap(card => card.sections.map(s => `section-${s.id}`)),
+    [LAUDO_STRUCTURE]
+  );
 
   // Use scroll spy for navigation highlighting
   const {
@@ -315,14 +338,22 @@ export function DevPrompts() {
     }
   };
 
-  // Prompts classificados vs não classificados
+  // Filtro por módulo ativo (Trabalhista vs Previdenciário).
+  // Aplicado ANTES de qualquer classificação/agrupamento para que toda a página
+  // (stats, navegação, cards, busca, checklist, export) reflita só o módulo.
+  const modulePrompts = useMemo(
+    () => prompts.filter(p => activeModuleConfig.matchPromptId(p.id)),
+    [prompts, activeModuleConfig]
+  );
+
+  // Prompts classificados vs não classificados (dentro do módulo ativo)
   const {
     classifiedPrompts,
     unclassifiedPrompts
   } = useMemo(() => {
     const classified: PromptConfig[] = [];
     const unclassified: PromptConfig[] = [];
-    prompts.forEach(p => {
+    modulePrompts.forEach(p => {
       if (p.cardId && p.sectionId) {
         classified.push(p);
       } else {
@@ -333,7 +364,7 @@ export function DevPrompts() {
       classifiedPrompts: classified,
       unclassifiedPrompts: unclassified
     };
-  }, [prompts]);
+  }, [modulePrompts]);
   
 
   // Filtrar por busca
@@ -366,7 +397,7 @@ export function DevPrompts() {
     });
     
     return { groupedPrompts: grouped, orphanedClassified: orphaned };
-  }, [filteredClassified]);
+  }, [filteredClassified, LAUDO_STRUCTURE]);
 
   // Combined unclassified: truly unclassified + orphaned (unknown cardId/sectionId)
   const combinedUnclassified = useMemo(() => {
@@ -491,7 +522,7 @@ export function DevPrompts() {
         align: "center"
       });
       yPos += 6;
-      doc.text(`Total: ${prompts.length} prompts`, pageWidth / 2, yPos, {
+      doc.text(`Módulo: ${activeModuleConfig.label}  |  Total: ${modulePrompts.length} prompts`, pageWidth / 2, yPos, {
         align: "center"
       });
       yPos += 15;
@@ -562,7 +593,7 @@ export function DevPrompts() {
       for (const card of LAUDO_STRUCTURE) {
         // Verificar se card tem prompts OU campos fixos
         const cardPrompts = Object.values(groupedPrompts[card.id] || {}).flat();
-        const hasFixedSections = card.sections.some(s => FIXED_CONFIG_SECTIONS[s.id]);
+        const hasFixedSections = card.sections.some(s => currentFixedConfig[s.id]);
         if (cardPrompts.length === 0 && !hasFixedSections) continue;
         
         checkNewPage(25);
@@ -577,7 +608,7 @@ export function DevPrompts() {
         doc.setTextColor(0);
         
         for (const section of card.sections) {
-          const isFixedConfig = FIXED_CONFIG_SECTIONS[section.id];
+          const isFixedConfig = currentFixedConfig[section.id];
           const sectionPrompts = groupedPrompts[card.id]?.[section.id] || [];
           
           // Renderizar campo fixo na posição correta
@@ -732,7 +763,7 @@ export function DevPrompts() {
       doc.save(`prompts-backup-${timestamp}.pdf`);
       toast({
         title: "PDF exportado!",
-        description: `Backup com ${prompts.length} prompts salvo com sucesso.`
+        description: `Backup com ${modulePrompts.length} prompts (${activeModuleConfig.label}) salvo com sucesso.`
       });
     } catch (error) {
       console.error("Erro ao exportar PDF:", error);
@@ -795,26 +826,49 @@ export function DevPrompts() {
   return <TooltipProvider>
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Prompts de IA</h1>
           <p className="text-muted-foreground mt-1">
-            Gerenciador de prompts IA do sistema
+            Gerenciador de prompts IA do sistema — módulo <strong>{activeModuleConfig.label}</strong>
           </p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button onClick={exportToPDF} variant="outline" size="sm" disabled={exporting || prompts.length === 0}>
+        <div className="flex gap-2 flex-wrap items-center">
+          {/* Module selector — preserva ações por módulo */}
+          <div className="inline-flex rounded-md border bg-muted/30 p-1">
+            {PROMPT_MODULE_LIST.map(mod => (
+              <button
+                key={mod.id}
+                type="button"
+                onClick={() => setActiveModule(mod.id)}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium rounded-sm transition-colors",
+                  activeModule === mod.id
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                aria-pressed={activeModule === mod.id}
+              >
+                {mod.label}
+              </button>
+            ))}
+          </div>
+          <Button onClick={exportToPDF} variant="outline" size="sm" disabled={exporting || modulePrompts.length === 0}>
             {exporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
             Exportar PDF
           </Button>
-          <Button onClick={checkForUpdates} variant="outline" size="sm" disabled={checkingUpdates}>
-            {checkingUpdates ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <GitCompare className="h-4 w-4 mr-2" />}
-            Verificar Atualizações
-          </Button>
-          <Button onClick={() => setShowSeedConfirmDialog(true)} variant="destructive" size="sm" disabled={seeding}>
-            {seeding ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2" />}
-            Restaurar Padrão de Fábrica
-          </Button>
+          {activeModuleConfig.hasFactoryDefaults && (
+            <>
+              <Button onClick={checkForUpdates} variant="outline" size="sm" disabled={checkingUpdates}>
+                {checkingUpdates ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <GitCompare className="h-4 w-4 mr-2" />}
+                Verificar Atualizações
+              </Button>
+              <Button onClick={() => setShowSeedConfirmDialog(true)} variant="destructive" size="sm" disabled={seeding}>
+                {seeding ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2" />}
+                Restaurar Padrão de Fábrica
+              </Button>
+            </>
+          )}
           <Button onClick={fetchPrompts} variant="ghost" size="sm">
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -829,7 +883,7 @@ export function DevPrompts() {
             <MessageSquare className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{prompts.length}</div>
+            <div className="text-2xl font-bold">{modulePrompts.length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -855,7 +909,11 @@ export function DevPrompts() {
       </div>
 
       {/* Coverage Alert */}
-      <CoverageAlert prompts={prompts} />
+      <CoverageAlert
+        prompts={modulePrompts}
+        structure={currentCards}
+        expectedTypes={currentExpectedTypes}
+      />
 
       {/* Search */}
       <div className="relative">
@@ -914,7 +972,7 @@ export function DevPrompts() {
                                   {card.sections.map(section => {
                                   const sectionCount = getSectionPromptCount(card.id, section.id);
                                   const isActive = activeId === `section-${section.id}`;
-                                  const isFixedConfig = FIXED_CONFIG_SECTIONS[section.id];
+                                  const isFixedConfig = currentFixedConfig[section.id];
                                   
                                   return <Tooltip key={section.id}>
                                     <TooltipTrigger asChild>
@@ -955,7 +1013,12 @@ export function DevPrompts() {
                 </Card>
               
               {/* Coverage Checklist */}
-              <CoverageChecklist prompts={prompts} />
+              <CoverageChecklist
+                prompts={modulePrompts}
+                structure={currentCards}
+                expectedTypes={currentExpectedTypes}
+                fixedConfig={currentFixedConfig}
+              />
               </div>
             </aside>
 
