@@ -272,9 +272,45 @@ export default function PrelaudoEditor() {
           )}
         </div>
 
-        <Button variant="outline" size="sm" onClick={handleExportPdf}>
-          <FileDown className="h-4 w-4 mr-1.5" /> Exportar PDF
-        </Button>
+        {/* Export Button with Format Toggle (mesmo padrão do módulo Trabalhista) */}
+        <div className="flex items-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            disabled={exporting}
+            className="rounded-r-none border-r-0"
+          >
+            {exporting ? (
+              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+            ) : (
+              <FileDown className="h-4 w-4 mr-1.5" />
+            )}
+            <span className="hidden sm:inline">
+              Baixar em {exportFormat.toUpperCase()}
+            </span>
+          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setExportFormat((prev) => (prev === "pdf" ? "docx" : "pdf"))
+                  }
+                  className="rounded-l-none px-2"
+                  disabled={exporting}
+                >
+                  <ArrowLeftRight className="h-3 w-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Alternar para {exportFormat === "pdf" ? "DOCX" : "PDF"}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
 
         <Button
           variant="default"
