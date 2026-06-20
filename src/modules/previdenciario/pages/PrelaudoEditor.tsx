@@ -61,9 +61,40 @@ export default function PrelaudoEditor() {
   const [saving, setSaving] = useState(false);
   const [exportFormat, setExportFormat] = useState<"pdf" | "docx">("pdf");
   const [exporting, setExporting] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (typeof window === "undefined") return "paginated";
+    const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+    return (stored as ViewMode) || "paginated";
+  });
   const dirtyRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFirstSaveRef = useRef(true);
+  const mainContentRef = useRef<HTMLDivElement | null>(null);
+
+  const sectionIds = useMemo(
+    () => PRELAUDO_STEPS.filter((s) => s.implemented).map((s) => `step-${s.id}`),
+    [],
+  );
+
+  const { activeId: scrollSpyActiveId, scrollToSection } = useScrollSpy({
+    sectionIds,
+    offset: 120,
+    enabled: viewMode === "infinite",
+    scrollContainerRef: mainContentRef,
+  });
+
+  useEffect(() => {
+    if (viewMode !== "infinite" || !scrollSpyActiveId) return;
+    const id = scrollSpyActiveId.replace("step-", "") as StepId;
+    setCurrentStep((prev) => (prev !== id ? id : prev));
+  }, [scrollSpyActiveId, viewMode]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, viewMode);
+    }
+  }, [viewMode]);
+
 
   // Load
   useEffect(() => {
