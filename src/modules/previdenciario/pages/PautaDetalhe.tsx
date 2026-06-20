@@ -231,6 +231,11 @@ export default function PautaDetalhe() {
                   <Sparkles className="h-4 w-4 mr-1.5" />
                 )}
                 Processar pendentes ({pendentes.length})
+                {processandoLote && (
+                  <span className="ml-2 text-[11px] font-normal opacity-80 tabular-nums">
+                    {loteProgresso.done}/{loteProgresso.total} · {progress}%
+                  </span>
+                )}
               </Button>
             )}
             <Button onClick={() => setNovaOpen(true)}>
