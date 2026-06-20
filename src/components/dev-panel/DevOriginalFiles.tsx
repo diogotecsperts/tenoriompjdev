@@ -255,6 +255,20 @@ export function DevOriginalFiles() {
                       <TableCell className="font-mono text-xs max-w-xs truncate">
                         {f.file_name}
                       </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={
+                            f.module === "previdenciario"
+                              ? "border-emerald-300 text-emerald-700 bg-emerald-50"
+                              : "border-blue-300 text-blue-700 bg-blue-50"
+                          }
+                        >
+                          {f.module === "previdenciario"
+                            ? "Previdenciário"
+                            : "Trabalhista"}
+                        </Badge>
+                      </TableCell>
                       <TableCell className="text-sm font-medium max-w-[200px] truncate">
                         {f.reclamante ? (
                           f.reclamante
@@ -290,7 +304,9 @@ export function DevOriginalFiles() {
                           size="sm"
                           variant="outline"
                           disabled={downloadingPath === f.file_path}
-                          onClick={() => downloadFile(f.file_path, f.file_name)}
+                          onClick={() =>
+                            downloadFile(f.file_path, f.file_name, f.bucket)
+                          }
                         >
                           {downloadingPath === f.file_path ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
