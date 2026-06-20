@@ -18,6 +18,7 @@ import { jsPDF } from "jspdf";
 import { cn } from "@/lib/utils";
 import { PromptEditor } from "./PromptEditor";
 import { LAUDO_CARDS_STRUCTURE, PROMPT_ONLY_CARDS, FIXED_CONFIG_SECTIONS } from "@/lib/laudo-structure";
+import { PROMPT_MODULE_LIST, PROMPT_MODULES, readActiveModule, persistActiveModule, type PromptModule } from "@/lib/prompts-modules-registry";
 import { useScrollSpy } from "@/hooks/useScrollSpy";
 import { CoverageAlert } from "./CoverageAlert";
 import { CoverageChecklist } from "./CoverageChecklist";
@@ -62,7 +63,7 @@ interface UpdatesResult {
   totalHardcoded: number;
 }
 
-// Map card IDs to icons
+// Map card IDs to icons (Trabalhista — usado quando o módulo ativo não fornece o ícone)
 const cardIcons: Record<string, React.ComponentType<{
   className?: string;
 }>> = {
@@ -78,17 +79,6 @@ const cardIcons: Record<string, React.ComponentType<{
   _global: Sparkles,
   impugnacao: Scale
 };
-
-// Build LAUDO_STRUCTURE from shared module
-const LAUDO_STRUCTURE = [...LAUDO_CARDS_STRUCTURE, ...PROMPT_ONLY_CARDS].map(card => ({
-  id: card.id,
-  title: card.label,
-  icon: cardIcons[card.id] || FileText,
-  sections: card.sections.map(s => ({
-    id: s.id,
-    label: s.label
-  }))
-}));
 
 // ============================================
 // PROMPT TYPE UTILITIES
