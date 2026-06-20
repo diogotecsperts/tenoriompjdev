@@ -41,6 +41,8 @@ interface DevFileRow {
   reclamante: string | null;
   processo: string | null;
   error: string | null;
+  module?: "trabalhista" | "previdenciario";
+  bucket?: "processos-pdf" | "prev-pdfs";
 }
 
 export function DevOriginalFiles() {
@@ -101,12 +103,16 @@ export function DevOriginalFiles() {
     }
   };
 
-  const downloadFile = async (filePath: string, fileName: string) => {
+  const downloadFile = async (
+    filePath: string,
+    fileName: string,
+    bucket?: string,
+  ) => {
     setDownloadingPath(filePath);
     try {
       const { data, error } = await supabase.functions.invoke(
         "dev-download-pdf",
-        { body: { file_path: filePath } },
+        { body: { file_path: filePath, bucket } },
       );
       if (error) throw error;
       const url = (data as any)?.url;
@@ -235,7 +241,8 @@ export function DevOriginalFiles() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Arquivo</TableHead>
-                    <TableHead>Reclamante</TableHead>
+                    <TableHead>Módulo</TableHead>
+                    <TableHead>Periciado</TableHead>
                     <TableHead>Processo</TableHead>
                     <TableHead>Data</TableHead>
                     <TableHead>Status</TableHead>
@@ -244,9 +251,23 @@ export function DevOriginalFiles() {
                 </TableHeader>
                 <TableBody>
                   {filteredFiles.map((f) => (
-                    <TableRow key={f.job_id}>
+                    <TableRow key={`${f.module ?? "trab"}-${f.job_id}`}>
                       <TableCell className="font-mono text-xs max-w-xs truncate">
                         {f.file_name}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={
+                            f.module === "previdenciario"
+                              ? "border-emerald-300 text-emerald-700 bg-emerald-50"
+                              : "border-blue-300 text-blue-700 bg-blue-50"
+                          }
+                        >
+                          {f.module === "previdenciario"
+                            ? "Previdenciário"
+                            : "Trabalhista"}
+                        </Badge>
                       </TableCell>
                       <TableCell className="text-sm font-medium max-w-[200px] truncate">
                         {f.reclamante ? (
@@ -283,7 +304,9 @@ export function DevOriginalFiles() {
                           size="sm"
                           variant="outline"
                           disabled={downloadingPath === f.file_path}
-                          onClick={() => downloadFile(f.file_path, f.file_name)}
+                          onClick={() =>
+                            downloadFile(f.file_path, f.file_name, f.bucket)
+                          }
                         >
                           {downloadingPath === f.file_path ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
