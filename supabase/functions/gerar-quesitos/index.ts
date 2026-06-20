@@ -17,9 +17,28 @@ REGRAS ABSOLUTAS:
 2. Se um dado clínico não foi fornecido, responda: "Prejudicado ante a ausência de informações clínicas suficientes."
 3. Use linguagem técnica médico-pericial em português formal.
 4. NÃO use Markdown (*, #, **, etc.). Apenas texto plano com quebras de linha.
-5. Formate cada quesito como: "QUESITO X: [pergunta]\\nRESPOSTA: [resposta]\\n\\n"
-6. Numere os quesitos sequencialmente conforme aparecem no processo.
+5. Cada par PERGUNTA/RESPOSTA deve ocupar DUAS linhas distintas:
+   - linha 1: "QUESITO N: <pergunta>"
+   - linha 2: "RESPOSTA: <resposta técnica>"
+   Deixe UMA linha em branco antes do próximo QUESITO. Nunca cole a resposta na mesma linha da pergunta. Use os rótulos "QUESITO N:" e "RESPOSTA:" sempre em caixa alta, com dois-pontos.
+6. Renumere QUESITO 1, 2, 3... sequencialmente, ignorando a numeração original do processo.
 7. Escreva SEMPRE em português brasileiro com acentuação correta (á, é, í, ó, ú, ã, õ, ç).`;
+
+const FORMATO_BLOCO = `
+
+FORMATO OBRIGATÓRIO DA SAÍDA (siga literalmente):
+
+QUESITO 1: <pergunta integral>
+RESPOSTA: <resposta técnica fundamentada nos dados clínicos>
+
+QUESITO 2: <pergunta integral>
+RESPOSTA: <resposta técnica fundamentada nos dados clínicos>
+
+Regras invioláveis:
+- Sempre escreva os rótulos "QUESITO N:" e "RESPOSTA:" em CAIXA ALTA, com dois-pontos.
+- Renumere sequencialmente (1, 2, 3...), ignorando a numeração original do processo.
+- A resposta NUNCA pode ficar na mesma linha da pergunta.
+- UMA linha em branco entre cada par pergunta/resposta.`;
 
 // Default prompts for each group
 const DEFAULT_PROMPTS: Record<string, string> = {
@@ -45,7 +64,7 @@ DADOS CLÍNICOS DO PERITO (use EXCLUSIVAMENTE estes dados para responder):
 - Antecedentes: \${antecedentes}
 - Laudos Médicos: \${laudosMedicos}
 
-Se NÃO encontrar quesitos do Juízo no processo, retorne UNICAMENTE: "Quesitos do Juízo não identificados nos autos."`,
+Se NÃO encontrar quesitos do Juízo no processo, retorne UNICAMENTE: "Quesitos do Juízo não identificados nos autos."${FORMATO_BLOCO}`,
 
   reclamante: `Analise o TEXTO DO PROCESSO abaixo e identifique TODOS os quesitos formulados pelo RECLAMANTE (autor/trabalhador).
 
@@ -69,7 +88,7 @@ DADOS CLÍNICOS DO PERITO (use EXCLUSIVAMENTE estes dados para responder):
 - Antecedentes: \${antecedentes}
 - Laudos Médicos: \${laudosMedicos}
 
-Se NÃO encontrar quesitos do Reclamante no processo, retorne UNICAMENTE: "Quesitos do Reclamante não identificados nos autos."`,
+Se NÃO encontrar quesitos do Reclamante no processo, retorne UNICAMENTE: "Quesitos do Reclamante não identificados nos autos."${FORMATO_BLOCO}`,
 
   reclamada: `Analise o TEXTO DO PROCESSO abaixo e identifique TODOS os quesitos formulados pela RECLAMADA (empresa/empregador).
 
@@ -93,8 +112,18 @@ DADOS CLÍNICOS DO PERITO (use EXCLUSIVAMENTE estes dados para responder):
 - Antecedentes: \${antecedentes}
 - Laudos Médicos: \${laudosMedicos}
 
-Se NÃO encontrar quesitos da Reclamada no processo, retorne UNICAMENTE: "Quesitos da Reclamada não identificados nos autos."`,
+Se NÃO encontrar quesitos da Reclamada no processo, retorne UNICAMENTE: "Quesitos da Reclamada não identificados nos autos."${FORMATO_BLOCO}`,
 };
+
+// Normalizador defensivo: garante que QUESITO N: e RESPOSTA: comecem em linha própria
+function normalizarQuesitos(txt: string): string {
+  if (!txt) return txt;
+  return txt
+    .replace(/([^\n])\s*(QUESITO\s*\d+\s*:)/gi, "$1\n\n$2")
+    .replace(/([^\n])\s*(RESPOSTA\s*:)/gi, "$1\nRESPOSTA:")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -289,7 +318,7 @@ serve(async (req) => {
     for (const result of results) {
       if (result.status === "fulfilled") {
         const { key, text, label } = result.value;
-        response[fieldMap[key]] = text.trim();
+        response[fieldMap[key]] = normalizarQuesitos(text);
         successCount++;
         console.log(`[gerar-quesitos] ${label}: OK (${text.length} chars)`);
       } else {
