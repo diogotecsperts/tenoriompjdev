@@ -17,7 +17,6 @@ import { Info } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { cn } from "@/lib/utils";
 import { PromptEditor } from "./PromptEditor";
-import { LAUDO_CARDS_STRUCTURE, PROMPT_ONLY_CARDS, FIXED_CONFIG_SECTIONS } from "@/lib/laudo-structure";
 import { PROMPT_MODULE_LIST, PROMPT_MODULES, readActiveModule, persistActiveModule, type PromptModule } from "@/lib/prompts-modules-registry";
 import { useScrollSpy } from "@/hooks/useScrollSpy";
 import { CoverageAlert } from "./CoverageAlert";
