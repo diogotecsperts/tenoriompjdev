@@ -47,6 +47,8 @@ export default function PautaDetalhe() {
   const [novaOpen, setNovaOpen] = useState(false);
   const [processandoIds, setProcessandoIds] = useState<Set<string>>(new Set());
   const [processandoLote, setProcessandoLote] = useState(false);
+  const [loteProgresso, setLoteProgresso] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+  const { progress, finish } = useFakeProgress(processandoIds.size > 0 || processandoLote);
 
   const reload = async () => {
     if (!pautaId) return;
