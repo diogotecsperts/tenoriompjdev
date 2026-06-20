@@ -139,22 +139,31 @@ export default function PrelaudoEditor() {
     }
   };
 
-  const handleExportPdf = async () => {
+  const handleExport = async () => {
     if (!pericia) return;
+    setExporting(true);
     try {
       await persist();
       const localStr = pauta
         ? [pauta.local, pauta.cidade, pauta.uf].filter(Boolean).join(" — ")
         : "";
-      downloadPrelaudoPdf(data, {
+      const meta = {
         periciado: pericia.periciado_nome || data.identificacao?.nome || "",
         dataPericia: pauta?.data || new Date().toISOString().slice(0, 10),
         local: localStr,
         numeroProcesso: data.identificacao?.numero_processo || "",
-      });
-      toast({ title: "PDF gerado" });
+      };
+      if (exportFormat === "pdf") {
+        await downloadPrelaudoPdf(data, meta);
+        toast({ title: "PDF gerado" });
+      } else {
+        await downloadPrelaudoDocx(data, meta);
+        toast({ title: "DOCX gerado" });
+      }
     } catch (err: any) {
       toast({ variant: "destructive", title: "Erro ao exportar", description: err.message });
+    } finally {
+      setExporting(false);
     }
   };
 
