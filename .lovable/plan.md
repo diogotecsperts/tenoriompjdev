@@ -1,86 +1,65 @@
-# Plano: Export DOCX + PDF do Pré-Laudo com paridade visual ao Trabalhista
+# Plano: Toggle Paginado ↔ Scroll Infinito no Pré-Laudo Previdenciário
 
-## Entendimento (confirmação)
+## Entendimento
 
-Sim, entendi perfeitamente. Hoje o módulo Previdenciário só exporta PDF, e com um visual próprio (faixa teal #2A9D8F) que destoa do resto do programa. O que você quer:
+Replicar no `PrelaudoEditor` exatamente o mesmo mecanismo de alternância de visualização já existente no `LaudoEditor` (Trabalhista):
 
-1. **Adicionar export DOCX** ao Pré-Laudo Previdenciário.
-2. **Botão único com toggle** PDF ↔ DOCX, idêntico ao do Editor Trabalhista (split button + ícone `ArrowLeftRight`).
-3. **Estrutura visual** (cabeçalho, rodapé, fonte, margens, numeração de página, estilos de título de seção) **rigorosamente igual** ao Trabalhista — o "esqueleto" do documento, não o conteúdo.
-4. **Conteúdo permanece 100% previdenciário** (os 10 steps do `PrelaudoData`).
-5. **Isolamento total**: nada novo no `src/utils/` nem em `src/lib/laudo-structure.ts`. Tudo dentro de `src/modules/previdenciario/`.
+- Botão único `variant="outline" size="icon"` com tooltip.
+- Ícones: `Scroll` quando está em modo paginado (sugere alternar p/ infinito) e `LayoutGrid` quando está em infinito.
+- Hook `useScrollSpy` reutilizado (já é genérico, vive em `src/hooks/` — não viola isolamento).
+- Persistência da escolha em `localStorage` por chave dedicada do módulo.
 
-## Padrão estrutural a replicar (extraído do Trabalhista)
+## Padrão a replicar (extraído do Trabalhista)
 
-| Elemento | Origem | Reuso |
-|---|---|---|
-| Banner topo | `public/timbrado-cabecalho.png` (floating, full-width, borda superior) | mesmo asset |
-| Banner rodapé | `public/timbrado-rodape.png` + "Página X de Y" branco centralizado sobre o banner | mesmo asset |
-| Página | A4, margens **20 mm esq / 15 mm dir / 45 mm topo / dinâmico rodapé** | igual |
-| Fonte | Arial, 10pt corpo, 12pt título, 11pt subtítulo, 8pt rodapé | igual |
-| Cores | `#1B3665` primária (azul institucional) p/ títulos de seção, `#1F2937` texto, `#4B5563` muted | igual |
-| Numeração páginas | `Página X de Y` rodapé centralizado | igual |
-| Nome arquivo | `prelaudo-<processo>-<periciado>.{pdf|docx}` (mesmo padrão de slug) | adaptado |
+| Elemento | Origem (LaudoEditor.tsx) |
+|---|---|
+| Tipo | `type ViewMode = "paginated" \| "infinite"` |
+| Estado | `useState<ViewMode>` inicializado de `localStorage` |
+| Persistência | `useEffect` salvando em `localStorage` |
+| Hook | `useScrollSpy({ sectionIds, enabled: viewMode==="infinite", scrollContainerRef })` |
+| Sync | quando `scrollSpyActiveId` muda → atualiza `currentStep` |
+| Click step | em modo infinito, `scrollToSection("step-<id>")`; em paginado, troca `currentStep` |
+| Render | paginado = só etapa atual + nav prev/next; infinito = todas com `space-y-8` |
+| Botão | `Tooltip` + `Button outline icon` com `Scroll`/`LayoutGrid` no header |
 
-> Observação importante: o teal #2A9D8F **deixa de aparecer no documento exportado** — ele continua sendo a cor de identidade da **UI** do módulo Previdenciário (sidebar, botões, steps). Só o documento final ganha o "esqueleto institucional" comum aos dois módulos. Isso resolve a sensação de "outro programa" no entregável final sem misturar as UIs dos módulos.
+## Mudanças (escopo cirúrgico)
 
-## Arquivos a criar / alterar (todos dentro de `src/modules/previdenciario/`)
+### 1. `src/modules/previdenciario/pages/PrelaudoEditor.tsx`
+- Adicionar `ViewMode`, `viewMode`, `setViewMode`, `VIEW_MODE_STORAGE_KEY = "prev-prelaudo-view-mode"`.
+- `mainContentRef` no `<div className="flex-1 overflow-y-auto …">` central.
+- `sectionIds = PRELAUDO_STEPS.filter(s=>s.implemented).map(s=>`step-${s.id}`)` (memo).
+- `useScrollSpy({ sectionIds, offset: 100, enabled: viewMode==="infinite", scrollContainerRef: mainContentRef })`.
+- `useEffect` sincronizando `scrollSpyActiveId` → `setCurrentStep`.
+- `useEffect` persistindo `viewMode` no localStorage.
+- Função `handleStepSelect(id)`: se infinito, `scrollToSection("step-"+id)`; senão `setCurrentStep(id)`. Passar para `<StepNav onSelect>`.
+- No header (ao lado direito do "Salvo …" e antes do botão de exportar), inserir o mesmo botão de toggle (ícone `Scroll`/`LayoutGrid` + Tooltip).
+- No corpo, condicional:
+  - **paginado** (atual): `renderStep(currentStep, …)` + footer Prev/Próxima.
+  - **infinito**: `PRELAUDO_STEPS.filter(s=>s.implemented).map(s => <section id={`step-${s.id}`} key={s.id} className="scroll-mt-24 space-y-3"><h2 className="text-lg font-semibold text-foreground">{s.ordem}. {s.label}</h2>{renderStep(s.id, data, setData)}</section>)` dentro de `<div className="space-y-10 pb-12">`.
 
-### 1. `lib/export/_shared-export.ts` (novo)
-Helpers compartilhados entre PDF e DOCX deste módulo:
-- `loadImageAsBase64(url)` e `loadImageAsArrayBuffer(url)`
-- `getImageDimensions(url)`
-- `calculateDynamicLayout(headerB64, footerB64)` → devolve margens dinâmicas em mm
-- `buildPeritoIdLine(meta)` (mesma formatação "Dr. Fulano — CRM/UF NNN")
-- `slugifyName(s)` e `fmtDate(iso)`
-- Constantes `COLORS`, `FONT`, `PAGE` idênticas às do Trabalhista
+### 2. `src/modules/previdenciario/components/StepNav.tsx`
+- Adicionar prop opcional `mode?: "paginated" | "infinite"` apenas para destacar visualmente o item ativo via scroll-spy (a destaque já vem do `current` que será sincronizado pelo spy). Nenhuma outra mudança.
 
-> **Nada disso é importado de `src/utils/`** — é uma cópia adaptada vivendo no namespace do módulo, preservando o isolamento.
+## Garantias
 
-### 2. `lib/export/prelaudo-pdf.ts` (refatorar)
-Reescrever para usar a mesma "casca" do `generateLaudoPDF.ts`:
-- Carrega `/timbrado-cabecalho.png` e `/timbrado-rodape.png`
-- `addHeaderToPages` + `addFooterToPages` rodando em **todas** as páginas após o build
-- Numeração `Página X de Y` em branco sobre o rodapé
-- Linha "Perito Judicial: Dr. X — CRM/UF NNN" no topo da página 1
-- Títulos de seção com a mesma tipografia/cor azul `#1B3665` do Trabalhista
-- Conteúdo continua sendo os 10 steps do `PrelaudoData` (Identificação, Queixa, Medicação, …, Conclusão) — função de render por seção mantida, só muda o "chrome"
+- **Isolamento**: nenhuma importação de `src/pages/LaudoEditor`, `src/components/laudo/*` ou `src/contexts/LaudoContext`. Só reutiliza `useScrollSpy` (hook genérico, sem regra de negócio do Trabalhista) e shadcn UI.
+- **Sem regressão**: módulo Trabalhista intacto. Edge functions, schema, prompts e export PDF/DOCX intactos.
+- **Robustez**:
+  - `enabled: viewMode === "infinite"` evita listener desnecessário em modo paginado.
+  - `setCurrentStep` só dispara se id realmente mudou.
+  - `scroll-mt-24` em cada seção evita que o topo fique escondido sob o header sticky.
+  - Persistência por chave própria (`prev-prelaudo-view-mode`) sem conflitar com a chave do Trabalhista.
 
-### 3. `lib/export/prelaudo-docx.ts` (novo)
-Espelho do `generateLaudoDOCX.ts`:
-- Mesmas `page.margin` (`top: 45mm`, `left: 20mm`, `right: 15mm`, rodapé dinâmico, `header: 0mm`, `footer: 0mm`)
-- `Header`/`Footer` com `ImageRun` floating (PNG do timbrado), `behindDocument: false`
-- Rodapé com `PageNumber.CURRENT` / `PageNumber.TOTAL_PAGES` em branco
-- Render dos 10 steps em `Paragraph` + `TextRun` com Arial/tamanhos padrão
-- `Packer.toBlob` + `saveAs` (já temos `file-saver` no projeto via Trabalhista)
-- Export `downloadPrelaudoDocx(data, meta)`
+## Como validar depois
 
-### 4. `pages/PrelaudoEditor.tsx` (UI do toggle)
-Substituir o botão atual `Exportar PDF` por exatamente o mesmo padrão do `LaudoEditor.tsx` (linhas 853–883):
-- `useState<'pdf'|'docx'>('pdf')` para `exportFormat`
-- Split button: `[Baixar em PDF/DOCX] [⇄]`
-- `Tooltip` "Alternar para DOCX/PDF"
-- `handleExport()` decide entre `downloadPrelaudoPdf` e `downloadPrelaudoDocx`
+1. Abrir uma perícia, clicar no botão `Scroll` → todas as 10 etapas aparecem empilhadas; rolar e ver o item ativo no `StepNav` mudando.
+2. Clicar em um item do `StepNav` em modo infinito → rola suavemente até a seção.
+3. Clicar de novo no botão (agora `LayoutGrid`) → volta para a visão paginada na etapa atual.
+4. Recarregar a página → modo escolhido é preservado.
+5. Conferir que o LaudoEditor (Trabalhista) continua funcionando idêntico.
 
-## Garantias de isolamento
+## Fora do escopo
 
-- Zero import cruzado: o novo código **não** importa de `src/utils/generateLaudo*` nem de `src/lib/laudo-structure.ts` nem de `src/contexts/LaudoContext`.
-- `LaudoData` (Trabalhista) **não** é tocado. `PrelaudoData` (Previdenciário) **não** muda.
-- Os PNGs `/timbrado-*` em `public/` são assets estáticos compartilhados — usá-los nos dois módulos é o que cria a identidade visual única do programa, sem acoplar código.
-- Edge functions, schema do banco e prompts: **nenhuma alteração**.
-
-## Como verificar depois de aplicado
-
-1. Abrir uma perícia previdenciária com dados preenchidos.
-2. Clicar em "Baixar em PDF" → conferir banner topo/rodapé idênticos ao Trabalhista, fonte Arial, numeração de página.
-3. Alternar com ⇄ → "Baixar em DOCX" → abrir no Word e conferir mesma estrutura.
-4. Verificar que o módulo Trabalhista continua exportando sem qualquer alteração.
-
-## Fora do escopo (não vou fazer agora)
-
-- Mudar paleta da UI do Pré-Laudo (sidebar/steps continuam teal).
-- Mexer no Trabalhista, em `src/utils/generateLaudo*`, ou no schema.
-- Adicionar imagens/anexos novos ao documento.
-- Tocar na edge function `prev-pre-processar` (a correção de truncamento já foi aplicada).
-
-Confirma que posso seguir com esse plano?
+- Mudar paleta/cores do módulo.
+- Refatorar `StepNav` ou `renderStep`.
+- Mexer no Trabalhista ou em qualquer função de exportação.
