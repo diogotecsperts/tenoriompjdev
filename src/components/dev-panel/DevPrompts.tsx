@@ -827,26 +827,49 @@ export function DevPrompts() {
   return <TooltipProvider>
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Prompts de IA</h1>
           <p className="text-muted-foreground mt-1">
-            Gerenciador de prompts IA do sistema
+            Gerenciador de prompts IA do sistema — módulo <strong>{activeModuleConfig.label}</strong>
           </p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button onClick={exportToPDF} variant="outline" size="sm" disabled={exporting || prompts.length === 0}>
+        <div className="flex gap-2 flex-wrap items-center">
+          {/* Module selector — preserva ações por módulo */}
+          <div className="inline-flex rounded-md border bg-muted/30 p-1">
+            {PROMPT_MODULE_LIST.map(mod => (
+              <button
+                key={mod.id}
+                type="button"
+                onClick={() => setActiveModule(mod.id)}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium rounded-sm transition-colors",
+                  activeModule === mod.id
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                aria-pressed={activeModule === mod.id}
+              >
+                {mod.label}
+              </button>
+            ))}
+          </div>
+          <Button onClick={exportToPDF} variant="outline" size="sm" disabled={exporting || modulePrompts.length === 0}>
             {exporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
             Exportar PDF
           </Button>
-          <Button onClick={checkForUpdates} variant="outline" size="sm" disabled={checkingUpdates}>
-            {checkingUpdates ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <GitCompare className="h-4 w-4 mr-2" />}
-            Verificar Atualizações
-          </Button>
-          <Button onClick={() => setShowSeedConfirmDialog(true)} variant="destructive" size="sm" disabled={seeding}>
-            {seeding ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2" />}
-            Restaurar Padrão de Fábrica
-          </Button>
+          {activeModuleConfig.hasFactoryDefaults && (
+            <>
+              <Button onClick={checkForUpdates} variant="outline" size="sm" disabled={checkingUpdates}>
+                {checkingUpdates ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <GitCompare className="h-4 w-4 mr-2" />}
+                Verificar Atualizações
+              </Button>
+              <Button onClick={() => setShowSeedConfirmDialog(true)} variant="destructive" size="sm" disabled={seeding}>
+                {seeding ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-2" />}
+                Restaurar Padrão de Fábrica
+              </Button>
+            </>
+          )}
           <Button onClick={fetchPrompts} variant="ghost" size="sm">
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -861,7 +884,7 @@ export function DevPrompts() {
             <MessageSquare className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{prompts.length}</div>
+            <div className="text-2xl font-bold">{modulePrompts.length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -887,7 +910,11 @@ export function DevPrompts() {
       </div>
 
       {/* Coverage Alert */}
-      <CoverageAlert prompts={prompts} />
+      <CoverageAlert
+        prompts={modulePrompts}
+        structure={currentCards}
+        expectedTypes={currentExpectedTypes}
+      />
 
       {/* Search */}
       <div className="relative">
