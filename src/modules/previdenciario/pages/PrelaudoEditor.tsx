@@ -46,6 +46,8 @@ import { Step09Cid } from "../components/steps/Step09Cid";
 import { Step10Conclusao } from "../components/steps/Step10Conclusao";
 
 const AUTOSAVE_MS = 900;
+const VIEW_MODE_STORAGE_KEY = "prev-prelaudo-view-mode";
+type ViewMode = "paginated" | "infinite";
 
 export default function PrelaudoEditor() {
   const { periciaId } = useParams<{ periciaId: string }>();
