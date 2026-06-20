@@ -339,14 +339,22 @@ export function DevPrompts() {
     }
   };
 
-  // Prompts classificados vs não classificados
+  // Filtro por módulo ativo (Trabalhista vs Previdenciário).
+  // Aplicado ANTES de qualquer classificação/agrupamento para que toda a página
+  // (stats, navegação, cards, busca, checklist, export) reflita só o módulo.
+  const modulePrompts = useMemo(
+    () => prompts.filter(p => activeModuleConfig.matchPromptId(p.id)),
+    [prompts, activeModuleConfig]
+  );
+
+  // Prompts classificados vs não classificados (dentro do módulo ativo)
   const {
     classifiedPrompts,
     unclassifiedPrompts
   } = useMemo(() => {
     const classified: PromptConfig[] = [];
     const unclassified: PromptConfig[] = [];
-    prompts.forEach(p => {
+    modulePrompts.forEach(p => {
       if (p.cardId && p.sectionId) {
         classified.push(p);
       } else {
@@ -357,7 +365,7 @@ export function DevPrompts() {
       classifiedPrompts: classified,
       unclassifiedPrompts: unclassified
     };
-  }, [prompts]);
+  }, [modulePrompts]);
   
 
   // Filtrar por busca
@@ -390,7 +398,7 @@ export function DevPrompts() {
     });
     
     return { groupedPrompts: grouped, orphanedClassified: orphaned };
-  }, [filteredClassified]);
+  }, [filteredClassified, LAUDO_STRUCTURE]);
 
   // Combined unclassified: truly unclassified + orphaned (unknown cardId/sectionId)
   const combinedUnclassified = useMemo(() => {
