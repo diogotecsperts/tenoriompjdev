@@ -115,6 +115,8 @@ export interface IdentificacaoData {
   ultima_atividade: string;
   endereco: string;
   telefone: string;
+  tempo_sem_trabalhar: string;
+  pessoas_mesmo_teto: string;
   // Processo
   numero_processo: string;
   vara: string;
@@ -224,6 +226,8 @@ export function mergeFromExtracao(
   fill(base.identificacao, "escolaridade", ident.escolaridade);
   fill(base.identificacao, "profissao", ident.profissao);
   fill(base.identificacao, "ultima_atividade", ident.ultima_atividade);
+  fill(base.identificacao, "tempo_sem_trabalhar", ident.tempo_sem_trabalhar);
+  fill(base.identificacao, "pessoas_mesmo_teto", ident.pessoas_mesmo_teto);
   // telefone e endereço removidos da UI — não pré-preencher.
   fill(base.identificacao, "numero_processo", proc.numero);
   fill(base.identificacao, "vara", proc.vara);
