@@ -103,12 +103,16 @@ export function DevOriginalFiles() {
     }
   };
 
-  const downloadFile = async (filePath: string, fileName: string) => {
+  const downloadFile = async (
+    filePath: string,
+    fileName: string,
+    bucket?: string,
+  ) => {
     setDownloadingPath(filePath);
     try {
       const { data, error } = await supabase.functions.invoke(
         "dev-download-pdf",
-        { body: { file_path: filePath } },
+        { body: { file_path: filePath, bucket } },
       );
       if (error) throw error;
       const url = (data as any)?.url;
