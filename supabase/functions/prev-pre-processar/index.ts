@@ -179,6 +179,132 @@ function parseAIJson(raw: string): any | null {
   return null;
 }
 
+// ============================================================
+// Unificação da Queixa Principal (prompt do cliente)
+// ============================================================
+
+const QUEIXA_SYSTEM_PROMPT =
+  'Você é médico perito judicial. Retorne APENAS o parágrafo técnico final em português, sem markdown, sem bullets, sem títulos, sem aspas e sem a palavra "IA".';
+
+const DEFAULT_QUEIXA_PROMPT = `Você é médico perito judicial especialista em perícias ortopédicas, previdenciárias e trabalhistas.
+
+Sua tarefa é reescrever e UNIFICAR todas as seções selecionadas pelo usuário, transformando-as exclusivamente em QUEIXA PRINCIPAL e parte inicial da ANAMNESE.
+
+FOCALIZE APENAS EM:
+1. Queixa principal.
+2. Tempo de evolução.
+3. Evolução, recorrência ou progressão.
+4. Características dos sintomas.
+5. Irradiação, parestesia ou sintomas associados, quando informados.
+6. Antecedentes traumáticos relevantes, quando informados.
+7. Repercussão funcional referida.
+
+REGRAS OBRIGATÓRIAS:
+1. Una todas as informações em um único texto coeso.
+2. Elimine repetições.
+3. Organize nesta sequência: queixa principal, tempo de evolução, evolução/recorrência/progressão, características dos sintomas, sintomas associados, antecedentes traumáticos e repercussão funcional referida.
+4. Não acrescentar medicações, tratamentos, fisioterapia, acompanhamento médico, exames, documentos ou comorbidades.
+5. Não emitir conclusão sobre incapacidade laboral.
+6. Não presumir diagnóstico não informado.
+7. Não ampliar os fatos além do que foi descrito.
+8. Usar sempre A parte pericianda como sujeito principal.
+9. Preferir o verbo refere em vez de relata, salvo em histórico de trauma onde se usa relata.
+10. Quando houver dor crônica, usar: de evolução crônica e recorrente, relatando episódios de exacerbação álgica.
+11. Quando houver irradiação ou parestesia, descrever: com irradiação e parestesia para o segmento informado.
+12. Quando houver trauma, usar: A parte pericianda relata histórico de trauma ocorrido em [data], ocasião em que sofreu [lesão]. Desde o evento, refere [sintomas], os quais associa diretamente ao trauma inicial.
+13. Quando houver coxalgia, tratá-la como queixa do segmento axial, descrevendo-a junto à coluna e não com as artralgias periféricas.
+14. O tempo de evolução deve ser vinculado obrigatoriamente à queixa principal. Nunca posicioná-lo após queixa de outro sistema.
+15. Queixas emocionais em frase própria no final: Acrescenta queixas emocionais, incluindo os sintomas referidos, com repercussão referida no convívio social e na qualidade de vida.
+16. Corrigir ortografia, pontuação, concordância e repetições.
+17. Não usar bullets, título, cabeçalho, markdown ou comentários.
+18. Produzir apenas o texto final em um único parágrafo técnico e coeso.
+19. Se houver múltiplas queixas, iniciar pela queixa principal mais específica e agrupar as demais de forma anatômica e lógica.
+20. Se faltar tempo de evolução, não inventar. Omitir.
+21. Se faltar repercussão funcional, não inventar. Omitir.
+22. O texto final deve usar referindo repercussão funcional referida nas atividades habituais como encerramento, quando aplicável.
+
+TEXTOS / SEÇÕES SELECIONADAS:
+\${textoSelecionado}
+
+Reescreva em um único parágrafo técnico, coeso e pronto para inserção direta no laudo pericial. Retorne apenas o texto final, sem introdução, sem aspas, sem numeração e sem títulos.`;
+
+function buildTextoSelecionado(ocrText: string, extracao: any): string {
+  const queixa = (extracao?.queixa_principal || "").toString().trim();
+  const histClin = (extracao?.historia_clinica || "").toString().trim();
+  const histLab = (extracao?.historia_laboral || "").toString().trim();
+  const comorb = (extracao?.comorbidades || "").toString().trim();
+  const cids = Array.isArray(extracao?.cids_alegados) ? extracao.cids_alegados.join(", ") : "";
+
+  const blocoEstruturado = [
+    queixa && `QUEIXA EXTRAÍDA: ${queixa}`,
+    histClin && `HISTÓRIA CLÍNICA: ${histClin}`,
+    histLab && `HISTÓRIA LABORAL: ${histLab}`,
+    comorb && `COMORBIDADES: ${comorb}`,
+    cids && `CIDS ALEGADOS: ${cids}`,
+  ].filter(Boolean).join("\n\n");
+
+  // Cauda do OCR — quesitos/anamnese costumam ficar no fim
+  const ocrTail = ocrText.length > 40_000 ? ocrText.slice(-40_000) : ocrText;
+
+  return `${blocoEstruturado}\n\nTEXTO BRUTO DO PROCESSO (trecho):\n${ocrTail}`;
+}
+
+/**
+ * Pós-processa a saída da IA: remove markdown/bullets, colapsa em parágrafo único,
+ * rejeita se contiver "IA" como palavra isolada ou se for muito curto.
+ */
+function sanitizeQueixa(raw: string): string {
+  if (!raw) return "";
+  let t = raw.trim();
+  // remove fences
+  t = t.replace(/^```[a-z]*\s*/i, "").replace(/```\s*$/, "");
+  // remove markdown headings/bullets
+  t = t.replace(/^#{1,6}\s+/gm, "");
+  t = t.replace(/^\s*[-*•]\s+/gm, "");
+  // remove negrito/itálico
+  t = t.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1");
+  t = t.replace(/__([^_]+)__/g, "$1").replace(/_([^_]+)_/g, "$1");
+  // colapsa em um único parágrafo
+  t = t.replace(/\s*\n+\s*/g, " ").replace(/\s{2,}/g, " ").trim();
+  // remove aspas envolventes
+  t = t.replace(/^["'“”«»](.*)["'“”«»]$/s, "$1").trim();
+  // rejeita conteúdo proibido
+  if (/\bIA\b/.test(t)) return "";
+  if (t.length < 60) return "";
+  return t;
+}
+
+async function gerarQueixaUnificada(args: {
+  aiConfig: any;
+  userId: string;
+  ocrText: string;
+  extracao: any;
+}): Promise<string> {
+  const textoSelecionado = buildTextoSelecionado(args.ocrText, args.extracao);
+  if (textoSelecionado.replace(/\s/g, "").length < 80) return "";
+
+  const userPrompt = await getPrompt(
+    "prompt_prev_queixa_unificada",
+    DEFAULT_QUEIXA_PROMPT,
+    { textoSelecionado },
+    {
+      description: "PREV: Unificação da Queixa Principal a partir do processo",
+      cardId: "previdenciario",
+      sectionId: "queixa",
+    },
+  );
+
+  const resp = await callAI(args.aiConfig, QUEIXA_SYSTEM_PROMPT, userPrompt, {
+    userId: args.userId,
+    promptType: "prev_queixa_unificada",
+    maxOutputTokens: 1200,
+    jsonMode: false,
+  });
+
+  return sanitizeQueixa(resp?.text || "");
+}
+
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -324,7 +450,23 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 5) Persistência: prev_extracao + status + documentos
+    // 5) Unificação da Queixa Principal (segunda passada IA, não-fatal)
+    let queixaUnificada = "";
+    try {
+      queixaUnificada = await gerarQueixaUnificada({
+        aiConfig,
+        userId,
+        ocrText,
+        extracao: parsed,
+      });
+      if (queixaUnificada) {
+        parsed.queixa_principal = queixaUnificada;
+      }
+    } catch (e) {
+      console.warn("[prev-pre-processar] queixa unificada falhou (não-fatal):", e);
+    }
+
+    // 6) Persistência: prev_extracao + status + documentos
     const extracao = {
       ...parsed,
       _meta: {
@@ -333,9 +475,11 @@ Deno.serve(async (req: Request) => {
         ai_provider: aiResp.provider,
         ai_model: aiResp.model,
         used_fallback: aiResp.usedFallback,
+        queixa_unificada_ok: !!queixaUnificada,
         extracted_at: new Date().toISOString(),
       },
     };
+
 
     const periciado_nome =
       parsed?.identificacao?.nome && typeof parsed.identificacao.nome === "string"

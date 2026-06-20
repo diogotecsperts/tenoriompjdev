@@ -224,8 +224,7 @@ export function mergeFromExtracao(
   fill(base.identificacao, "escolaridade", ident.escolaridade);
   fill(base.identificacao, "profissao", ident.profissao);
   fill(base.identificacao, "ultima_atividade", ident.ultima_atividade);
-  fill(base.identificacao, "endereco", ident.endereco);
-  fill(base.identificacao, "telefone", ident.telefone);
+  // telefone e endereço removidos da UI — não pré-preencher.
   fill(base.identificacao, "numero_processo", proc.numero);
   fill(base.identificacao, "vara", proc.vara);
   fill(base.identificacao, "comarca", proc.comarca);
