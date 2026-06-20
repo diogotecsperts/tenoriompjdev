@@ -13,9 +13,13 @@ import {
   Construction,
   FileDown,
   ArrowLeftRight,
+  Scroll,
+  LayoutGrid,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
+import { useScrollSpy } from "@/hooks/useScrollSpy";
+
 import { getPericia, updatePericia, setPericiaStatus, getPauta } from "../api/pautas";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
 import type { PrevPericia, PrevPauta } from "../types";
