@@ -1,57 +1,86 @@
-# Correção — `prev-pre-processar` 502 (JSON truncado)
+# Plano: Export DOCX + PDF do Pré-Laudo com paridade visual ao Trabalhista
 
-## Causa raiz (confirmada pelos logs)
-- OCR Mistral: 68 páginas, 122.720 chars — ok.
-- Chamada à IA feita com `maxOutputTokens: 8000`.
-- A resposta foi cortada no meio de uma string (`"São José da L`…), ou seja, o modelo **bateu o limite de tokens de saída** antes de fechar o JSON.
-- `tryParseJson` local é simples (só faz strip de fences e fatia entre `{` e `}`) → falhou → 502 `"A IA retornou conteúdo fora do formato esperado."`
+## Entendimento (confirmação)
 
-Não é problema da Mistral, nem do provider de IA, nem do PDF. É o teto de saída pequeno demais para um processo previdenciário real + parser sem reparo.
+Sim, entendi perfeitamente. Hoje o módulo Previdenciário só exporta PDF, e com um visual próprio (faixa teal #2A9D8F) que destoa do resto do programa. O que você quer:
 
-Já existe na memória do projeto o padrão **`reparo-json-robusto` (8 etapas)** usado no `processar-autos` do trabalhista. Vamos reutilizar a mesma filosofia, sem importar nada do trabalhista (isolamento do módulo preservado).
+1. **Adicionar export DOCX** ao Pré-Laudo Previdenciário.
+2. **Botão único com toggle** PDF ↔ DOCX, idêntico ao do Editor Trabalhista (split button + ícone `ArrowLeftRight`).
+3. **Estrutura visual** (cabeçalho, rodapé, fonte, margens, numeração de página, estilos de título de seção) **rigorosamente igual** ao Trabalhista — o "esqueleto" do documento, não o conteúdo.
+4. **Conteúdo permanece 100% previdenciário** (os 10 steps do `PrelaudoData`).
+5. **Isolamento total**: nada novo no `src/utils/` nem em `src/lib/laudo-structure.ts`. Tudo dentro de `src/modules/previdenciario/`.
 
-## O que será alterado
-Apenas `supabase/functions/prev-pre-processar/index.ts`. Nada no front, nada no trabalhista, nada no schema.
+## Padrão estrutural a replicar (extraído do Trabalhista)
 
-### 1. Subir o teto de saída
-- `maxOutputTokens: 8000` → `maxOutputTokens: 32000`.
-- 32k cabe folgado em Gemini 3 Flash (provider atual) e nos fallbacks usuais; suficiente para JSON completo de processo grande.
+| Elemento | Origem | Reuso |
+|---|---|---|
+| Banner topo | `public/timbrado-cabecalho.png` (floating, full-width, borda superior) | mesmo asset |
+| Banner rodapé | `public/timbrado-rodape.png` + "Página X de Y" branco centralizado sobre o banner | mesmo asset |
+| Página | A4, margens **20 mm esq / 15 mm dir / 45 mm topo / dinâmico rodapé** | igual |
+| Fonte | Arial, 10pt corpo, 12pt título, 11pt subtítulo, 8pt rodapé | igual |
+| Cores | `#1B3665` primária (azul institucional) p/ títulos de seção, `#1F2937` texto, `#4B5563` muted | igual |
+| Numeração páginas | `Página X de Y` rodapé centralizado | igual |
+| Nome arquivo | `prelaudo-<processo>-<periciado>.{pdf|docx}` (mesmo padrão de slug) | adaptado |
 
-### 2. Reduzir input de OCR de forma inteligente
-Hoje corta cego em 180.000 chars (`ocr.text.slice(0, 180_000)`). Para 68 páginas / 122k chars cabe inteiro, mas para processos maiores corta justamente o fim (quesitos costumam ficar no fim). Vou:
-- Manter o limite ~180k, mas **preservar cabeça + cauda** (ex.: 120k iniciais + 60k finais com marcador `\n\n[...trecho omitido...]\n\n`) para não perder quesitos.
+> Observação importante: o teal #2A9D8F **deixa de aparecer no documento exportado** — ele continua sendo a cor de identidade da **UI** do módulo Previdenciário (sidebar, botões, steps). Só o documento final ganha o "esqueleto institucional" comum aos dois módulos. Isso resolve a sensação de "outro programa" no entregável final sem misturar as UIs dos módulos.
 
-### 3. Parser robusto de JSON (substitui `tryParseJson`)
-Novo helper local `parseAIJson(raw)` que aplica, em cascata:
-1. Strip de fences ```` ``` ```` / ```` ```json ````.
-2. Localiza primeiro `{` e tenta `JSON.parse` direto.
-3. Se falhar: balanceia chaves/colchetes (`{` vs `}`, `[` vs `]`) fechando o que faltar.
-4. Remove vírgulas penduradas (`,}` / `,]`).
-5. Remove caracteres de controle (`\x00-\x1F\x7F` exceto `\n\r\t`).
-6. Se string final ainda estiver aberta, fecha aspas + fecha estruturas pendentes.
-7. Retenta `JSON.parse`.
-8. Se ainda falhar, devolve `null` → erro 502 explícito como hoje.
+## Arquivos a criar / alterar (todos dentro de `src/modules/previdenciario/`)
 
-### 4. Detecção e log de truncamento
-Antes de tentar parsear, detectar truncamento (chaves/colchetes desbalanceados ou ausência de `}` final) e logar `[prev-pre-processar] AI output looks truncated (len=...)` para diagnóstico futuro no DevPanel.
+### 1. `lib/export/_shared-export.ts` (novo)
+Helpers compartilhados entre PDF e DOCX deste módulo:
+- `loadImageAsBase64(url)` e `loadImageAsArrayBuffer(url)`
+- `getImageDimensions(url)`
+- `calculateDynamicLayout(headerB64, footerB64)` → devolve margens dinâmicas em mm
+- `buildPeritoIdLine(meta)` (mesma formatação "Dr. Fulano — CRM/UF NNN")
+- `slugifyName(s)` e `fmtDate(iso)`
+- Constantes `COLORS`, `FONT`, `PAGE` idênticas às do Trabalhista
 
-### 5. Mensagem de erro mais útil
-Quando o reparo falhar de verdade, devolver 502 com mensagem do tipo: `"A IA devolveu JSON incompleto (provavelmente saída truncada). Tente novamente; se persistir, reduza o PDF ou avise o suporte."` — mantém o status 502 mas dá contexto.
+> **Nada disso é importado de `src/utils/`** — é uma cópia adaptada vivendo no namespace do módulo, preservando o isolamento.
 
-## Fora de escopo (intencional)
-- **Não** vou re-chunkar o PDF em múltiplas chamadas agora (overkill para o caso atual de 68p / 122k chars; 32k de saída resolve).
-- **Não** vou tocar em `mistral-ocr.ts`, `ai-config.ts`, prompts globais, schema ou UI.
-- **Não** vou registrar prompt customizado — o fallback default permanece.
+### 2. `lib/export/prelaudo-pdf.ts` (refatorar)
+Reescrever para usar a mesma "casca" do `generateLaudoPDF.ts`:
+- Carrega `/timbrado-cabecalho.png` e `/timbrado-rodape.png`
+- `addHeaderToPages` + `addFooterToPages` rodando em **todas** as páginas após o build
+- Numeração `Página X de Y` em branco sobre o rodapé
+- Linha "Perito Judicial: Dr. X — CRM/UF NNN" no topo da página 1
+- Títulos de seção com a mesma tipografia/cor azul `#1B3665` do Trabalhista
+- Conteúdo continua sendo os 10 steps do `PrelaudoData` (Identificação, Queixa, Medicação, …, Conclusão) — função de render por seção mantida, só muda o "chrome"
 
-## Verificação após a correção
-1. Confirmar build da função (auto-deploy).
-2. Pedir para o usuário reenviar o mesmo PDF de teste e validar:
-   - `pdf_processado = true` em `prev_pericias`
-   - `prev_extracao` populado com `identificacao`, `processo`, `quesitos_*`
-   - `prev_documentos` com linhas inseridas
-3. Se ainda falhar: ler os novos logs (`AI output looks truncated` ou parser final) e decidir se precisamos partir para chunking — só então.
+### 3. `lib/export/prelaudo-docx.ts` (novo)
+Espelho do `generateLaudoDOCX.ts`:
+- Mesmas `page.margin` (`top: 45mm`, `left: 20mm`, `right: 15mm`, rodapé dinâmico, `header: 0mm`, `footer: 0mm`)
+- `Header`/`Footer` com `ImageRun` floating (PNG do timbrado), `behindDocument: false`
+- Rodapé com `PageNumber.CURRENT` / `PageNumber.TOTAL_PAGES` em branco
+- Render dos 10 steps em `Paragraph` + `TextRun` com Arial/tamanhos padrão
+- `Packer.toBlob` + `saveAs` (já temos `file-saver` no projeto via Trabalhista)
+- Export `downloadPrelaudoDocx(data, meta)`
 
-## Integridade do módulo Trabalhista
-Nenhum arquivo do trabalhista é tocado. A mudança é estritamente dentro de `supabase/functions/prev-pre-processar/index.ts`. Helper de parse é local na própria função.
+### 4. `pages/PrelaudoEditor.tsx` (UI do toggle)
+Substituir o botão atual `Exportar PDF` por exatamente o mesmo padrão do `LaudoEditor.tsx` (linhas 853–883):
+- `useState<'pdf'|'docx'>('pdf')` para `exportFormat`
+- Split button: `[Baixar em PDF/DOCX] [⇄]`
+- `Tooltip` "Alternar para DOCX/PDF"
+- `handleExport()` decide entre `downloadPrelaudoPdf` e `downloadPrelaudoDocx`
 
-Confirma para eu aplicar a correção?
+## Garantias de isolamento
+
+- Zero import cruzado: o novo código **não** importa de `src/utils/generateLaudo*` nem de `src/lib/laudo-structure.ts` nem de `src/contexts/LaudoContext`.
+- `LaudoData` (Trabalhista) **não** é tocado. `PrelaudoData` (Previdenciário) **não** muda.
+- Os PNGs `/timbrado-*` em `public/` são assets estáticos compartilhados — usá-los nos dois módulos é o que cria a identidade visual única do programa, sem acoplar código.
+- Edge functions, schema do banco e prompts: **nenhuma alteração**.
+
+## Como verificar depois de aplicado
+
+1. Abrir uma perícia previdenciária com dados preenchidos.
+2. Clicar em "Baixar em PDF" → conferir banner topo/rodapé idênticos ao Trabalhista, fonte Arial, numeração de página.
+3. Alternar com ⇄ → "Baixar em DOCX" → abrir no Word e conferir mesma estrutura.
+4. Verificar que o módulo Trabalhista continua exportando sem qualquer alteração.
+
+## Fora do escopo (não vou fazer agora)
+
+- Mudar paleta da UI do Pré-Laudo (sidebar/steps continuam teal).
+- Mexer no Trabalhista, em `src/utils/generateLaudo*`, ou no schema.
+- Adicionar imagens/anexos novos ao documento.
+- Tocar na edge function `prev-pre-processar` (a correção de truncamento já foi aplicada).
+
+Confirma que posso seguir com esse plano?
