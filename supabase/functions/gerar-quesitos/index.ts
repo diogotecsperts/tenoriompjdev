@@ -64,7 +64,7 @@ DADOS CLÍNICOS DO PERITO (use EXCLUSIVAMENTE estes dados para responder):
 - Antecedentes: \${antecedentes}
 - Laudos Médicos: \${laudosMedicos}
 
-Se NÃO encontrar quesitos do Juízo no processo, retorne UNICAMENTE: "Quesitos do Juízo não identificados nos autos."`,
+Se NÃO encontrar quesitos do Juízo no processo, retorne UNICAMENTE: "Quesitos do Juízo não identificados nos autos."${FORMATO_BLOCO}`,
 
   reclamante: `Analise o TEXTO DO PROCESSO abaixo e identifique TODOS os quesitos formulados pelo RECLAMANTE (autor/trabalhador).
 
