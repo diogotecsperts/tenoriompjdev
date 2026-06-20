@@ -324,7 +324,23 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 5) Persistência: prev_extracao + status + documentos
+    // 5) Unificação da Queixa Principal (segunda passada IA, não-fatal)
+    let queixaUnificada = "";
+    try {
+      queixaUnificada = await gerarQueixaUnificada({
+        aiConfig,
+        userId,
+        ocrText,
+        extracao: parsed,
+      });
+      if (queixaUnificada) {
+        parsed.queixa_principal = queixaUnificada;
+      }
+    } catch (e) {
+      console.warn("[prev-pre-processar] queixa unificada falhou (não-fatal):", e);
+    }
+
+    // 6) Persistência: prev_extracao + status + documentos
     const extracao = {
       ...parsed,
       _meta: {
@@ -333,9 +349,11 @@ Deno.serve(async (req: Request) => {
         ai_provider: aiResp.provider,
         ai_model: aiResp.model,
         used_fallback: aiResp.usedFallback,
+        queixa_unificada_ok: !!queixaUnificada,
         extracted_at: new Date().toISOString(),
       },
     };
+
 
     const periciado_nome =
       parsed?.identificacao?.nome && typeof parsed.identificacao.nome === "string"
