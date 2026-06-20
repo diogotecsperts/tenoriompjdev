@@ -398,31 +398,51 @@ export default function PrelaudoEditor() {
 
       {/* Body: nav | editor | painel */}
       <div className="flex-1 flex overflow-hidden">
-        <StepNav current={currentStep} completed={completed} onSelect={setCurrentStep} />
+        <StepNav current={currentStep} completed={completed} onSelect={handleStepSelect} />
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+        <div ref={mainContentRef} className="flex-1 overflow-y-auto custom-scrollbar p-6">
           <div className="max-w-3xl mx-auto">
-            {renderStep(currentStep, data, setData)}
+            {viewMode === "paginated" ? (
+              <>
+                {renderStep(currentStep, data, setData)}
 
-            {/* Footer nav */}
-            <div className="mt-8 pt-4 border-t border-border flex items-center justify-between">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={goPrev}
-                disabled={currentIdx === 0}
-              >
-                <ChevronLeft className="h-4 w-4 mr-1" /> Anterior
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                Etapa {currentDef.ordem} de {PRELAUDO_STEPS.length}
-              </span>
-              <Button size="sm" onClick={goNext} disabled={currentIdx >= PRELAUDO_STEPS.length - 1}>
-                Próxima <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
+                {/* Footer nav */}
+                <div className="mt-8 pt-4 border-t border-border flex items-center justify-between">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goPrev}
+                    disabled={currentIdx === 0}
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-1" /> Anterior
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Etapa {currentDef.ordem} de {PRELAUDO_STEPS.length}
+                  </span>
+                  <Button size="sm" onClick={goNext} disabled={currentIdx >= PRELAUDO_STEPS.length - 1}>
+                    Próxima <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-10 pb-12">
+                {PRELAUDO_STEPS.filter((s) => s.implemented).map((s) => (
+                  <section
+                    key={s.id}
+                    id={`step-${s.id}`}
+                    className="scroll-mt-24 space-y-3"
+                  >
+                    <h2 className="text-lg font-semibold text-foreground border-b border-border pb-2">
+                      {s.ordem}. {s.label}
+                    </h2>
+                    {renderStep(s.id, data, setData)}
+                  </section>
+                ))}
+              </div>
+            )}
           </div>
         </div>
+
 
         <PainelLateralProcesso
           extracao={pericia.prev_extracao as Record<string, any>}
