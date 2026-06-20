@@ -41,6 +41,8 @@ interface DevFileRow {
   reclamante: string | null;
   processo: string | null;
   error: string | null;
+  module?: "trabalhista" | "previdenciario";
+  bucket?: "processos-pdf" | "prev-pdfs";
 }
 
 export function DevOriginalFiles() {
