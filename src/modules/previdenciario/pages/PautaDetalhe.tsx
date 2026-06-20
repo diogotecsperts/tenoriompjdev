@@ -157,20 +157,6 @@ export default function PautaDetalhe() {
     }
     setProcessandoLote(false);
     finish();
-    if (pendentes.length === 0) return;
-    setProcessandoLote(true);
-    let ok = 0;
-    let fail = 0;
-    for (const p of pendentes) {
-      try {
-        await preProcessarPericia(p.id);
-        ok++;
-      } catch (err: any) {
-        console.error("[lote] falha em", p.id, err);
-        fail++;
-      }
-    }
-    setProcessandoLote(false);
     toast({
       title: "Lote concluído",
       description: `${ok} processada(s)${fail ? ` · ${fail} falha(s)` : ""}.`,
