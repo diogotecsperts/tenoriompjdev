@@ -246,6 +246,20 @@ export default function PrelaudoEditor() {
     }
   };
 
+  const handleStepSelect = (id: StepId) => {
+    if (viewMode === "infinite") {
+      setCurrentStep(id);
+      scrollToSection(`step-${id}`);
+    } else {
+      setCurrentStep(id);
+    }
+  };
+
+  const handleViewModeToggle = () => {
+    setViewMode((prev) => (prev === "paginated" ? "infinite" : "paginated"));
+  };
+
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
