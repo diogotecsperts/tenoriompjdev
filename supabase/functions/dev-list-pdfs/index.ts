@@ -55,7 +55,7 @@ Deno.serve(async (req) => {
     const userId = url.searchParams.get("user_id");
 
     if (!userId) {
-      // List users with PDF counts
+      // List users with PDF counts (trabalhista + previdenciario)
       const { data: profiles, error: pErr } = await admin
         .from("profiles")
         .select("id, nome, email, user_id, created_at");
@@ -66,9 +66,17 @@ Deno.serve(async (req) => {
         .select("user_id")
         .not("file_path", "is", null);
 
+      const { data: prevs } = await admin
+        .from("prev_pericias")
+        .select("user_id")
+        .not("pdf_path", "is", null);
+
       const counts = new Map<string, number>();
       (jobs ?? []).forEach((j: any) => {
         counts.set(j.user_id, (counts.get(j.user_id) ?? 0) + 1);
+      });
+      (prevs ?? []).forEach((p: any) => {
+        counts.set(p.user_id, (counts.get(p.user_id) ?? 0) + 1);
       });
 
       const users = (profiles ?? [])
@@ -87,7 +95,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // List PDFs for a specific user
+    // List PDFs for a specific user — combina trabalhista + previdenciario
     const { data: jobs, error: jErr } = await admin
       .from("import_jobs")
       .select("id, file_path, status, created_at, result, error")
@@ -96,7 +104,6 @@ Deno.serve(async (req) => {
       .order("created_at", { ascending: false });
     if (jErr) throw jErr;
 
-    // Fallback: fetch laudos from this user to enrich missing reclamante/processo
     const { data: laudos } = await admin
       .from("laudos")
       .select("processo_numero, reclamante")
@@ -109,7 +116,7 @@ Deno.serve(async (req) => {
       }
     });
 
-    const files = (jobs ?? []).map((j: any) => {
+    const trabalhistaFiles = (jobs ?? []).map((j: any) => {
       const fileName = j.file_path?.split("/").pop() ?? j.file_path;
 
       let reclamante: string | null =
@@ -119,13 +126,11 @@ Deno.serve(async (req) => {
         j.result?.dadosBasicos?.processoNumero ??
         null;
 
-      // Fallback 1: extract processo from filename via CNJ regex
       if (!processo && fileName) {
         const match = fileName.match(PROCESSO_REGEX);
         if (match) processo = match[0];
       }
 
-      // Fallback 2: cross-ref laudos table by processo
       if (!reclamante && processo) {
         const found = laudosByProcesso.get(processo.trim());
         if (found) reclamante = found;
@@ -140,8 +145,41 @@ Deno.serve(async (req) => {
         reclamante,
         processo,
         error: j.error,
+        module: "trabalhista" as const,
+        bucket: "processos-pdf" as const,
       };
     });
+
+    // Previdenciário
+    const { data: prevPericias, error: prevErr } = await admin
+      .from("prev_pericias")
+      .select("id, pdf_path, status, created_at, periciado_nome, pdf_processado, prev_extracao")
+      .eq("user_id", userId)
+      .not("pdf_path", "is", null)
+      .order("created_at", { ascending: false });
+    if (prevErr) throw prevErr;
+
+    const prevFiles = (prevPericias ?? []).map((p: any) => {
+      const fileName = p.pdf_path?.split("/").pop() ?? p.pdf_path;
+      const processo: string | null =
+        p.prev_extracao?.identificacao?.numero_processo ?? null;
+      return {
+        job_id: p.id,
+        file_path: p.pdf_path,
+        file_name: fileName,
+        status: p.pdf_processado ? "completed" : (p.status ?? "aguardando"),
+        created_at: p.created_at,
+        reclamante: p.periciado_nome ?? null,
+        processo,
+        error: null,
+        module: "previdenciario" as const,
+        bucket: "prev-pdfs" as const,
+      };
+    });
+
+    const files = [...trabalhistaFiles, ...prevFiles].sort((a, b) =>
+      (b.created_at ?? "").localeCompare(a.created_at ?? ""),
+    );
 
     return new Response(JSON.stringify({ files }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
