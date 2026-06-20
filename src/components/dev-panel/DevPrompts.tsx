@@ -523,7 +523,7 @@ export function DevPrompts() {
         align: "center"
       });
       yPos += 6;
-      doc.text(`Total: ${prompts.length} prompts`, pageWidth / 2, yPos, {
+      doc.text(`Módulo: ${activeModuleConfig.label}  |  Total: ${modulePrompts.length} prompts`, pageWidth / 2, yPos, {
         align: "center"
       });
       yPos += 15;
@@ -594,7 +594,7 @@ export function DevPrompts() {
       for (const card of LAUDO_STRUCTURE) {
         // Verificar se card tem prompts OU campos fixos
         const cardPrompts = Object.values(groupedPrompts[card.id] || {}).flat();
-        const hasFixedSections = card.sections.some(s => FIXED_CONFIG_SECTIONS[s.id]);
+        const hasFixedSections = card.sections.some(s => currentFixedConfig[s.id]);
         if (cardPrompts.length === 0 && !hasFixedSections) continue;
         
         checkNewPage(25);
@@ -609,7 +609,7 @@ export function DevPrompts() {
         doc.setTextColor(0);
         
         for (const section of card.sections) {
-          const isFixedConfig = FIXED_CONFIG_SECTIONS[section.id];
+          const isFixedConfig = currentFixedConfig[section.id];
           const sectionPrompts = groupedPrompts[card.id]?.[section.id] || [];
           
           // Renderizar campo fixo na posição correta
@@ -764,7 +764,7 @@ export function DevPrompts() {
       doc.save(`prompts-backup-${timestamp}.pdf`);
       toast({
         title: "PDF exportado!",
-        description: `Backup com ${prompts.length} prompts salvo com sucesso.`
+        description: `Backup com ${modulePrompts.length} prompts (${activeModuleConfig.label}) salvo com sucesso.`
       });
     } catch (error) {
       console.error("Erro ao exportar PDF:", error);
@@ -973,7 +973,7 @@ export function DevPrompts() {
                                   {card.sections.map(section => {
                                   const sectionCount = getSectionPromptCount(card.id, section.id);
                                   const isActive = activeId === `section-${section.id}`;
-                                  const isFixedConfig = FIXED_CONFIG_SECTIONS[section.id];
+                                  const isFixedConfig = currentFixedConfig[section.id];
                                   
                                   return <Tooltip key={section.id}>
                                     <TooltipTrigger asChild>
@@ -1014,7 +1014,12 @@ export function DevPrompts() {
                 </Card>
               
               {/* Coverage Checklist */}
-              <CoverageChecklist prompts={prompts} />
+              <CoverageChecklist
+                prompts={modulePrompts}
+                structure={currentCards}
+                expectedTypes={currentExpectedTypes}
+                fixedConfig={currentFixedConfig}
+              />
               </div>
             </aside>
 
