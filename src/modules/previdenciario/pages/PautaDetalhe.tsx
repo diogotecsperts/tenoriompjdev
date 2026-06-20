@@ -30,6 +30,7 @@ import { NovaPericiaDialog } from "../components/NovaPericiaDialog";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
 import type { PrevPauta, PrevPericia } from "../types";
 import { useAuth } from "@/contexts/AuthContext";
+import { useFakeProgress } from "../hooks/useFakeProgress";
 
 function formatData(iso: string) {
   const [y, m, d] = iso.split("-");
