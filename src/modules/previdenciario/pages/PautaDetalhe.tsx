@@ -30,6 +30,7 @@ import { NovaPericiaDialog } from "../components/NovaPericiaDialog";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
 import type { PrevPauta, PrevPericia } from "../types";
 import { useAuth } from "@/contexts/AuthContext";
+import { useFakeProgress } from "../hooks/useFakeProgress";
 
 function formatData(iso: string) {
   const [y, m, d] = iso.split("-");
@@ -46,6 +47,8 @@ export default function PautaDetalhe() {
   const [novaOpen, setNovaOpen] = useState(false);
   const [processandoIds, setProcessandoIds] = useState<Set<string>>(new Set());
   const [processandoLote, setProcessandoLote] = useState(false);
+  const [loteProgresso, setLoteProgresso] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+  const { progress, finish } = useFakeProgress(processandoIds.size > 0 || processandoLote);
 
   const reload = async () => {
     if (!pautaId) return;
@@ -131,15 +134,18 @@ export default function PautaDetalhe() {
         n.delete(pericia.id);
         return n;
       });
+      finish();
     }
   };
 
   const handleProcessarLote = async () => {
     if (pendentes.length === 0) return;
     setProcessandoLote(true);
+    setLoteProgresso({ done: 0, total: pendentes.length });
     let ok = 0;
     let fail = 0;
-    for (const p of pendentes) {
+    for (let i = 0; i < pendentes.length; i++) {
+      const p = pendentes[i];
       try {
         await preProcessarPericia(p.id);
         ok++;
@@ -147,8 +153,10 @@ export default function PautaDetalhe() {
         console.error("[lote] falha em", p.id, err);
         fail++;
       }
+      setLoteProgresso({ done: i + 1, total: pendentes.length });
     }
     setProcessandoLote(false);
+    finish();
     toast({
       title: "Lote concluído",
       description: `${ok} processada(s)${fail ? ` · ${fail} falha(s)` : ""}.`,
@@ -223,6 +231,11 @@ export default function PautaDetalhe() {
                   <Sparkles className="h-4 w-4 mr-1.5" />
                 )}
                 Processar pendentes ({pendentes.length})
+                {processandoLote && (
+                  <span className="ml-2 text-[11px] font-normal opacity-80 tabular-nums">
+                    {loteProgresso.done}/{loteProgresso.total} · {progress}%
+                  </span>
+                )}
               </Button>
             )}
             <Button onClick={() => setNovaOpen(true)}>
@@ -318,21 +331,28 @@ export default function PautaDetalhe() {
                 </label>
 
                 {p.pdf_path && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-[11px]"
-                    onClick={() => void handleProcessar(p)}
-                    disabled={processandoIds.has(p.id) || processandoLote}
-                    title={p.pdf_processado ? "Reprocessar com IA" : "Processar com IA"}
-                  >
-                    {processandoIds.has(p.id) ? (
-                      <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-3.5 w-3.5 mr-1" />
+                  <div className="flex flex-col items-center">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-[11px]"
+                      onClick={() => void handleProcessar(p)}
+                      disabled={processandoIds.has(p.id) || processandoLote}
+                      title={p.pdf_processado ? "Reprocessar com IA" : "Processar com IA"}
+                    >
+                      {processandoIds.has(p.id) ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      {p.pdf_processado ? "Reprocessar" : "Processar"}
+                    </Button>
+                    {processandoIds.has(p.id) && (
+                      <span className="text-[10px] text-muted-foreground tabular-nums leading-none mt-0.5">
+                        {progress}%
+                      </span>
                     )}
-                    {p.pdf_processado ? "Reprocessar" : "Processar"}
-                  </Button>
+                  </div>
                 )}
 
                 <Button
