@@ -53,6 +53,8 @@ export default function PrelaudoEditor() {
   const [currentStep, setCurrentStep] = useState<StepId>("identificacao");
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
+  const [exportFormat, setExportFormat] = useState<"pdf" | "docx">("pdf");
+  const [exporting, setExporting] = useState(false);
   const dirtyRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFirstSaveRef = useRef(true);
