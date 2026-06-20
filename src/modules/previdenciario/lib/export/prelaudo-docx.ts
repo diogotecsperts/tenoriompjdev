@@ -53,7 +53,7 @@ const sectionTitle = (n: number, title: string) =>
     ],
     spacing: { before: 320, after: 160 },
     border: {
-      bottom: { color: COLORS_HEX.primary, size: 6, style: "single", space: 1 },
+      bottom: { color: COLORS_HEX.primary, size: 6, style: BorderStyle.SINGLE, space: 1 },
     },
   });
 
