@@ -4,35 +4,52 @@
  import { Button } from "@/components/ui/button";
  import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
  import { AlertTriangle, ChevronDown, ChevronRight, ArrowRight } from "lucide-react";
- import { LAUDO_CARDS_STRUCTURE, EXPECTED_PROMPT_TYPES, PromptType } from "@/lib/laudo-structure";
- 
- interface PromptConfig {
-   id: string;
-   cardId?: string;
-   sectionId?: string;
- }
- 
- interface UncoveredSection {
-   cardId: string;
-   cardLabel: string;
-   sectionId: string;
-   sectionLabel: string;
-   missingTypes: PromptType[];
- }
- 
- interface CoverageAlertProps {
-   prompts: PromptConfig[];
-   onNavigateToSection?: (sectionId: string) => void;
- }
- 
- function getPromptType(promptId: string): PromptType | null {
-   if (promptId.startsWith('prompt_import_')) return 'import';
-   if (promptId.startsWith('prompt_gen_')) return 'gen';
-   if (promptId.startsWith('prompt_regen_')) return 'regen';
-   return null;
- }
- 
- export function CoverageAlert({ prompts, onNavigateToSection }: CoverageAlertProps) {
+import { LAUDO_CARDS_STRUCTURE, EXPECTED_PROMPT_TYPES, PromptType } from "@/lib/laudo-structure";
+
+interface CardLike {
+  id: string;
+  label: string;
+  sections: { id: string; label: string }[];
+}
+
+interface PromptConfig {
+  id: string;
+  cardId?: string;
+  sectionId?: string;
+}
+
+interface UncoveredSection {
+  cardId: string;
+  cardLabel: string;
+  sectionId: string;
+  sectionLabel: string;
+  missingTypes: PromptType[];
+}
+
+interface CoverageAlertProps {
+  prompts: PromptConfig[];
+  onNavigateToSection?: (sectionId: string) => void;
+  /** Estrutura de cards para verificação. Default = Trabalhista (compat). */
+  structure?: CardLike[];
+  /** Mapa de tipos esperados. Default = Trabalhista (compat). */
+  expectedTypes?: Record<string, PromptType[]>;
+}
+
+function getPromptType(promptId: string): PromptType | null {
+  if (promptId.startsWith('prompt_import_')) return 'import';
+  if (promptId.startsWith('prompt_gen_')) return 'gen';
+  if (promptId.startsWith('prompt_regen_')) return 'regen';
+  // prev prompts (prompt_prev_*) são considerados "import" — extraem do PDF.
+  if (promptId.startsWith('prompt_prev_')) return 'import';
+  return null;
+}
+
+export function CoverageAlert({
+  prompts,
+  onNavigateToSection,
+  structure = LAUDO_CARDS_STRUCTURE,
+  expectedTypes = EXPECTED_PROMPT_TYPES,
+}: CoverageAlertProps) {
    const [isExpanded, setIsExpanded] = useState(false);
  
    const uncoveredSections = useMemo(() => {
@@ -53,31 +70,31 @@
        }
      });
  
-     // Check each section against expected types
-     for (const card of LAUDO_CARDS_STRUCTURE) {
-       for (const section of card.sections) {
-         const expectedTypes = EXPECTED_PROMPT_TYPES[section.id] || [];
-         
-         // Skip sections that don't expect any prompts
-         if (expectedTypes.length === 0) continue;
- 
-         const existingTypes = promptsBySectionAndType[section.id] || new Set();
-         const missingTypes = expectedTypes.filter(t => !existingTypes.has(t));
- 
-         if (missingTypes.length > 0) {
-           results.push({
-             cardId: card.id,
-             cardLabel: card.label,
-             sectionId: section.id,
-             sectionLabel: section.label,
-             missingTypes,
-           });
-         }
-       }
-     }
- 
-     return results;
-   }, [prompts]);
+      // Check each section against expected types
+    for (const card of structure) {
+      for (const section of card.sections) {
+        const expected = expectedTypes[section.id] || [];
+
+        // Skip sections that don't expect any prompts
+        if (expected.length === 0) continue;
+
+        const existingTypes = promptsBySectionAndType[section.id] || new Set();
+        const missingTypes = expected.filter(t => !existingTypes.has(t));
+
+        if (missingTypes.length > 0) {
+          results.push({
+            cardId: card.id,
+            cardLabel: card.label,
+            sectionId: section.id,
+            sectionLabel: section.label,
+            missingTypes,
+          });
+        }
+      }
+    }
+
+    return results;
+  }, [prompts, structure, expectedTypes]);
  
    if (uncoveredSections.length === 0) return null;
  
