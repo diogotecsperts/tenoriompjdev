@@ -47,6 +47,11 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const filePath: string | undefined = body?.file_path;
+    const bucketRaw: string | undefined = body?.bucket;
+    const ALLOWED_BUCKETS = ["processos-pdf", "prev-pdfs"];
+    const bucket = ALLOWED_BUCKETS.includes(bucketRaw ?? "")
+      ? (bucketRaw as string)
+      : "processos-pdf";
     if (!filePath || typeof filePath !== "string") {
       return new Response(JSON.stringify({ error: "file_path required" }), {
         status: 400,
@@ -56,7 +61,7 @@ Deno.serve(async (req) => {
 
     const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data, error } = await admin.storage
-      .from("processos-pdf")
+      .from(bucket)
       .createSignedUrl(filePath, 3600); // 1h
 
     if (error || !data?.signedUrl) {
