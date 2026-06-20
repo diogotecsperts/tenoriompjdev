@@ -13,6 +13,7 @@ import {
   Footer,
   ImageRun,
   AlignmentType,
+  BorderStyle,
   PageNumber,
   HorizontalPositionRelativeFrom,
   VerticalPositionRelativeFrom,
