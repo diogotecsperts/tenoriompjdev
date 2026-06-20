@@ -46,7 +46,7 @@ export function PainelLateralProcesso({ extracao, hasPdf }: Props) {
   return (
     <aside
       className={cn(
-        "shrink-0 border-l border-border bg-card/30 transition-all overflow-hidden",
+        "shrink-0 border-l border-border bg-card/30 transition-all overflow-hidden flex flex-col h-full",
         open ? "w-80" : "w-10",
       )}
     >
@@ -66,7 +66,7 @@ export function PainelLateralProcesso({ extracao, hasPdf }: Props) {
       </div>
 
       {open && (
-        <div className="p-3 space-y-4 overflow-y-auto max-h-[calc(100vh-8rem)] custom-scrollbar text-xs">
+        <div className="p-3 space-y-4 overflow-y-auto flex-1 min-h-0 custom-scrollbar text-xs">
           <Section title="Identificação">
             <KV k="Nome" v={ident.nome} />
             <KV k="CPF" v={ident.cpf} />
@@ -74,6 +74,8 @@ export function PainelLateralProcesso({ extracao, hasPdf }: Props) {
             <KV k="Sexo" v={ident.sexo} />
             <KV k="Profissão" v={ident.profissao} />
             <KV k="Última atividade" v={ident.ultima_atividade} />
+            <KV k="Tempo sem trabalhar" v={ident.tempo_sem_trabalhar} />
+            <KV k="Pessoas no mesmo teto" v={ident.pessoas_mesmo_teto} />
           </Section>
 
           <Section title="Processo">
