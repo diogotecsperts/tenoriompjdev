@@ -44,14 +44,10 @@ export function Step01Identificacao({ value, onChange }: Props) {
           <Field label="Escolaridade">
             <Input value={value.escolaridade ?? ""} onChange={set("escolaridade")} />
           </Field>
-          <Field label="Telefone">
-            <Input value={value.telefone ?? ""} onChange={set("telefone")} />
-          </Field>
-          <Field label="Endereço" full>
-            <Input value={value.endereco ?? ""} onChange={set("endereco")} />
-          </Field>
         </Grid>
       </Section>
+
+
 
       <Section title="Atividade laboral">
         <Grid>
