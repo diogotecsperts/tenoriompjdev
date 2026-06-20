@@ -1,72 +1,46 @@
-## Ajustes Step 1 (Identificação) + painel lateral
 
-### 1. Novos campos extraídos pela IA
+## Resposta à dúvida (DevPrompts) — sem código
 
-**`prelaudo-structure.ts` — `IdentificacaoData`:** adicionar
-- `tempo_sem_trabalhar: string`
-- `pessoas_mesmo_teto: string`
+Sim, o **DevPrompts continua sendo a base única e centralizada de todos os prompts** — inclusive do módulo previdenciário novo. Tecnicamente:
 
-Em `mergeFromExtracao`, adicionar dois `fill()`:
-- `fill(base.identificacao, "tempo_sem_trabalhar", ident.tempo_sem_trabalhar)`
-- `fill(base.identificacao, "pessoas_mesmo_teto", ident.pessoas_mesmo_teto)`
+- A edge `prev-pre-processar` registra dois prompts no banco via `getPrompt()` (mesmo mecanismo do trabalhista):
+  - `prompt_prev_extracao_processo` (extração estruturada do PDF)
+  - `prompt_prev_queixa_unificada` (síntese da queixa)
+- Esses registros ficam na tabela `system_config` (mesma do trabalhista) com `cardId="previdenciario"`.
+- **Por que você não vê no DevPrompts:** a UI do DevPrompts hoje só renderiza cards definidos em `LAUDO_CARDS_STRUCTURE` (trabalhista). Como `previdenciario` não está nessa estrutura, os prompts caem em **"Não classificados"** no final da lista — eles existem, são editáveis, mas ficam escondidos lá embaixo. Eles só aparecem **depois do primeiro processamento de um PDF previdenciário** (é quando são gravados no DB pela primeira vez).
+- Nada de prompt do previdenciário está fora do DevPrompts / fora do seu controle. Tudo passa pelo mesmo `prompt-manager`.
 
-**`supabase/functions/prev-pre-processar/index.ts` — prompt de extração:** acrescentar ao schema JSON solicitado à IA os dois campos novos em `identificacao`, com instruções curtas:
-- `tempo_sem_trabalhar`: tempo afastado do trabalho conforme relato/documentos (texto livre, ex.: "8 meses", "desde 03/2024"). Vazio se não houver menção.
-- `pessoas_mesmo_teto`: nº de pessoas que residem com o periciado (texto livre, ex.: "3 pessoas: esposa e dois filhos"). Vazio se não houver menção.
-Regras anti-alucinação mantidas (não inventar).
+Quando você quiser, posso criar um card "Previdenciário" próprio no DevPrompts para organizar visualmente — mas isso é melhoria de UX, não muda a fonte da verdade.
 
-### 2. Escolaridade — IA + botão "Editar" com lista padrão
+---
 
-**`Step01Identificacao.tsx`:**
-- Manter o `Input` de `escolaridade` (continua mostrando o valor da IA editável).
-- Adicionar pequeno botão ícone "lápis" (`Pencil` do lucide) ao lado direito do campo. Ao clicar, abre um `Popover` (shadcn já no projeto) com uma lista clicável de opções padrão:
-  - Analfabeto
-  - Ensino fundamental incompleto
-  - Ensino fundamental completo
-  - Ensino médio incompleto
-  - Ensino médio completo
-  - Ensino superior incompleto
-  - Ensino superior completo
-  - Pós-graduação
-  - Mestrado
-  - Doutorado
-- Selecionar uma opção sobrescreve `escolaridade` com o texto exato.
-- Texto da IA continua tendo prioridade no carregamento (já é assim, pois o popover só age sob clique).
+## Plano de implementação — Arquivos Originais
 
-Os dois campos novos serão renderizados em "Dados pessoais" (ou em "Atividade laboral" para `tempo_sem_trabalhar`):
-- `Tempo sem trabalhar` → "Atividade laboral"
-- `Pessoas que vivem sob o mesmo teto` → "Dados pessoais"
+### Problema
+`DevOriginalFiles` lista apenas `import_jobs` (trabalhista, bucket `processos-pdf`). Os PDFs do novo módulo previdenciário ficam em `prev_pericias.pdf_path` no bucket `prev-pdfs` e nunca aparecem.
 
-### 3. Correção do scroll do painel lateral
+### Mudanças
 
-Problema: em `PainelLateralProcesso.tsx`, o container de rolagem usa `max-h-[calc(100vh-8rem)]`, valor arbitrário que não acompanha a altura real do flex pai (o editor está dentro de `h-[calc(100vh-4rem)]` e tem header próprio). Resultado: corta o conteúdo antes do fim.
+**1. `supabase/functions/dev-list-pdfs/index.ts`** — unificar fontes:
+- Manter a query atual em `import_jobs` (módulo trabalhista).
+- Adicionar query em `prev_pericias` filtrando `pdf_path IS NOT NULL`, juntando `prev_pautas` para obter cidade/data se útil, e o nome do periciado.
+- Retornar lista combinada com novo campo `module: "trabalhista" | "previdenciario"` e `bucket: "processos-pdf" | "prev-pdfs"` em cada item.
+- Na listagem de usuários (sem `user_id`), somar contagem das duas tabelas.
 
-**Fix seguro e mínimo:**
-- `aside`: adicionar `flex flex-col h-full` (herda a altura do flex row pai, que já é controlada).
-- Container interno de conteúdo: trocar `max-h-[calc(100vh-8rem)] overflow-y-auto` por `flex-1 min-h-0 overflow-y-auto` (padrão flexbox para rolagem confiável dentro de pai com altura definida).
-- Header do painel permanece fixo no topo via flex column.
+**2. `supabase/functions/dev-download-pdf/index.ts`** — aceitar `bucket` opcional no body (default `processos-pdf`) para servir downloads do `prev-pdfs` também.
 
-Sem mexer no layout do `PrelaudoEditor` (o flex já está correto).
-
-### Arquivos alterados
-
-- `src/modules/previdenciario/lib/prelaudo-structure.ts` — 2 campos no tipo + 2 `fill()`.
-- `src/modules/previdenciario/components/steps/Step01Identificacao.tsx` — 2 inputs novos + botão `Editar` (Popover) na escolaridade.
-- `src/modules/previdenciario/components/PainelLateralProcesso.tsx` — correção de altura do scroll + exibir os 2 novos campos em "Identificação".
-- `supabase/functions/prev-pre-processar/index.ts` — adicionar `tempo_sem_trabalhar` e `pessoas_mesmo_teto` ao prompt/schema da extração.
-
-### Não tocados
-
-- Módulo Trabalhista, schema do banco (jsonb tolerante), export PDF/DOCX, Step 2, demais steps, prompt unificado da queixa.
-
-### Validação
-
-1. PDF processado → "Tempo sem trabalhar" e "Pessoas sob mesmo teto" aparecem preenchidos quando o processo mencionar.
-2. Botão lápis ao lado de Escolaridade abre lista; clicar substitui o valor.
-3. Painel lateral rola até o último item (testar com perícia com muitos documentos).
-4. Perícias antigas abrem sem erro (campos novos vazios).
+**3. `src/components/dev-panel/DevOriginalFiles.tsx`**:
+- Adicionar coluna **"Módulo"** na tabela (badge: "Trabalhista" / "Previdenciário").
+- Passar `bucket` ao chamar `dev-download-pdf`.
+- Tipos atualizados (`module`, `bucket`).
+- Opcional: filtro/segmento por módulo no topo (só se ficar leve).
 
 ### Fora de escopo
+- Não mexer no DevPrompts agora (resposta acima esclarece). Se quiser, abrimos um item separado para criar o card "Previdenciário".
+- Não migrar PDFs antigos nem alterar buckets.
+- Trabalhista intocado.
 
-- Reprocessar perícias antigas.
-- Adicionar mais opções de escolaridade dinâmicas pelo DevPanel.
+### Arquivos
+- `supabase/functions/dev-list-pdfs/index.ts`
+- `supabase/functions/dev-download-pdf/index.ts`
+- `src/components/dev-panel/DevOriginalFiles.tsx`
