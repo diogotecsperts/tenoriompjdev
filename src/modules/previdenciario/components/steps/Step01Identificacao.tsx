@@ -1,6 +1,23 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Pencil, Check } from "lucide-react";
+import { useState } from "react";
 import type { IdentificacaoData } from "../../lib/prelaudo-structure";
+
+const ESCOLARIDADE_OPCOES = [
+  "Analfabeto",
+  "Ensino fundamental incompleto",
+  "Ensino fundamental completo",
+  "Ensino médio incompleto",
+  "Ensino médio completo",
+  "Ensino superior incompleto",
+  "Ensino superior completo",
+  "Pós-graduação",
+  "Mestrado",
+  "Doutorado",
+];
 
 interface Props {
   value: Partial<IdentificacaoData>;
@@ -10,6 +27,7 @@ interface Props {
 export function Step01Identificacao({ value, onChange }: Props) {
   const set = (k: keyof IdentificacaoData) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ [k]: e.target.value } as Partial<IdentificacaoData>);
+  const [escOpen, setEscOpen] = useState(false);
 
   return (
     <div className="space-y-6">
@@ -42,7 +60,57 @@ export function Step01Identificacao({ value, onChange }: Props) {
             <Input value={value.estado_civil ?? ""} onChange={set("estado_civil")} />
           </Field>
           <Field label="Escolaridade">
-            <Input value={value.escolaridade ?? ""} onChange={set("escolaridade")} />
+            <div className="flex items-center gap-1.5">
+              <Input
+                value={value.escolaridade ?? ""}
+                onChange={set("escolaridade")}
+                className="flex-1"
+              />
+              <Popover open={escOpen} onOpenChange={setEscOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9 shrink-0"
+                    title="Selecionar escolaridade da lista"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-1" align="end">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground px-2 py-1.5">
+                    Selecionar escolaridade
+                  </div>
+                  <div className="max-h-72 overflow-y-auto custom-scrollbar">
+                    {ESCOLARIDADE_OPCOES.map((op) => {
+                      const selected = (value.escolaridade ?? "") === op;
+                      return (
+                        <button
+                          key={op}
+                          type="button"
+                          onClick={() => {
+                            onChange({ escolaridade: op });
+                            setEscOpen(false);
+                          }}
+                          className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted flex items-center justify-between"
+                        >
+                          <span>{op}</span>
+                          {selected && <Check className="h-3.5 w-3.5 text-primary" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+          </Field>
+          <Field label="Pessoas que vivem sob o mesmo teto" full>
+            <Input
+              value={value.pessoas_mesmo_teto ?? ""}
+              onChange={set("pessoas_mesmo_teto")}
+              placeholder='ex: "3 pessoas: esposa e dois filhos"'
+            />
           </Field>
         </Grid>
       </Section>
@@ -56,6 +124,13 @@ export function Step01Identificacao({ value, onChange }: Props) {
           </Field>
           <Field label="Última atividade exercida">
             <Input value={value.ultima_atividade ?? ""} onChange={set("ultima_atividade")} />
+          </Field>
+          <Field label="Tempo que está sem trabalhar" full>
+            <Input
+              value={value.tempo_sem_trabalhar ?? ""}
+              onChange={set("tempo_sem_trabalhar")}
+              placeholder='ex: "8 meses" ou "desde 03/2024"'
+            />
           </Field>
         </Grid>
       </Section>

@@ -44,8 +44,12 @@ FORMATO DE SAÍDA (JSON puro, sem markdown, sem comentários):
     "profissao": "",
     "ultima_atividade": "",
     "endereco": "",
-    "telefone": ""
+    "telefone": "",
+    "tempo_sem_trabalhar": "",
+    "pessoas_mesmo_teto": ""
   },
+  /* tempo_sem_trabalhar: tempo afastado do trabalho conforme relato/documentos (ex: "8 meses", "desde 03/2024"). Vazio se não houver menção explícita. NÃO inventar.
+     pessoas_mesmo_teto: nº/descrição das pessoas que residem com o periciado (ex: "3 pessoas: esposa e dois filhos"). Vazio se não houver menção. NÃO inventar. */
   "processo": {
     "numero": "",
     "vara": "",
