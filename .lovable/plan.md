@@ -1,65 +1,104 @@
-# Plano: Toggle Paginado ↔ Scroll Infinito no Pré-Laudo Previdenciário
+# Ajustes Step 1 & Step 2 — Pré-Laudo Previdenciário
 
-## Entendimento
+## Objetivo
 
-Replicar no `PrelaudoEditor` exatamente o mesmo mecanismo de alternância de visualização já existente no `LaudoEditor` (Trabalhista):
+1. **Step 1 — Identificação:** remover `Telefone` e `Endereço`.
+2. **Step 2 — Queixa Principal:** colapsar todos os campos em **um único campo grande**, preenchido automaticamente pela IA no momento do processamento do PDF, usando o prompt enviado pelo cliente.
 
-- Botão único `variant="outline" size="icon"` com tooltip.
-- Ícones: `Scroll` quando está em modo paginado (sugere alternar p/ infinito) e `LayoutGrid` quando está em infinito.
-- Hook `useScrollSpy` reutilizado (já é genérico, vive em `src/hooks/` — não viola isolamento).
-- Persistência da escolha em `localStorage` por chave dedicada do módulo.
+Princípios mantidos do módulo:
+- Zero-Touch Import (sem botão "gerar" — preenchimento vem do processar PDF).
+- "Médico decide, IA sugere" (campo permanece 100% editável).
+- Strict isolation: nada do módulo Trabalhista é modificado.
+- jsonb tolerante: nenhum DROP/ALTER, dados antigos ficam latentes e não aparecem na UI.
 
-## Padrão a replicar (extraído do Trabalhista)
+---
 
-| Elemento | Origem (LaudoEditor.tsx) |
-|---|---|
-| Tipo | `type ViewMode = "paginated" \| "infinite"` |
-| Estado | `useState<ViewMode>` inicializado de `localStorage` |
-| Persistência | `useEffect` salvando em `localStorage` |
-| Hook | `useScrollSpy({ sectionIds, enabled: viewMode==="infinite", scrollContainerRef })` |
-| Sync | quando `scrollSpyActiveId` muda → atualiza `currentStep` |
-| Click step | em modo infinito, `scrollToSection("step-<id>")`; em paginado, troca `currentStep` |
-| Render | paginado = só etapa atual + nav prev/next; infinito = todas com `space-y-8` |
-| Botão | `Tooltip` + `Button outline icon` com `Scroll`/`LayoutGrid` no header |
+## Step 1 — Remoção segura de Telefone e Endereço
 
-## Mudanças (escopo cirúrgico)
+**`src/modules/previdenciario/components/steps/Step01Identificacao.tsx`**
+- Remover os dois `<Field>` (`telefone`, `endereco`).
+- Não alterar o `IdentificacaoData` (jsonb tolerante; perícias antigas seguem válidas).
 
-### 1. `src/modules/previdenciario/pages/PrelaudoEditor.tsx`
-- Adicionar `ViewMode`, `viewMode`, `setViewMode`, `VIEW_MODE_STORAGE_KEY = "prev-prelaudo-view-mode"`.
-- `mainContentRef` no `<div className="flex-1 overflow-y-auto …">` central.
-- `sectionIds = PRELAUDO_STEPS.filter(s=>s.implemented).map(s=>`step-${s.id}`)` (memo).
-- `useScrollSpy({ sectionIds, offset: 100, enabled: viewMode==="infinite", scrollContainerRef: mainContentRef })`.
-- `useEffect` sincronizando `scrollSpyActiveId` → `setCurrentStep`.
-- `useEffect` persistindo `viewMode` no localStorage.
-- Função `handleStepSelect(id)`: se infinito, `scrollToSection("step-"+id)`; senão `setCurrentStep(id)`. Passar para `<StepNav onSelect>`.
-- No header (ao lado direito do "Salvo …" e antes do botão de exportar), inserir o mesmo botão de toggle (ícone `Scroll`/`LayoutGrid` + Tooltip).
-- No corpo, condicional:
-  - **paginado** (atual): `renderStep(currentStep, …)` + footer Prev/Próxima.
-  - **infinito**: `PRELAUDO_STEPS.filter(s=>s.implemented).map(s => <section id={`step-${s.id}`} key={s.id} className="scroll-mt-24 space-y-3"><h2 className="text-lg font-semibold text-foreground">{s.ordem}. {s.label}</h2>{renderStep(s.id, data, setData)}</section>)` dentro de `<div className="space-y-10 pb-12">`.
+**`src/modules/previdenciario/lib/prelaudo-structure.ts`**
+- Em `mergeFromExtracao`, remover as duas linhas `fill(... "telefone" ...)` e `fill(... "endereco" ...)`. Evita "fantasma" — a IA não vai mais alimentar campos que a UI não exibe.
 
-### 2. `src/modules/previdenciario/components/StepNav.tsx`
-- Adicionar prop opcional `mode?: "paginated" | "infinite"` apenas para destacar visualmente o item ativo via scroll-spy (a destaque já vem do `current` que será sincronizado pelo spy). Nenhuma outra mudança.
+**`src/modules/previdenciario/components/PainelLateralProcesso.tsx`** — sem mudança (painel é leitura do cache da extração; manter telefone/endereço lá não atrapalha e ainda dá utilidade ao perito durante a consulta).
 
-## Garantias
+---
 
-- **Isolamento**: nenhuma importação de `src/pages/LaudoEditor`, `src/components/laudo/*` ou `src/contexts/LaudoContext`. Só reutiliza `useScrollSpy` (hook genérico, sem regra de negócio do Trabalhista) e shadcn UI.
-- **Sem regressão**: módulo Trabalhista intacto. Edge functions, schema, prompts e export PDF/DOCX intactos.
-- **Robustez**:
-  - `enabled: viewMode === "infinite"` evita listener desnecessário em modo paginado.
-  - `setCurrentStep` só dispara se id realmente mudou.
-  - `scroll-mt-24` em cada seção evita que o topo fique escondido sob o header sticky.
-  - Persistência por chave própria (`prev-prelaudo-view-mode`) sem conflitar com a chave do Trabalhista.
+## Step 2 — Campo único + integração no pipeline de processamento
 
-## Como validar depois
+### 2.1 UI (`Step02Queixa.tsx`)
 
-1. Abrir uma perícia, clicar no botão `Scroll` → todas as 10 etapas aparecem empilhadas; rolar e ver o item ativo no `StepNav` mudando.
-2. Clicar em um item do `StepNav` em modo infinito → rola suavemente até a seção.
-3. Clicar de novo no botão (agora `LayoutGrid`) → volta para a visão paginada na etapa atual.
-4. Recarregar a página → modo escolhido é preservado.
-5. Conferir que o LaudoEditor (Trabalhista) continua funcionando idêntico.
+Reescrever para conter **apenas**:
+- Header (título + subtítulo).
+- Uma `<Section>` com **um único `<Textarea>`** de ~14 linhas, ligado a `value.queixa_principal`.
+- Subtítulo atualizado: "Texto unificado gerado a partir do processo. Edite livremente."
 
-## Fora do escopo
+Os campos `inicio_sintomas`, `evolucao`, `lateralidade`, `fatores_agravantes` deixam de aparecer. Permanecem tolerados no jsonb (sem risco para perícias antigas).
 
-- Mudar paleta/cores do módulo.
-- Refatorar `StepNav` ou `renderStep`.
-- Mexer no Trabalhista ou em qualquer função de exportação.
+### 2.2 Pipeline de extração — onde plugar o prompt
+
+A integração acontece **dentro de `supabase/functions/prev-pre-processar/index.ts`**, no mesmo run que já popula `prev_extracao`. Fluxo:
+
+```text
+PDF → OCR/extrator atual → JSON estruturado (identificação, processo, CIDs, …)
+                        ↘ texto bruto (raw_text)
+                          ↓
+              [NOVA ETAPA] LLM com prompt do cliente
+                          ↓
+              extracao.queixa_principal = parágrafo unificado
+                          ↓
+                  grava em prev_pericias.prev_extracao
+```
+
+Como `mergeFromExtracao` **já** copia `extracao.queixa_principal` para `prelaudo_data.queixa.queixa_principal`, **nenhuma mudança no client é necessária para o auto-preenchimento** além da própria UI do Step 2.
+
+### 2.3 Prompt — armazenamento
+
+Seguindo a arquitetura existente (memory: Global Prompt Manager):
+- Chave nova: `prev_queixa_principal_unificada`.
+- Salva via `supabase/functions/seed-prompts/index.ts` (adiciona entry ao seed).
+- Lida em runtime via `_shared/prompt-manager.ts` (`getPrompt('prev_queixa_principal_unificada')`).
+- Editável pelo DevPanel sem deploy.
+
+Texto do prompt = exatamente o que o cliente mandou, com a única substituição já prevista por ele: `[texto gerado pelos chips]` → bloco contendo o `raw_text` + JSON sumarizado da extração corrente. Mantemos as 22 regras intactas.
+
+### 2.4 Chamada LLM
+
+Dentro de `prev-pre-processar`, após a extração principal:
+- Modelo: `google/gemini-3-flash-preview` (mesmo padrão do módulo).
+- Provider: Lovable AI Gateway com `LOVABLE_API_KEY` (já secret).
+- `temperature` baixa (0.2) para fidelidade ao prompt.
+- Tratamento de erro **não-fatal**: se a chamada falhar (429, 402, timeout), o processamento principal **não quebra** — grava `extracao.queixa_principal = ""` e loga em `backend_logger`. O médico vê o campo vazio e preenche/regenera depois (futura iteração).
+- Validação simples de saída: 1 parágrafo, sem markdown/bullets (regra 17/18 do prompt). Se a IA devolver lixo, descarta e grava vazio.
+
+### 2.5 Reprocessamento de perícias já processadas
+
+**Não fazemos retroativo** (regra de projeto: "Stale Data Regeneration Policy"). Só novos processamentos vão gerar o campo. Perícias antigas continuam com o que tinham no `queixa_principal` (vazio ou pré-existente).
+
+---
+
+## Detalhes técnicos
+
+**Arquivos alterados:**
+- `src/modules/previdenciario/components/steps/Step01Identificacao.tsx` — remove 2 fields.
+- `src/modules/previdenciario/components/steps/Step02Queixa.tsx` — reescrita mínima (um textarea).
+- `src/modules/previdenciario/lib/prelaudo-structure.ts` — remove 2 `fill()` em `mergeFromExtracao`.
+- `supabase/functions/prev-pre-processar/index.ts` — adiciona etapa LLM pós-extração para `queixa_principal`.
+- `supabase/functions/seed-prompts/index.ts` — adiciona seed do prompt `prev_queixa_principal_unificada`.
+
+**Não tocados:** schema/migrations, módulo Trabalhista, outras edge functions, export PDF/DOCX, painel lateral.
+
+**Validação após build:**
+1. Step 1 não mostra mais telefone/endereço; perícia antiga abre sem erro.
+2. Step 2 mostra só o textarea grande.
+3. Novo PDF processado → textarea da Queixa vem preenchido com parágrafo único técnico.
+4. Falha da IA na queixa não quebra o resto da extração.
+5. DevPanel → Prompts mostra `prev_queixa_principal_unificada` editável.
+
+## Fora de escopo (próximas iterações)
+
+- Botão "Regenerar Queixa" sob demanda dentro do Step 2.
+- Reprocessamento retroativo de perícias antigas.
+- Aplicar mesmo padrão de "campo unificado IA" aos Steps 3–10.
