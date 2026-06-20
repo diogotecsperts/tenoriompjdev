@@ -331,21 +331,28 @@ export default function PautaDetalhe() {
                 </label>
 
                 {p.pdf_path && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-[11px]"
-                    onClick={() => void handleProcessar(p)}
-                    disabled={processandoIds.has(p.id) || processandoLote}
-                    title={p.pdf_processado ? "Reprocessar com IA" : "Processar com IA"}
-                  >
-                    {processandoIds.has(p.id) ? (
-                      <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                    ) : (
-                      <Sparkles className="h-3.5 w-3.5 mr-1" />
+                  <div className="flex flex-col items-center">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 text-[11px]"
+                      onClick={() => void handleProcessar(p)}
+                      disabled={processandoIds.has(p.id) || processandoLote}
+                      title={p.pdf_processado ? "Reprocessar com IA" : "Processar com IA"}
+                    >
+                      {processandoIds.has(p.id) ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5 mr-1" />
+                      )}
+                      {p.pdf_processado ? "Reprocessar" : "Processar"}
+                    </Button>
+                    {processandoIds.has(p.id) && (
+                      <span className="text-[10px] text-muted-foreground tabular-nums leading-none mt-0.5">
+                        {progress}%
+                      </span>
                     )}
-                    {p.pdf_processado ? "Reprocessar" : "Processar"}
-                  </Button>
+                  </div>
                 )}
 
                 <Button
