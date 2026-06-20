@@ -122,12 +122,31 @@ function getPromptType(promptId: string): {
 // ============================================
 
 export function DevPrompts() {
+  const [activeModule, setActiveModuleState] = useState<PromptModule>(() => readActiveModule());
+  const activeModuleConfig = PROMPT_MODULES[activeModule];
+
+  // Estrutura de cards/seções renderizada pelo DevPrompts no módulo ativo.
+  // Trabalhista combina cards do laudo + cards "prompt-only" (System/Global/Impugnação).
+  const LAUDO_STRUCTURE = useMemo(() => {
+    const merged = [...activeModuleConfig.cards, ...activeModuleConfig.promptCards];
+    return merged.map(card => ({
+      id: card.id,
+      title: card.label,
+      icon: activeModuleConfig.cardIcons[card.id] || cardIcons[card.id] || FileText,
+      sections: card.sections.map(s => ({ id: s.id, label: s.label }))
+    }));
+  }, [activeModuleConfig]);
+
+  const currentFixedConfig = activeModuleConfig.fixedConfig;
+  const currentExpectedTypes = activeModuleConfig.expectedTypes;
+  const currentCards = activeModuleConfig.cards;
+
   const [prompts, setPrompts] = useState<PromptConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [seeding, setSeeding] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set(LAUDO_STRUCTURE.map(c => c.id)));
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(() => new Set(LAUDO_STRUCTURE.map(c => c.id)));
   const [selectedPrompt, setSelectedPrompt] = useState<PromptConfig | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"classified" | "unclassified">("classified");
@@ -143,8 +162,23 @@ export function DevPrompts() {
   } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Get all section IDs for scroll spy
-  const allSectionIds = useMemo(() => LAUDO_STRUCTURE.flatMap(card => card.sections.map(s => `section-${s.id}`)), []);
+  // Troca de módulo: persiste, reseta busca/expansão/tab para evitar estado órfão.
+  const setActiveModule = (m: PromptModule) => {
+    if (m === activeModule) return;
+    persistActiveModule(m);
+    setActiveModuleState(m);
+    setSearchTerm("");
+    setActiveTab("classified");
+    const next = PROMPT_MODULES[m];
+    const allCardIds = [...next.cards, ...next.promptCards].map(c => c.id);
+    setExpandedCards(new Set(allCardIds));
+  };
+
+  // Get all section IDs for scroll spy (depende do módulo ativo)
+  const allSectionIds = useMemo(
+    () => LAUDO_STRUCTURE.flatMap(card => card.sections.map(s => `section-${s.id}`)),
+    [LAUDO_STRUCTURE]
+  );
 
   // Use scroll spy for navigation highlighting
   const {
