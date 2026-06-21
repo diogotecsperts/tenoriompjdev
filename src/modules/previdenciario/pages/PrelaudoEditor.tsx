@@ -28,11 +28,13 @@ import { downloadPrelaudoDocx } from "../lib/export/prelaudo-docx";
 import {
   PRELAUDO_STEPS,
   EMPTY_PRELAUDO,
+  ALL_STEP_IDS,
   mergeFromExtracao,
   type PrelaudoData,
   type StepId,
 } from "../lib/prelaudo-structure";
 import { StepNav } from "../components/StepNav";
+import { ExportStepsSelector } from "../components/ExportStepsSelector";
 import { PainelLateralProcesso } from "../components/PainelLateralProcesso";
 import { Step01Identificacao } from "../components/steps/Step01Identificacao";
 import { Step02Queixa } from "../components/steps/Step02Queixa";
@@ -47,6 +49,7 @@ import { Step10Conclusao } from "../components/steps/Step10Conclusao";
 
 const AUTOSAVE_MS = 900;
 const VIEW_MODE_STORAGE_KEY = "prev-prelaudo-view-mode";
+const EXPORT_STEPS_STORAGE_KEY = "prev:prelaudo:export-steps";
 type ViewMode = "paginated" | "infinite";
 
 export default function PrelaudoEditor() {
