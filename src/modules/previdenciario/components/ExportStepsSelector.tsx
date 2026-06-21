@@ -27,14 +27,9 @@ export function ExportStepsSelector({ value, onChange, disabled }: Props) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" disabled={disabled} className="gap-1.5">
+        <Button variant="outline" size="sm" disabled={disabled} className="gap-1.5" title={`Etapas no export (${count}/${total})`}>
           <ListFilter className="h-4 w-4" />
-          <span className="hidden sm:inline">
-            Etapas no export ({count}/{total})
-          </span>
-          <span className="sm:hidden">
-            {count}/{total}
-          </span>
+          <span>{count}/{total}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 p-3">
