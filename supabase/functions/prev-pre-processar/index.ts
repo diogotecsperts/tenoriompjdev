@@ -206,26 +206,34 @@ FOCALIZE APENAS EM:
 REGRAS OBRIGATÓRIAS:
 1. Una todas as informações em um único texto coeso.
 2. Elimine repetições.
-3. Organize nesta sequência: queixa principal, tempo de evolução, evolução/recorrência/progressão, características dos sintomas, sintomas associados, antecedentes traumáticos e repercussão funcional referida.
+3. Organize a frase principal nesta ordem fixa e inegociável:
+   (a) queixa principal;
+   (b) irradiação e parestesia (quando houver);
+   (c) tempo de evolução (com início há aproximadamente [X ou _] anos);
+   (d) encerramento padrão (episódios recorrentes de exacerbação álgica e repercussão funcional nas atividades habituais).
 4. Não acrescentar medicações, tratamentos, fisioterapia, acompanhamento médico, exames, documentos ou comorbidades.
 5. Não emitir conclusão sobre incapacidade laboral.
 6. Não presumir diagnóstico não informado.
 7. Não ampliar os fatos além do que foi descrito.
 8. Usar sempre A parte pericianda como sujeito principal.
 9. Preferir o verbo refere em vez de relata, salvo em histórico de trauma onde se usa relata.
-10. Quando houver dor crônica, usar: de evolução crônica e recorrente, relatando episódios de exacerbação álgica.
-11. Quando houver irradiação ou parestesia, descrever: com irradiação e parestesia para o segmento informado.
+10. TEMPLATE OFICIAL da frase principal (preencher os colchetes; omitir o trecho de irradiação se não houver):
+    "A parte pericianda refere quadro de [queixa], com irradiação e parestesia para [membros], com início há aproximadamente [tempo ou _] anos, relatando episódios recorrentes de exacerbação álgica e repercussão funcional nas atividades habituais."
+11. Quando houver irradiação ou parestesia, descrevê-la SEMPRE antes do tempo de evolução, no formato: "com irradiação e parestesia para o segmento informado".
 12. Quando houver trauma, usar: A parte pericianda relata histórico de trauma ocorrido em [data], ocasião em que sofreu [lesão]. Desde o evento, refere [sintomas], os quais associa diretamente ao trauma inicial.
 13. Quando houver coxalgia, tratá-la como queixa do segmento axial, descrevendo-a junto à coluna e não com as artralgias periféricas.
-14. O tempo de evolução deve ser vinculado obrigatoriamente à queixa principal. Nunca posicioná-lo após queixa de outro sistema.
+14. POSIÇÃO FIXA DO TEMPO: o tempo de evolução entra SEMPRE depois da irradiação/parestesia e SEMPRE antes do encerramento padrão. NUNCA no início da frase. NUNCA depois do encerramento. NUNCA vinculado a queixa de outro sistema.
 15. Queixas emocionais em frase própria no final: Acrescenta queixas emocionais, incluindo os sintomas referidos, com repercussão referida no convívio social e na qualidade de vida.
 16. Corrigir ortografia, pontuação, concordância e repetições.
 17. Não usar bullets, título, cabeçalho, markdown ou comentários.
 18. Produzir apenas o texto final em um único parágrafo técnico e coeso.
 19. Se houver múltiplas queixas, iniciar pela queixa principal mais específica e agrupar as demais de forma anatômica e lógica.
-20. Se faltar tempo de evolução, não inventar. Omitir.
+20. TEMPO DE EVOLUÇÃO — regra crítica:
+    - PROIBIDO inventar, estimar ou inferir o tempo a partir de datas de exames, laudos, afastamentos, receitas, início de tratamento ou qualquer outro indício indireto.
+    - Se o tempo de evolução estiver EXPLÍCITO no relato do processo (ex.: "há 5 anos", "desde 2019"), usar o valor informado: "com início há aproximadamente 5 anos".
+    - Se o tempo NÃO estiver explícito, NÃO OMITIR o trecho: inserir o placeholder underline exatamente como: "com início há aproximadamente _ anos" — o perito preencherá manualmente durante a consulta.
 21. Se faltar repercussão funcional, não inventar. Omitir.
-22. O texto final deve usar referindo repercussão funcional referida nas atividades habituais como encerramento, quando aplicável.
+22. O encerramento padrão "relatando episódios recorrentes de exacerbação álgica e repercussão funcional nas atividades habituais" deve aparecer sempre por último na frase principal, após o tempo de evolução.
 
 TEXTOS / SEÇÕES SELECIONADAS:
 \${textoSelecionado}
