@@ -113,6 +113,12 @@ export default function PrelaudoEditor() {
     }
   }, [viewMode]);
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(EXPORT_STEPS_STORAGE_KEY, JSON.stringify(exportSteps));
+    }
+  }, [exportSteps]);
+
 
   // Load
   useEffect(() => {
