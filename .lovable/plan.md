@@ -1,80 +1,49 @@
-# Correção segura dos quesitos (Reclamante/Reclamada) — escopo cirúrgico
+## Contexto
 
-## Garantias de segurança
+Hoje em `src/modules/previdenciario/pages/PautaList.tsx` as pautas são **agrupadas por data** (mais recente no topo) e dentro de cada grupo aparecem em ordem de inserção. Não há como o usuário escolher outra ordem — daí a percepção de "está só por data".
 
-- **Zero alteração no DevPrompts, registry de módulos, módulo previdenciário, exportadores DOCX/PDF, RLS, buckets, tabelas, edge functions de import/OCR (`processar-autos`, `prev-pre-processar`, `mistral-ocr`), `prompt-manager`, ou qualquer hook/UI do laudo.**
-- **Nenhuma migration de banco. Nenhum prompt do `system_config` é sobrescrito** (o `seed-prompts` só grava prompts que ainda não existem; prompts atuais do usuário ficam intactos).
-- **Nenhum laudo já salvo é tocado** (respeita a regra de não atualizar dados retroativamente).
-- Mudanças isoladas em **2 arquivos backend**, ambos no caminho do botão "Gerar Respostas dos Quesitos" do módulo trabalhista. Qualquer outro fluxo (import, regen via PDF, exportação) continua exatamente igual.
-- Mudança puramente **aditiva**: reforço de instrução no prompt + normalizador de string pós-IA. Não remove nem renomeia nada.
+## Objetivo
 
-## O que está errado (resumo)
+Adicionar um controle de **Ordenar por** no topo da lista de pautas, sem mexer em nada fora dessa tela.
 
-A IA está devolvendo o texto dos quesitos com a numeração original do processo (`1-`, `2-`) e **sem os rótulos `QUESITO N:` / `RESPOSTA:`**. No banco a pergunta e a resposta estão separadas só por uma linha em branco — em viewport estreito (mobile 384px) elas parecem coladas. Confirmado lendo o laudo `81c2bea4-…` atualizado em 20/06 21:04. Isso **não tem relação com as alterações do DevPrompts** (que são 100% client-side e não tocam prompts, IA ou edge functions).
+## Opções de ordenação propostas
 
-## Mudanças
+1. **Data (mais recente primeiro)** — comportamento atual, padrão.
+2. **Data (mais antiga primeiro)**.
+3. **Local (A-Z)** — ordem alfabética pelo campo `local` (nome da pasta).
+4. **Local (Z-A)**.
+5. **Cidade / UF (A-Z)** — útil para quem faz pautas em várias cidades.
+6. **Criação (mais recente)** — pelo `created_at`, para achar a que acabou de criar.
 
-### 1. `supabase/functions/gerar-quesitos/index.ts` — único arquivo essencial
+Sugiro entregar as 6. São triviais e cobrem todos os casos reais.
 
-**a) Trocar a regra 5 do `SYSTEM_PROMPT`** (hoje usa `\\n` literal, frágil) por:
+## Comportamento
 
-```
-5. Cada par PERGUNTA/RESPOSTA deve ocupar DUAS linhas distintas:
-   - linha 1: "QUESITO N: <pergunta>"
-   - linha 2: "RESPOSTA: <resposta técnica>"
-   Deixe UMA linha em branco antes do próximo QUESITO. Nunca cole a resposta na mesma linha da pergunta. Use os rótulos "QUESITO N:" e "RESPOSTA:" em caixa alta, sempre.
-```
+- Quando a ordenação for **por data**, mantemos o agrupamento atual por dia (cabeçalho com data + contagem de pastas).
+- Quando for **alfabética / cidade / criação**, removemos o agrupamento e exibimos uma **grade única** com todas as pastas ordenadas, para a ordem fazer sentido visualmente. O card continua mostrando a data implicitamente (já mostra local + cidade; podemos adicionar uma linha discreta com a data nesse modo).
+- A escolha do usuário é persistida em `localStorage` (`prev:pautas:sort`) para não precisar reescolher a cada visita. Sem mudanças de schema, sem RLS, sem backend.
 
-**b) Anexar bloco de formato no final de cada string de `DEFAULT_PROMPTS.juizo/reclamante/reclamada`** (o mesmo bloco para os três):
+## UI
 
-```
-FORMATO OBRIGATÓRIO DA SAÍDA:
+No header da página, ao lado do botão "Nova pauta":
 
-QUESITO 1: <pergunta integral>
-RESPOSTA: <resposta técnica fundamentada nos dados clínicos>
-
-QUESITO 2: <pergunta integral>
-RESPOSTA: <resposta técnica fundamentada nos dados clínicos>
-
-Renumere sequencialmente (1, 2, 3...) ignorando a numeração original do processo. Sempre escreva os rótulos "QUESITO N:" e "RESPOSTA:" em caixa alta. Uma linha em branco entre cada par.
+```text
+[ Pautas ]                    [Ordenar por ▾]  [+ Nova pauta]
+ Organize...
 ```
 
-> Esses defaults só entram em uso quando o prompt não existe no `system_config` (via `getPrompt(..., DEFAULT_PROMPTS[key], ...)` com `autoRegister: true`). Os prompts atuais do usuário, se já existirem no banco com outra versão, **não são alterados**.
+Componente: `Select` do shadcn já usado no projeto, label curta ("Data ↓", "A–Z", etc.) para caber bem.
 
-**c) Normalizador defensivo pós-IA**, aplicado apenas ao texto retornado pela função, antes de devolver ao cliente:
+## Arquivos afetados
 
-```ts
-function normalizarQuesitos(txt: string): string {
-  return txt
-    .replace(/([^\n])\s*(QUESITO\s*\d+\s*:)/gi, "$1\n\n$2")
-    .replace(/([^\n])\s*(RESPOSTA\s*:)/gi, "$1\nRESPOSTA:")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-```
+- `src/modules/previdenciario/pages/PautaList.tsx` — único arquivo editado. Adiciona estado `sortBy`, persistência em localStorage, lógica de ordenação e renderização condicional (agrupado por data vs. grade única).
 
-Aplicado **só** em `response[fieldMap[key]] = normalizarQuesitos(text.trim())`. Não toca em nada além da string de saída desta função.
+## Fora de escopo
 
-### 2. `supabase/functions/seed-prompts/index.ts` — opcional, só uniformidade
+- Outras telas (PautaDetalhe, perícias internas, trabalhista, dev panel).
+- Banco de dados, RLS, edge functions, prompts de IA.
+- Mudanças de estilo global ou no card em si (apenas, no modo não-agrupado, mostrar a data como linha discreta).
 
-Acrescentar a mesma regra "duas linhas separadas, linha em branco entre pares, rótulos em caixa alta" dentro do bloco `FORMATO DE SAÍDA` dos 3 `prompt_regen_quesitos*`. **Só afeta instalações novas** (o seed nunca sobrescreve prompts já existentes), portanto sem risco para o ambiente atual do cliente.
+## Riscos
 
-Se quiser ser ainda mais conservador, podemos **pular essa etapa 2** e fazer só a 1 — o problema relatado é resolvido apenas com a edição em `gerar-quesitos`.
-
-## O que NÃO muda
-
-- DevPrompts, registry, coverage, `prev-prompts-structure`, módulo previdenciário.
-- Edge functions: `processar-autos`, `regerar-campo-pdf`, `prev-pre-processar`, `mistral-ocr`, `prompt-manager`, `ai-config`.
-- Exportadores `generateLaudoDOCX.ts` / `generateLaudoPDF.ts` (já lidam corretamente com `QUESITO N:` / `RESPOSTA:`).
-- Schema, RLS, buckets, secrets.
-- Conteúdo já salvo nos laudos (o cliente pode regenerar manualmente se quiser).
-
-## Arquivos tocados
-- Editar: `supabase/functions/gerar-quesitos/index.ts`
-- (opcional) Editar: `supabase/functions/seed-prompts/index.ts`
-
-## Verificação após aplicar
-1. Em um laudo trabalhista com PDF, clicar "Gerar Respostas dos Quesitos".
-2. Conferir nos 3 campos: linhas no padrão `QUESITO 1: ...` / `RESPOSTA: ...` separadas por linha em branco.
-3. Exportar DOCX e PDF e conferir que cada pergunta e cada resposta vira parágrafo próprio.
-4. Sem regressão visível em DevPrompts, módulo previdenciário, import de autos ou impugnação.
+Praticamente nulos: alteração isolada de UI/estado local em uma única página, sem efeitos sobre dados, perícias já criadas, ou o restante do módulo.
