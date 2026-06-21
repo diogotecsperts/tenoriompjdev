@@ -9,7 +9,9 @@ import type {
   PrelaudoData,
   CidItem,
   MedicacaoItem,
+  StepId,
 } from "../prelaudo-structure";
+import { ALL_STEP_IDS } from "../prelaudo-structure";
 import {
   COLORS,
   MARGINS,
@@ -203,7 +205,12 @@ export interface PrelaudoPdfMeta {
 export const generatePrelaudoPdf = async (
   data: PrelaudoData,
   meta: PrelaudoPdfMeta,
+  includedSteps?: StepId[],
 ): Promise<jsPDF> => {
+  const included = new Set<StepId>(includedSteps ?? ALL_STEP_IDS);
+  let sectionNo = 0;
+  const nextN = () => ++sectionNo;
+
   const doc = new jsPDF();
 
   const headerB64 = await loadImageAsBase64("/timbrado-cabecalho.png");
@@ -243,165 +250,185 @@ export const generatePrelaudoPdf = async (
   y += 4;
 
   // ----- 1. Identificação -----
-  y = sectionTitle(doc, 1, "Identificação", y);
-  const id = data.identificacao || {};
-  if (!hasAny(id)) {
-    y = emptyNote(doc, y);
-  } else {
-    y = labeled(doc, "Nome", id.nome || "", y);
-    y = labeled(doc, "CPF", id.cpf || "", y);
-    y = labeled(doc, "RG", id.rg || "", y);
-    y = labeled(doc, "Data de nascimento", fmtDate(id.data_nascimento), y);
-    y = labeled(doc, "Idade", id.idade || "", y);
-    y = labeled(doc, "Sexo", id.sexo || "", y);
-    y = labeled(doc, "Estado civil", id.estado_civil || "", y);
-    y = labeled(doc, "Escolaridade", id.escolaridade || "", y);
-    y = labeled(doc, "Profissão", id.profissao || "", y);
-    y = labeled(doc, "Última atividade", id.ultima_atividade || "", y);
-    y = labeled(doc, "Endereço", id.endereco || "", y);
-    y = labeled(doc, "Telefone", id.telefone || "", y);
-    if (id.numero_processo || id.vara || id.comarca || id.beneficio_pleiteado) {
-      y += 2;
-      y = subtitle(doc, "Dados do processo", y);
-      y = labeled(doc, "Nº do processo", id.numero_processo || "", y);
-      y = labeled(doc, "Vara", id.vara || "", y);
-      y = labeled(doc, "Comarca", id.comarca || "", y);
-      y = labeled(doc, "Benefício pleiteado", id.beneficio_pleiteado || "", y);
+  if (included.has("identificacao")) {
+    y = sectionTitle(doc, nextN(), "Identificação", y);
+    const id = data.identificacao || {};
+    if (!hasAny(id)) {
+      y = emptyNote(doc, y);
+    } else {
+      y = labeled(doc, "Nome", id.nome || "", y);
+      y = labeled(doc, "CPF", id.cpf || "", y);
+      y = labeled(doc, "RG", id.rg || "", y);
+      y = labeled(doc, "Data de nascimento", fmtDate(id.data_nascimento), y);
+      y = labeled(doc, "Idade", id.idade || "", y);
+      y = labeled(doc, "Sexo", id.sexo || "", y);
+      y = labeled(doc, "Estado civil", id.estado_civil || "", y);
+      y = labeled(doc, "Escolaridade", id.escolaridade || "", y);
+      y = labeled(doc, "Profissão", id.profissao || "", y);
+      y = labeled(doc, "Última atividade", id.ultima_atividade || "", y);
+      y = labeled(doc, "Endereço", id.endereco || "", y);
+      y = labeled(doc, "Telefone", id.telefone || "", y);
+      if (id.numero_processo || id.vara || id.comarca || id.beneficio_pleiteado) {
+        y += 2;
+        y = subtitle(doc, "Dados do processo", y);
+        y = labeled(doc, "Nº do processo", id.numero_processo || "", y);
+        y = labeled(doc, "Vara", id.vara || "", y);
+        y = labeled(doc, "Comarca", id.comarca || "", y);
+        y = labeled(doc, "Benefício pleiteado", id.beneficio_pleiteado || "", y);
+      }
     }
   }
 
   // ----- 2. Queixa -----
-  y = sectionTitle(doc, 2, "Queixa principal", y);
-  const q = data.queixa || {};
-  if (!hasAny(q)) y = emptyNote(doc, y);
-  else {
-    if (q.queixa_principal) y = paragraph(doc, q.queixa_principal, y);
-    y = labeled(doc, "Início dos sintomas", q.inicio_sintomas || "", y);
-    y = labeled(doc, "Evolução", q.evolucao || "", y);
-    y = labeled(doc, "Lateralidade", q.lateralidade || "", y);
-    y = labeled(doc, "Fatores agravantes", q.fatores_agravantes || "", y);
+  if (included.has("queixa")) {
+    y = sectionTitle(doc, nextN(), "Queixa principal", y);
+    const q = data.queixa || {};
+    if (!hasAny(q)) y = emptyNote(doc, y);
+    else {
+      if (q.queixa_principal) y = paragraph(doc, q.queixa_principal, y);
+      y = labeled(doc, "Início dos sintomas", q.inicio_sintomas || "", y);
+      y = labeled(doc, "Evolução", q.evolucao || "", y);
+      y = labeled(doc, "Lateralidade", q.lateralidade || "", y);
+      y = labeled(doc, "Fatores agravantes", q.fatores_agravantes || "", y);
+    }
   }
 
   // ----- 3. Medicação -----
-  y = sectionTitle(doc, 3, "Medicação em uso", y);
-  const itens = data.medicacao?.itens ?? [];
-  if (itens.length === 0 && !data.medicacao?.observacoes) {
-    y = emptyNote(doc, y);
-  } else {
-    itens.forEach((m: MedicacaoItem) => {
-      const parts = [m.nome, m.dose, m.frequencia].filter(Boolean).join(" — ");
-      const status = m.em_uso === false ? " (suspensa)" : "";
-      y = paragraph(doc, `• ${parts}${status}`, y);
-    });
-    if (data.medicacao?.observacoes) {
-      y = labeled(doc, "Observações", data.medicacao.observacoes, y);
+  if (included.has("medicacao")) {
+    y = sectionTitle(doc, nextN(), "Medicação em uso", y);
+    const itens = data.medicacao?.itens ?? [];
+    if (itens.length === 0 && !data.medicacao?.observacoes) {
+      y = emptyNote(doc, y);
+    } else {
+      itens.forEach((m: MedicacaoItem) => {
+        const parts = [m.nome, m.dose, m.frequencia].filter(Boolean).join(" — ");
+        const status = m.em_uso === false ? " (suspensa)" : "";
+        y = paragraph(doc, `• ${parts}${status}`, y);
+      });
+      if (data.medicacao?.observacoes) {
+        y = labeled(doc, "Observações", data.medicacao.observacoes, y);
+      }
     }
   }
 
   // ----- 4. Acompanhamento -----
-  y = sectionTitle(doc, 4, "Acompanhamento médico", y);
-  const a = data.acompanhamento || {};
-  if (!hasAny(a)) y = emptyNote(doc, y);
-  else {
-    y = labeled(doc, "Faz acompanhamento", a.faz_acompanhamento === "sim" ? "Sim" : a.faz_acompanhamento === "nao" ? "Não" : "", y);
-    y = labeled(doc, "Especialistas", a.especialistas || "", y);
-    y = labeled(doc, "Frequência", a.frequencia || "", y);
-    y = labeled(doc, "Última consulta", a.ultima_consulta || "", y);
-    if (a.observacoes) y = labeled(doc, "Observações", a.observacoes, y);
+  if (included.has("acompanhamento")) {
+    y = sectionTitle(doc, nextN(), "Acompanhamento médico", y);
+    const a = data.acompanhamento || {};
+    if (!hasAny(a)) y = emptyNote(doc, y);
+    else {
+      y = labeled(doc, "Faz acompanhamento", a.faz_acompanhamento === "sim" ? "Sim" : a.faz_acompanhamento === "nao" ? "Não" : "", y);
+      y = labeled(doc, "Especialistas", a.especialistas || "", y);
+      y = labeled(doc, "Frequência", a.frequencia || "", y);
+      y = labeled(doc, "Última consulta", a.ultima_consulta || "", y);
+      if (a.observacoes) y = labeled(doc, "Observações", a.observacoes, y);
+    }
   }
 
   // ----- 5. Comorbidades -----
-  y = sectionTitle(doc, 5, "Comorbidades", y);
-  const c = data.comorbidades || {};
-  if (!hasAny(c)) y = emptyNote(doc, y);
-  else {
-    if (c.lista && c.lista.length > 0) y = paragraph(doc, c.lista.join(" • "), y);
-    if (c.texto) y = paragraph(doc, c.texto, y);
-    y = labeled(doc, "Cirurgias prévias", c.cirurgias_previas || "", y);
-    y = labeled(doc, "Internações", c.internacoes || "", y);
-    y = labeled(doc, "Histórico familiar", c.historico_familiar || "", y);
+  if (included.has("comorbidades")) {
+    y = sectionTitle(doc, nextN(), "Comorbidades", y);
+    const c = data.comorbidades || {};
+    if (!hasAny(c)) y = emptyNote(doc, y);
+    else {
+      if (c.lista && c.lista.length > 0) y = paragraph(doc, c.lista.join(" • "), y);
+      if (c.texto) y = paragraph(doc, c.texto, y);
+      y = labeled(doc, "Cirurgias prévias", c.cirurgias_previas || "", y);
+      y = labeled(doc, "Internações", c.internacoes || "", y);
+      y = labeled(doc, "Histórico familiar", c.historico_familiar || "", y);
+    }
   }
 
   // ----- 6. Estado mental -----
-  y = sectionTitle(doc, 6, "Estado mental", y);
-  const em = data.estado_mental || {};
-  if (!hasAny(em)) y = emptyNote(doc, y);
-  else {
-    y = labeled(doc, "Orientação", em.orientacao || "", y);
-    y = labeled(doc, "Humor", em.humor || "", y);
-    y = labeled(doc, "Afeto", em.afeto || "", y);
-    y = labeled(doc, "Pensamento", em.pensamento || "", y);
-    y = labeled(doc, "Memória", em.memoria || "", y);
-    y = labeled(doc, "Atenção", em.atencao || "", y);
-    y = labeled(doc, "Juízo e crítica", em.juizo_critica || "", y);
-    if (em.observacoes) y = labeled(doc, "Observações", em.observacoes, y);
+  if (included.has("estado_mental")) {
+    y = sectionTitle(doc, nextN(), "Estado mental", y);
+    const em = data.estado_mental || {};
+    if (!hasAny(em)) y = emptyNote(doc, y);
+    else {
+      y = labeled(doc, "Orientação", em.orientacao || "", y);
+      y = labeled(doc, "Humor", em.humor || "", y);
+      y = labeled(doc, "Afeto", em.afeto || "", y);
+      y = labeled(doc, "Pensamento", em.pensamento || "", y);
+      y = labeled(doc, "Memória", em.memoria || "", y);
+      y = labeled(doc, "Atenção", em.atencao || "", y);
+      y = labeled(doc, "Juízo e crítica", em.juizo_critica || "", y);
+      if (em.observacoes) y = labeled(doc, "Observações", em.observacoes, y);
+    }
   }
 
   // ----- 7. Ectoscopia -----
-  y = sectionTitle(doc, 7, "Ectoscopia / Exame geral", y);
-  const ec = data.ectoscopia || {};
-  if (!hasAny(ec)) y = emptyNote(doc, y);
-  else {
-    y = labeled(doc, "Estado geral", ec.estado_geral || "", y);
-    y = labeled(doc, "Hidratação", ec.hidratacao || "", y);
-    y = labeled(doc, "Corado", ec.corado || "", y);
-    y = labeled(doc, "Acianótico", ec.acianotico || "", y);
-    y = labeled(doc, "Anictérico", ec.anicterico || "", y);
-    y = labeled(doc, "Marcha", ec.marcha || "", y);
-    y = labeled(doc, "Postura", ec.postura || "", y);
-    y = labeled(doc, "Peso", ec.peso || "", y);
-    y = labeled(doc, "Altura", ec.altura || "", y);
-    y = labeled(doc, "IMC", ec.imc || "", y);
-    y = labeled(doc, "Pressão arterial", ec.pressao_arterial || "", y);
-    if (ec.observacoes) y = labeled(doc, "Observações", ec.observacoes, y);
+  if (included.has("ectoscopia")) {
+    y = sectionTitle(doc, nextN(), "Ectoscopia / Exame geral", y);
+    const ec = data.ectoscopia || {};
+    if (!hasAny(ec)) y = emptyNote(doc, y);
+    else {
+      y = labeled(doc, "Estado geral", ec.estado_geral || "", y);
+      y = labeled(doc, "Hidratação", ec.hidratacao || "", y);
+      y = labeled(doc, "Corado", ec.corado || "", y);
+      y = labeled(doc, "Acianótico", ec.acianotico || "", y);
+      y = labeled(doc, "Anictérico", ec.anicterico || "", y);
+      y = labeled(doc, "Marcha", ec.marcha || "", y);
+      y = labeled(doc, "Postura", ec.postura || "", y);
+      y = labeled(doc, "Peso", ec.peso || "", y);
+      y = labeled(doc, "Altura", ec.altura || "", y);
+      y = labeled(doc, "IMC", ec.imc || "", y);
+      y = labeled(doc, "Pressão arterial", ec.pressao_arterial || "", y);
+      if (ec.observacoes) y = labeled(doc, "Observações", ec.observacoes, y);
+    }
   }
 
   // ----- 8. Ortopédico -----
-  y = sectionTitle(doc, 8, "Exame ortopédico", y);
-  const ort = data.exame_ortopedico || {};
-  if (!hasAny(ort)) y = emptyNote(doc, y);
-  else {
-    y = labeled(doc, "Segmento avaliado", ort.segmento_avaliado || "", y);
-    y = labeled(doc, "Inspeção", ort.inspecao || "", y);
-    y = labeled(doc, "Palpação", ort.palpacao || "", y);
-    y = labeled(doc, "Amplitude de movimento", ort.amplitude_movimento || "", y);
-    y = labeled(doc, "Força muscular", ort.forca_muscular || "", y);
-    y = labeled(doc, "Reflexos", ort.reflexos || "", y);
-    y = labeled(doc, "Testes especiais", ort.testes_especiais || "", y);
-    y = labeled(doc, "Manobras", ort.manobras || "", y);
-    if (ort.observacoes) y = labeled(doc, "Observações", ort.observacoes, y);
+  if (included.has("exame_ortopedico")) {
+    y = sectionTitle(doc, nextN(), "Exame ortopédico", y);
+    const ort = data.exame_ortopedico || {};
+    if (!hasAny(ort)) y = emptyNote(doc, y);
+    else {
+      y = labeled(doc, "Segmento avaliado", ort.segmento_avaliado || "", y);
+      y = labeled(doc, "Inspeção", ort.inspecao || "", y);
+      y = labeled(doc, "Palpação", ort.palpacao || "", y);
+      y = labeled(doc, "Amplitude de movimento", ort.amplitude_movimento || "", y);
+      y = labeled(doc, "Força muscular", ort.forca_muscular || "", y);
+      y = labeled(doc, "Reflexos", ort.reflexos || "", y);
+      y = labeled(doc, "Testes especiais", ort.testes_especiais || "", y);
+      y = labeled(doc, "Manobras", ort.manobras || "", y);
+      if (ort.observacoes) y = labeled(doc, "Observações", ort.observacoes, y);
+    }
   }
 
   // ----- 9. CID -----
-  y = sectionTitle(doc, 9, "CID-10", y);
-  const cid = data.cid;
-  if (!cid?.itens || cid.itens.length === 0) y = emptyNote(doc, y);
-  else {
-    cid.itens.forEach((it: CidItem) => {
-      const prefix = it.principal ? "★ " : "• ";
-      const desc = it.descricao ? ` — ${it.descricao}` : "";
-      y = paragraph(doc, `${prefix}${it.codigo}${desc}`, y);
-    });
-    if (cid.observacoes) y = labeled(doc, "Observações", cid.observacoes, y);
+  if (included.has("cid")) {
+    y = sectionTitle(doc, nextN(), "CID-10", y);
+    const cid = data.cid;
+    if (!cid?.itens || cid.itens.length === 0) y = emptyNote(doc, y);
+    else {
+      cid.itens.forEach((it: CidItem) => {
+        const prefix = it.principal ? "★ " : "• ";
+        const desc = it.descricao ? ` — ${it.descricao}` : "";
+        y = paragraph(doc, `${prefix}${it.codigo}${desc}`, y);
+      });
+      if (cid.observacoes) y = labeled(doc, "Observações", cid.observacoes, y);
+    }
   }
 
   // ----- 10. Conclusão -----
-  y = sectionTitle(doc, 10, "Conclusão", y);
-  const con = data.conclusao || {};
-  if (!hasAny(con)) y = emptyNote(doc, y);
-  else {
-    if (con.diagnostico) y = labeled(doc, "Diagnóstico", con.diagnostico, y);
-    const nexoMap: Record<string, string> = { sim: "Sim", nao: "Não", parcial: "Parcial" };
-    y = labeled(doc, "Nexo causal", nexoMap[con.nexo_causal || ""] || "", y);
-    if (con.nexo_justificativa) y = labeled(doc, "Justificativa do nexo", con.nexo_justificativa, y);
-    const incMap: Record<string, string> = { total: "Total", parcial: "Parcial", ausente: "Ausente" };
-    y = labeled(doc, "Incapacidade", incMap[con.incapacidade || ""] || "", y);
-    const tempMap: Record<string, string> = { temporaria: "Temporária", permanente: "Permanente" };
-    y = labeled(doc, "Temporalidade", tempMap[con.temporalidade || ""] || "", y);
-    y = labeled(doc, "Data de início da incapacidade (DII)", fmtDate(con.data_inicio_incapacidade), y);
-    y = labeled(doc, "Prazo para reavaliação", con.prazo_reavaliacao || "", y);
-    y = labeled(doc, "Reabilitação indicada", con.reabilitacao_indicada === "sim" ? "Sim" : con.reabilitacao_indicada === "nao" ? "Não" : "", y);
-    if (con.consideracoes_finais) y = labeled(doc, "Considerações finais", con.consideracoes_finais, y);
+  if (included.has("conclusao")) {
+    y = sectionTitle(doc, nextN(), "Conclusão", y);
+    const con = data.conclusao || {};
+    if (!hasAny(con)) y = emptyNote(doc, y);
+    else {
+      if (con.diagnostico) y = labeled(doc, "Diagnóstico", con.diagnostico, y);
+      const nexoMap: Record<string, string> = { sim: "Sim", nao: "Não", parcial: "Parcial" };
+      y = labeled(doc, "Nexo causal", nexoMap[con.nexo_causal || ""] || "", y);
+      if (con.nexo_justificativa) y = labeled(doc, "Justificativa do nexo", con.nexo_justificativa, y);
+      const incMap: Record<string, string> = { total: "Total", parcial: "Parcial", ausente: "Ausente" };
+      y = labeled(doc, "Incapacidade", incMap[con.incapacidade || ""] || "", y);
+      const tempMap: Record<string, string> = { temporaria: "Temporária", permanente: "Permanente" };
+      y = labeled(doc, "Temporalidade", tempMap[con.temporalidade || ""] || "", y);
+      y = labeled(doc, "Data de início da incapacidade (DII)", fmtDate(con.data_inicio_incapacidade), y);
+      y = labeled(doc, "Prazo para reavaliação", con.prazo_reavaliacao || "", y);
+      y = labeled(doc, "Reabilitação indicada", con.reabilitacao_indicada === "sim" ? "Sim" : con.reabilitacao_indicada === "nao" ? "Não" : "", y);
+      if (con.consideracoes_finais) y = labeled(doc, "Considerações finais", con.consideracoes_finais, y);
+    }
   }
 
   // Assinatura
@@ -433,7 +460,8 @@ export const generatePrelaudoPdf = async (
 export const downloadPrelaudoPdf = async (
   data: PrelaudoData,
   meta: PrelaudoPdfMeta,
+  includedSteps?: StepId[],
 ): Promise<void> => {
-  const doc = await generatePrelaudoPdf(data, meta);
+  const doc = await generatePrelaudoPdf(data, meta, includedSteps);
   doc.save(buildFilename("pdf", meta));
 };

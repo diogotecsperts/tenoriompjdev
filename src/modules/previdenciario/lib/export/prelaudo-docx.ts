@@ -25,7 +25,9 @@ import type {
   PrelaudoData,
   CidItem,
   MedicacaoItem,
+  StepId,
 } from "../prelaudo-structure";
+import { ALL_STEP_IDS } from "../prelaudo-structure";
 import {
   COLORS_HEX,
   FONT,
@@ -140,7 +142,12 @@ export interface PrelaudoDocxMeta {
 export const generatePrelaudoDocx = async (
   data: PrelaudoData,
   meta: PrelaudoDocxMeta,
+  includedSteps?: StepId[],
 ): Promise<Blob> => {
+  const included = new Set<StepId>(includedSteps ?? ALL_STEP_IDS);
+  let sectionNo = 0;
+  const nextN = () => ++sectionNo;
+
   const paragraphs: Paragraph[] = [];
 
   // ----- Cabeçalho do documento (interno, não é o banner) -----
@@ -180,157 +187,177 @@ export const generatePrelaudoDocx = async (
   };
 
   // ----- 1. Identificação -----
-  const id = data.identificacao || {};
-  pushSection(1, "Identificação", [
-    labeled("Nome", id.nome || ""),
-    labeled("CPF", id.cpf || ""),
-    labeled("RG", id.rg || ""),
-    labeled("Data de nascimento", fmtDate(id.data_nascimento)),
-    labeled("Idade", id.idade || ""),
-    labeled("Sexo", id.sexo || ""),
-    labeled("Estado civil", id.estado_civil || ""),
-    labeled("Escolaridade", id.escolaridade || ""),
-    labeled("Profissão", id.profissao || ""),
-    labeled("Última atividade", id.ultima_atividade || ""),
-    labeled("Endereço", id.endereco || ""),
-    labeled("Telefone", id.telefone || ""),
-  ]);
-  if (id.numero_processo || id.vara || id.comarca || id.beneficio_pleiteado) {
-    paragraphs.push(subtitle("Dados do processo"));
-    [
-      labeled("Nº do processo", id.numero_processo || ""),
-      labeled("Vara", id.vara || ""),
-      labeled("Comarca", id.comarca || ""),
-      labeled("Benefício pleiteado", id.beneficio_pleiteado || ""),
-    ].forEach((p) => p && paragraphs.push(p));
+  if (included.has("identificacao")) {
+    const id = data.identificacao || {};
+    pushSection(nextN(), "Identificação", [
+      labeled("Nome", id.nome || ""),
+      labeled("CPF", id.cpf || ""),
+      labeled("RG", id.rg || ""),
+      labeled("Data de nascimento", fmtDate(id.data_nascimento)),
+      labeled("Idade", id.idade || ""),
+      labeled("Sexo", id.sexo || ""),
+      labeled("Estado civil", id.estado_civil || ""),
+      labeled("Escolaridade", id.escolaridade || ""),
+      labeled("Profissão", id.profissao || ""),
+      labeled("Última atividade", id.ultima_atividade || ""),
+      labeled("Endereço", id.endereco || ""),
+      labeled("Telefone", id.telefone || ""),
+    ]);
+    if (id.numero_processo || id.vara || id.comarca || id.beneficio_pleiteado) {
+      paragraphs.push(subtitle("Dados do processo"));
+      [
+        labeled("Nº do processo", id.numero_processo || ""),
+        labeled("Vara", id.vara || ""),
+        labeled("Comarca", id.comarca || ""),
+        labeled("Benefício pleiteado", id.beneficio_pleiteado || ""),
+      ].forEach((p) => p && paragraphs.push(p));
+    }
   }
 
   // ----- 2. Queixa -----
-  const q = data.queixa || {};
-  pushSection(2, "Queixa principal", [
-    paragraph(q.queixa_principal || ""),
-    labeled("Início dos sintomas", q.inicio_sintomas || ""),
-    labeled("Evolução", q.evolucao || ""),
-    labeled("Lateralidade", q.lateralidade || ""),
-    labeled("Fatores agravantes", q.fatores_agravantes || ""),
-  ]);
+  if (included.has("queixa")) {
+    const q = data.queixa || {};
+    pushSection(nextN(), "Queixa principal", [
+      paragraph(q.queixa_principal || ""),
+      labeled("Início dos sintomas", q.inicio_sintomas || ""),
+      labeled("Evolução", q.evolucao || ""),
+      labeled("Lateralidade", q.lateralidade || ""),
+      labeled("Fatores agravantes", q.fatores_agravantes || ""),
+    ]);
+  }
 
   // ----- 3. Medicação -----
-  const meds = data.medicacao?.itens ?? [];
-  paragraphs.push(sectionTitle(3, "Medicação em uso"));
-  if (meds.length === 0 && !data.medicacao?.observacoes) paragraphs.push(emptyNote());
-  else {
-    meds.forEach((m: MedicacaoItem) => {
-      const parts = [m.nome, m.dose, m.frequencia].filter(Boolean).join(" — ");
-      const status = m.em_uso === false ? " (suspensa)" : "";
-      const p = paragraph(`• ${parts}${status}`);
-      if (p) paragraphs.push(p);
-    });
-    const obs = labeled("Observações", data.medicacao?.observacoes || "");
-    if (obs) paragraphs.push(obs);
+  if (included.has("medicacao")) {
+    const meds = data.medicacao?.itens ?? [];
+    paragraphs.push(sectionTitle(nextN(), "Medicação em uso"));
+    if (meds.length === 0 && !data.medicacao?.observacoes) paragraphs.push(emptyNote());
+    else {
+      meds.forEach((m: MedicacaoItem) => {
+        const parts = [m.nome, m.dose, m.frequencia].filter(Boolean).join(" — ");
+        const status = m.em_uso === false ? " (suspensa)" : "";
+        const p = paragraph(`• ${parts}${status}`);
+        if (p) paragraphs.push(p);
+      });
+      const obs = labeled("Observações", data.medicacao?.observacoes || "");
+      if (obs) paragraphs.push(obs);
+    }
   }
 
   // ----- 4. Acompanhamento -----
-  const a = data.acompanhamento || {};
-  pushSection(4, "Acompanhamento médico", [
-    labeled(
-      "Faz acompanhamento",
-      a.faz_acompanhamento === "sim" ? "Sim" : a.faz_acompanhamento === "nao" ? "Não" : "",
-    ),
-    labeled("Especialistas", a.especialistas || ""),
-    labeled("Frequência", a.frequencia || ""),
-    labeled("Última consulta", a.ultima_consulta || ""),
-    labeled("Observações", a.observacoes || ""),
-  ]);
+  if (included.has("acompanhamento")) {
+    const a = data.acompanhamento || {};
+    pushSection(nextN(), "Acompanhamento médico", [
+      labeled(
+        "Faz acompanhamento",
+        a.faz_acompanhamento === "sim" ? "Sim" : a.faz_acompanhamento === "nao" ? "Não" : "",
+      ),
+      labeled("Especialistas", a.especialistas || ""),
+      labeled("Frequência", a.frequencia || ""),
+      labeled("Última consulta", a.ultima_consulta || ""),
+      labeled("Observações", a.observacoes || ""),
+    ]);
+  }
 
   // ----- 5. Comorbidades -----
-  const c = data.comorbidades || {};
-  pushSection(5, "Comorbidades", [
-    c.lista && c.lista.length > 0 ? paragraph(c.lista.join(" • ")) : null,
-    paragraph(c.texto || ""),
-    labeled("Cirurgias prévias", c.cirurgias_previas || ""),
-    labeled("Internações", c.internacoes || ""),
-    labeled("Histórico familiar", c.historico_familiar || ""),
-  ]);
+  if (included.has("comorbidades")) {
+    const c = data.comorbidades || {};
+    pushSection(nextN(), "Comorbidades", [
+      c.lista && c.lista.length > 0 ? paragraph(c.lista.join(" • ")) : null,
+      paragraph(c.texto || ""),
+      labeled("Cirurgias prévias", c.cirurgias_previas || ""),
+      labeled("Internações", c.internacoes || ""),
+      labeled("Histórico familiar", c.historico_familiar || ""),
+    ]);
+  }
 
   // ----- 6. Estado mental -----
-  const em = data.estado_mental || {};
-  pushSection(6, "Estado mental", [
-    labeled("Orientação", em.orientacao || ""),
-    labeled("Humor", em.humor || ""),
-    labeled("Afeto", em.afeto || ""),
-    labeled("Pensamento", em.pensamento || ""),
-    labeled("Memória", em.memoria || ""),
-    labeled("Atenção", em.atencao || ""),
-    labeled("Juízo e crítica", em.juizo_critica || ""),
-    labeled("Observações", em.observacoes || ""),
-  ]);
+  if (included.has("estado_mental")) {
+    const em = data.estado_mental || {};
+    pushSection(nextN(), "Estado mental", [
+      labeled("Orientação", em.orientacao || ""),
+      labeled("Humor", em.humor || ""),
+      labeled("Afeto", em.afeto || ""),
+      labeled("Pensamento", em.pensamento || ""),
+      labeled("Memória", em.memoria || ""),
+      labeled("Atenção", em.atencao || ""),
+      labeled("Juízo e crítica", em.juizo_critica || ""),
+      labeled("Observações", em.observacoes || ""),
+    ]);
+  }
 
   // ----- 7. Ectoscopia -----
-  const ec = data.ectoscopia || {};
-  pushSection(7, "Ectoscopia / Exame geral", [
-    labeled("Estado geral", ec.estado_geral || ""),
-    labeled("Hidratação", ec.hidratacao || ""),
-    labeled("Corado", ec.corado || ""),
-    labeled("Acianótico", ec.acianotico || ""),
-    labeled("Anictérico", ec.anicterico || ""),
-    labeled("Marcha", ec.marcha || ""),
-    labeled("Postura", ec.postura || ""),
-    labeled("Peso", ec.peso || ""),
-    labeled("Altura", ec.altura || ""),
-    labeled("IMC", ec.imc || ""),
-    labeled("Pressão arterial", ec.pressao_arterial || ""),
-    labeled("Observações", ec.observacoes || ""),
-  ]);
+  if (included.has("ectoscopia")) {
+    const ec = data.ectoscopia || {};
+    pushSection(nextN(), "Ectoscopia / Exame geral", [
+      labeled("Estado geral", ec.estado_geral || ""),
+      labeled("Hidratação", ec.hidratacao || ""),
+      labeled("Corado", ec.corado || ""),
+      labeled("Acianótico", ec.acianotico || ""),
+      labeled("Anictérico", ec.anicterico || ""),
+      labeled("Marcha", ec.marcha || ""),
+      labeled("Postura", ec.postura || ""),
+      labeled("Peso", ec.peso || ""),
+      labeled("Altura", ec.altura || ""),
+      labeled("IMC", ec.imc || ""),
+      labeled("Pressão arterial", ec.pressao_arterial || ""),
+      labeled("Observações", ec.observacoes || ""),
+    ]);
+  }
 
   // ----- 8. Ortopédico -----
-  const ort = data.exame_ortopedico || {};
-  pushSection(8, "Exame ortopédico", [
-    labeled("Segmento avaliado", ort.segmento_avaliado || ""),
-    labeled("Inspeção", ort.inspecao || ""),
-    labeled("Palpação", ort.palpacao || ""),
-    labeled("Amplitude de movimento", ort.amplitude_movimento || ""),
-    labeled("Força muscular", ort.forca_muscular || ""),
-    labeled("Reflexos", ort.reflexos || ""),
-    labeled("Testes especiais", ort.testes_especiais || ""),
-    labeled("Manobras", ort.manobras || ""),
-    labeled("Observações", ort.observacoes || ""),
-  ]);
+  if (included.has("exame_ortopedico")) {
+    const ort = data.exame_ortopedico || {};
+    pushSection(nextN(), "Exame ortopédico", [
+      labeled("Segmento avaliado", ort.segmento_avaliado || ""),
+      labeled("Inspeção", ort.inspecao || ""),
+      labeled("Palpação", ort.palpacao || ""),
+      labeled("Amplitude de movimento", ort.amplitude_movimento || ""),
+      labeled("Força muscular", ort.forca_muscular || ""),
+      labeled("Reflexos", ort.reflexos || ""),
+      labeled("Testes especiais", ort.testes_especiais || ""),
+      labeled("Manobras", ort.manobras || ""),
+      labeled("Observações", ort.observacoes || ""),
+    ]);
+  }
 
   // ----- 9. CID -----
-  paragraphs.push(sectionTitle(9, "CID-10"));
-  const cid = data.cid;
-  if (!cid?.itens || cid.itens.length === 0) paragraphs.push(emptyNote());
-  else {
-    cid.itens.forEach((it: CidItem) => {
-      const prefix = it.principal ? "★ " : "• ";
-      const desc = it.descricao ? ` — ${it.descricao}` : "";
-      const p = paragraph(`${prefix}${it.codigo}${desc}`);
-      if (p) paragraphs.push(p);
-    });
-    const obs = labeled("Observações", cid.observacoes || "");
-    if (obs) paragraphs.push(obs);
+  if (included.has("cid")) {
+    paragraphs.push(sectionTitle(nextN(), "CID-10"));
+    const cid = data.cid;
+    if (!cid?.itens || cid.itens.length === 0) paragraphs.push(emptyNote());
+    else {
+      cid.itens.forEach((it: CidItem) => {
+        const prefix = it.principal ? "★ " : "• ";
+        const desc = it.descricao ? ` — ${it.descricao}` : "";
+        const p = paragraph(`${prefix}${it.codigo}${desc}`);
+        if (p) paragraphs.push(p);
+      });
+      const obs = labeled("Observações", cid.observacoes || "");
+      if (obs) paragraphs.push(obs);
+    }
   }
 
   // ----- 10. Conclusão -----
-  const con = data.conclusao || {};
-  const nexoMap: Record<string, string> = { sim: "Sim", nao: "Não", parcial: "Parcial" };
-  const incMap: Record<string, string> = { total: "Total", parcial: "Parcial", ausente: "Ausente" };
-  const tempMap: Record<string, string> = { temporaria: "Temporária", permanente: "Permanente" };
-  pushSection(10, "Conclusão", [
-    labeled("Diagnóstico", con.diagnostico || ""),
-    labeled("Nexo causal", nexoMap[con.nexo_causal || ""] || ""),
-    labeled("Justificativa do nexo", con.nexo_justificativa || ""),
-    labeled("Incapacidade", incMap[con.incapacidade || ""] || ""),
-    labeled("Temporalidade", tempMap[con.temporalidade || ""] || ""),
-    labeled("Data de início da incapacidade (DII)", fmtDate(con.data_inicio_incapacidade)),
-    labeled("Prazo para reavaliação", con.prazo_reavaliacao || ""),
-    labeled(
-      "Reabilitação indicada",
-      con.reabilitacao_indicada === "sim" ? "Sim" : con.reabilitacao_indicada === "nao" ? "Não" : "",
-    ),
-    labeled("Considerações finais", con.consideracoes_finais || ""),
-  ]);
+  if (included.has("conclusao")) {
+    const con = data.conclusao || {};
+    const nexoMap: Record<string, string> = { sim: "Sim", nao: "Não", parcial: "Parcial" };
+    const incMap: Record<string, string> = { total: "Total", parcial: "Parcial", ausente: "Ausente" };
+    const tempMap: Record<string, string> = { temporaria: "Temporária", permanente: "Permanente" };
+    pushSection(nextN(), "Conclusão", [
+      labeled("Diagnóstico", con.diagnostico || ""),
+      labeled("Nexo causal", nexoMap[con.nexo_causal || ""] || ""),
+      labeled("Justificativa do nexo", con.nexo_justificativa || ""),
+      labeled("Incapacidade", incMap[con.incapacidade || ""] || ""),
+      labeled("Temporalidade", tempMap[con.temporalidade || ""] || ""),
+      labeled("Data de início da incapacidade (DII)", fmtDate(con.data_inicio_incapacidade)),
+      labeled("Prazo para reavaliação", con.prazo_reavaliacao || ""),
+      labeled(
+        "Reabilitação indicada",
+        con.reabilitacao_indicada === "sim" ? "Sim" : con.reabilitacao_indicada === "nao" ? "Não" : "",
+      ),
+      labeled("Considerações finais", con.consideracoes_finais || ""),
+    ]);
+  }
 
   // ----- Assinatura -----
   paragraphs.push(new Paragraph({ spacing: { before: 600 } }));
@@ -493,7 +520,8 @@ export const generatePrelaudoDocx = async (
 export const downloadPrelaudoDocx = async (
   data: PrelaudoData,
   meta: PrelaudoDocxMeta,
+  includedSteps?: StepId[],
 ): Promise<void> => {
-  const blob = await generatePrelaudoDocx(data, meta);
+  const blob = await generatePrelaudoDocx(data, meta, includedSteps);
   saveAs(blob, buildFilename("docx", meta));
 };

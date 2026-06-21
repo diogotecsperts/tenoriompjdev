@@ -1,49 +1,56 @@
-## Contexto
-
-Hoje em `src/modules/previdenciario/pages/PautaList.tsx` as pautas são **agrupadas por data** (mais recente no topo) e dentro de cada grupo aparecem em ordem de inserção. Não há como o usuário escolher outra ordem — daí a percepção de "está só por data".
-
 ## Objetivo
 
-Adicionar um controle de **Ordenar por** no topo da lista de pautas, sem mexer em nada fora dessa tela.
+Adicionar ao editor do Pré-Laudo (módulo Previdenciário) uma forma de **escolher quais etapas (1 a 10) serão incluídas no PDF/DOCX exportado**, sem afetar o que fica salvo no app. A escolha é lembrada entre laudos.
 
-## Opções de ordenação propostas
+## Como vai funcionar (UX)
 
-1. **Data (mais recente primeiro)** — comportamento atual, padrão.
-2. **Data (mais antiga primeiro)**.
-3. **Local (A-Z)** — ordem alfabética pelo campo `local` (nome da pasta).
-4. **Local (Z-A)**.
-5. **Cidade / UF (A-Z)** — útil para quem faz pautas em várias cidades.
-6. **Criação (mais recente)** — pelo `created_at`, para achar a que acabou de criar.
+1. **Novo botão** no cabeçalho do `PrelaudoEditor`, ao lado do botão "Baixar em PDF/DOCX": ícone de filtro/lista com rótulo curto, ex.: `Etapas no export (8/10)`.
+2. Ao clicar, abre um **Popover** com:
+   - Lista das 10 etapas (ordem + nome), cada uma com um `Checkbox`.
+   - Atalhos: **Marcar todas** / **Desmarcar todas** / **Restaurar padrão (todas)**.
+   - Texto auxiliar: "As etapas desmarcadas ficam salvas no app, mas não aparecem no PDF/DOCX."
+3. A escolha é **persistida em `localStorage`** com a chave `prev:prelaudo:export-steps` (array de `StepId`). Vale para qualquer laudo que o usuário abrir depois — exatamente o comportamento pedido.
+4. Default (quando nunca foi configurado): **todas as 10 marcadas** — comportamento atual preservado.
+5. Se o usuário tentar exportar com **zero etapas marcadas**, mostramos um `toast` de aviso e cancelamos a exportação.
 
-Sugiro entregar as 6. São triviais e cobrem todos os casos reais.
+## Como vai funcionar (técnico)
 
-## Comportamento
+Mudanças mínimas, isoladas ao módulo previdenciário. **Nada de backend, schema, RLS, prompts, IA, OCR ou outros módulos.**
 
-- Quando a ordenação for **por data**, mantemos o agrupamento atual por dia (cabeçalho com data + contagem de pastas).
-- Quando for **alfabética / cidade / criação**, removemos o agrupamento e exibimos uma **grade única** com todas as pastas ordenadas, para a ordem fazer sentido visualmente. O card continua mostrando a data implicitamente (já mostra local + cidade; podemos adicionar uma linha discreta com a data nesse modo).
-- A escolha do usuário é persistida em `localStorage` (`prev:pautas:sort`) para não precisar reescolher a cada visita. Sem mudanças de schema, sem RLS, sem backend.
+### 1. `src/modules/previdenciario/lib/prelaudo-structure.ts`
+- Exportar uma constante `ALL_STEP_IDS: StepId[]` derivada de `PRELAUDO_STEPS`.
+- Adicionar helper puro `filterPrelaudoForExport(data, includedSteps)` que devolve um clone de `PrelaudoData` com as seções **não incluídas zeradas** (objetos vazios / arrays vazios), preservando a tipagem.
+  - Por que zerar em vez de remover: os exporters atuais (`prelaudo-pdf.ts` e `prelaudo-docx.ts`) iteram pelas 10 seções fixas e já tratam seção vazia chamando `emptyNote(...)`. Para ocultar de verdade, precisamos da próxima mudança ⬇.
 
-## UI
+### 2. `src/modules/previdenciario/lib/export/prelaudo-pdf.ts` e `prelaudo-docx.ts`
+- Acrescentar um parâmetro opcional `includedSteps?: StepId[]` em `generatePrelaudoPdf`, `downloadPrelaudoPdf`, `generatePrelaudoDocx`, `downloadPrelaudoDocx`.
+- Quando informado, **pular completamente** a renderização das seções não incluídas (não imprime título, não imprime "Não informado"). A numeração visível dos títulos passa a ser sequencial só entre as incluídas (1, 2, 3…), o que evita "buracos" como `1. … 3. … 7. …`.
+- Quando omitido, comportamento idêntico ao atual (todas as 10) — garantia de retrocompatibilidade.
 
-No header da página, ao lado do botão "Nova pauta":
+### 3. Novo componente: `src/modules/previdenciario/components/ExportStepsSelector.tsx`
+- Popover com `Checkbox` por etapa (usando `PRELAUDO_STEPS`).
+- Props: `value: StepId[]`, `onChange(next: StepId[])`, `disabled?: boolean`.
+- Botões "Todas", "Nenhuma", "Padrão".
 
-```text
-[ Pautas ]                    [Ordenar por ▾]  [+ Nova pauta]
- Organize...
-```
+### 4. `src/modules/previdenciario/pages/PrelaudoEditor.tsx`
+- Novo estado `exportSteps: StepId[]` inicializado de `localStorage` (`prev:prelaudo:export-steps`), com fallback = `ALL_STEP_IDS`.
+- `useEffect` grava no `localStorage` a cada alteração.
+- Renderiza `<ExportStepsSelector />` no header, à esquerda do grupo do botão "Baixar em …".
+- `handleExport` passa `exportSteps` para `downloadPrelaudoPdf` / `downloadPrelaudoDocx`.
+- Validação: se `exportSteps.length === 0`, `toast` "Selecione ao menos uma etapa" e não exporta.
 
-Componente: `Select` do shadcn já usado no projeto, label curta ("Data ↓", "A–Z", etc.) para caber bem.
-
-## Arquivos afetados
-
-- `src/modules/previdenciario/pages/PautaList.tsx` — único arquivo editado. Adiciona estado `sortBy`, persistência em localStorage, lógica de ordenação e renderização condicional (agrupado por data vs. grade única).
-
-## Fora de escopo
-
-- Outras telas (PautaDetalhe, perícias internas, trabalhista, dev panel).
-- Banco de dados, RLS, edge functions, prompts de IA.
-- Mudanças de estilo global ou no card em si (apenas, no modo não-agrupado, mostrar a data como linha discreta).
+## O que NÃO muda
+- Autosave, status da perícia, dados salvos no banco.
+- Editor: todas as 10 etapas continuam visíveis e editáveis normalmente.
+- Painel lateral, módulo Trabalhista, DevPrompts, edge functions, schema, RLS, buckets, secrets.
+- Comportamento padrão da exportação para usuários que nunca tocarem no seletor (continua exportando tudo).
 
 ## Riscos
+Praticamente nulos: a mudança é local ao módulo `previdenciario`, sem dependências cruzadas. O parâmetro novo nos exporters é opcional, preservando qualquer call site existente. A persistência via `localStorage` segue o mesmo padrão já usado em `VIEW_MODE_STORAGE_KEY` neste arquivo e em `prev:pautas:sort` na `PautaList`.
 
-Praticamente nulos: alteração isolada de UI/estado local em uma única página, sem efeitos sobre dados, perícias já criadas, ou o restante do módulo.
+## Arquivos afetados
+- `src/modules/previdenciario/lib/prelaudo-structure.ts` (adições)
+- `src/modules/previdenciario/lib/export/prelaudo-pdf.ts` (parâmetro opcional + skip)
+- `src/modules/previdenciario/lib/export/prelaudo-docx.ts` (idem)
+- `src/modules/previdenciario/components/ExportStepsSelector.tsx` (novo)
+- `src/modules/previdenciario/pages/PrelaudoEditor.tsx` (estado + UI + integração)

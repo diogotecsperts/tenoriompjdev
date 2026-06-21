@@ -36,6 +36,8 @@ export const PRELAUDO_STEPS: StepDef[] = [
   { id: "conclusao",         ordem: 10, label: "Conclusão",            short: "Concl.",    implemented: true  },
 ];
 
+export const ALL_STEP_IDS: StepId[] = PRELAUDO_STEPS.map((s) => s.id);
+
 // ---------- Steps 6-10 schemas ----------
 
 export interface EstadoMentalData {
