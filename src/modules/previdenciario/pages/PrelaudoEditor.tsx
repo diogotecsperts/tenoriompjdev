@@ -69,6 +69,21 @@ export default function PrelaudoEditor() {
     const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
     return (stored as ViewMode) || "paginated";
   });
+  const [exportSteps, setExportSteps] = useState<StepId[]>(() => {
+    if (typeof window === "undefined") return [...ALL_STEP_IDS];
+    try {
+      const raw = window.localStorage.getItem(EXPORT_STEPS_STORAGE_KEY);
+      if (!raw) return [...ALL_STEP_IDS];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [...ALL_STEP_IDS];
+      const valid = new Set(ALL_STEP_IDS);
+      const filtered = parsed.filter((s): s is StepId => typeof s === "string" && valid.has(s as StepId));
+      // preserve canonical order
+      return ALL_STEP_IDS.filter((s) => filtered.includes(s));
+    } catch {
+      return [...ALL_STEP_IDS];
+    }
+  });
   const dirtyRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFirstSaveRef = useRef(true);
