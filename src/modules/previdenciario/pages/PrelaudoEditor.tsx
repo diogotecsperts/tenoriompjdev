@@ -202,6 +202,14 @@ export default function PrelaudoEditor() {
 
   const handleExport = async () => {
     if (!pericia) return;
+    if (exportSteps.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Nenhuma etapa selecionada",
+        description: "Marque ao menos uma etapa para exportar.",
+      });
+      return;
+    }
     setExporting(true);
     try {
       await persist();
@@ -215,10 +223,10 @@ export default function PrelaudoEditor() {
         numeroProcesso: data.identificacao?.numero_processo || "",
       };
       if (exportFormat === "pdf") {
-        await downloadPrelaudoPdf(data, meta);
+        await downloadPrelaudoPdf(data, meta, exportSteps);
         toast({ title: "PDF gerado" });
       } else {
-        await downloadPrelaudoDocx(data, meta);
+        await downloadPrelaudoDocx(data, meta, exportSteps);
         toast({ title: "DOCX gerado" });
       }
     } catch (err: any) {
