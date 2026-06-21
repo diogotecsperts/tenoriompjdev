@@ -378,6 +378,12 @@ export default function PrelaudoEditor() {
           </Tooltip>
         </TooltipProvider>
 
+        <ExportStepsSelector
+          value={exportSteps}
+          onChange={setExportSteps}
+          disabled={exporting}
+        />
+
         {/* Export Button with Format Toggle (mesmo padrão do módulo Trabalhista) */}
         <div className="flex items-center">
           <Button
