@@ -405,6 +405,10 @@ function sanitizeResumo(raw: string): string {
   t = t.replace(/^#{1,6}\s+/gm, "");
   t = t.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1");
   t = t.replace(/__([^_]+)__/g, "$1");
+  // Remover qualquer ocorrência remanescente do rótulo "EXTRAÇÃO DO LAUDO"
+  // (no início de linha ou em qualquer ponto do texto).
+  t = t.replace(/^[ \t]*EXTRA[ÇC][ÃA]O\s+DO\s+LAUDO\s*[—\-:]?\s*/gim, "");
+  t = t.replace(/EXTRA[ÇC][ÃA]O\s+DO\s+LAUDO\s*[—\-:]?\s*/gi, "");
   t = t.replace(/\n{3,}/g, "\n\n").trim();
   if (/\bIA\b/.test(t)) return "";
   if (t.length < 30) return "";
