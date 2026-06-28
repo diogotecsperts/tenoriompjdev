@@ -69,6 +69,80 @@ export const ESCOLARIDADE_OPCOES = [
   "Outros",
 ] as const;
 
+// =====================================================================
+// Normalizadores — convertem texto cru da IA para um dos rótulos fixos.
+// Caso não reconheçam, devolvem { value: "Outros", outros: <texto original> }
+// para que (a) o Select mostre "Outros", (b) o campo livre seja preenchido
+// e (c) o PDF/DOCX marque "Outros: <texto>".
+// =====================================================================
+
+const stripDiacritics = (s: string) =>
+  s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+export function normalizeEscolaridade(
+  raw: string | undefined | null,
+): { value: string; outros: string } {
+  const text = (raw || "").toString().trim();
+  if (!text) return { value: "", outros: "" };
+  const n = stripDiacritics(text).replace(/[.;,]+$/g, "").trim();
+
+  // Match direto contra a lista oficial.
+  for (const op of ESCOLARIDADE_OPCOES) {
+    if (stripDiacritics(op) === n) return { value: op, outros: "" };
+  }
+
+  // Heurísticas / sinônimos
+  const hasInc = /\binc(ompleto|\.?)\b|nao concluid|sem conclus/.test(n);
+  const hasComp = /\bcompl(eto|\.?)\b|concluid|formad/.test(n);
+
+  const isAnalf = /analfabet|sem instruc|nao alfabet|nao-alfabet/.test(n);
+  const isFund = /fundamental|\b1[ºo°]?\s*grau\b|primari|ginasi|\b[1-9]a?\s*serie\b|\b8a?\s*serie\b|\b9a?\s*serie\b|eja\s*fundamental/.test(n);
+  const isMed = /\bmedio\b|\b2[ºo°]?\s*grau\b|colegial|tecnico|cientifico|eja\s*medio|ensino tecnico/.test(n);
+  const isSup = /superior|graduac|universitari|pos[\s-]?graduac|mestrad|doutorad|especializac|bachare|licenciatur|tecnologo/.test(n);
+
+  if (isAnalf) return { value: "Analfabeto", outros: "" };
+  if (isSup) {
+    if (hasInc) return { value: "Ensino superior incompleto", outros: "" };
+    return { value: "Ensino superior completo", outros: "" };
+  }
+  if (isMed) {
+    if (hasInc) return { value: "Ensino médio incompleto", outros: "" };
+    if (hasComp || /tecnico|cientifico/.test(n)) return { value: "Ensino médio completo", outros: "" };
+    return { value: "Ensino médio completo", outros: "" };
+  }
+  if (isFund) {
+    if (hasInc) return { value: "Ensino fundamental incompleto", outros: "" };
+    if (hasComp) return { value: "Ensino fundamental completo", outros: "" };
+    return { value: "Ensino fundamental incompleto", outros: "" };
+  }
+
+  return { value: "Outros", outros: text };
+}
+
+export function normalizeEstadoCivil(
+  raw: string | undefined | null,
+): { value: string; outros: string } {
+  const text = (raw || "").toString().trim();
+  if (!text) return { value: "", outros: "" };
+  const n = stripDiacritics(text).replace(/[.;,]+$/g, "").trim();
+
+  for (const op of ESTADO_CIVIL_OPCOES) {
+    if (stripDiacritics(op) === n) return { value: op, outros: "" };
+  }
+
+  if (/uniao\s*estavel|amasiad|amig?ad|convivente|companheir/.test(n))
+    return { value: "União estável", outros: "" };
+  if (/^solteir|solteir[oa]/.test(n)) return { value: "Solteiro(a)", outros: "" };
+  if (/^casad|casad[oa]/.test(n)) return { value: "Casado(a)", outros: "" };
+  if (/divorciad|separad[oa]\s*judicial/.test(n)) return { value: "Divorciado(a)", outros: "" };
+  if (/viuv[oa]/.test(n)) return { value: "Viúvo(a)", outros: "" };
+  if (/nao\s*informad|n[\/.]?\s*i\b|sem\s*informac/.test(n))
+    return { value: "Não informado", outros: "" };
+
+  return { value: "Outros", outros: text };
+}
+
+
 /** Comorbidades fixas (etapa 2). Ordem do guia do cliente. */
 export const COMORBIDADES_FIXAS = [
   { key: "has",            label: "Hipertensão arterial sistêmica" },
@@ -305,8 +379,22 @@ export function mergeFromExtracao(
   fill(base.identificacao, "data_nascimento", ident.data_nascimento);
   fill(base.identificacao, "idade", ident.idade);
   fill(base.identificacao, "sexo", ident.sexo);
-  fill(base.identificacao, "estado_civil", ident.estado_civil);
-  fill(base.identificacao, "escolaridade", ident.escolaridade);
+  // Estado civil + escolaridade passam por normalizadores: garantem que o
+  // valor caia em um dos rótulos fixos OU vire "Outros" + texto livre.
+  if (!base.identificacao.estado_civil && ident.estado_civil) {
+    const ec = normalizeEstadoCivil(ident.estado_civil);
+    if (ec.value) base.identificacao.estado_civil = ec.value;
+    if (ec.outros && !base.identificacao.estado_civil_outros) {
+      base.identificacao.estado_civil_outros = ec.outros;
+    }
+  }
+  if (!base.identificacao.escolaridade && ident.escolaridade) {
+    const es = normalizeEscolaridade(ident.escolaridade);
+    if (es.value) base.identificacao.escolaridade = es.value;
+    if (es.outros && !base.identificacao.escolaridade_outros) {
+      base.identificacao.escolaridade_outros = es.outros;
+    }
+  }
   fill(base.identificacao, "profissao", ident.profissao);
   fill(base.identificacao, "ultima_atividade", ident.ultima_atividade);
   // tempo_sem_trabalhar: NÃO pré-preencher (regra GUIA 23.06)

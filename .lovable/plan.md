@@ -1,52 +1,33 @@
-## Entendimento
+## Ajustes pontuais — Resumo de exames + Escolaridade
 
-Confirmado. Em todos os campos com opções fixas (Estado Civil, Escolaridade, Comorbidades), o **documento exportado (DOCX/PDF)** deve mostrar **a lista completa** no estilo "prova escolar":
+### 1) Remover o rótulo "EXTRAÇÃO DO LAUDO" do resumo de exames
 
-```
-Estado Civil:
-(X) Casado(a)
-( ) Solteiro(a)
-( ) União Estável
-...
-```
+**Onde:** `supabase/functions/prev-pre-processar/index.ts` (prompt `prompt_prev_resumo_exames` + sanitizador) e sync no banco (`system_config`).
 
-A IA marca com **(X)** o(s) item(ns) pertinente(s); os demais saem com **( )** para o operador alterar manualmente no Word/PDF se quiser. Regras antigas preservadas: itens marcados saem **em vermelho** (#C00000), nada muda no editor do sistema (continua usando Select/Checkbox), e o texto continua corrido — apenas estes três blocos viram lista vertical de opções.
+**O que muda:**
+- Atualizar o `DEFAULT_RESUMO_PROMPT` e o `RESUMO_SYSTEM_PROMPT` para que cada bloco comece direto pelo cabeçalho útil:
+  `"[TIPO DO EXAME] ([SEGMENTO se houver]) — [DATA AAAA-MM-DD ou 'data não informada']"`
+  (sem o prefixo `EXTRAÇÃO DO LAUDO — `).
+- Reforçar no `sanitizeResumo` uma limpeza defensiva: regex no início de cada bloco para remover qualquer ocorrência remanescente de `^EXTRAÇÃO DO LAUDO\s*[—-]\s*` (cobre exames já gerados/retornos antigos da IA).
+- Rodar `UPDATE system_config` em `prompt_prev_resumo_exames` para refletir o novo texto (mantém DevPrompts em sincronia).
 
-## Plano
+**Não muda:** o restante do bloco (linhas `Achados:` e `Impressão diagnóstica do laudo:`) permanece exatamente igual; ordenação por data e separação por linha em branco também.
 
-### 1. Helper compartilhado em `_shared.ts`
-Adicionar utilitário `buildOptionsList(opcoes, marcados)` que devolve uma estrutura `{ label, marcado }[]` consumível por PDF e DOCX. Centraliza a regra para evitar divergência entre exportadores.
+### 2) Escolaridade: extrair via IA e marcar corretamente no documento
 
-### 2. Exportador DOCX (`prelaudo-docx.ts`)
-- Nova função `optionsParagraphs(titulo, opcoes, marcados)` que emite:
-  - 1 parágrafo com o título (ex.: "Estado civil:")
-  - 1 parágrafo por opção: `(X) Texto` em **vermelho/negrito** se marcado, `( ) Texto` em cor padrão se não — usando `TextRun` separados (parêntese + espaço + label).
-- Substituir, no bloco de Identificação:
-  - `labeled("Estado civil", ...)` → `optionsParagraphs("Estado civil", ESTADO_CIVIL_OPCOES, [valor])`
-  - `labeled("Escolaridade", ...)` → idem com `ESCOLARIDADE_OPCOES`
-  - Quando o valor escolhido for "Outros" + texto livre, acrescentar uma linha extra `(X) Outros: <texto>` em vermelho ao final.
-- Substituir `comorbidadesParagraph()` (que hoje gera uma frase corrida) por:
-  - Título "Informa demais comorbidades:"
-  - Lista das 12 comorbidades fixas com `(X)`/`( )` conforme `comorbidades_fixas`
-  - Extras (campos livres) renderizadas como linhas adicionais; só aparece a linha se houver texto. Marcadas saem em vermelho.
+**Diagnóstico:** o prompt no DB já instrui a IA a usar um dos 7 valores fixos, mas se a IA devolver com variação (capitalização, "Médio completo", "2º grau completo", etc.), o valor não bate exatamente com `ESCOLARIDADE_OPCOES`. Resultado: o `<Select>` fica vazio no editor e o `buildOptionRows` no PDF/DOCX não marca nenhuma linha. O mesmo risco existe para `estado_civil`.
 
-### 3. Exportador PDF (`prelaudo-pdf.ts`)
-Replicar mesma estrutura usando o helper de richParagraph já existente: cada opção como linha individual, com "(X) " em vermelho/negrito quando marcada. Mesmas três seções (Estado Civil, Escolaridade, Comorbidades).
+**O que muda — `src/modules/previdenciario/lib/prelaudo-structure.ts`:**
+- Adicionar dois normalizadores puros (`normalizeEscolaridade`, `normalizeEstadoCivil`) que recebem a string crua da IA e devolvem:
+  - o valor exato de `ESCOLARIDADE_OPCOES` / `ESTADO_CIVIL_OPCOES` quando reconhecido (case-insensitive, sem acentos, com sinônimos: "1º grau" → "Ensino fundamental", "2º grau" → "Ensino médio", "superior" → "Ensino superior", "completo/incompleto" preservado; "solteiro/casado/viúvo/divorciado/união estável" para estado civil);
+  - `"Outros"` + preencher `escolaridade_outros` / `estado_civil_outros` com o texto original quando não reconhecido;
+  - string vazia quando a IA não trouxe nada.
+- Em `mergeFromExtracao`, trocar o `fill` direto pelos normalizadores nas duas linhas correspondentes.
 
-### 4. Validação de extração da IA (comorbidades sem marcar)
-- Conferir via `supabase--read_query` se o prompt em `system_config` (`prompt_prev_extracao_processo`) realmente contém o bloco `comorbidades_fixas` com as 12 chaves e a instrução "marque true SOMENTE quando…". Se não estiver sincronizado, fazer `UPDATE` para alinhar com o default do código.
-- Reforçar no prompt: "É ESPERADO marcar como true ao menos as comorbidades EXPLICITAMENTE citadas em laudos, receitas ou anamnese do processo. Não marcar nenhuma quando o processo de fato não cita."
-- Manter a normalização defensiva já existente no edge function (não muda).
+**O que muda — `supabase/functions/prev-pre-processar/index.ts`:**
+- Reforçar no prompt (`DEFAULT_EXTRACTION_PROMPT`) que a IA deve preencher escolaridade sempre que houver QUALQUER menção (carteira, qualificação, anamnese, depoimento), mapeando sinônimos comuns para os 7 rótulos fixos. Sincronizar no `system_config`.
 
-### 5. Editor (UI do sistema)
-Sem mudanças visuais. Selects e checkboxes seguem como hoje — o formato "prova" é exclusivo da exportação, como você pediu.
+**Resultado esperado:** mesmo que a IA devolva "ensino médio completo" minúsculo ou "2º grau completo", o editor exibe o rádio/select correto e o PDF/DOCX marca `(X)` na linha certa. Se for algo realmente fora do padrão, cai em "Outros" com o texto original preservado.
 
-### 6. Isolamento
-Tudo dentro de `src/modules/previdenciario/` e `supabase/functions/prev-pre-processar/`. Módulo Trabalhista e helpers compartilhados globais não são tocados.
-
-## Arquivos afetados
-- `src/modules/previdenciario/lib/export/_shared.ts` (novo helper)
-- `src/modules/previdenciario/lib/export/prelaudo-docx.ts`
-- `src/modules/previdenciario/lib/export/prelaudo-pdf.ts`
-- `supabase/functions/prev-pre-processar/index.ts` (só reforço de prompt, se necessário)
-- `system_config` (UPDATE SQL do prompt, se desincronizado)
+### Escopo isolado
+Mudanças contidas no módulo Previdenciário (`src/modules/previdenciario/**`) e na edge function `prev-pre-processar`. Nenhum arquivo do Trabalhista ou de utilitários compartilhados é tocado.

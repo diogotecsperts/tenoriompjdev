@@ -55,11 +55,19 @@ FORMATO DE SAÍDA (JSON puro, sem markdown, sem comentários):
      - estado_civil: usar SOMENTE um destes valores literais, quando explícito no
        processo: "União estável", "Solteiro(a)", "Casado(a)", "Divorciado(a)",
        "Viúvo(a)". Se não estiver explícito, "".
-     - escolaridade: usar SOMENTE um destes valores literais, quando explícito:
-       "Analfabeto", "Ensino fundamental incompleto", "Ensino fundamental completo",
-       "Ensino médio incompleto", "Ensino médio completo",
-       "Ensino superior incompleto", "Ensino superior completo". Se não estiver
-       explícito, "". */
+     - escolaridade: SEMPRE preencher quando houver QUALQUER menção
+       (carteira de trabalho, qualificação na petição inicial, anamnese,
+       depoimento, formulários do INSS, currículo). Usar OBRIGATORIAMENTE
+       um destes valores literais (escolha o mais próximo, mapeando sinônimos):
+       "Analfabeto" (não-alfabetizado, sem instrução),
+       "Ensino fundamental incompleto" (primário incompleto, 1º grau incompleto, série inicial),
+       "Ensino fundamental completo" (primário completo, 1º grau completo, 8ª/9ª série),
+       "Ensino médio incompleto" (2º grau incompleto, colegial incompleto),
+       "Ensino médio completo" (2º grau completo, colegial completo, ensino técnico),
+       "Ensino superior incompleto" (universitário incompleto, graduação incompleta),
+       "Ensino superior completo" (graduado, universitário, pós-graduação).
+       Use EXATAMENTE um dos 7 rótulos acima. Se realmente não houver
+       nenhuma menção, deixe "". */
   "processo": {
     "numero": "",
     "vara": "",
@@ -368,7 +376,7 @@ async function gerarQueixaUnificada(args: {
 // ============================================================
 
 const RESUMO_SYSTEM_PROMPT =
-  'Você é médico perito judicial. Retorne APENAS os blocos de "EXTRAÇÃO DO LAUDO" em português, sem markdown, sem comentários e sem a palavra "IA". Se não houver nenhum laudo de exame complementar identificável, retorne string vazia.';
+  'Você é médico perito judicial. Retorne APENAS blocos de extração de laudos de exames complementares em português, sem markdown, sem comentários e sem a palavra "IA". Cada bloco começa direto pelo cabeçalho do exame (tipo, segmento, data). NÃO inclua a expressão "EXTRAÇÃO DO LAUDO" no texto retornado. Se não houver nenhum laudo de exame complementar identificável, retorne string vazia.';
 
 const DEFAULT_RESUMO_PROMPT = `Você é médico perito judicial. Sua tarefa é LOCALIZAR, dentro do TEXTO OCR DO PROCESSO abaixo, TODOS os laudos de exames complementares descritos (ex.: ultrassonografia, raio-X, tomografia computadorizada, ressonância magnética, eletroneuromiografia, densitometria, ecocardiograma, ecodoppler, endoscopia, colonoscopia, EEG, e laudos médicos de especialistas que contenham achados objetivos) e PRODUZIR um bloco de extração para cada laudo encontrado.
 
@@ -380,10 +388,11 @@ REGRAS GERAIS:
 5. Mantenha terminologia médica original do laudo (não simplificar).
 6. Ignore documentos que NÃO sejam laudos de exame (procurações, petições, contracheques, ofícios, decisões, atestados sem achados objetivos).
 7. Se o mesmo exame aparecer repetido, considerar apenas a versão mais completa.
+8. PROIBIDO escrever a expressão "EXTRAÇÃO DO LAUDO" (ou variações) em qualquer parte da resposta. O cabeçalho de cada bloco começa direto pelo tipo do exame.
 
 FORMATO OBRIGATÓRIO de cada bloco (texto puro, exatamente assim):
 
-EXTRAÇÃO DO LAUDO — [TIPO DO EXAME] ([SEGMENTO/REGIÃO se houver]) — [DATA AAAA-MM-DD ou "data não informada"]
+[TIPO DO EXAME] ([SEGMENTO/REGIÃO se houver]) — [DATA AAAA-MM-DD ou "data não informada"]
 Achados: [descrever os achados objetivos do laudo, em frase corrida, mantendo a terminologia original].
 Impressão diagnóstica do laudo: [transcrever a conclusão/impressão diagnóstica do próprio laudo, se houver; caso contrário, omitir esta linha].
 
@@ -404,6 +413,10 @@ function sanitizeResumo(raw: string): string {
   t = t.replace(/^#{1,6}\s+/gm, "");
   t = t.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1");
   t = t.replace(/__([^_]+)__/g, "$1");
+  // Remover qualquer ocorrência remanescente do rótulo "EXTRAÇÃO DO LAUDO"
+  // (no início de linha ou em qualquer ponto do texto).
+  t = t.replace(/^[ \t]*EXTRA[ÇC][ÃA]O\s+DO\s+LAUDO\s*[—\-:]?\s*/gim, "");
+  t = t.replace(/EXTRA[ÇC][ÃA]O\s+DO\s+LAUDO\s*[—\-:]?\s*/gi, "");
   t = t.replace(/\n{3,}/g, "\n\n").trim();
   if (/\bIA\b/.test(t)) return "";
   if (t.length < 30) return "";

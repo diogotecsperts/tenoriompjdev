@@ -1,0 +1,1 @@
+-- placeholder; será substituído pelo conteúdo de /tmp/sync.sql via tool
