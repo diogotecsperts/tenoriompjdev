@@ -121,6 +121,8 @@ export default function PrelaudoEditor() {
     if (!periciaId) return;
     (async () => {
       setLoading(true);
+      dirtyRef.current = false;
+      skipFirstSaveRef.current = true;
       try {
         const p = await getPericia(periciaId);
         if (!p) {
