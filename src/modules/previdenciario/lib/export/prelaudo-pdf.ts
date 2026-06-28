@@ -1,17 +1,18 @@
 /**
- * Export PDF do Pré-Laudo Previdenciário.
- * "Esqueleto" visual (banner topo + banner rodapé + fonte + margens + numeração)
- * idêntico ao módulo Trabalhista para manter a identidade do programa.
- * O conteúdo continua sendo os 10 steps do PrelaudoData.
+ * Export PDF do Pré-Laudo Previdenciário — versão GUIA 23.06.
+ * Texto corrido (sem títulos/subtítulos visíveis no corpo). O único título
+ * que aparece é "PRÉ-LAUDO PERICIAL PREVIDENCIÁRIO" no topo, seguido do
+ * cabeçalho de Dados do processo.
  */
 import { jsPDF } from "jspdf";
-import type {
-  PrelaudoData,
-  CidItem,
-  MedicacaoItem,
-  StepId,
+import type { PrelaudoData, StepId } from "../prelaudo-structure";
+import {
+  ALL_STEP_IDS,
+  COMORBIDADES_FIXAS,
+  COMORBIDADES_FIXAS_KEYS,
+  EXAME_FISICO_TEXTOS,
+  INCAPACIDADE_LABEL,
 } from "../prelaudo-structure";
-import { ALL_STEP_IDS } from "../prelaudo-structure";
 import {
   COLORS,
   MARGINS,
@@ -27,6 +28,7 @@ import {
   buildFilename,
   isFieldEmpty,
   stripLightMarkdown,
+  resolveEnumValue,
 } from "./_shared";
 
 // ---------- Layout dinâmico ----------
@@ -61,7 +63,6 @@ const calculateDynamicLayout = async (
   };
 };
 
-// ---------- Banner topo/rodapé (idêntico ao Trabalhista) ----------
 const addHeaderToPages = async (doc: jsPDF, b64: string | null) => {
   if (!b64) return;
   let aspect = 0.15;
@@ -104,8 +105,6 @@ const addFooterToPages = async (doc: jsPDF, b64: string | null) => {
 
 // ---------- Helpers de renderização ----------
 const LINE = 5;
-const SECTION_H = 12;
-const SUBTITLE_H = 7;
 
 const checkNewPage = (doc: jsPDF, y: number, needed = 10): number => {
   if (y + needed > pageLayout.contentEndY) {
@@ -115,36 +114,11 @@ const checkNewPage = (doc: jsPDF, y: number, needed = 10): number => {
   return y;
 };
 
-const sectionTitle = (doc: jsPDF, n: number, title: string, y: number): number => {
-  y = checkNewPage(doc, y, SECTION_H);
-  doc.setFontSize(12);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
-  doc.text(`${n}. ${title.toUpperCase()}`, MARGINS.left, y);
-  doc.setDrawColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
-  doc.setLineWidth(0.5);
-  doc.line(MARGINS.left, y + 2, PAGE.width - MARGINS.right, y + 2);
-  doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
-  doc.setFont("helvetica", "normal");
-  return y + SECTION_H;
-};
-
-const subtitle = (doc: jsPDF, t: string, y: number): number => {
-  y = checkNewPage(doc, y, SUBTITLE_H);
-  doc.setFontSize(11);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(COLORS.secondary.r, COLORS.secondary.g, COLORS.secondary.b);
-  doc.text(t, MARGINS.left, y);
-  doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
-  doc.setFont("helvetica", "normal");
-  return y + SUBTITLE_H;
-};
-
-const paragraph = (doc: jsPDF, text: string, y: number): number => {
+const paragraph = (doc: jsPDF, text: string, y: number, opts?: { italic?: boolean }): number => {
   if (isFieldEmpty(text)) return y;
   const clean = stripLightMarkdown(text);
   doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
+  doc.setFont("helvetica", opts?.italic ? "italic" : "normal");
   doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   const lines = doc.splitTextToSize(clean, PAGE.contentWidth);
   for (const line of lines) {
@@ -177,19 +151,71 @@ const labeled = (doc: jsPDF, label: string, value: string, y: number): number =>
   return y + LINE + 1;
 };
 
-const hasAny = (obj: any) =>
-  obj && Object.values(obj).some((v) => (Array.isArray(v) ? v.length > 0 : !!v));
+// ---------- Rich paragraph com runs coloridos (para comorbidades em vermelho) ----------
+type Run = { text: string; color?: { r: number; g: number; b: number }; bold?: boolean };
 
-const emptyNote = (doc: jsPDF, y: number): number => {
-  doc.setFont("helvetica", "italic");
-  doc.setFontSize(9);
-  doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
+const richParagraph = (doc: jsPDF, runs: Run[], y: number): number => {
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  const tokens: Run[] = [];
+  for (const r of runs) {
+    const parts = r.text.split(/(\s+)/);
+    for (const p of parts) if (p) tokens.push({ text: p, color: r.color, bold: r.bold });
+  }
+  let x = MARGINS.left;
+  let lineWidth = 0;
   y = checkNewPage(doc, y, LINE);
-  doc.text("— Não informado.", MARGINS.left, y);
+  for (const tok of tokens) {
+    doc.setFont("helvetica", tok.bold ? "bold" : "normal");
+    const ww = doc.getTextWidth(tok.text);
+    if (lineWidth + ww > PAGE.contentWidth && lineWidth > 0) {
+      y += LINE;
+      y = checkNewPage(doc, y, LINE);
+      x = MARGINS.left;
+      lineWidth = 0;
+      if (/^\s+$/.test(tok.text)) continue;
+    }
+    const c = tok.color || COLORS.text;
+    doc.setTextColor(c.r, c.g, c.b);
+    doc.text(tok.text, x, y);
+    x += ww;
+    lineWidth += ww;
+  }
   doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   doc.setFont("helvetica", "normal");
   return y + LINE + 2;
 };
+
+// ---------- Builder da frase de comorbidades ----------
+function buildComorbidadesRuns(queixa: any): Run[] {
+  const fixas = queixa?.comorbidades_fixas || {};
+  const extras: { marcado: boolean; texto: string }[] = Array.isArray(
+    queixa?.comorbidades_extras,
+  )
+    ? queixa.comorbidades_extras
+    : [];
+  const marcadas: string[] = [];
+  for (const k of COMORBIDADES_FIXAS_KEYS) {
+    if (fixas[k]) {
+      const def = COMORBIDADES_FIXAS.find((c) => c.key === k)!;
+      marcadas.push(def.label);
+    }
+  }
+  for (const e of extras) {
+    if (e.marcado && e.texto?.trim()) marcadas.push(e.texto.trim());
+  }
+  const runs: Run[] = [{ text: "Informa demais comorbidades: " }];
+  if (marcadas.length === 0) {
+    runs.push({ text: "nenhuma referida." });
+    return runs;
+  }
+  marcadas.forEach((m, i) => {
+    runs.push({ text: m, color: COLORS.red });
+    if (i < marcadas.length - 1) runs.push({ text: ", " });
+  });
+  runs.push({ text: "." });
+  return runs;
+}
 
 // ---------- Metadados públicos ----------
 export interface PrelaudoPdfMeta {
@@ -208,8 +234,6 @@ export const generatePrelaudoPdf = async (
   includedSteps?: StepId[],
 ): Promise<jsPDF> => {
   const included = new Set<StepId>(includedSteps ?? ALL_STEP_IDS);
-  let sectionNo = 0;
-  const nextN = () => ++sectionNo;
 
   const doc = new jsPDF();
 
@@ -219,7 +243,7 @@ export const generatePrelaudoPdf = async (
 
   let y = pageLayout.contentStartY;
 
-  // Identificação do perito (topo direito da p.1)
+  // Identificação do perito (topo direito)
   const peritoLine = buildPeritoIdLine({
     peritoNome: meta.peritoNome,
     peritoCRM: meta.peritoCRM,
@@ -233,7 +257,7 @@ export const generatePrelaudoPdf = async (
     y += 6;
   }
 
-  // Título do documento
+  // Título único do documento
   doc.setFont("helvetica", "bold");
   doc.setFontSize(14);
   doc.setTextColor(COLORS.primary.r, COLORS.primary.g, COLORS.primary.b);
@@ -241,193 +265,96 @@ export const generatePrelaudoPdf = async (
   doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   y += 8;
 
-  // Metadados do cabeçalho do documento
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  if (meta.local) { y = labeled(doc, "Local", meta.local, y); }
-  if (meta.dataPericia) { y = labeled(doc, "Data da perícia", fmtDate(meta.dataPericia), y); }
-  if (meta.numeroProcesso) { y = labeled(doc, "Nº do processo", meta.numeroProcesso, y); }
+  // ----- Cabeçalho fixo: Dados do processo -----
+  const id = data.identificacao || {};
+  y = labeled(doc, "Nº do processo", id.numero_processo || meta.numeroProcesso || "", y);
+  y = labeled(doc, "Vara", id.vara || "", y);
+  y = labeled(doc, "Comarca", id.comarca || "", y);
+  y = labeled(
+    doc,
+    "Data da perícia",
+    fmtDate(id.data_pericia || meta.dataPericia) || "",
+    y,
+  );
+  y = labeled(doc, "Benefício pleiteado", id.beneficio_pleiteado || "", y);
+  if (meta.local) y = labeled(doc, "Local", meta.local, y);
   y += 4;
 
-  // ----- 1. Identificação -----
+  // ============================================================
+  // 1) Identificação
+  // ============================================================
   if (included.has("identificacao")) {
-    y = sectionTitle(doc, nextN(), "Identificação", y);
-    const id = data.identificacao || {};
-    if (!hasAny(id)) {
-      y = emptyNote(doc, y);
-    } else {
-      y = labeled(doc, "Nome", id.nome || "", y);
-      y = labeled(doc, "CPF", id.cpf || "", y);
-      y = labeled(doc, "RG", id.rg || "", y);
-      y = labeled(doc, "Data de nascimento", fmtDate(id.data_nascimento), y);
-      y = labeled(doc, "Idade", id.idade || "", y);
-      y = labeled(doc, "Sexo", id.sexo || "", y);
-      y = labeled(doc, "Estado civil", id.estado_civil || "", y);
-      y = labeled(doc, "Escolaridade", id.escolaridade || "", y);
-      y = labeled(doc, "Profissão", id.profissao || "", y);
-      y = labeled(doc, "Última atividade", id.ultima_atividade || "", y);
-      y = labeled(doc, "Endereço", id.endereco || "", y);
-      y = labeled(doc, "Telefone", id.telefone || "", y);
-      if (id.numero_processo || id.vara || id.comarca || id.beneficio_pleiteado) {
-        y += 2;
-        y = subtitle(doc, "Dados do processo", y);
-        y = labeled(doc, "Nº do processo", id.numero_processo || "", y);
-        y = labeled(doc, "Vara", id.vara || "", y);
-        y = labeled(doc, "Comarca", id.comarca || "", y);
-        y = labeled(doc, "Benefício pleiteado", id.beneficio_pleiteado || "", y);
-      }
-    }
+    y = labeled(doc, "Nome", id.nome || "", y);
+    y = labeled(doc, "CPF", id.cpf || "", y);
+    y = labeled(doc, "RG", id.rg || "", y);
+    y = labeled(doc, "Data de nascimento", fmtDate(id.data_nascimento), y);
+    y = labeled(doc, "Idade", id.idade || "", y);
+    y = labeled(doc, "Sexo", id.sexo || "", y);
+    y = labeled(doc, "Estado civil", resolveEnumValue(id.estado_civil, id.estado_civil_outros), y);
+    y = labeled(doc, "Escolaridade", resolveEnumValue(id.escolaridade, id.escolaridade_outros), y);
+    y = labeled(doc, "Profissão", id.profissao || "", y);
+    y = labeled(doc, "Última atividade", id.ultima_atividade || "", y);
+    y = labeled(doc, "Pessoas sob o mesmo teto", id.pessoas_mesmo_teto || "", y);
+    y = labeled(doc, "Tempo sem trabalhar", id.tempo_sem_trabalhar || "", y);
+    y += 2;
   }
 
-  // ----- 2. Queixa -----
+  // ============================================================
+  // 2) Queixa principal + medicações + comorbidades
+  // ============================================================
   if (included.has("queixa")) {
-    y = sectionTitle(doc, nextN(), "Queixa principal", y);
     const q = data.queixa || {};
-    if (!hasAny(q)) y = emptyNote(doc, y);
-    else {
-      if (q.queixa_principal) y = paragraph(doc, q.queixa_principal, y);
-      y = labeled(doc, "Início dos sintomas", q.inicio_sintomas || "", y);
-      y = labeled(doc, "Evolução", q.evolucao || "", y);
-      y = labeled(doc, "Lateralidade", q.lateralidade || "", y);
-      y = labeled(doc, "Fatores agravantes", q.fatores_agravantes || "", y);
+    if (q.queixa_principal) y = paragraph(doc, q.queixa_principal, y);
+    // Medicações
+    if (q.medicacoes_uso && q.medicacoes_uso.trim()) {
+      y = paragraph(
+        doc,
+        `Para os sintomas referidos, informa uso contínuo de medicações: ${q.medicacoes_uso.trim()}`,
+        y,
+      );
     }
+    // Parágrafo fixo
+    y = paragraph(
+      doc,
+      "Relata acompanhamento médico e realização regular de fisioterapia.",
+      y,
+    );
+    // Comorbidades (com runs em vermelho)
+    const comorbRuns = buildComorbidadesRuns(q);
+    y = richParagraph(doc, comorbRuns, y);
+    y += 2;
   }
 
-  // ----- 3. Medicação -----
-  if (included.has("medicacao")) {
-    y = sectionTitle(doc, nextN(), "Medicação em uso", y);
-    const itens = data.medicacao?.itens ?? [];
-    if (itens.length === 0 && !data.medicacao?.observacoes) {
-      y = emptyNote(doc, y);
-    } else {
-      itens.forEach((m: MedicacaoItem) => {
-        const parts = [m.nome, m.dose, m.frequencia].filter(Boolean).join(" — ");
-        const status = m.em_uso === false ? " (suspensa)" : "";
-        y = paragraph(doc, `• ${parts}${status}`, y);
-      });
-      if (data.medicacao?.observacoes) {
-        y = labeled(doc, "Observações", data.medicacao.observacoes, y);
+  // ============================================================
+  // 3) Exame físico (texto fixo + radios de incapacidade)
+  // ============================================================
+  if (included.has("exame_fisico")) {
+    y = paragraph(doc, EXAME_FISICO_TEXTOS.estado_mental, y);
+    y = paragraph(doc, EXAME_FISICO_TEXTOS.ectoscopia, y);
+    y = paragraph(doc, EXAME_FISICO_TEXTOS.inspecao_dinamica, y);
+    y = paragraph(doc, EXAME_FISICO_TEXTOS.complementacao, y);
+
+    const ex = data.exame_fisico || {};
+    const fh = INCAPACIDADE_LABEL[ex.incap_funcao_habitual ?? ""];
+    const vi = INCAPACIDADE_LABEL[ex.incap_vida_independente ?? ""];
+    if (fh) {
+      y = paragraph(doc, `Apresenta, para a sua função habitual: ${fh}.`, y);
+    }
+    if (vi) {
+      y = paragraph(doc, `Apresenta, para a vida independente: ${vi}.`, y);
+    }
+    y += 2;
+  }
+
+  // ============================================================
+  // 4) Resumo (texto da IA, somente leitura)
+  // ============================================================
+  if (included.has("resumo")) {
+    const resumo = (data.resumo?.texto || "").trim();
+    if (resumo) {
+      for (const block of resumo.split(/\n{2,}/)) {
+        y = paragraph(doc, block.replace(/\n/g, " "), y);
       }
-    }
-  }
-
-  // ----- 4. Acompanhamento -----
-  if (included.has("acompanhamento")) {
-    y = sectionTitle(doc, nextN(), "Acompanhamento médico", y);
-    const a = data.acompanhamento || {};
-    if (!hasAny(a)) y = emptyNote(doc, y);
-    else {
-      y = labeled(doc, "Faz acompanhamento", a.faz_acompanhamento === "sim" ? "Sim" : a.faz_acompanhamento === "nao" ? "Não" : "", y);
-      y = labeled(doc, "Especialistas", a.especialistas || "", y);
-      y = labeled(doc, "Frequência", a.frequencia || "", y);
-      y = labeled(doc, "Última consulta", a.ultima_consulta || "", y);
-      if (a.observacoes) y = labeled(doc, "Observações", a.observacoes, y);
-    }
-  }
-
-  // ----- 5. Comorbidades -----
-  if (included.has("comorbidades")) {
-    y = sectionTitle(doc, nextN(), "Comorbidades", y);
-    const c = data.comorbidades || {};
-    if (!hasAny(c)) y = emptyNote(doc, y);
-    else {
-      if (c.lista && c.lista.length > 0) y = paragraph(doc, c.lista.join(" • "), y);
-      if (c.texto) y = paragraph(doc, c.texto, y);
-      y = labeled(doc, "Cirurgias prévias", c.cirurgias_previas || "", y);
-      y = labeled(doc, "Internações", c.internacoes || "", y);
-      y = labeled(doc, "Histórico familiar", c.historico_familiar || "", y);
-    }
-  }
-
-  // ----- 6. Estado mental -----
-  if (included.has("estado_mental")) {
-    y = sectionTitle(doc, nextN(), "Estado mental", y);
-    const em = data.estado_mental || {};
-    if (!hasAny(em)) y = emptyNote(doc, y);
-    else {
-      y = labeled(doc, "Orientação", em.orientacao || "", y);
-      y = labeled(doc, "Humor", em.humor || "", y);
-      y = labeled(doc, "Afeto", em.afeto || "", y);
-      y = labeled(doc, "Pensamento", em.pensamento || "", y);
-      y = labeled(doc, "Memória", em.memoria || "", y);
-      y = labeled(doc, "Atenção", em.atencao || "", y);
-      y = labeled(doc, "Juízo e crítica", em.juizo_critica || "", y);
-      if (em.observacoes) y = labeled(doc, "Observações", em.observacoes, y);
-    }
-  }
-
-  // ----- 7. Ectoscopia -----
-  if (included.has("ectoscopia")) {
-    y = sectionTitle(doc, nextN(), "Ectoscopia / Exame geral", y);
-    const ec = data.ectoscopia || {};
-    if (!hasAny(ec)) y = emptyNote(doc, y);
-    else {
-      y = labeled(doc, "Estado geral", ec.estado_geral || "", y);
-      y = labeled(doc, "Hidratação", ec.hidratacao || "", y);
-      y = labeled(doc, "Corado", ec.corado || "", y);
-      y = labeled(doc, "Acianótico", ec.acianotico || "", y);
-      y = labeled(doc, "Anictérico", ec.anicterico || "", y);
-      y = labeled(doc, "Marcha", ec.marcha || "", y);
-      y = labeled(doc, "Postura", ec.postura || "", y);
-      y = labeled(doc, "Peso", ec.peso || "", y);
-      y = labeled(doc, "Altura", ec.altura || "", y);
-      y = labeled(doc, "IMC", ec.imc || "", y);
-      y = labeled(doc, "Pressão arterial", ec.pressao_arterial || "", y);
-      if (ec.observacoes) y = labeled(doc, "Observações", ec.observacoes, y);
-    }
-  }
-
-  // ----- 8. Ortopédico -----
-  if (included.has("exame_ortopedico")) {
-    y = sectionTitle(doc, nextN(), "Exame ortopédico", y);
-    const ort = data.exame_ortopedico || {};
-    if (!hasAny(ort)) y = emptyNote(doc, y);
-    else {
-      y = labeled(doc, "Segmento avaliado", ort.segmento_avaliado || "", y);
-      y = labeled(doc, "Inspeção", ort.inspecao || "", y);
-      y = labeled(doc, "Palpação", ort.palpacao || "", y);
-      y = labeled(doc, "Amplitude de movimento", ort.amplitude_movimento || "", y);
-      y = labeled(doc, "Força muscular", ort.forca_muscular || "", y);
-      y = labeled(doc, "Reflexos", ort.reflexos || "", y);
-      y = labeled(doc, "Testes especiais", ort.testes_especiais || "", y);
-      y = labeled(doc, "Manobras", ort.manobras || "", y);
-      if (ort.observacoes) y = labeled(doc, "Observações", ort.observacoes, y);
-    }
-  }
-
-  // ----- 9. CID -----
-  if (included.has("cid")) {
-    y = sectionTitle(doc, nextN(), "CID-10", y);
-    const cid = data.cid;
-    if (!cid?.itens || cid.itens.length === 0) y = emptyNote(doc, y);
-    else {
-      cid.itens.forEach((it: CidItem) => {
-        const prefix = it.principal ? "★ " : "• ";
-        const desc = it.descricao ? ` — ${it.descricao}` : "";
-        y = paragraph(doc, `${prefix}${it.codigo}${desc}`, y);
-      });
-      if (cid.observacoes) y = labeled(doc, "Observações", cid.observacoes, y);
-    }
-  }
-
-  // ----- 10. Conclusão -----
-  if (included.has("conclusao")) {
-    y = sectionTitle(doc, nextN(), "Conclusão", y);
-    const con = data.conclusao || {};
-    if (!hasAny(con)) y = emptyNote(doc, y);
-    else {
-      if (con.diagnostico) y = labeled(doc, "Diagnóstico", con.diagnostico, y);
-      const nexoMap: Record<string, string> = { sim: "Sim", nao: "Não", parcial: "Parcial" };
-      y = labeled(doc, "Nexo causal", nexoMap[con.nexo_causal || ""] || "", y);
-      if (con.nexo_justificativa) y = labeled(doc, "Justificativa do nexo", con.nexo_justificativa, y);
-      const incMap: Record<string, string> = { total: "Total", parcial: "Parcial", ausente: "Ausente" };
-      y = labeled(doc, "Incapacidade", incMap[con.incapacidade || ""] || "", y);
-      const tempMap: Record<string, string> = { temporaria: "Temporária", permanente: "Permanente" };
-      y = labeled(doc, "Temporalidade", tempMap[con.temporalidade || ""] || "", y);
-      y = labeled(doc, "Data de início da incapacidade (DII)", fmtDate(con.data_inicio_incapacidade), y);
-      y = labeled(doc, "Prazo para reavaliação", con.prazo_reavaliacao || "", y);
-      y = labeled(doc, "Reabilitação indicada", con.reabilitacao_indicada === "sim" ? "Sim" : con.reabilitacao_indicada === "nao" ? "Não" : "", y);
-      if (con.consideracoes_finais) y = labeled(doc, "Considerações finais", con.consideracoes_finais, y);
     }
   }
 
@@ -450,7 +377,6 @@ export const generatePrelaudoPdf = async (
   doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
   doc.text("Médico Perito Judicial", PAGE.width / 2, y, { align: "center" });
 
-  // Aplica banners em TODAS as páginas (igual ao Trabalhista)
   await addHeaderToPages(doc, headerB64);
   await addFooterToPages(doc, footerB64);
 
