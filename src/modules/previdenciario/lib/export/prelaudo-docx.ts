@@ -203,7 +203,14 @@ export const generatePrelaudoDocx = async (
     );
     if (fixedPar) paragraphs.push(fixedPar);
 
-    paragraphs.push(comorbidadesParagraph(q));
+    optionsBlock(
+      "Informa demais comorbidades",
+      buildMultiOptionRows(
+        COMORBIDADES_FIXAS,
+        (q.comorbidades_fixas || {}) as Record<string, boolean | undefined>,
+        Array.isArray(q.comorbidades_extras) ? q.comorbidades_extras : [],
+      ),
+    ).forEach((p) => paragraphs.push(p));
   }
 
   // ===== 3) Exame físico (fixo + incapacidades) =====
