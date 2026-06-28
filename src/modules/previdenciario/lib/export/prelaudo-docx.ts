@@ -162,8 +162,21 @@ export const generatePrelaudoDocx = async (
       labeled("Data de nascimento", fmtDate(id.data_nascimento)),
       labeled("Idade", id.idade || ""),
       labeled("Sexo", id.sexo || ""),
-      labeled("Estado civil", resolveEnumValue(id.estado_civil, id.estado_civil_outros)),
-      labeled("Escolaridade", resolveEnumValue(id.escolaridade, id.escolaridade_outros)),
+    ].forEach((p) => p && paragraphs.push(p));
+
+    // Estado civil — lista (X)/( ) com todas as opções
+    optionsBlock(
+      "Estado civil",
+      buildOptionRows(ESTADO_CIVIL_OPCOES, id.estado_civil, id.estado_civil_outros),
+    ).forEach((p) => paragraphs.push(p));
+
+    // Escolaridade — lista (X)/( ) com todas as opções
+    optionsBlock(
+      "Escolaridade",
+      buildOptionRows(ESCOLARIDADE_OPCOES, id.escolaridade, id.escolaridade_outros),
+    ).forEach((p) => paragraphs.push(p));
+
+    [
       labeled("Profissão", id.profissao || ""),
       labeled("Última atividade", id.ultima_atividade || ""),
       labeled("Pessoas sob o mesmo teto", id.pessoas_mesmo_teto || ""),
