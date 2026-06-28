@@ -1,58 +1,42 @@
+## Diagnóstico
 
-## Contexto
+Verifiquei no banco e nos exporters:
 
-Hoje, quando o upload na Mistral falha, a edge function `prev-pre-processar` repassa uma mensagem genérica ("Edge Function returned a non-2xx status code"). Os logs já mostram que a Mistral retorna informações úteis no corpo (`status` HTTP + JSON com `detail`/`message`/`type`), mas não estamos interpretando esses campos. Sim — com o que já recebemos da API dá pra distinguir com clareza: cota esgotada, chave inválida/revogada, arquivo grande demais, rate-limit momentâneo, indisponibilidade do provedor, etc.
+1. **"Para os sintomas referidos, informa uso contínuo de medicações"** → o código (`prev-pre-processar/index.ts`) já tem a instrução para preencher `medicacoes_uso`, **mas a IA não está usando**.
+2. **Checkboxes de comorbidades** → o código também já tem o mapeamento (`has`, `dm2`, `dislipidemia`, …) com regra "marcar só quando explícito no processo", **mas chega tudo `false`**.
+3. **Exportação DOCX/PDF** → os dois exporters já leem `medicacoes_uso`, `comorbidades_fixas` e `comorbidades_extras` e aplicam o grifo vermelho (#C00000). Estão corretos — o problema é só que chegam vazios.
 
-Este plano implementa essa diferenciação **somente no módulo Previdenciário**, sem tocar no Trabalhista.
+### Causa raiz
 
-## O que muda
+A edge function carrega o prompt do banco (`system_config.id = 'prompt_prev_extracao_processo'`), e não o default do código. Consultei o banco e confirmei que a versão salva lá foi **auto-registrada antes da reestruturação GUIA 23.06** — ela não contém as palavras `medicacoes_uso` nem `comorbidades_fixas`. Resultado: a IA devolve um JSON sem esses campos e o pré-laudo abre vazio.
 
-### 1. Classificador de erros Mistral (novo helper, isolado)
-Criar `supabase/functions/prev-pre-processar/_mistral-errors.ts` com uma função `classifyMistralError(status, bodyText)` que retorna:
-- `code`: `quota_exceeded` | `invalid_key` | `rate_limited` | `file_too_large` | `unsupported_file` | `provider_unavailable` | `unknown`
-- `userMessage`: texto pt-BR amigável, sem jargão técnico, sem expor chaves
-- `httpStatus`: status HTTP a devolver ao front (402 cota, 401 chave, 413 arquivo, 429 rate, 503 indisponível, 500 desconhecido)
+Os logs reforçam: `[prompt-manager] Prompt carregado do banco: prompt_prev_extracao_processo` (versão antiga, sem as novas chaves).
 
-Regras de classificação (baseadas em status + parsing leve do JSON):
-- `401` + corpo contendo `unauthorized`/`invalid api key` → `invalid_key`
-- `402` ou `403` com `quota`/`exceeded`/`payment`/`billing` → `quota_exceeded`
-- `429` → `rate_limited`
-- `413` ou mensagem `too large`/`size limit` → `file_too_large`
-- `415` ou `unsupported` → `unsupported_file`
-- `5xx` → `provider_unavailable`
-- demais → `unknown` (mantém mensagem genérica + status original no log)
+## Plano de correção (cirúrgico, isolado ao módulo Previdenciário)
 
-Importante: o classificador **só lê o corpo retornado pelo provedor**; nunca registra/retorna a API key.
+### 1. Ressincronizar o prompt no banco (1 migration)
+- `UPDATE public.system_config SET value = <DEFAULT_EXTRACTION_PROMPT atual do código>, updated_at = now() WHERE id = 'prompt_prev_extracao_processo';`
+- Conteúdo idêntico ao default que já está em `supabase/functions/prev-pre-processar/index.ts` (inclui `medicacoes_uso`, `comorbidades_fixas` com mapeamento dos 12 CIDs, regra de só marcar quando explícito).
+- Não toca em `prompt_prev_queixa_unificada` nem `prompt_prev_resumo_exames` — esses já estão corretos.
+- Não toca em prompts do Trabalhista.
 
-### 2. Integração na função `prev-pre-processar`
-Nos pontos onde hoje fazemos `throw new Error("Mistral upload failed (...)")` / `Mistral OCR failed (...)`:
-- capturar `status` e `body` da resposta
-- chamar `classifyMistralError`
-- logar `[prev-pre-processar] mistral_error code=<code> status=<status>` (sem corpo bruto que possa vazar dados)
-- responder com `Response(JSON.stringify({ error: userMessage, code, stage: 'ocr' }), { status: httpStatus, headers: corsHeaders })`
+### 2. Pequeno reforço de defesa no edge function (opcional, mas recomendado)
+- Em `prev-pre-processar/index.ts`, após o `JSON.parse`, normalizar `comorbidades_fixas`:
+  - se a chave vier ausente, criar objeto vazio;
+  - se vier valor não-booleano, converter (`!!`) — evita que strings tipo `"sim"` quebrem os checkboxes.
+- Sanitizar `medicacoes_uso` (string, trim, sem markdown).
+- Não muda comportamento quando a IA acerta; só protege contra variações futuras.
 
-Aplicar nas 2 chamadas Mistral existentes: upload do arquivo e chamada de OCR. Nenhuma outra lógica de processamento é alterada.
-
-### 3. Exibição amigável no front (apenas Previdenciário)
-Atualizar o ponto que invoca `prev-pre-processar` (botão "Processar" em `PautaDetalhe.tsx` e fluxo de lote) para:
-- ler `error.context?.body` / response JSON
-- exibir `toast.error(userMessage)` quando vier `code` conhecido
-- manter fallback atual quando não houver `code`
-
-Mensagens pt-BR propostas:
-- `quota_exceeded`: "Cota mensal da IA de OCR esgotada. O processamento será retomado automaticamente quando a cota for renovada."
-- `invalid_key`: "Credencial da IA de OCR inválida ou revogada. Avise o administrador."
-- `rate_limited`: "Muitas requisições simultâneas à IA de OCR. Aguarde alguns segundos e tente novamente."
-- `file_too_large`: "PDF excede o tamanho máximo aceito pela IA de OCR (50MB)."
-- `unsupported_file`: "Formato de arquivo não suportado pela IA de OCR."
-- `provider_unavailable`: "Serviço de OCR temporariamente indisponível. Tente novamente em instantes."
+### 3. Validação
+- Reprocessar o PDF atual da perícia aberta.
+- Confirmar no editor (Etapa 2):
+  - campo "Para os sintomas referidos…" preenchido;
+  - checkboxes das comorbidades explícitas no processo marcadas, com possibilidade de o operador alterar livremente (lógica já existente em `Step02Queixa`).
+- Exportar DOCX e PDF e conferir:
+  - medicações em parágrafo contínuo;
+  - comorbidades marcadas listadas em **vermelho** (#C00000), comorbidades extras marcadas idem.
 
 ## Garantias de segurança
-
-- Alterações restritas a: `supabase/functions/prev-pre-processar/` e o(s) componente(s) do módulo previdenciário que invocam essa função.
-- Zero alteração em: `supabase/functions/processar-autos`, `mistral-ocr` compartilhado (não é importado pelo Previdenciário), Trabalhista, prompts, banco, schema, RLS.
-- Nenhum segredo é lido, logado ou retornado — apenas o status HTTP e o corpo já enviado pela Mistral.
-- Compatível com o estado atual de cota esgotada: o próximo upload mostrará a mensagem de `quota_exceeded` em vez do erro genérico, sem mudar comportamento de retry.
-
-## Trabalhista (fora deste plano)
-A mesma estratégia é replicável em `processar-autos` / helper `mistral-ocr` compartilhado, mas exige revisar mais pontos de chamada e a UI de importação. Fica registrado como passo futuro, **não implementado agora**.
+- Mudança restrita a uma linha do `system_config` (id `prompt_prev_extracao_processo`) + reforço defensivo em uma única edge function.
+- Nenhum dado de pré-laudo já salvo é alterado (regra "Zero-Touch / Stale Data Regeneration" preservada — só novos processamentos passam a vir completos).
+- Trabalhista, DevPrompts UI, outros prompts e exporters não são tocados.
