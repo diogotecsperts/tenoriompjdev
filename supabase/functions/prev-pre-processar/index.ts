@@ -368,7 +368,7 @@ async function gerarQueixaUnificada(args: {
 // ============================================================
 
 const RESUMO_SYSTEM_PROMPT =
-  'Você é médico perito judicial. Retorne APENAS os blocos de "EXTRAÇÃO DO LAUDO" em português, sem markdown, sem comentários e sem a palavra "IA". Se não houver nenhum laudo de exame complementar identificável, retorne string vazia.';
+  'Você é médico perito judicial. Retorne APENAS blocos de extração de laudos de exames complementares em português, sem markdown, sem comentários e sem a palavra "IA". Cada bloco começa direto pelo cabeçalho do exame (tipo, segmento, data). NÃO inclua a expressão "EXTRAÇÃO DO LAUDO" no texto retornado. Se não houver nenhum laudo de exame complementar identificável, retorne string vazia.';
 
 const DEFAULT_RESUMO_PROMPT = `Você é médico perito judicial. Sua tarefa é LOCALIZAR, dentro do TEXTO OCR DO PROCESSO abaixo, TODOS os laudos de exames complementares descritos (ex.: ultrassonografia, raio-X, tomografia computadorizada, ressonância magnética, eletroneuromiografia, densitometria, ecocardiograma, ecodoppler, endoscopia, colonoscopia, EEG, e laudos médicos de especialistas que contenham achados objetivos) e PRODUZIR um bloco de extração para cada laudo encontrado.
 
@@ -380,10 +380,11 @@ REGRAS GERAIS:
 5. Mantenha terminologia médica original do laudo (não simplificar).
 6. Ignore documentos que NÃO sejam laudos de exame (procurações, petições, contracheques, ofícios, decisões, atestados sem achados objetivos).
 7. Se o mesmo exame aparecer repetido, considerar apenas a versão mais completa.
+8. PROIBIDO escrever a expressão "EXTRAÇÃO DO LAUDO" (ou variações) em qualquer parte da resposta. O cabeçalho de cada bloco começa direto pelo tipo do exame.
 
 FORMATO OBRIGATÓRIO de cada bloco (texto puro, exatamente assim):
 
-EXTRAÇÃO DO LAUDO — [TIPO DO EXAME] ([SEGMENTO/REGIÃO se houver]) — [DATA AAAA-MM-DD ou "data não informada"]
+[TIPO DO EXAME] ([SEGMENTO/REGIÃO se houver]) — [DATA AAAA-MM-DD ou "data não informada"]
 Achados: [descrever os achados objetivos do laudo, em frase corrida, mantendo a terminologia original].
 Impressão diagnóstica do laudo: [transcrever a conclusão/impressão diagnóstica do próprio laudo, se houver; caso contrário, omitir esta linha].
 
