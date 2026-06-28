@@ -586,6 +586,39 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // 4b) Normalização defensiva (medicacoes_uso + comorbidades_fixas)
+    const COMORB_KEYS = [
+      "has","dm2","dislipidemia","hipotireoidismo","ansiedade","depressao",
+      "fibromialgia","obesidade","cardiopatia","dpoc","irc","ar",
+    ] as const;
+    const toBool = (v: unknown): boolean => {
+      if (typeof v === "boolean") return v;
+      if (typeof v === "number") return v !== 0;
+      if (typeof v === "string") {
+        const s = v.trim().toLowerCase();
+        return ["true","1","sim","yes","y","x","marcado","positivo"].includes(s);
+      }
+      return false;
+    };
+    if (parsed && typeof parsed === "object") {
+      // medicacoes_uso: garantir string limpa, sem markdown e sem "IA"
+      let mu = parsed.medicacoes_uso;
+      if (Array.isArray(mu)) mu = mu.filter(Boolean).join(", ");
+      if (typeof mu !== "string") mu = "";
+      mu = mu.replace(/[*_`#>]/g, "").replace(/\bIA\b/g, "").replace(/\s+/g, " ").trim();
+      parsed.medicacoes_uso = mu;
+
+      // comorbidades_fixas: objeto com as 12 chaves booleanas
+      const src = (parsed.comorbidades_fixas && typeof parsed.comorbidades_fixas === "object")
+        ? parsed.comorbidades_fixas as Record<string, unknown>
+        : {};
+      const normalized: Record<string, boolean> = {};
+      for (const k of COMORB_KEYS) normalized[k] = toBool(src[k]);
+      parsed.comorbidades_fixas = normalized;
+    }
+
+
+
     // 5) Unificação da Queixa Principal (segunda passada IA, não-fatal)
     let queixaUnificada = "";
     try {
