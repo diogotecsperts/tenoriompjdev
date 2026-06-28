@@ -360,6 +360,85 @@ async function gerarQueixaUnificada(args: {
   return sanitizeQueixa(resp?.text || "");
 }
 
+// ============================================================
+// Resumo de Exames Complementares (3ª passada IA)
+// ============================================================
+
+const RESUMO_SYSTEM_PROMPT =
+  'Você é médico perito judicial. Retorne APENAS os blocos de "EXTRAÇÃO DO LAUDO" em português, sem markdown, sem comentários e sem a palavra "IA". Se não houver nenhum laudo de exame complementar identificável, retorne string vazia.';
+
+const DEFAULT_RESUMO_PROMPT = `Você é médico perito judicial. Sua tarefa é LOCALIZAR, dentro do TEXTO OCR DO PROCESSO abaixo, TODOS os laudos de exames complementares descritos (ex.: ultrassonografia, raio-X, tomografia computadorizada, ressonância magnética, eletroneuromiografia, densitometria, ecocardiograma, ecodoppler, endoscopia, colonoscopia, EEG, e laudos médicos de especialistas que contenham achados objetivos) e PRODUZIR um bloco de extração para cada laudo encontrado.
+
+REGRAS GERAIS:
+1. Apenas EXTRAIR. Não interpretar, não diagnosticar, não emitir conduta, não sugerir tratamento.
+2. NUNCA inventar achados, datas ou tipos de exame. Se a informação não está no texto, OMITA.
+3. Português brasileiro, técnico, objetivo, sem floreios.
+4. PROIBIDO usar markdown, bullets, títulos hierárquicos ("###", "**", etc.) ou a palavra "IA".
+5. Mantenha terminologia médica original do laudo (não simplificar).
+6. Ignore documentos que NÃO sejam laudos de exame (procurações, petições, contracheques, ofícios, decisões, atestados sem achados objetivos).
+7. Se o mesmo exame aparecer repetido, considerar apenas a versão mais completa.
+
+FORMATO OBRIGATÓRIO de cada bloco (texto puro, exatamente assim):
+
+EXTRAÇÃO DO LAUDO — [TIPO DO EXAME] ([SEGMENTO/REGIÃO se houver]) — [DATA AAAA-MM-DD ou "data não informada"]
+Achados: [descrever os achados objetivos do laudo, em frase corrida, mantendo a terminologia original].
+Impressão diagnóstica do laudo: [transcrever a conclusão/impressão diagnóstica do próprio laudo, se houver; caso contrário, omitir esta linha].
+
+REGRAS DE CONCATENAÇÃO:
+- Separe cada bloco por UMA linha em branco.
+- Ordene os blocos por data crescente quando houver data; laudos sem data vão ao final.
+- Se NENHUM laudo de exame complementar for identificado no processo, retorne string VAZIA (não escreva "nenhum laudo encontrado", não escreva nada).
+
+TEXTO OCR DO PROCESSO:
+\${ocrText}
+
+Retorne SOMENTE os blocos no formato acima, concatenados, sem introdução e sem comentários.`;
+
+function sanitizeResumo(raw: string): string {
+  if (!raw) return "";
+  let t = raw.trim();
+  t = t.replace(/^```[a-z]*\s*/i, "").replace(/```\s*$/, "");
+  t = t.replace(/^#{1,6}\s+/gm, "");
+  t = t.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1");
+  t = t.replace(/__([^_]+)__/g, "$1");
+  t = t.replace(/\n{3,}/g, "\n\n").trim();
+  if (/\bIA\b/.test(t)) return "";
+  if (t.length < 30) return "";
+  return t;
+}
+
+async function gerarResumoExames(args: {
+  aiConfig: any;
+  userId: string;
+  ocrText: string;
+}): Promise<string> {
+  // Resumo precisa do OCR completo (vários laudos costumam estar espalhados).
+  // Reaproveita o trimming preservando cauda já aplicado upstream.
+  if (args.ocrText.replace(/\s/g, "").length < 200) return "";
+
+  const userPrompt = await getPrompt(
+    "prompt_prev_resumo_exames",
+    DEFAULT_RESUMO_PROMPT,
+    { ocrText: args.ocrText },
+    {
+      description: "PREV: Resumo de Exames Complementares (extração técnica de laudos)",
+      cardId: "previdenciario",
+      sectionId: "resumo",
+    },
+  );
+
+  const resp = await callAI(args.aiConfig, RESUMO_SYSTEM_PROMPT, userPrompt, {
+    userId: args.userId,
+    promptType: "prev_resumo_exames",
+    maxOutputTokens: 4000,
+    jsonMode: false,
+  });
+
+  return sanitizeResumo(resp?.text || "");
+}
+
+
+
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
