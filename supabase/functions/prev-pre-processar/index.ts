@@ -683,8 +683,29 @@ Deno.serve(async (req: Request) => {
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Erro desconhecido";
+
+    // Classifica erros vindos da Mistral (OCR) para devolver mensagem específica
+    if (isMistralError(msg)) {
+      const classified = classifyMistralError(msg);
+      console.error(
+        `[prev-pre-processar] mistral_error code=${classified.code} upstreamStatus=${classified.upstreamStatus ?? "n/a"}`,
+      );
+      return new Response(
+        JSON.stringify({
+          error: classified.userMessage,
+          code: classified.code,
+          stage: "ocr",
+          upstreamStatus: classified.upstreamStatus,
+        }),
+        {
+          status: classified.httpStatus,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
     console.error("[prev-pre-processar] FATAL:", msg);
-    return new Response(JSON.stringify({ error: msg }), {
+    return new Response(JSON.stringify({ error: msg, code: "unknown" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
