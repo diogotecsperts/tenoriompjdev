@@ -138,6 +138,7 @@ export default function PrelaudoEditor() {
           !previousData?.identificacao?.escolaridade &&
           initial?.identificacao?.escolaridade
         ) {
+          skipFirstSaveRef.current = false;
           dirtyRef.current = true;
         }
         getPauta(p.pauta_id).then(setPauta).catch(() => {});
