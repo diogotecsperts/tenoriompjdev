@@ -1,33 +1,65 @@
-## Ajustes pontuais — Resumo de exames + Escolaridade
+## Diagnóstico
 
-### 1) Remover o rótulo "EXTRAÇÃO DO LAUDO" do resumo de exames
+1. **Reverter após concluir**
+   - Hoje o botão `Concluir perícia` muda o status diretamente para `concluido`.
+   - Depois disso o botão fica desabilitado e não há ação para voltar ao status anterior.
+   - A tabela atual só guarda `status`; não há histórico persistido do status anterior. Para não criar migração desnecessária, a forma mais segura é reverter para o status operacional anterior esperado: `em_atendimento`.
 
-**Onde:** `supabase/functions/prev-pre-processar/index.ts` (prompt `prompt_prev_resumo_exames` + sanitizador) e sync no banco (`system_config`).
+2. **Escolaridade não marca no app nem no DOCX/PDF**
+   - A cadeia de exportação já está preparada: se `prelaudo_data.identificacao.escolaridade` estiver preenchido, DOCX/PDF marcam a opção correta.
+   - No caso atual aberto, o banco mostra:
+     - `prev_extracao.identificacao.escolaridade = ""`
+     - `prelaudo_data.identificacao.escolaridade = null`
+   - Portanto o problema não está principalmente no exportador: a IA não extraiu a escolaridade neste PDF e o merge não tem fallback para tentar achar escolaridade em outros trechos estruturados/documentos quando o campo vem vazio.
 
-**O que muda:**
-- Atualizar o `DEFAULT_RESUMO_PROMPT` e o `RESUMO_SYSTEM_PROMPT` para que cada bloco comece direto pelo cabeçalho útil:
-  `"[TIPO DO EXAME] ([SEGMENTO se houver]) — [DATA AAAA-MM-DD ou 'data não informada']"`
-  (sem o prefixo `EXTRAÇÃO DO LAUDO — `).
-- Reforçar no `sanitizeResumo` uma limpeza defensiva: regex no início de cada bloco para remover qualquer ocorrência remanescente de `^EXTRAÇÃO DO LAUDO\s*[—-]\s*` (cobre exames já gerados/retornos antigos da IA).
-- Rodar `UPDATE system_config` em `prompt_prev_resumo_exames` para refletir o novo texto (mantém DevPrompts em sincronia).
+## Plano de implementação
 
-**Não muda:** o restante do bloco (linhas `Achados:` e `Impressão diagnóstica do laudo:`) permanece exatamente igual; ordenação por data e separação por linha em branco também.
+### 1. Adicionar reversão segura do status concluído
 
-### 2) Escolaridade: extrair via IA e marcar corretamente no documento
+- No editor previdenciário, quando a perícia estiver `concluido`, trocar o botão desabilitado por uma ação ativa: **Reabrir perícia**.
+- Ao clicar, salvar alterações pendentes e alterar o status para `em_atendimento`.
+- Atualizar o badge/status local imediatamente após sucesso.
+- Exibir toast de confirmação: “Perícia reaberta”.
+- Manter o fluxo isolado no módulo Previdenciário, sem tocar no Trabalhista.
 
-**Diagnóstico:** o prompt no DB já instrui a IA a usar um dos 7 valores fixos, mas se a IA devolver com variação (capitalização, "Médio completo", "2º grau completo", etc.), o valor não bate exatamente com `ESCOLARIDADE_OPCOES`. Resultado: o `<Select>` fica vazio no editor e o `buildOptionRows` no PDF/DOCX não marca nenhuma linha. O mesmo risco existe para `estado_civil`.
+### 2. Corrigir escolaridade com fallback defensivo local
 
-**O que muda — `src/modules/previdenciario/lib/prelaudo-structure.ts`:**
-- Adicionar dois normalizadores puros (`normalizeEscolaridade`, `normalizeEstadoCivil`) que recebem a string crua da IA e devolvem:
-  - o valor exato de `ESCOLARIDADE_OPCOES` / `ESTADO_CIVIL_OPCOES` quando reconhecido (case-insensitive, sem acentos, com sinônimos: "1º grau" → "Ensino fundamental", "2º grau" → "Ensino médio", "superior" → "Ensino superior", "completo/incompleto" preservado; "solteiro/casado/viúvo/divorciado/união estável" para estado civil);
-  - `"Outros"` + preencher `escolaridade_outros` / `estado_civil_outros` com o texto original quando não reconhecido;
-  - string vazia quando a IA não trouxe nada.
-- Em `mergeFromExtracao`, trocar o `fill` direto pelos normalizadores nas duas linhas correspondentes.
+- Fortalecer `mergeFromExtracao` para tentar preencher escolaridade quando `identificacao.escolaridade` vier vazio.
+- A busca será feita apenas em campos já extraídos pela IA, sem reler PDF e sem inventar:
+  - `historia_clinica`
+  - `historia_laboral`
+  - `documentos[].resumo`
+  - outros textos estruturados simples do `prev_extracao`
+- Criar um helper de detecção com padrões explícitos, por exemplo:
+  - `analfabeto`, `sem instrução`
+  - `fundamental incompleto/completo`, `primário`, `1º grau`, `8ª série`, `9ª série`
+  - `médio incompleto/completo`, `2º grau`, `colegial`, `ensino técnico`
+  - `superior incompleto/completo`, `graduação`, `universitário`
+- Só preencher quando houver menção textual clara. Se não houver, continuará vazio.
 
-**O que muda — `supabase/functions/prev-pre-processar/index.ts`:**
-- Reforçar no prompt (`DEFAULT_EXTRACTION_PROMPT`) que a IA deve preencher escolaridade sempre que houver QUALQUER menção (carteira, qualificação, anamnese, depoimento), mapeando sinônimos comuns para os 7 rótulos fixos. Sincronizar no `system_config`.
+### 3. Corrigir escolaridade na edge function para próximos processamentos
 
-**Resultado esperado:** mesmo que a IA devolva "ensino médio completo" minúsculo ou "2º grau completo", o editor exibe o rádio/select correto e o PDF/DOCX marca `(X)` na linha certa. Se for algo realmente fora do padrão, cai em "Outros" com o texto original preservado.
+- Adicionar normalização defensiva também dentro de `prev-pre-processar`, logo após o JSON da IA:
+  - se `parsed.identificacao.escolaridade` vier com sinônimo, normalizar para um dos rótulos oficiais;
+  - se vier vazio, tentar fallback nos próprios textos estruturados retornados pela IA;
+  - se continuar sem evidência clara, deixar vazio.
+- Isso melhora novos uploads/reprocessamentos sem depender só do frontend.
 
-### Escopo isolado
-Mudanças contidas no módulo Previdenciário (`src/modules/previdenciario/**`) e na edge function `prev-pre-processar`. Nenhum arquivo do Trabalhista ou de utilitários compartilhados é tocado.
+### 4. Garantir que documentos exportados recebam a correção
+
+- Como DOCX/PDF já usam `buildOptionRows(ESCOLARIDADE_OPCOES, id.escolaridade, id.escolaridade_outros)`, a correção passa a aparecer automaticamente quando o dado for preenchido.
+- Não alterar a estrutura visual do DOCX/PDF além disso.
+
+### 5. Tratar o laudo atualmente aberto
+
+- Como o PDF atual já foi processado e salvou escolaridade vazia, a correção automática só aparecerá ao:
+  - reabrir o editor após o patch, se o fallback encontrar escolaridade nos dados já salvos; ou
+  - reprocessar o PDF, caso a informação exista apenas no OCR bruto e não tenha ficado em nenhum campo estruturado salvo.
+- Não farei atualização retroativa manual no banco sem pedido expresso, preservando a regra de integridade de dados.
+
+## Validação
+
+- Verificar que uma perícia `concluido` mostra botão **Reabrir perícia** e volta para `em_atendimento`.
+- Verificar que escolaridade detectada aparece selecionada no Step 1.
+- Verificar que DOCX/PDF marcam a escolaridade no formato `(X)`.
+- Confirmar que os ajustes ficam restritos ao módulo Previdenciário.

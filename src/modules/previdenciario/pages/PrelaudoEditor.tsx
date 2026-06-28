@@ -13,6 +13,7 @@ import {
   ArrowLeftRight,
   Scroll,
   LayoutGrid,
+  RotateCcw,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/hooks/use-toast";
@@ -58,6 +59,7 @@ export default function PrelaudoEditor() {
   const [saving, setSaving] = useState(false);
   const [exportFormat, setExportFormat] = useState<"pdf" | "docx">("pdf");
   const [exporting, setExporting] = useState(false);
+  const [statusUpdating, setStatusUpdating] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     if (typeof window === "undefined") return "paginated";
     const stored = window.localStorage.getItem(VIEW_MODE_STORAGE_KEY);
@@ -184,12 +186,30 @@ export default function PrelaudoEditor() {
   const handleConcluir = async () => {
     if (!pericia) return;
     await persist();
+    setStatusUpdating(true);
     try {
       await setPericiaStatus(pericia.id, "concluido");
-      setPericia({ ...pericia, status: "concluido" });
+      setPericia((prev) => (prev ? { ...prev, status: "concluido" } : prev));
       toast({ title: "Perícia concluída" });
     } catch (err: any) {
       toast({ variant: "destructive", title: "Erro", description: err.message });
+    } finally {
+      setStatusUpdating(false);
+    }
+  };
+
+  const handleReabrir = async () => {
+    if (!pericia) return;
+    await persist();
+    setStatusUpdating(true);
+    try {
+      await setPericiaStatus(pericia.id, "em_atendimento");
+      setPericia((prev) => (prev ? { ...prev, status: "em_atendimento" } : prev));
+      toast({ title: "Perícia reaberta" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Erro", description: err.message });
+    } finally {
+      setStatusUpdating(false);
     }
   };
 
@@ -408,14 +428,21 @@ export default function PrelaudoEditor() {
           </TooltipProvider>
         </div>
 
-        <Button
-          variant="default"
-          size="sm"
-          onClick={handleConcluir}
-          disabled={pericia.status === "concluido"}
-        >
-          {pericia.status === "concluido" ? "Concluída" : "Concluir perícia"}
-        </Button>
+        {pericia.status === "concluido" ? (
+          <Button variant="outline" size="sm" onClick={handleReabrir} disabled={statusUpdating}>
+            {statusUpdating ? (
+              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+            ) : (
+              <RotateCcw className="h-4 w-4 mr-1.5" />
+            )}
+            Reabrir perícia
+          </Button>
+        ) : (
+          <Button variant="default" size="sm" onClick={handleConcluir} disabled={statusUpdating}>
+            {statusUpdating && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+            Concluir perícia
+          </Button>
+        )}
       </div>
 
       {/* Body: nav | editor | painel */}
