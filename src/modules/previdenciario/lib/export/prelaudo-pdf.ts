@@ -296,8 +296,18 @@ export const generatePrelaudoPdf = async (
     y = labeled(doc, "Data de nascimento", fmtDate(id.data_nascimento), y);
     y = labeled(doc, "Idade", id.idade || "", y);
     y = labeled(doc, "Sexo", id.sexo || "", y);
-    y = labeled(doc, "Estado civil", resolveEnumValue(id.estado_civil, id.estado_civil_outros), y);
-    y = labeled(doc, "Escolaridade", resolveEnumValue(id.escolaridade, id.escolaridade_outros), y);
+    y = optionsBlock(
+      doc,
+      "Estado civil",
+      buildOptionRows(ESTADO_CIVIL_OPCOES, id.estado_civil, id.estado_civil_outros),
+      y,
+    );
+    y = optionsBlock(
+      doc,
+      "Escolaridade",
+      buildOptionRows(ESCOLARIDADE_OPCOES, id.escolaridade, id.escolaridade_outros),
+      y,
+    );
     y = labeled(doc, "Profissão", id.profissao || "", y);
     y = labeled(doc, "Última atividade", id.ultima_atividade || "", y);
     y = labeled(doc, "Pessoas sob o mesmo teto", id.pessoas_mesmo_teto || "", y);
