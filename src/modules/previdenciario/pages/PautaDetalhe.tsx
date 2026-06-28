@@ -127,7 +127,21 @@ export default function PautaDetalhe() {
       });
       void reload();
     } catch (err: any) {
-      toast({ variant: "destructive", title: "Erro IA", description: err.message });
+      const title =
+        err?.code === "quota_exceeded"
+          ? "Cota da IA esgotada"
+          : err?.code === "invalid_key"
+            ? "Credencial inválida"
+            : err?.code === "rate_limited"
+              ? "Muitas requisições"
+              : err?.code === "file_too_large"
+                ? "PDF muito grande"
+                : err?.code === "unsupported_file"
+                  ? "Arquivo não suportado"
+                  : err?.code === "provider_unavailable"
+                    ? "IA indisponível"
+                    : "Erro IA";
+      toast({ variant: "destructive", title, description: err.message });
     } finally {
       setProcessandoIds((s) => {
         const n = new Set(s);
