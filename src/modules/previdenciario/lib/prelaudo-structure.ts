@@ -96,7 +96,7 @@ export function normalizeEscolaridade(
   const hasComp = /\bcompl(eto|\.?)\b|concluid|formad/.test(n);
 
   const isAnalf = /analfabet|sem instruc|nao alfabet|nao-alfabet/.test(n);
-  const isFund = /fundamental|\b1[ºo°]?\s*grau\b|primari|ginasi|\b[1-9]a?\s*serie\b|\b8a?\s*serie\b|\b9a?\s*serie\b|eja\s*fundamental/.test(n);
+  const isFund = /fundamental|\b1[ºo°]?\s*grau\b|primeiro\s+grau|primari|ginasi|\b[1-9]\s*[ªa]?\s*serie\b|oitava\s+serie|nona\s+serie|eja\s*fundamental/.test(n);
   const isMed = /\bmedio\b|\b2[ºo°]?\s*grau\b|colegial|tecnico|cientifico|eja\s*medio|ensino tecnico/.test(n);
   const isSup = /superior|graduac|universitari|pos[\s-]?graduac|mestrad|doutorad|especializac|bachare|licenciatur|tecnologo/.test(n);
 
@@ -112,6 +112,7 @@ export function normalizeEscolaridade(
   }
   if (isFund) {
     if (hasInc) return { value: "Ensino fundamental incompleto", outros: "" };
+    if (/\b[89]\s*[ªa]?\s*serie\b|oitava\s+serie|nona\s+serie/.test(n)) return { value: "Ensino fundamental completo", outros: "" };
     if (hasComp) return { value: "Ensino fundamental completo", outros: "" };
     return { value: "Ensino fundamental incompleto", outros: "" };
   }
@@ -140,6 +141,79 @@ export function normalizeEstadoCivil(
     return { value: "Não informado", outros: "" };
 
   return { value: "Outros", outros: text };
+}
+
+function normalizeEscolaridadeStrict(raw: string | undefined | null): string {
+  const text = (raw || "").toString().trim();
+  if (!text) return "";
+  const normalized = normalizeEscolaridade(text).value;
+  return normalized === "Outros" ? "" : normalized;
+}
+
+function inferEscolaridadeFromText(raw: string | undefined | null): string {
+  const text = (raw || "").toString().trim();
+  if (!text) return "";
+  const n = stripDiacritics(text);
+
+  const snippets: string[] = [];
+  const marker = /(escolaridade|grau\s+de\s+instrucao|nivel\s+de\s+instrucao|instru[cç][aã]o)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = marker.exec(text)) && snippets.length < 8) {
+    snippets.push(text.slice(Math.max(0, match.index - 160), match.index + 220));
+  }
+
+  for (const snippet of snippets) {
+    const found = normalizeEscolaridadeStrict(snippet);
+    if (found) return found;
+  }
+
+  if (/analfabet|sem instruc|nao alfabet/.test(n)) return "Analfabeto";
+  if (/ensino\s+superior|curso\s+superior|nivel\s+superior|graduac|universitari|faculdade|bachare|licenciatur|tecnologo|pos[\s-]?graduac|mestrad|doutorad/.test(n)) {
+    return /incomplet|nao\s+concluid|sem\s+conclus|cursando/.test(n)
+      ? "Ensino superior incompleto"
+      : "Ensino superior completo";
+  }
+  if (/ensino\s+medio|\b2[ºo°]?\s*grau\b|segundo\s+grau|colegial|ensino\s+tecnico|curso\s+tecnico/.test(n)) {
+    return /incomplet|nao\s+concluid|sem\s+conclus|cursando/.test(n)
+      ? "Ensino médio incompleto"
+      : "Ensino médio completo";
+  }
+  if (/ensino\s+fundamental|\b1[ºo°]?\s*grau\b|primeiro\s+grau|primari|ginasi|\b[1-9]\s*[ªa]?\s*serie\b|oitava\s+serie|nona\s+serie/.test(n)) {
+    if (/incomplet|nao\s+concluid|sem\s+conclus|cursando/.test(n)) return "Ensino fundamental incompleto";
+    if (/\b[89]\s*[ªa]?\s*serie\b|oitava\s+serie|nona\s+serie|complet|concluid/.test(n)) return "Ensino fundamental completo";
+    return "Ensino fundamental incompleto";
+  }
+
+  return "";
+}
+
+function inferEscolaridadeFromExtracao(extracao: Record<string, any>): string {
+  const ident = extracao?.identificacao || {};
+  const direct = normalizeEscolaridadeStrict(ident.escolaridade);
+  if (direct) return direct;
+
+  const candidates: string[] = [
+    ident.escolaridade,
+    extracao?.historia_clinica,
+    extracao?.historia_laboral,
+    extracao?.queixa_principal,
+    extracao?.tratamentos,
+    extracao?.afastamentos,
+  ].filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+
+  if (Array.isArray(extracao?.documentos)) {
+    for (const d of extracao.documentos) {
+      if (typeof d?.resumo === "string" && d.resumo.trim()) candidates.push(d.resumo);
+      if (typeof d?.trecho_original === "string" && d.trecho_original.trim()) candidates.push(d.trecho_original);
+    }
+  }
+
+  for (const candidate of candidates) {
+    const found = inferEscolaridadeFromText(candidate);
+    if (found) return found;
+  }
+
+  return "";
 }
 
 
@@ -388,8 +462,9 @@ export function mergeFromExtracao(
       base.identificacao.estado_civil_outros = ec.outros;
     }
   }
-  if (!base.identificacao.escolaridade && ident.escolaridade) {
-    const es = normalizeEscolaridade(ident.escolaridade);
+  if (!base.identificacao.escolaridade) {
+    const escolaridadeFonte = ident.escolaridade || inferEscolaridadeFromExtracao(extracao);
+    const es = normalizeEscolaridade(escolaridadeFonte);
     if (es.value) base.identificacao.escolaridade = es.value;
     if (es.outros && !base.identificacao.escolaridade_outros) {
       base.identificacao.escolaridade_outros = es.outros;

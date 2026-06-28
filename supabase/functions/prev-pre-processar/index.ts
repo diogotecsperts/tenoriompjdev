@@ -239,6 +239,114 @@ function parseAIJson(raw: string): any | null {
 }
 
 // ============================================================
+// Normalização defensiva de escolaridade
+// ============================================================
+
+function stripDiacritics(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+function normalizeEscolaridade(raw: unknown): string {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (!text) return "";
+  const n = stripDiacritics(text).replace(/[.;,]+$/g, "").trim();
+
+  const direct: Record<string, string> = {
+    "analfabeto": "Analfabeto",
+    "ensino fundamental incompleto": "Ensino fundamental incompleto",
+    "ensino fundamental completo": "Ensino fundamental completo",
+    "ensino medio incompleto": "Ensino médio incompleto",
+    "ensino medio completo": "Ensino médio completo",
+    "ensino superior incompleto": "Ensino superior incompleto",
+    "ensino superior completo": "Ensino superior completo",
+  };
+  if (direct[n]) return direct[n];
+
+  const hasInc = /\binc(ompleto|\.?)\b|nao concluid|sem conclus|cursando/.test(n);
+  const hasComp = /\bcompl(eto|\.?)\b|concluid|formad/.test(n);
+
+  if (/analfabet|sem instruc|nao alfabet|nao-alfabet/.test(n)) return "Analfabeto";
+  if (/superior|graduac|universitari|faculdade|pos[\s-]?graduac|mestrad|doutorad|especializac|bachare|licenciatur|tecnologo/.test(n)) {
+    return hasInc ? "Ensino superior incompleto" : "Ensino superior completo";
+  }
+  if (/\bmedio\b|\b2[ºo°]?\s*grau\b|segundo\s+grau|colegial|tecnico|cientifico|eja\s*medio|ensino tecnico/.test(n)) {
+    return hasInc ? "Ensino médio incompleto" : "Ensino médio completo";
+  }
+  if (/fundamental|\b1[ºo°]?\s*grau\b|primeiro\s+grau|primari|ginasi|\b[1-9]\s*[ªa]?\s*serie\b|oitava\s+serie|nona\s+serie|eja\s*fundamental/.test(n)) {
+    if (hasInc) return "Ensino fundamental incompleto";
+    if (/\b[89]\s*[ªa]?\s*serie\b|oitava\s+serie|nona\s+serie/.test(n)) return "Ensino fundamental completo";
+    return hasComp ? "Ensino fundamental completo" : "Ensino fundamental incompleto";
+  }
+
+  return "";
+}
+
+function inferEscolaridadeFromText(raw: unknown): string {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (!text) return "";
+  const n = stripDiacritics(text);
+
+  const snippets: string[] = [];
+  const marker = /(escolaridade|grau\s+de\s+instrucao|nivel\s+de\s+instrucao|instru[cç][aã]o)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = marker.exec(text)) && snippets.length < 8) {
+    snippets.push(text.slice(Math.max(0, match.index - 160), match.index + 220));
+  }
+  for (const snippet of snippets) {
+    const found = normalizeEscolaridade(snippet);
+    if (found) return found;
+  }
+
+  if (/analfabet|sem instruc|nao alfabet/.test(n)) return "Analfabeto";
+  if (/ensino\s+superior|curso\s+superior|nivel\s+superior|graduac|universitari|faculdade|bachare|licenciatur|tecnologo|pos[\s-]?graduac|mestrad|doutorad/.test(n)) {
+    return /incomplet|nao\s+concluid|sem\s+conclus|cursando/.test(n)
+      ? "Ensino superior incompleto"
+      : "Ensino superior completo";
+  }
+  if (/ensino\s+medio|\b2[ºo°]?\s*grau\b|segundo\s+grau|colegial|ensino\s+tecnico|curso\s+tecnico/.test(n)) {
+    return /incomplet|nao\s+concluid|sem\s+conclus|cursando/.test(n)
+      ? "Ensino médio incompleto"
+      : "Ensino médio completo";
+  }
+  if (/ensino\s+fundamental|\b1[ºo°]?\s*grau\b|primeiro\s+grau|primari|ginasi|\b[1-9]\s*[ªa]?\s*serie\b|oitava\s+serie|nona\s+serie/.test(n)) {
+    if (/incomplet|nao\s+concluid|sem\s+conclus|cursando/.test(n)) return "Ensino fundamental incompleto";
+    if (/\b[89]\s*[ªa]?\s*serie\b|oitava\s+serie|nona\s+serie|complet|concluid/.test(n)) return "Ensino fundamental completo";
+    return "Ensino fundamental incompleto";
+  }
+
+  return "";
+}
+
+function inferEscolaridadeFromParsed(parsed: any, ocrText?: string): string {
+  const direct = normalizeEscolaridade(parsed?.identificacao?.escolaridade);
+  if (direct) return direct;
+
+  const candidates: unknown[] = [
+    parsed?.historia_clinica,
+    parsed?.historia_laboral,
+    parsed?.queixa_principal,
+    parsed?.tratamentos,
+    parsed?.afastamentos,
+  ];
+
+  if (Array.isArray(parsed?.documentos)) {
+    for (const d of parsed.documentos) {
+      candidates.push(d?.resumo, d?.trecho_original);
+    }
+  }
+
+  for (const candidate of candidates) {
+    const found = inferEscolaridadeFromText(candidate);
+    if (found) return found;
+  }
+
+  const fromOcr = inferEscolaridadeFromText(ocrText);
+  if (fromOcr) return fromOcr;
+
+  return "";
+}
+
+// ============================================================
 // Unificação da Queixa Principal (prompt do cliente)
 // ============================================================
 
@@ -622,6 +730,13 @@ Deno.serve(async (req: Request) => {
       if (typeof mu !== "string") mu = "";
       mu = mu.replace(/[*_`#>]/g, "").replace(/\bIA\b/g, "").replace(/\s+/g, " ").trim();
       parsed.medicacoes_uso = mu;
+
+      // escolaridade: normalizar sinônimos e tentar fallback em textos já extraídos.
+      if (!parsed.identificacao || typeof parsed.identificacao !== "object") {
+        parsed.identificacao = {};
+      }
+      const escolaridade = inferEscolaridadeFromParsed(parsed, ocrText);
+      if (escolaridade) parsed.identificacao.escolaridade = escolaridade;
 
       // comorbidades_fixas: objeto com as 12 chaves booleanas
       const src = (parsed.comorbidades_fixas && typeof parsed.comorbidades_fixas === "object")
