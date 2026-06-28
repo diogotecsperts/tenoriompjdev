@@ -1,110 +1,58 @@
 
-# Pré-Laudo Previdenciário — Reestruturação total (GUIA 23.06)
+## Contexto
 
-Escopo 100% isolado no módulo Previdenciário. Nada toca o Trabalhista.
+Hoje, quando o upload na Mistral falha, a edge function `prev-pre-processar` repassa uma mensagem genérica ("Edge Function returned a non-2xx status code"). Os logs já mostram que a Mistral retorna informações úteis no corpo (`status` HTTP + JSON com `detail`/`message`/`type`), mas não estamos interpretando esses campos. Sim — com o que já recebemos da API dá pra distinguir com clareza: cota esgotada, chave inválida/revogada, arquivo grande demais, rate-limit momentâneo, indisponibilidade do provedor, etc.
 
-## 1. Estrutura final do pré-laudo
+Este plano implementa essa diferenciação **somente no módulo Previdenciário**, sem tocar no Trabalhista.
 
-**Cabeçalho fixo do processo** (novo, fora dos steps), logo abaixo do título "PRÉ-LAUDO PERICIAL PREVIDENCIÁRIO" no editor e no topo do DOCX/PDF exportado:
-- Nº do processo · Vara · Comarca · Data da perícia · Benefício pleiteado.
+## O que muda
 
-**Etapas que ficam — apenas 4:**
-1. Identificação
-2. Queixa principal (incorpora medicações + comorbidades)
-3. Exame físico (texto fixo + radios de incapacidade)
-4. Resumo (extração de exames pela IA, somente leitura)
+### 1. Classificador de erros Mistral (novo helper, isolado)
+Criar `supabase/functions/prev-pre-processar/_mistral-errors.ts` com uma função `classifyMistralError(status, bodyText)` que retorna:
+- `code`: `quota_exceeded` | `invalid_key` | `rate_limited` | `file_too_large` | `unsupported_file` | `provider_unavailable` | `unknown`
+- `userMessage`: texto pt-BR amigável, sem jargão técnico, sem expor chaves
+- `httpStatus`: status HTTP a devolver ao front (402 cota, 401 chave, 413 arquivo, 429 rate, 503 indisponível, 500 desconhecido)
 
-**Etapas que desaparecem do fluxo:** Medicação em uso, Acompanhamento, Comorbidades, Estado mental, Ectoscopia, Exame ortopédico, CID-10, Conclusão. Os IDs antigos permanecem no tipo `PrelaudoData` (não apago do schema para não quebrar pré-laudos já salvos), mas saem da navegação, do editor e da exportação.
+Regras de classificação (baseadas em status + parsing leve do JSON):
+- `401` + corpo contendo `unauthorized`/`invalid api key` → `invalid_key`
+- `402` ou `403` com `quota`/`exceeded`/`payment`/`billing` → `quota_exceeded`
+- `429` → `rate_limited`
+- `413` ou mensagem `too large`/`size limit` → `file_too_large`
+- `415` ou `unsupported` → `unsupported_file`
+- `5xx` → `provider_unavailable`
+- demais → `unknown` (mantém mensagem genérica + status original no log)
 
-## 2. Etapa 1 — Identificação
+Importante: o classificador **só lê o corpo retornado pelo provedor**; nunca registra/retorna a API key.
 
-- **Estado Civil:** select fixo (União Estável, Solteiro(a), Casado(a), Divorciado(a), Viúvo(a), Não Informado, Outros). Ao escolher **Outros**, abre input livre adicional (`estado_civil_outros`).
-- **Escolaridade:** select fixo (Analfabeto, Fund. Incompleto/Completo, Médio Incompleto/Completo, Superior Incompleto/Completo, Outros). Ao escolher **Outros**, abre input livre (`escolaridade_outros`).
-- **Profissão:** texto livre (IA preenche).
-- **Tempo sem trabalhar:** **100% manual** (IA deixa de preencher).
-- **Pessoas sob o mesmo teto:** IA preenche **somente em BPC/LOAS** (detecta via `beneficio_pleiteado`); fora disso, fica vazio. Sempre editável.
-- Remove daqui os campos de processo (movidos para o cabeçalho fixo).
+### 2. Integração na função `prev-pre-processar`
+Nos pontos onde hoje fazemos `throw new Error("Mistral upload failed (...)")` / `Mistral OCR failed (...)`:
+- capturar `status` e `body` da resposta
+- chamar `classifyMistralError`
+- logar `[prev-pre-processar] mistral_error code=<code> status=<status>` (sem corpo bruto que possa vazar dados)
+- responder com `Response(JSON.stringify({ error: userMessage, code, stage: 'ocr' }), { status: httpStatus, headers: corsHeaders })`
 
-## 3. Etapa 2 — Queixa principal (expandida)
+Aplicar nas 2 chamadas Mistral existentes: upload do arquivo e chamada de OCR. Nenhuma outra lógica de processamento é alterada.
 
-Estrutura na ordem:
-1. Bloco existente da queixa unificada (IA) — **inalterado**.
-2. Título fixo: **"Para os sintomas referidos, informa uso contínuo de medicações:"** + textarea editável (IA preenche `medicacoes_uso`).
-3. Parágrafo fixo, sem campo: **"Relata acompanhamento médico e realização regular de fisioterapia."**
-4. Título fixo: **"Informa demais comorbidades:"** com 12 checkboxes fixos (HAS, DM2, Dislipidemia, Hipotireoidismo, Ansiedade, Depressão, Fibromialgia, Obesidade, Cardiopatia, DPOC, IRC, Artrite reumatoide) — IA marca automaticamente as que detectar no PDF, usuário pode alterar.
-5. Lista de comorbidades extras: cada item = checkbox + input livre + botão remover. Botão **"Adicionar"** cria novas linhas. A primeira linha vazia já vem pronta para o usuário marcar e digitar.
+### 3. Exibição amigável no front (apenas Previdenciário)
+Atualizar o ponto que invoca `prev-pre-processar` (botão "Processar" em `PautaDetalhe.tsx` e fluxo de lote) para:
+- ler `error.context?.body` / response JSON
+- exibir `toast.error(userMessage)` quando vier `code` conhecido
+- manter fallback atual quando não houver `code`
 
-UI sem grifo vermelho (basta o checkbox marcado). O **grifo vermelho aparece somente no DOCX/PDF exportado**.
+Mensagens pt-BR propostas:
+- `quota_exceeded`: "Cota mensal da IA de OCR esgotada. O processamento será retomado automaticamente quando a cota for renovada."
+- `invalid_key`: "Credencial da IA de OCR inválida ou revogada. Avise o administrador."
+- `rate_limited`: "Muitas requisições simultâneas à IA de OCR. Aguarde alguns segundos e tente novamente."
+- `file_too_large`: "PDF excede o tamanho máximo aceito pela IA de OCR (50MB)."
+- `unsupported_file`: "Formato de arquivo não suportado pela IA de OCR."
+- `provider_unavailable`: "Serviço de OCR temporariamente indisponível. Tente novamente em instantes."
 
-## 4. Etapa 3 — Exame físico (novo, fixo)
+## Garantias de segurança
 
-100% texto fixo, sem IA, sem edição, com os parágrafos exatos do guia:
-- Exame do Estado Mental.
-- Exame Físico Geral / Ectoscopia.
-- Inspeção Dinâmica.
-- Complementação.
+- Alterações restritas a: `supabase/functions/prev-pre-processar/` e o(s) componente(s) do módulo previdenciário que invocam essa função.
+- Zero alteração em: `supabase/functions/processar-autos`, `mistral-ocr` compartilhado (não é importado pelo Previdenciário), Trabalhista, prompts, banco, schema, RLS.
+- Nenhum segredo é lido, logado ou retornado — apenas o status HTTP e o corpo já enviado pela Mistral.
+- Compatível com o estado atual de cota esgotada: o próximo upload mostrará a mensagem de `quota_exceeded` em vez do erro genérico, sem mudar comportamento de retry.
 
-Únicos campos interativos:
-- **Incapacidade para função habitual:** radio (Não há / Temporária já cessada / Temporária ainda presente / Permanente).
-- **Incapacidade para vida independente:** radio (mesmas 4 opções).
-
-## 5. Etapa 4 — Resumo (nova, IA, somente leitura)
-
-Campo grande mostrando os blocos de extração de exames gerados pela IA, **não editável**.
-
-**Adaptação do prompt do cliente ao nosso fluxo:** mantenho integralmente as regras de extração, campos obrigatórios, formato do bloco "EXTRAÇÃO DO LAUDO" e o "Trecho pronto para inserir no laudo pericial". O que muda é só o veículo de entrada — em vez de receber uma imagem por vez, a IA recebe o texto OCR completo do PDF (já produzido pelo Mistral na etapa atual de processamento), identifica cada laudo de exame distinto (US, TC, RX, RM, ENMG) presente no processo, e gera **um bloco por exame**, concatenados em ordem cronológica no campo Resumo. Regras anti-invenção, "[ilegível]", "não identificada", separação por exame e proibições (sem diagnóstico, sem conduta, sem nexo, sem incapacidade) ficam idênticas ao prompt original.
-
-Prompt registrado como `prompt_prev_resumo_exames` no `system_config` (editável no DevPrompts, como os demais).
-
-## 6. Exportação DOCX e PDF
-
-- Cabeçalho do processo no topo do documento (igual ao editor).
-- **Sem títulos/subtítulos visíveis** — texto corrido contínuo, em tom de continuação.
-- Comorbidades marcadas exibidas **em vermelho** dentro do parágrafo "Informa demais comorbidades: …".
-- Etapa 3 sai como os 4 parágrafos fixos seguidos das duas frases de incapacidade ("Apresenta incapacidade para sua função habitual: temporária ainda presente." etc.).
-- Etapa 4 sai com os blocos da IA já no formato do prompt (mantendo a estética de "EXTRAÇÃO DO LAUDO" do guia, mas sem markdown).
-- Campos "Outros" (estado civil/escolaridade) exportam o texto livre digitado, não a palavra "Outros".
-- `ExportStepsSelector` atualizado para as 4 etapas reais.
-
-## 7. Backend (`prev-pre-processar`)
-
-Após a unificação da queixa, dois ajustes:
-- Extração estendida para popular: `medicacoes_uso` (texto), `comorbidades_fixas` (12 booleanos), `pessoas_mesmo_teto` só quando `beneficio_pleiteado` for BPC/LOAS, e remoção do pré-preenchimento de `tempo_sem_trabalhar`.
-- Nova chamada LLM final usando `prompt_prev_resumo_exames` sobre o OCR completo (com `trimOcrPreservingTail` já existente), gerando o texto consolidado dos exames e gravando em `extracao.resumo_exames`.
-
-`mergeFromExtracao` passa a popular: queixa.medicacoes_uso, queixa.comorbidades_fixas, resumo.texto, identificacao.pessoas_mesmo_teto (condicional). Tempo_sem_trabalhar é removido do merge.
-
-## Detalhes técnicos
-
-**Schemas (`prelaudo-structure.ts`)**
-- `IdentificacaoData`: adicionar `estado_civil_outros`, `escolaridade_outros`. Manter campos de processo (consumidos pelo cabeçalho).
-- `QueixaData`: adicionar `medicacoes_uso: string`, `comorbidades_fixas: Record<ComorbidadeKey, boolean>`, `comorbidades_extras: Array<{ marcado: boolean; texto: string }>`.
-- Novo `ExameFisicoData`: `incap_funcao_habitual`, `incap_vida_independente`.
-- Novo `ResumoData`: `texto: string`.
-- `PRELAUDO_STEPS` reduzido a 4 itens (`identificacao`, `queixa`, `exame_fisico`, `resumo`). IDs antigos ficam no tipo apenas para retrocompat.
-
-**Componentes novos/alterados**
-- `components/ProcessoHeader.tsx` (novo): bloco editável no topo do `PrelaudoEditor`.
-- `Step01Identificacao.tsx`: remover telefone/endereço/processo, trocar campos por selects fixos com Popover "Outros".
-- `Step02Queixa.tsx`: bloco IA + 3 blocos novos (medicações, parágrafo fixo, comorbidades com checkboxes + extras).
-- `Step03ExameFisico.tsx` (novo): substitui `Step03Medicacao.tsx` na navegação.
-- `Step04Resumo.tsx` (novo): textarea desabilitada exibindo `resumo.texto`.
-- Arquivos `Step05..Step10` deixam de ser referenciados (não excluo para não criar regressão de build em outras telas).
-- `StepNav.tsx`: passa a iterar sobre os 4 steps.
-- `ExportStepsSelector.tsx`: lista reduzida a 4 IDs; localStorage migra automaticamente (filtro já descarta IDs inválidos).
-
-**Exportadores (`prelaudo-pdf.ts` e `prelaudo-docx.ts`)**
-- Renderização em parágrafos corridos (sem `H1/H2` visíveis).
-- Cabeçalho de processo no topo.
-- Helper para frase de comorbidades com runs em vermelho (`color: "C00000"` no DOCX; `setTextColor` no jsPDF).
-- Mapeamento de radios de incapacidade para frase pronta.
-
-**Edge function `prev-pre-processar`**
-- Atualizar `EXTRACAO_PROMPT` para pedir os novos campos (medicações, comorbidades_fixas como objeto booleano).
-- Detectar BPC/LOAS via regex no `beneficio_pleiteado` antes de aceitar `pessoas_mesmo_teto`.
-- Remover `tempo_sem_trabalhar` do schema esperado.
-- Adicionar terceira chamada LLM (`prompt_prev_resumo_exames`) reutilizando o cliente Lovable AI e o mesmo OCR; gravar resultado em `prev_extracao.dados.resumo_exames`.
-- Registrar o prompt via `system_config` (seed em runtime se ausente, como já fazemos para `prompt_prev_queixa_unificada`).
-
-**Registro no DevPrompts**
-- Adicionar `prompt_prev_resumo_exames` ao `prev-prompts-structure.ts` para aparecer corretamente sob o filtro Previdenciário.
+## Trabalhista (fora deste plano)
+A mesma estratégia é replicável em `processar-autos` / helper `mistral-ocr` compartilhado, mas exige revisar mais pontos de chamada e a UI de importação. Fica registrado como passo futuro, **não implementado agora**.
