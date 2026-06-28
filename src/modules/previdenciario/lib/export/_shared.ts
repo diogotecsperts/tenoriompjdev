@@ -177,3 +177,64 @@ export const resolveEnumValue = (value?: string, outros?: string): string => {
   if (v.toLowerCase() === "outros") return o || "Outros";
   return v;
 };
+
+// =====================================================================
+// "Prova escolar": listas (X)/( ) compartilhadas entre PDF e DOCX.
+// =====================================================================
+
+export interface OptionRow {
+  label: string;
+  marked: boolean;
+}
+
+/**
+ * Constrói a lista para exportação a partir das opções fixas e do valor
+ * selecionado. Quando `outrosTexto` é informado e a seleção é "Outros", a
+ * opção "Outros" é substituída por "Outros: <texto>". Se o valor selecionado
+ * não está nas opções fixas, é acrescentado como linha extra marcada.
+ */
+export const buildOptionRows = (
+  opcoes: readonly string[],
+  selected: string | undefined,
+  outrosTexto?: string,
+): OptionRow[] => {
+  const sel = (selected || "").trim();
+  const outros = (outrosTexto || "").trim();
+  const norm = (s: string) => s.toLowerCase();
+  const rows: OptionRow[] = opcoes.map((label) => {
+    const isOutros = norm(label) === "outros";
+    const marked = !!sel && norm(sel) === norm(label);
+    return {
+      label: isOutros && marked && outros ? `Outros: ${outros}` : label,
+      marked,
+    };
+  });
+  if (sel && !opcoes.some((o) => norm(o) === norm(sel))) {
+    rows.push({ label: sel, marked: true });
+  }
+  return rows;
+};
+
+/**
+ * Versão para listas com múltiplos marcados (comorbidades).
+ * `extras` são linhas adicionais livres (renderizadas se tiverem texto).
+ */
+export interface MultiOption { key: string; label: string }
+
+export const buildMultiOptionRows = (
+  opcoes: readonly MultiOption[],
+  marcados: Record<string, boolean | undefined>,
+  extras?: { marcado: boolean; texto: string }[],
+): OptionRow[] => {
+  const rows: OptionRow[] = opcoes.map((o) => ({
+    label: o.label,
+    marked: !!marcados[o.key],
+  }));
+  if (Array.isArray(extras)) {
+    for (const e of extras) {
+      const t = (e.texto || "").trim();
+      if (t) rows.push({ label: t, marked: !!e.marcado });
+    }
+  }
+  return rows;
+};

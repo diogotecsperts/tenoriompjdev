@@ -9,7 +9,8 @@ import type { PrelaudoData, StepId } from "../prelaudo-structure";
 import {
   ALL_STEP_IDS,
   COMORBIDADES_FIXAS,
-  COMORBIDADES_FIXAS_KEYS,
+  ESTADO_CIVIL_OPCOES,
+  ESCOLARIDADE_OPCOES,
   EXAME_FISICO_TEXTOS,
   INCAPACIDADE_LABEL,
 } from "../prelaudo-structure";
@@ -28,7 +29,9 @@ import {
   buildFilename,
   isFieldEmpty,
   stripLightMarkdown,
-  resolveEnumValue,
+  buildOptionRows,
+  buildMultiOptionRows,
+  type OptionRow,
 } from "./_shared";
 
 // ---------- Layout dinâmico ----------
@@ -186,36 +189,39 @@ const richParagraph = (doc: jsPDF, runs: Run[], y: number): number => {
   return y + LINE + 2;
 };
 
-// ---------- Builder da frase de comorbidades ----------
-function buildComorbidadesRuns(queixa: any): Run[] {
-  const fixas = queixa?.comorbidades_fixas || {};
-  const extras: { marcado: boolean; texto: string }[] = Array.isArray(
-    queixa?.comorbidades_extras,
-  )
-    ? queixa.comorbidades_extras
-    : [];
-  const marcadas: string[] = [];
-  for (const k of COMORBIDADES_FIXAS_KEYS) {
-    if (fixas[k]) {
-      const def = COMORBIDADES_FIXAS.find((c) => c.key === k)!;
-      marcadas.push(def.label);
-    }
+// ---------- "Prova escolar": título + lista (X)/( ) vertical ----------
+const optionsBlock = (doc: jsPDF, title: string, rows: OptionRow[], y: number): number => {
+  // Título
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+  y = checkNewPage(doc, y, LINE);
+  doc.text(`${title}:`, MARGINS.left, y);
+  y += LINE;
+  // Linhas
+  for (const r of rows) {
+    y = checkNewPage(doc, y, LINE);
+    const mark = r.marked ? "(X) " : "(  ) ";
+    const c = r.marked ? COLORS.red : COLORS.text;
+    doc.setFont("helvetica", r.marked ? "bold" : "normal");
+    doc.setTextColor(c.r, c.g, c.b);
+    const markW = doc.getTextWidth(mark);
+    doc.text(mark, MARGINS.left + 4, y);
+    // Quebra de linha para labels longos
+    const labelLines = doc.splitTextToSize(r.label, PAGE.contentWidth - 4 - markW);
+    labelLines.forEach((ln: string, idx: number) => {
+      if (idx > 0) {
+        y += LINE;
+        y = checkNewPage(doc, y, LINE);
+      }
+      doc.text(ln, MARGINS.left + 4 + markW, y);
+    });
+    y += LINE;
   }
-  for (const e of extras) {
-    if (e.marcado && e.texto?.trim()) marcadas.push(e.texto.trim());
-  }
-  const runs: Run[] = [{ text: "Informa demais comorbidades: " }];
-  if (marcadas.length === 0) {
-    runs.push({ text: "nenhuma referida." });
-    return runs;
-  }
-  marcadas.forEach((m, i) => {
-    runs.push({ text: m, color: COLORS.red });
-    if (i < marcadas.length - 1) runs.push({ text: ", " });
-  });
-  runs.push({ text: "." });
-  return runs;
-}
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+  return y + 2;
+};
 
 // ---------- Metadados públicos ----------
 export interface PrelaudoPdfMeta {
@@ -290,8 +296,18 @@ export const generatePrelaudoPdf = async (
     y = labeled(doc, "Data de nascimento", fmtDate(id.data_nascimento), y);
     y = labeled(doc, "Idade", id.idade || "", y);
     y = labeled(doc, "Sexo", id.sexo || "", y);
-    y = labeled(doc, "Estado civil", resolveEnumValue(id.estado_civil, id.estado_civil_outros), y);
-    y = labeled(doc, "Escolaridade", resolveEnumValue(id.escolaridade, id.escolaridade_outros), y);
+    y = optionsBlock(
+      doc,
+      "Estado civil",
+      buildOptionRows(ESTADO_CIVIL_OPCOES, id.estado_civil, id.estado_civil_outros),
+      y,
+    );
+    y = optionsBlock(
+      doc,
+      "Escolaridade",
+      buildOptionRows(ESCOLARIDADE_OPCOES, id.escolaridade, id.escolaridade_outros),
+      y,
+    );
     y = labeled(doc, "Profissão", id.profissao || "", y);
     y = labeled(doc, "Última atividade", id.ultima_atividade || "", y);
     y = labeled(doc, "Pessoas sob o mesmo teto", id.pessoas_mesmo_teto || "", y);
@@ -319,9 +335,17 @@ export const generatePrelaudoPdf = async (
       "Relata acompanhamento médico e realização regular de fisioterapia.",
       y,
     );
-    // Comorbidades (com runs em vermelho)
-    const comorbRuns = buildComorbidadesRuns(q);
-    y = richParagraph(doc, comorbRuns, y);
+    // Comorbidades — lista (X)/( ) com todas as opções, marcadas em vermelho
+    y = optionsBlock(
+      doc,
+      "Informa demais comorbidades",
+      buildMultiOptionRows(
+        COMORBIDADES_FIXAS,
+        (q.comorbidades_fixas || {}) as Record<string, boolean | undefined>,
+        Array.isArray(q.comorbidades_extras) ? q.comorbidades_extras : [],
+      ),
+      y,
+    );
     y += 2;
   }
 

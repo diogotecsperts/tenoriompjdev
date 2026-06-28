@@ -90,22 +90,24 @@ FORMATO DE SAÍDA (JSON puro, sem markdown, sem comentários):
     "irc": false,
     "ar": false
   },
-  /* comorbidades_fixas: marque true SOMENTE quando a comorbidade estiver
-     EXPLICITAMENTE descrita no processo (laudo, receita, anamnese, CID).
-     Mapeamento:
-       has = Hipertensão arterial sistêmica (CID I10);
-       dm2 = Diabetes mellitus tipo 2 (E11);
-       dislipidemia = Dislipidemia (E78);
-       hipotireoidismo = Hipotireoidismo (E03);
-       ansiedade = Transtorno de ansiedade (F41);
-       depressao = Transtorno depressivo (F32/F33);
-       fibromialgia = Fibromialgia (M79.7);
-       obesidade = Obesidade (E66);
-       cardiopatia = Cardiopatia / insuf. cardíaca / IAM prévio (I20-I25/I50);
-       dpoc = Doença pulmonar obstrutiva crônica (J44);
-       irc = Insuficiência renal crônica (N18);
-       ar = Artrite reumatoide (M05/M06).
-     NÃO inferir por sintoma; só marcar quando o nome ou o CID aparecer. */
+  /* comorbidades_fixas: marque true para CADA comorbidade EXPLICITAMENTE
+     descrita no processo (laudo, receita, anamnese, CID, exames).
+     É ESPERADO marcar várias quando o processo cita várias. Não invente:
+     se o processo não cita uma comorbidade, deixe false.
+     Mapeamento (sinônimos e CIDs também valem como menção explícita):
+       has = Hipertensão arterial sistêmica / HAS / "hipertenso" / I10;
+       dm2 = Diabetes mellitus tipo 2 / DM2 / "diabético" / E11;
+       dislipidemia = Dislipidemia / "colesterol alto" / E78;
+       hipotireoidismo = Hipotireoidismo / E03 / uso de levotiroxina;
+       ansiedade = Transtorno de ansiedade / ansiedade generalizada / F41;
+       depressao = Transtorno depressivo / depressão / F32 / F33;
+       fibromialgia = Fibromialgia / M79.7;
+       obesidade = Obesidade / IMC > 30 declarado / E66;
+       cardiopatia = Cardiopatia / insuf. cardíaca / IAM prévio / I20-I25 / I50;
+       dpoc = Doença pulmonar obstrutiva crônica / DPOC / J44;
+       irc = Insuficiência renal crônica / IRC / N18;
+       ar = Artrite reumatoide / AR / M05 / M06.
+     NÃO inferir por sintoma genérico (ex.: "dor lombar" não vira nada). */
   "cids_alegados": [],
   "tratamentos": "",
   "afastamentos": "",
