@@ -133,6 +133,13 @@ export default function PrelaudoEditor() {
           p.prev_extracao as Record<string, any>,
         );
         setData(initial);
+        const previousData = (p.prelaudo_data as PrelaudoData) ?? EMPTY_PRELAUDO;
+        if (
+          !previousData?.identificacao?.escolaridade &&
+          initial?.identificacao?.escolaridade
+        ) {
+          dirtyRef.current = true;
+        }
         getPauta(p.pauta_id).then(setPauta).catch(() => {});
       } catch (err: any) {
         toast({ variant: "destructive", title: "Erro", description: err.message });
