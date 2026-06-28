@@ -317,7 +317,7 @@ function inferEscolaridadeFromText(raw: unknown): string {
   return "";
 }
 
-function inferEscolaridadeFromParsed(parsed: any): string {
+function inferEscolaridadeFromParsed(parsed: any, ocrText?: string): string {
   const direct = normalizeEscolaridade(parsed?.identificacao?.escolaridade);
   if (direct) return direct;
 
@@ -339,6 +339,9 @@ function inferEscolaridadeFromParsed(parsed: any): string {
     const found = inferEscolaridadeFromText(candidate);
     if (found) return found;
   }
+
+  const fromOcr = inferEscolaridadeFromText(ocrText);
+  if (fromOcr) return fromOcr;
 
   return "";
 }
@@ -732,7 +735,7 @@ Deno.serve(async (req: Request) => {
       if (!parsed.identificacao || typeof parsed.identificacao !== "object") {
         parsed.identificacao = {};
       }
-      const escolaridade = inferEscolaridadeFromParsed(parsed);
+      const escolaridade = inferEscolaridadeFromParsed(parsed, ocrText);
       if (escolaridade) parsed.identificacao.escolaridade = escolaridade;
 
       // comorbidades_fixas: objeto com as 12 chaves booleanas
