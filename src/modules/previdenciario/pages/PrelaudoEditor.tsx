@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import {
   ArrowLeft,
   Loader2,
@@ -10,7 +9,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
-  Construction,
   FileDown,
   ArrowLeftRight,
   Scroll,
@@ -29,6 +27,7 @@ import {
   PRELAUDO_STEPS,
   EMPTY_PRELAUDO,
   ALL_STEP_IDS,
+  COMORBIDADES_FIXAS_KEYS,
   mergeFromExtracao,
   type PrelaudoData,
   type StepId,
@@ -36,16 +35,11 @@ import {
 import { StepNav } from "../components/StepNav";
 import { ExportStepsSelector } from "../components/ExportStepsSelector";
 import { PainelLateralProcesso } from "../components/PainelLateralProcesso";
+import { ProcessoHeader } from "../components/ProcessoHeader";
 import { Step01Identificacao } from "../components/steps/Step01Identificacao";
 import { Step02Queixa } from "../components/steps/Step02Queixa";
-import { Step03Medicacao } from "../components/steps/Step03Medicacao";
-import { Step04Acompanhamento } from "../components/steps/Step04Acompanhamento";
-import { Step05Comorbidades } from "../components/steps/Step05Comorbidades";
-import { Step06EstadoMental } from "../components/steps/Step06EstadoMental";
-import { Step07Ectoscopia } from "../components/steps/Step07Ectoscopia";
-import { Step08Ortopedico } from "../components/steps/Step08Ortopedico";
-import { Step09Cid } from "../components/steps/Step09Cid";
-import { Step10Conclusao } from "../components/steps/Step10Conclusao";
+import { Step03ExameFisico } from "../components/steps/Step03ExameFisico";
+import { Step04Resumo } from "../components/steps/Step04Resumo";
 
 const AUTOSAVE_MS = 900;
 const VIEW_MODE_STORAGE_KEY = "prev-prelaudo-view-mode";
@@ -77,8 +71,9 @@ export default function PrelaudoEditor() {
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [...ALL_STEP_IDS];
       const valid = new Set(ALL_STEP_IDS);
-      const filtered = parsed.filter((s): s is StepId => typeof s === "string" && valid.has(s as StepId));
-      // preserve canonical order
+      const filtered = parsed.filter(
+        (s): s is StepId => typeof s === "string" && valid.has(s as StepId),
+      );
       return ALL_STEP_IDS.filter((s) => filtered.includes(s));
     } catch {
       return [...ALL_STEP_IDS];
@@ -118,7 +113,6 @@ export default function PrelaudoEditor() {
       window.localStorage.setItem(EXPORT_STEPS_STORAGE_KEY, JSON.stringify(exportSteps));
     }
   }, [exportSteps]);
-
 
   // Load
   useEffect(() => {
@@ -171,7 +165,6 @@ export default function PrelaudoEditor() {
       const patch: Parameters<typeof updatePericia>[1] = {
         prelaudo_data: data as unknown as Record<string, any>,
       };
-      // Ao iniciar edição, marca como em_atendimento
       if (pericia.status === "aguardando") {
         patch.status = "em_atendimento" as any;
       }
@@ -218,7 +211,10 @@ export default function PrelaudoEditor() {
         : "";
       const meta = {
         periciado: pericia.periciado_nome || data.identificacao?.nome || "",
-        dataPericia: pauta?.data || new Date().toISOString().slice(0, 10),
+        dataPericia:
+          data.identificacao?.data_pericia ||
+          pauta?.data ||
+          new Date().toISOString().slice(0, 10),
         local: localStr,
         numeroProcesso: data.identificacao?.numero_processo || "",
       };
@@ -236,26 +232,17 @@ export default function PrelaudoEditor() {
     }
   };
 
-  // Steps completos = qualquer chave preenchida
+  // Cálculo de completude
   const completed = useMemo(() => {
     const s = new Set<StepId>();
     if (Object.values(data.identificacao || {}).some(Boolean)) s.add("identificacao");
-    if (Object.values(data.queixa || {}).some(Boolean)) s.add("queixa");
-    if ((data.medicacao?.itens?.length ?? 0) > 0 || data.medicacao?.observacoes) s.add("medicacao");
-    if (Object.values(data.acompanhamento || {}).some(Boolean)) s.add("acompanhamento");
-    if (
-      (data.comorbidades?.lista?.length ?? 0) > 0 ||
-      data.comorbidades?.texto ||
-      data.comorbidades?.cirurgias_previas ||
-      data.comorbidades?.internacoes ||
-      data.comorbidades?.historico_familiar
-    )
-      s.add("comorbidades");
-    if (Object.values(data.estado_mental || {}).some(Boolean)) s.add("estado_mental");
-    if (Object.values(data.ectoscopia || {}).some(Boolean)) s.add("ectoscopia");
-    if (Object.values(data.exame_ortopedico || {}).some(Boolean)) s.add("exame_ortopedico");
-    if ((data.cid?.itens?.length ?? 0) > 0 || data.cid?.observacoes) s.add("cid");
-    if (Object.values(data.conclusao || {}).some(Boolean)) s.add("conclusao");
+    const q = data.queixa || {};
+    const anyFixa = COMORBIDADES_FIXAS_KEYS.some((k) => !!q.comorbidades_fixas?.[k]);
+    const anyExtra = (q.comorbidades_extras ?? []).some((e) => e.marcado && e.texto.trim());
+    if (q.queixa_principal || q.medicacoes_uso || anyFixa || anyExtra) s.add("queixa");
+    const ex = data.exame_fisico || {};
+    if (ex.incap_funcao_habitual || ex.incap_vida_independente) s.add("exame_fisico");
+    if (data.resumo?.texto) s.add("resumo");
     return s;
   }, [data]);
 
@@ -291,7 +278,6 @@ export default function PrelaudoEditor() {
     setViewMode((prev) => (prev === "paginated" ? "infinite" : "paginated"));
   };
 
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -313,6 +299,9 @@ export default function PrelaudoEditor() {
 
   const aiSuggested = !!pericia.prev_extracao && Object.keys(pericia.prev_extracao).length > 0;
 
+  const updateIdentificacao = (patch: Partial<PrelaudoData["identificacao"]>) =>
+    setData((d) => ({ ...d, identificacao: { ...d.identificacao, ...patch } }));
+
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
       {/* Header */}
@@ -327,10 +316,15 @@ export default function PrelaudoEditor() {
         </Button>
         <div className="flex-1 min-w-0">
           <h1 className="text-base font-semibold text-foreground truncate">
-            {pericia.periciado_nome || <span className="italic text-muted-foreground">Sem nome</span>}
+            {pericia.periciado_nome || (
+              <span className="italic text-muted-foreground">Sem nome</span>
+            )}
           </h1>
           <div className="flex items-center gap-2 mt-0.5">
-            <Badge variant="outline" className={`text-[10px] ${PERICIA_STATUS_COLOR[pericia.status]}`}>
+            <Badge
+              variant="outline"
+              className={`text-[10px] ${PERICIA_STATUS_COLOR[pericia.status]}`}
+            >
               {PERICIA_STATUS_LABEL[pericia.status]}
             </Badge>
             {aiSuggested && (
@@ -355,7 +349,6 @@ export default function PrelaudoEditor() {
           )}
         </div>
 
-        {/* View Mode Toggle (mesmo padrão do módulo Trabalhista) */}
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -378,13 +371,8 @@ export default function PrelaudoEditor() {
           </Tooltip>
         </TooltipProvider>
 
-        <ExportStepsSelector
-          value={exportSteps}
-          onChange={setExportSteps}
-          disabled={exporting}
-        />
+        <ExportStepsSelector value={exportSteps} onChange={setExportSteps} disabled={exporting} />
 
-        {/* Export Button with Format Toggle (mesmo padrão do módulo Trabalhista) */}
         <div className="flex items-center">
           <Button
             variant="outline"
@@ -398,9 +386,7 @@ export default function PrelaudoEditor() {
             ) : (
               <FileDown className="h-4 w-4 mr-1.5" />
             )}
-            <span className="hidden sm:inline">
-              Baixar em {exportFormat.toUpperCase()}
-            </span>
+            <span className="hidden sm:inline">Baixar em {exportFormat.toUpperCase()}</span>
           </Button>
           <TooltipProvider>
             <Tooltip>
@@ -408,9 +394,7 @@ export default function PrelaudoEditor() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() =>
-                    setExportFormat((prev) => (prev === "pdf" ? "docx" : "pdf"))
-                  }
+                  onClick={() => setExportFormat((prev) => (prev === "pdf" ? "docx" : "pdf"))}
                   className="rounded-l-none px-2"
                   disabled={exporting}
                 >
@@ -440,11 +424,17 @@ export default function PrelaudoEditor() {
 
         <div ref={mainContentRef} className="flex-1 overflow-y-auto custom-scrollbar p-6">
           <div className="max-w-3xl mx-auto">
+            <div className="text-center mb-3">
+              <h2 className="text-sm font-bold tracking-wider text-primary">
+                PRÉ-LAUDO PERICIAL PREVIDENCIÁRIO
+              </h2>
+            </div>
+            <ProcessoHeader value={data.identificacao} onChange={updateIdentificacao} />
+
             {viewMode === "paginated" ? (
               <>
                 {renderStep(currentStep, data, setData)}
 
-                {/* Footer nav */}
                 <div className="mt-8 pt-4 border-t border-border flex items-center justify-between">
                   <Button
                     variant="outline"
@@ -457,7 +447,11 @@ export default function PrelaudoEditor() {
                   <span className="text-xs text-muted-foreground">
                     Etapa {currentDef.ordem} de {PRELAUDO_STEPS.length}
                   </span>
-                  <Button size="sm" onClick={goNext} disabled={currentIdx >= PRELAUDO_STEPS.length - 1}>
+                  <Button
+                    size="sm"
+                    onClick={goNext}
+                    disabled={currentIdx >= PRELAUDO_STEPS.length - 1}
+                  >
                     Próxima <ChevronRight className="h-4 w-4 ml-1" />
                   </Button>
                 </div>
@@ -465,11 +459,7 @@ export default function PrelaudoEditor() {
             ) : (
               <div className="space-y-10 pb-12">
                 {PRELAUDO_STEPS.filter((s) => s.implemented).map((s) => (
-                  <section
-                    key={s.id}
-                    id={`step-${s.id}`}
-                    className="scroll-mt-24 space-y-3"
-                  >
+                  <section key={s.id} id={`step-${s.id}`} className="scroll-mt-24 space-y-3">
                     <h2 className="text-lg font-semibold text-foreground border-b border-border pb-2">
                       {s.ordem}. {s.label}
                     </h2>
@@ -480,7 +470,6 @@ export default function PrelaudoEditor() {
             )}
           </div>
         </div>
-
 
         <PainelLateralProcesso
           extracao={pericia.prev_extracao as Record<string, any>}
@@ -513,82 +502,23 @@ function renderStep(
           onChange={(patch) => setData((d) => ({ ...d, queixa: { ...d.queixa, ...patch } }))}
         />
       );
-    case "medicacao":
+    case "exame_fisico":
       return (
-        <Step03Medicacao
-          value={data.medicacao}
+        <Step03ExameFisico
+          value={data.exame_fisico}
           onChange={(patch) =>
-            setData((d) => ({ ...d, medicacao: { ...d.medicacao, ...patch } }))
+            setData((d) => ({ ...d, exame_fisico: { ...d.exame_fisico, ...patch } }))
           }
         />
       );
-    case "acompanhamento":
+    case "resumo":
       return (
-        <Step04Acompanhamento
-          value={data.acompanhamento}
-          onChange={(patch) =>
-            setData((d) => ({ ...d, acompanhamento: { ...d.acompanhamento, ...patch } }))
-          }
-        />
-      );
-    case "comorbidades":
-      return (
-        <Step05Comorbidades
-          value={data.comorbidades}
-          onChange={(patch) =>
-            setData((d) => ({ ...d, comorbidades: { ...d.comorbidades, ...patch } }))
-          }
-        />
-      );
-    case "estado_mental":
-      return (
-        <Step06EstadoMental
-          value={data.estado_mental}
-          onChange={(patch) =>
-            setData((d) => ({ ...d, estado_mental: { ...d.estado_mental, ...patch } }))
-          }
-        />
-      );
-    case "ectoscopia":
-      return (
-        <Step07Ectoscopia
-          value={data.ectoscopia}
-          onChange={(patch) =>
-            setData((d) => ({ ...d, ectoscopia: { ...d.ectoscopia, ...patch } }))
-          }
-        />
-      );
-    case "exame_ortopedico":
-      return (
-        <Step08Ortopedico
-          value={data.exame_ortopedico}
-          onChange={(patch) =>
-            setData((d) => ({ ...d, exame_ortopedico: { ...d.exame_ortopedico, ...patch } }))
-          }
-        />
-      );
-    case "cid":
-      return (
-        <Step09Cid
-          value={data.cid}
-          onChange={(patch) => setData((d) => ({ ...d, cid: { ...d.cid, ...patch } }))}
-        />
-      );
-    case "conclusao":
-      return (
-        <Step10Conclusao
-          value={data.conclusao}
-          onChange={(patch) =>
-            setData((d) => ({ ...d, conclusao: { ...d.conclusao, ...patch } }))
-          }
+        <Step04Resumo
+          value={data.resumo}
+          onChange={(patch) => setData((d) => ({ ...d, resumo: { ...d.resumo, ...patch } }))}
         />
       );
     default:
-      return (
-        <Card className="p-8 text-center border-dashed">
-          <Construction className="h-10 w-10 text-amber-500 mx-auto mb-3" />
-          <p className="text-sm text-muted-foreground">Etapa em construção (Fase E).</p>
-        </Card>
-      );
+      return null;
   }
 }
