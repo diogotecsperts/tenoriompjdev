@@ -379,8 +379,22 @@ export function mergeFromExtracao(
   fill(base.identificacao, "data_nascimento", ident.data_nascimento);
   fill(base.identificacao, "idade", ident.idade);
   fill(base.identificacao, "sexo", ident.sexo);
-  fill(base.identificacao, "estado_civil", ident.estado_civil);
-  fill(base.identificacao, "escolaridade", ident.escolaridade);
+  // Estado civil + escolaridade passam por normalizadores: garantem que o
+  // valor caia em um dos rótulos fixos OU vire "Outros" + texto livre.
+  if (!base.identificacao.estado_civil && ident.estado_civil) {
+    const ec = normalizeEstadoCivil(ident.estado_civil);
+    if (ec.value) base.identificacao.estado_civil = ec.value;
+    if (ec.outros && !base.identificacao.estado_civil_outros) {
+      base.identificacao.estado_civil_outros = ec.outros;
+    }
+  }
+  if (!base.identificacao.escolaridade && ident.escolaridade) {
+    const es = normalizeEscolaridade(ident.escolaridade);
+    if (es.value) base.identificacao.escolaridade = es.value;
+    if (es.outros && !base.identificacao.escolaridade_outros) {
+      base.identificacao.escolaridade_outros = es.outros;
+    }
+  }
   fill(base.identificacao, "profissao", ident.profissao);
   fill(base.identificacao, "ultima_atividade", ident.ultima_atividade);
   // tempo_sem_trabalhar: NÃO pré-preencher (regra GUIA 23.06)
