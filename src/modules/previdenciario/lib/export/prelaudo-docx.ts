@@ -1,8 +1,7 @@
 /**
- * Export DOCX do Pré-Laudo Previdenciário.
- * "Esqueleto" (cabeçalho/rodapé/numeração/margens/fonte) idêntico ao
- * generateLaudoDOCX.ts do Trabalhista — sem importar nada dele.
- * Conteúdo: os 10 steps de PrelaudoData.
+ * Export DOCX do Pré-Laudo Previdenciário — versão GUIA 23.06.
+ * Texto corrido (sem títulos/subtítulos no corpo). Único título: "PRÉ-LAUDO
+ * PERICIAL PREVIDENCIÁRIO" no topo, seguido do cabeçalho de Dados do processo.
  */
 import {
   Document,
@@ -13,7 +12,6 @@ import {
   Footer,
   ImageRun,
   AlignmentType,
-  BorderStyle,
   PageNumber,
   HorizontalPositionRelativeFrom,
   VerticalPositionRelativeFrom,
@@ -21,13 +19,14 @@ import {
   TextWrappingType,
 } from "docx";
 import { saveAs } from "file-saver";
-import type {
-  PrelaudoData,
-  CidItem,
-  MedicacaoItem,
-  StepId,
+import type { PrelaudoData, StepId } from "../prelaudo-structure";
+import {
+  ALL_STEP_IDS,
+  COMORBIDADES_FIXAS,
+  COMORBIDADES_FIXAS_KEYS,
+  EXAME_FISICO_TEXTOS,
+  INCAPACIDADE_LABEL,
 } from "../prelaudo-structure";
-import { ALL_STEP_IDS } from "../prelaudo-structure";
 import {
   COLORS_HEX,
   FONT,
@@ -39,94 +38,74 @@ import {
   buildFilename,
   isFieldEmpty,
   stripLightMarkdown,
+  resolveEnumValue,
 } from "./_shared";
 
 // ---------- builders ----------
-const sectionTitle = (n: number, title: string) =>
-  new Paragraph({
-    children: [
-      new TextRun({
-        text: `${n}. ${title.toUpperCase()}`,
-        bold: true,
-        size: FONT.sizeTitle,
-        color: COLORS_HEX.primary,
-        font: FONT.name,
-      }),
-    ],
-    spacing: { before: 320, after: 160 },
-    border: {
-      bottom: { color: COLORS_HEX.primary, size: 6, style: BorderStyle.SINGLE, space: 1 },
-    },
-  });
-
-const subtitle = (text: string) =>
-  new Paragraph({
-    children: [
-      new TextRun({
-        text,
-        bold: true,
-        size: FONT.sizeSubtitle,
-        color: COLORS_HEX.secondary,
-        font: FONT.name,
-      }),
-    ],
-    spacing: { before: 160, after: 80 },
+const baseRun = (text: string, opts?: { bold?: boolean; italic?: boolean; color?: string }) =>
+  new TextRun({
+    text,
+    bold: opts?.bold,
+    italics: opts?.italic,
+    size: FONT.sizeDefault,
+    color: opts?.color || COLORS_HEX.text,
+    font: FONT.name,
   });
 
 const labeled = (label: string, value: string): Paragraph | null => {
   if (isFieldEmpty(value)) return null;
   return new Paragraph({
     children: [
-      new TextRun({
-        text: `${label}: `,
-        bold: true,
-        size: FONT.sizeDefault,
-        color: COLORS_HEX.text,
-        font: FONT.name,
-      }),
-      new TextRun({
-        text: stripLightMarkdown(value),
-        size: FONT.sizeDefault,
-        color: COLORS_HEX.text,
-        font: FONT.name,
-      }),
+      baseRun(`${label}: `, { bold: true }),
+      baseRun(stripLightMarkdown(value)),
     ],
     spacing: { after: 80 },
   });
 };
 
-const paragraph = (text: string): Paragraph | null => {
+const paragraph = (text: string, opts?: { italic?: boolean }): Paragraph | null => {
   if (isFieldEmpty(text)) return null;
   return new Paragraph({
-    children: [
-      new TextRun({
-        text: stripLightMarkdown(text),
-        size: FONT.sizeDefault,
-        color: COLORS_HEX.text,
-        font: FONT.name,
-      }),
-    ],
-    spacing: { after: 100 },
+    children: [baseRun(stripLightMarkdown(text), { italic: opts?.italic })],
+    spacing: { after: 120 },
     alignment: AlignmentType.JUSTIFIED,
   });
 };
 
-const emptyNote = () =>
-  new Paragraph({
-    children: [
-      new TextRun({
-        text: "— Não informado.",
-        italics: true,
-        size: FONT.sizeDefault,
-        color: COLORS_HEX.muted,
-        font: FONT.name,
-      }),
-    ],
-    spacing: { after: 100 },
+// Frase de comorbidades com runs em vermelho para as marcadas
+const comorbidadesParagraph = (queixa: any): Paragraph => {
+  const fixas = queixa?.comorbidades_fixas || {};
+  const extras: { marcado: boolean; texto: string }[] = Array.isArray(
+    queixa?.comorbidades_extras,
+  )
+    ? queixa.comorbidades_extras
+    : [];
+  const marcadas: string[] = [];
+  for (const k of COMORBIDADES_FIXAS_KEYS) {
+    if (fixas[k]) {
+      const def = COMORBIDADES_FIXAS.find((c) => c.key === k)!;
+      marcadas.push(def.label);
+    }
+  }
+  for (const e of extras) {
+    if (e.marcado && e.texto?.trim()) marcadas.push(e.texto.trim());
+  }
+  const children: TextRun[] = [baseRun("Informa demais comorbidades: ")];
+  if (marcadas.length === 0) {
+    children.push(baseRun("nenhuma referida."));
+  } else {
+    marcadas.forEach((m, i) => {
+      children.push(baseRun(m, { color: COLORS_HEX.red }));
+      if (i < marcadas.length - 1) children.push(baseRun(", "));
+    });
+    children.push(baseRun("."));
+  }
+  return new Paragraph({
+    children,
+    spacing: { after: 140 },
+    alignment: AlignmentType.JUSTIFIED,
   });
-
-const hasAny = (obj: any) =>
-  obj && Object.values(obj).some((v) => (Array.isArray(v) ? v.length > 0 : !!v));
+};
 
 // ---------- Metadados ----------
 export interface PrelaudoDocxMeta {
@@ -145,19 +124,17 @@ export const generatePrelaudoDocx = async (
   includedSteps?: StepId[],
 ): Promise<Blob> => {
   const included = new Set<StepId>(includedSteps ?? ALL_STEP_IDS);
-  let sectionNo = 0;
-  const nextN = () => ++sectionNo;
-
+  const id = data.identificacao || {};
   const paragraphs: Paragraph[] = [];
 
-  // ----- Cabeçalho do documento (interno, não é o banner) -----
+  // Título único
   paragraphs.push(
     new Paragraph({
       children: [
         new TextRun({
           text: "PRÉ-LAUDO PERICIAL PREVIDENCIÁRIO",
           bold: true,
-          size: 28, // 14pt
+          size: 28,
           color: COLORS_HEX.primary,
           font: FONT.name,
         }),
@@ -166,245 +143,119 @@ export const generatePrelaudoDocx = async (
       spacing: { before: 200, after: 200 },
     }),
   );
+
+  // ----- Cabeçalho fixo: Dados do processo -----
   const peritoLine = buildPeritoIdLine({
     peritoNome: meta.peritoNome,
     peritoCRM: meta.peritoCRM,
   });
   [
+    labeled("Nº do processo", id.numero_processo || meta.numeroProcesso || ""),
+    labeled("Vara", id.vara || ""),
+    labeled("Comarca", id.comarca || ""),
+    labeled("Data da perícia", fmtDate(id.data_pericia || meta.dataPericia)),
+    labeled("Benefício pleiteado", id.beneficio_pleiteado || ""),
     labeled("Local", meta.local || ""),
-    labeled("Data da perícia", fmtDate(meta.dataPericia)),
-    labeled("Nº do processo", meta.numeroProcesso || ""),
     peritoLine ? labeled("Identificação", peritoLine) : null,
   ].forEach((p) => p && paragraphs.push(p));
-  paragraphs.push(new Paragraph({ spacing: { after: 200 } }));
+  paragraphs.push(new Paragraph({ spacing: { after: 160 } }));
 
-  // Helper para empilhar seção
-  const pushSection = (n: number, title: string, items: (Paragraph | null)[]) => {
-    paragraphs.push(sectionTitle(n, title));
-    const real = items.filter((p): p is Paragraph => !!p);
-    if (real.length === 0) paragraphs.push(emptyNote());
-    else paragraphs.push(...real);
-  };
-
-  // ----- 1. Identificação -----
+  // ===== 1) Identificação =====
   if (included.has("identificacao")) {
-    const id = data.identificacao || {};
-    pushSection(nextN(), "Identificação", [
+    [
       labeled("Nome", id.nome || ""),
       labeled("CPF", id.cpf || ""),
       labeled("RG", id.rg || ""),
       labeled("Data de nascimento", fmtDate(id.data_nascimento)),
       labeled("Idade", id.idade || ""),
       labeled("Sexo", id.sexo || ""),
-      labeled("Estado civil", id.estado_civil || ""),
-      labeled("Escolaridade", id.escolaridade || ""),
+      labeled("Estado civil", resolveEnumValue(id.estado_civil, id.estado_civil_outros)),
+      labeled("Escolaridade", resolveEnumValue(id.escolaridade, id.escolaridade_outros)),
       labeled("Profissão", id.profissao || ""),
       labeled("Última atividade", id.ultima_atividade || ""),
-      labeled("Endereço", id.endereco || ""),
-      labeled("Telefone", id.telefone || ""),
-    ]);
-    if (id.numero_processo || id.vara || id.comarca || id.beneficio_pleiteado) {
-      paragraphs.push(subtitle("Dados do processo"));
-      [
-        labeled("Nº do processo", id.numero_processo || ""),
-        labeled("Vara", id.vara || ""),
-        labeled("Comarca", id.comarca || ""),
-        labeled("Benefício pleiteado", id.beneficio_pleiteado || ""),
-      ].forEach((p) => p && paragraphs.push(p));
-    }
+      labeled("Pessoas sob o mesmo teto", id.pessoas_mesmo_teto || ""),
+      labeled("Tempo sem trabalhar", id.tempo_sem_trabalhar || ""),
+    ].forEach((p) => p && paragraphs.push(p));
+    paragraphs.push(new Paragraph({ spacing: { after: 100 } }));
   }
 
-  // ----- 2. Queixa -----
+  // ===== 2) Queixa principal + medicações + comorbidades =====
   if (included.has("queixa")) {
     const q = data.queixa || {};
-    pushSection(nextN(), "Queixa principal", [
-      paragraph(q.queixa_principal || ""),
-      labeled("Início dos sintomas", q.inicio_sintomas || ""),
-      labeled("Evolução", q.evolucao || ""),
-      labeled("Lateralidade", q.lateralidade || ""),
-      labeled("Fatores agravantes", q.fatores_agravantes || ""),
-    ]);
+    const queixaPar = paragraph(q.queixa_principal || "");
+    if (queixaPar) paragraphs.push(queixaPar);
+
+    if (q.medicacoes_uso && q.medicacoes_uso.trim()) {
+      const medPar = paragraph(
+        `Para os sintomas referidos, informa uso contínuo de medicações: ${q.medicacoes_uso.trim()}`,
+      );
+      if (medPar) paragraphs.push(medPar);
+    }
+
+    const fixedPar = paragraph(
+      "Relata acompanhamento médico e realização regular de fisioterapia.",
+    );
+    if (fixedPar) paragraphs.push(fixedPar);
+
+    paragraphs.push(comorbidadesParagraph(q));
   }
 
-  // ----- 3. Medicação -----
-  if (included.has("medicacao")) {
-    const meds = data.medicacao?.itens ?? [];
-    paragraphs.push(sectionTitle(nextN(), "Medicação em uso"));
-    if (meds.length === 0 && !data.medicacao?.observacoes) paragraphs.push(emptyNote());
-    else {
-      meds.forEach((m: MedicacaoItem) => {
-        const parts = [m.nome, m.dose, m.frequencia].filter(Boolean).join(" — ");
-        const status = m.em_uso === false ? " (suspensa)" : "";
-        const p = paragraph(`• ${parts}${status}`);
-        if (p) paragraphs.push(p);
-      });
-      const obs = labeled("Observações", data.medicacao?.observacoes || "");
-      if (obs) paragraphs.push(obs);
+  // ===== 3) Exame físico (fixo + incapacidades) =====
+  if (included.has("exame_fisico")) {
+    [
+      paragraph(EXAME_FISICO_TEXTOS.estado_mental),
+      paragraph(EXAME_FISICO_TEXTOS.ectoscopia),
+      paragraph(EXAME_FISICO_TEXTOS.inspecao_dinamica),
+      paragraph(EXAME_FISICO_TEXTOS.complementacao),
+    ].forEach((p) => p && paragraphs.push(p));
+
+    const ex = data.exame_fisico || {};
+    const fh = INCAPACIDADE_LABEL[ex.incap_funcao_habitual ?? ""];
+    const vi = INCAPACIDADE_LABEL[ex.incap_vida_independente ?? ""];
+    if (fh) {
+      const p = paragraph(`Apresenta, para a sua função habitual: ${fh}.`);
+      if (p) paragraphs.push(p);
+    }
+    if (vi) {
+      const p = paragraph(`Apresenta, para a vida independente: ${vi}.`);
+      if (p) paragraphs.push(p);
     }
   }
 
-  // ----- 4. Acompanhamento -----
-  if (included.has("acompanhamento")) {
-    const a = data.acompanhamento || {};
-    pushSection(nextN(), "Acompanhamento médico", [
-      labeled(
-        "Faz acompanhamento",
-        a.faz_acompanhamento === "sim" ? "Sim" : a.faz_acompanhamento === "nao" ? "Não" : "",
-      ),
-      labeled("Especialistas", a.especialistas || ""),
-      labeled("Frequência", a.frequencia || ""),
-      labeled("Última consulta", a.ultima_consulta || ""),
-      labeled("Observações", a.observacoes || ""),
-    ]);
-  }
-
-  // ----- 5. Comorbidades -----
-  if (included.has("comorbidades")) {
-    const c = data.comorbidades || {};
-    pushSection(nextN(), "Comorbidades", [
-      c.lista && c.lista.length > 0 ? paragraph(c.lista.join(" • ")) : null,
-      paragraph(c.texto || ""),
-      labeled("Cirurgias prévias", c.cirurgias_previas || ""),
-      labeled("Internações", c.internacoes || ""),
-      labeled("Histórico familiar", c.historico_familiar || ""),
-    ]);
-  }
-
-  // ----- 6. Estado mental -----
-  if (included.has("estado_mental")) {
-    const em = data.estado_mental || {};
-    pushSection(nextN(), "Estado mental", [
-      labeled("Orientação", em.orientacao || ""),
-      labeled("Humor", em.humor || ""),
-      labeled("Afeto", em.afeto || ""),
-      labeled("Pensamento", em.pensamento || ""),
-      labeled("Memória", em.memoria || ""),
-      labeled("Atenção", em.atencao || ""),
-      labeled("Juízo e crítica", em.juizo_critica || ""),
-      labeled("Observações", em.observacoes || ""),
-    ]);
-  }
-
-  // ----- 7. Ectoscopia -----
-  if (included.has("ectoscopia")) {
-    const ec = data.ectoscopia || {};
-    pushSection(nextN(), "Ectoscopia / Exame geral", [
-      labeled("Estado geral", ec.estado_geral || ""),
-      labeled("Hidratação", ec.hidratacao || ""),
-      labeled("Corado", ec.corado || ""),
-      labeled("Acianótico", ec.acianotico || ""),
-      labeled("Anictérico", ec.anicterico || ""),
-      labeled("Marcha", ec.marcha || ""),
-      labeled("Postura", ec.postura || ""),
-      labeled("Peso", ec.peso || ""),
-      labeled("Altura", ec.altura || ""),
-      labeled("IMC", ec.imc || ""),
-      labeled("Pressão arterial", ec.pressao_arterial || ""),
-      labeled("Observações", ec.observacoes || ""),
-    ]);
-  }
-
-  // ----- 8. Ortopédico -----
-  if (included.has("exame_ortopedico")) {
-    const ort = data.exame_ortopedico || {};
-    pushSection(nextN(), "Exame ortopédico", [
-      labeled("Segmento avaliado", ort.segmento_avaliado || ""),
-      labeled("Inspeção", ort.inspecao || ""),
-      labeled("Palpação", ort.palpacao || ""),
-      labeled("Amplitude de movimento", ort.amplitude_movimento || ""),
-      labeled("Força muscular", ort.forca_muscular || ""),
-      labeled("Reflexos", ort.reflexos || ""),
-      labeled("Testes especiais", ort.testes_especiais || ""),
-      labeled("Manobras", ort.manobras || ""),
-      labeled("Observações", ort.observacoes || ""),
-    ]);
-  }
-
-  // ----- 9. CID -----
-  if (included.has("cid")) {
-    paragraphs.push(sectionTitle(nextN(), "CID-10"));
-    const cid = data.cid;
-    if (!cid?.itens || cid.itens.length === 0) paragraphs.push(emptyNote());
-    else {
-      cid.itens.forEach((it: CidItem) => {
-        const prefix = it.principal ? "★ " : "• ";
-        const desc = it.descricao ? ` — ${it.descricao}` : "";
-        const p = paragraph(`${prefix}${it.codigo}${desc}`);
+  // ===== 4) Resumo (texto fixo gerado pela IA) =====
+  if (included.has("resumo")) {
+    const resumo = (data.resumo?.texto || "").trim();
+    if (resumo) {
+      for (const block of resumo.split(/\n{2,}/)) {
+        const p = paragraph(block.replace(/\n/g, " "));
         if (p) paragraphs.push(p);
-      });
-      const obs = labeled("Observações", cid.observacoes || "");
-      if (obs) paragraphs.push(obs);
+      }
     }
-  }
-
-  // ----- 10. Conclusão -----
-  if (included.has("conclusao")) {
-    const con = data.conclusao || {};
-    const nexoMap: Record<string, string> = { sim: "Sim", nao: "Não", parcial: "Parcial" };
-    const incMap: Record<string, string> = { total: "Total", parcial: "Parcial", ausente: "Ausente" };
-    const tempMap: Record<string, string> = { temporaria: "Temporária", permanente: "Permanente" };
-    pushSection(nextN(), "Conclusão", [
-      labeled("Diagnóstico", con.diagnostico || ""),
-      labeled("Nexo causal", nexoMap[con.nexo_causal || ""] || ""),
-      labeled("Justificativa do nexo", con.nexo_justificativa || ""),
-      labeled("Incapacidade", incMap[con.incapacidade || ""] || ""),
-      labeled("Temporalidade", tempMap[con.temporalidade || ""] || ""),
-      labeled("Data de início da incapacidade (DII)", fmtDate(con.data_inicio_incapacidade)),
-      labeled("Prazo para reavaliação", con.prazo_reavaliacao || ""),
-      labeled(
-        "Reabilitação indicada",
-        con.reabilitacao_indicada === "sim" ? "Sim" : con.reabilitacao_indicada === "nao" ? "Não" : "",
-      ),
-      labeled("Considerações finais", con.consideracoes_finais || ""),
-    ]);
   }
 
   // ----- Assinatura -----
   paragraphs.push(new Paragraph({ spacing: { before: 600 } }));
   paragraphs.push(
     new Paragraph({
-      children: [
-        new TextRun({
-          text: "________________________________________",
-          size: FONT.sizeDefault,
-          color: COLORS_HEX.text,
-          font: FONT.name,
-        }),
-      ],
+      children: [baseRun("________________________________________")],
       alignment: AlignmentType.CENTER,
     }),
   );
   paragraphs.push(
     new Paragraph({
-      children: [
-        new TextRun({
-          text: meta.peritoNome || "Perito médico",
-          bold: true,
-          size: FONT.sizeDefault,
-          color: COLORS_HEX.text,
-          font: FONT.name,
-        }),
-      ],
+      children: [baseRun(meta.peritoNome || "Perito médico", { bold: true })],
       alignment: AlignmentType.CENTER,
       spacing: { before: 80 },
     }),
   );
   paragraphs.push(
     new Paragraph({
-      children: [
-        new TextRun({
-          text: "Médico Perito Judicial",
-          italics: true,
-          size: FONT.sizeDefault,
-          color: COLORS_HEX.muted,
-          font: FONT.name,
-        }),
-      ],
+      children: [baseRun("Médico Perito Judicial", { italic: true, color: COLORS_HEX.muted })],
       alignment: AlignmentType.CENTER,
     }),
   );
 
-  // ========== Banner topo/rodapé (idêntico ao Trabalhista) ==========
+  // ========== Banner topo/rodapé ==========
   const headerBuffer = await loadImageAsArrayBuffer("/timbrado-cabecalho.png");
   const footerBuffer = await loadImageAsArrayBuffer("/timbrado-rodape.png");
   let headerDimensions = { width: 595, height: 89 };

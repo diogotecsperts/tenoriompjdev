@@ -1,34 +1,33 @@
 /**
  * Helpers compartilhados entre os exports de PDF e DOCX do Pré-Laudo Previdenciário.
  * Vive 100% dentro do módulo — não importa nada de src/utils/* nem do Trabalhista.
- * Tudo aqui é uma cópia adaptada para garantir paridade VISUAL com o documento do
- * Trabalhista (mesmo cabeçalho, rodapé, fonte, margens, numeração) sem acoplar
- * código entre os dois módulos.
  */
 
-// ---------- Paleta institucional (igual ao Trabalhista) ----------
+// ---------- Paleta institucional ----------
 export const COLORS = {
-  primary: { r: 27, g: 54, b: 101 },   // #1B3665
-  secondary: { r: 31, g: 41, b: 55 },  // #1F2937
-  text: { r: 31, g: 41, b: 55 },
-  muted: { r: 75, g: 85, b: 99 },      // #4B5563
-  white: { r: 255, g: 255, b: 255 },
+  primary:   { r: 27, g: 54,  b: 101 },   // #1B3665
+  secondary: { r: 31, g: 41,  b: 55  },   // #1F2937
+  text:      { r: 31, g: 41,  b: 55  },
+  muted:     { r: 75, g: 85,  b: 99  },   // #4B5563
+  red:       { r: 192, g: 0,  b: 0   },   // C00000 — grifo das comorbidades
+  white:     { r: 255, g: 255, b: 255 },
 };
 
 export const COLORS_HEX = {
-  primary: "1B3665",
+  primary:   "1B3665",
   secondary: "1F2937",
-  text: "1F2937",
-  muted: "4B5563",
+  text:      "1F2937",
+  muted:     "4B5563",
+  red:       "C00000",
 };
 
-// ---------- Tipografia (Arial / Helvetica) ----------
+// ---------- Tipografia ----------
 export const FONT = {
   name: "Arial",
-  sizeDefault: 20,   // half-points → 10pt
-  sizeTitle: 24,     // 12pt
-  sizeSubtitle: 22,  // 11pt
-  sizeSmall: 16,     // 8pt
+  sizeDefault:  20, // 10pt
+  sizeTitle:    24, // 12pt
+  sizeSubtitle: 22, // 11pt
+  sizeSmall:    16, // 8pt
 };
 
 // ---------- Página A4 ----------
@@ -38,10 +37,8 @@ export const PAGE = { width: 210, height: 297, contentWidth: 175 };
 export const HEADER_SAFETY_MARGIN = 6;
 export const FOOTER_SAFETY_MARGIN = 12;
 
-// EMUs para imagens floating no DOCX (1mm ≈ 36000 EMUs)
 export const MM_TO_EMU = 36000;
 
-// ---------- Layout dinâmico do PDF ----------
 export interface PageLayout {
   headerBottomY: number;
   footerTopY: number;
@@ -97,7 +94,7 @@ export const getImageDimensions = (src: string): Promise<{ width: number; height
     img.src = src;
   });
 
-// ---------- Identificação do perito (igual ao Trabalhista) ----------
+// ---------- Identificação do perito ----------
 export interface PeritoMeta {
   peritoNome?: string;
   peritoCRM?: string;
@@ -143,7 +140,6 @@ export const buildFilename = (
   return `prelaudo-previdenciario-${proc}-${periciado}.${ext}`;
 };
 
-// ---------- Cleanup de placeholders e markdown leve ----------
 const PLACEHOLDER_PATTERNS = [
   /\[INSERIR/i,
   /^\s*\[.{3,}\]\s*$/,
@@ -171,3 +167,13 @@ export const stripLightMarkdown = (text: string): string =>
     .replace(/`(.+?)`/g, "$1")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+
+/**
+ * Resolve o texto exibido de Estado Civil / Escolaridade considerando "Outros".
+ */
+export const resolveEnumValue = (value?: string, outros?: string): string => {
+  const v = (value || "").trim();
+  const o = (outros || "").trim();
+  if (v.toLowerCase() === "outros") return o || "Outros";
+  return v;
+};

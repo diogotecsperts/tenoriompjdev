@@ -43,13 +43,22 @@ FORMATO DE SAÍDA (JSON puro, sem markdown, sem comentários):
     "escolaridade": "",
     "profissao": "",
     "ultima_atividade": "",
-    "endereco": "",
-    "telefone": "",
-    "tempo_sem_trabalhar": "",
     "pessoas_mesmo_teto": ""
   },
-  /* tempo_sem_trabalhar: tempo afastado do trabalho conforme relato/documentos (ex: "8 meses", "desde 03/2024"). Vazio se não houver menção explícita. NÃO inventar.
-     pessoas_mesmo_teto: nº/descrição das pessoas que residem com o periciado (ex: "3 pessoas: esposa e dois filhos"). Vazio se não houver menção. NÃO inventar. */
+  /* REGRAS de identificacao:
+     - tempo_sem_trabalhar: NÃO extrair. Este campo é preenchido manualmente pelo perito.
+     - pessoas_mesmo_teto: SOMENTE preencher se o benefício pleiteado for BPC/LOAS
+       (Benefício de Prestação Continuada / amparo assistencial). Em todos os outros
+       benefícios (auxílio-doença, aposentadoria por invalidez, etc.), deixe "".
+       Quando aplicável, descrever brevemente, ex.: "3 pessoas: esposa e dois filhos".
+     - estado_civil: usar SOMENTE um destes valores literais, quando explícito no
+       processo: "União estável", "Solteiro(a)", "Casado(a)", "Divorciado(a)",
+       "Viúvo(a)". Se não estiver explícito, "".
+     - escolaridade: usar SOMENTE um destes valores literais, quando explícito:
+       "Analfabeto", "Ensino fundamental incompleto", "Ensino fundamental completo",
+       "Ensino médio incompleto", "Ensino médio completo",
+       "Ensino superior incompleto", "Ensino superior completo". Se não estiver
+       explícito, "". */
   "processo": {
     "numero": "",
     "vara": "",
@@ -62,6 +71,40 @@ FORMATO DE SAÍDA (JSON puro, sem markdown, sem comentários):
   "queixa_principal": "",
   "comorbidades": "",
   "medicacoes": [],
+  "medicacoes_uso": "",
+  /* medicacoes_uso: TEXTO CORRIDO com as medicações de uso contínuo declaradas
+     pelo periciado/processo, separadas por vírgula (ex.: "Losartana 50mg 1x/dia,
+     Metformina 850mg 2x/dia, Dipirona se dor"). Vazio se não houver. */
+  "comorbidades_fixas": {
+    "has": false,
+    "dm2": false,
+    "dislipidemia": false,
+    "hipotireoidismo": false,
+    "ansiedade": false,
+    "depressao": false,
+    "fibromialgia": false,
+    "obesidade": false,
+    "cardiopatia": false,
+    "dpoc": false,
+    "irc": false,
+    "ar": false
+  },
+  /* comorbidades_fixas: marque true SOMENTE quando a comorbidade estiver
+     EXPLICITAMENTE descrita no processo (laudo, receita, anamnese, CID).
+     Mapeamento:
+       has = Hipertensão arterial sistêmica (CID I10);
+       dm2 = Diabetes mellitus tipo 2 (E11);
+       dislipidemia = Dislipidemia (E78);
+       hipotireoidismo = Hipotireoidismo (E03);
+       ansiedade = Transtorno de ansiedade (F41);
+       depressao = Transtorno depressivo (F32/F33);
+       fibromialgia = Fibromialgia (M79.7);
+       obesidade = Obesidade (E66);
+       cardiopatia = Cardiopatia / insuf. cardíaca / IAM prévio (I20-I25/I50);
+       dpoc = Doença pulmonar obstrutiva crônica (J44);
+       irc = Insuficiência renal crônica (N18);
+       ar = Artrite reumatoide (M05/M06).
+     NÃO inferir por sintoma; só marcar quando o nome ou o CID aparecer. */
   "cids_alegados": [],
   "tratamentos": "",
   "afastamentos": "",
@@ -83,6 +126,7 @@ REGRAS:
 
 TEXTO OCR DO PROCESSO:
 \${ocrText}`;
+
 
 const SYSTEM_PROMPT =
   'Você extrai dados objetivos de processos judiciais previdenciários e devolve APENAS JSON válido, sem markdown e sem texto adicional. É proibido usar a expressão "IA".';
@@ -316,6 +360,85 @@ async function gerarQueixaUnificada(args: {
   return sanitizeQueixa(resp?.text || "");
 }
 
+// ============================================================
+// Resumo de Exames Complementares (3ª passada IA)
+// ============================================================
+
+const RESUMO_SYSTEM_PROMPT =
+  'Você é médico perito judicial. Retorne APENAS os blocos de "EXTRAÇÃO DO LAUDO" em português, sem markdown, sem comentários e sem a palavra "IA". Se não houver nenhum laudo de exame complementar identificável, retorne string vazia.';
+
+const DEFAULT_RESUMO_PROMPT = `Você é médico perito judicial. Sua tarefa é LOCALIZAR, dentro do TEXTO OCR DO PROCESSO abaixo, TODOS os laudos de exames complementares descritos (ex.: ultrassonografia, raio-X, tomografia computadorizada, ressonância magnética, eletroneuromiografia, densitometria, ecocardiograma, ecodoppler, endoscopia, colonoscopia, EEG, e laudos médicos de especialistas que contenham achados objetivos) e PRODUZIR um bloco de extração para cada laudo encontrado.
+
+REGRAS GERAIS:
+1. Apenas EXTRAIR. Não interpretar, não diagnosticar, não emitir conduta, não sugerir tratamento.
+2. NUNCA inventar achados, datas ou tipos de exame. Se a informação não está no texto, OMITA.
+3. Português brasileiro, técnico, objetivo, sem floreios.
+4. PROIBIDO usar markdown, bullets, títulos hierárquicos ("###", "**", etc.) ou a palavra "IA".
+5. Mantenha terminologia médica original do laudo (não simplificar).
+6. Ignore documentos que NÃO sejam laudos de exame (procurações, petições, contracheques, ofícios, decisões, atestados sem achados objetivos).
+7. Se o mesmo exame aparecer repetido, considerar apenas a versão mais completa.
+
+FORMATO OBRIGATÓRIO de cada bloco (texto puro, exatamente assim):
+
+EXTRAÇÃO DO LAUDO — [TIPO DO EXAME] ([SEGMENTO/REGIÃO se houver]) — [DATA AAAA-MM-DD ou "data não informada"]
+Achados: [descrever os achados objetivos do laudo, em frase corrida, mantendo a terminologia original].
+Impressão diagnóstica do laudo: [transcrever a conclusão/impressão diagnóstica do próprio laudo, se houver; caso contrário, omitir esta linha].
+
+REGRAS DE CONCATENAÇÃO:
+- Separe cada bloco por UMA linha em branco.
+- Ordene os blocos por data crescente quando houver data; laudos sem data vão ao final.
+- Se NENHUM laudo de exame complementar for identificado no processo, retorne string VAZIA (não escreva "nenhum laudo encontrado", não escreva nada).
+
+TEXTO OCR DO PROCESSO:
+\${ocrText}
+
+Retorne SOMENTE os blocos no formato acima, concatenados, sem introdução e sem comentários.`;
+
+function sanitizeResumo(raw: string): string {
+  if (!raw) return "";
+  let t = raw.trim();
+  t = t.replace(/^```[a-z]*\s*/i, "").replace(/```\s*$/, "");
+  t = t.replace(/^#{1,6}\s+/gm, "");
+  t = t.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\*([^*]+)\*/g, "$1");
+  t = t.replace(/__([^_]+)__/g, "$1");
+  t = t.replace(/\n{3,}/g, "\n\n").trim();
+  if (/\bIA\b/.test(t)) return "";
+  if (t.length < 30) return "";
+  return t;
+}
+
+async function gerarResumoExames(args: {
+  aiConfig: any;
+  userId: string;
+  ocrText: string;
+}): Promise<string> {
+  // Resumo precisa do OCR completo (vários laudos costumam estar espalhados).
+  // Reaproveita o trimming preservando cauda já aplicado upstream.
+  if (args.ocrText.replace(/\s/g, "").length < 200) return "";
+
+  const userPrompt = await getPrompt(
+    "prompt_prev_resumo_exames",
+    DEFAULT_RESUMO_PROMPT,
+    { ocrText: args.ocrText },
+    {
+      description: "PREV: Resumo de Exames Complementares (extração técnica de laudos)",
+      cardId: "previdenciario",
+      sectionId: "resumo",
+    },
+  );
+
+  const resp = await callAI(args.aiConfig, RESUMO_SYSTEM_PROMPT, userPrompt, {
+    userId: args.userId,
+    promptType: "prev_resumo_exames",
+    maxOutputTokens: 4000,
+    jsonMode: false,
+  });
+
+  return sanitizeResumo(resp?.text || "");
+}
+
+
+
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -478,6 +601,17 @@ Deno.serve(async (req: Request) => {
       console.warn("[prev-pre-processar] queixa unificada falhou (não-fatal):", e);
     }
 
+    // 5b) Resumo de Exames Complementares (terceira passada IA, não-fatal)
+    let resumoExames = "";
+    try {
+      resumoExames = await gerarResumoExames({ aiConfig, userId, ocrText });
+      if (resumoExames) {
+        parsed.resumo_exames = resumoExames;
+      }
+    } catch (e) {
+      console.warn("[prev-pre-processar] resumo de exames falhou (não-fatal):", e);
+    }
+
     // 6) Persistência: prev_extracao + status + documentos
     const extracao = {
       ...parsed,
@@ -488,9 +622,11 @@ Deno.serve(async (req: Request) => {
         ai_model: aiResp.model,
         used_fallback: aiResp.usedFallback,
         queixa_unificada_ok: !!queixaUnificada,
+        resumo_exames_ok: !!resumoExames,
         extracted_at: new Date().toISOString(),
       },
     };
+
 
 
     const periciado_nome =
