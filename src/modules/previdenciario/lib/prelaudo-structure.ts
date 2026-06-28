@@ -275,17 +275,16 @@ export function mergeFromExtracao(
   current: PrelaudoData | undefined,
   extracao: Record<string, any> | undefined,
 ): PrelaudoData {
+  const queixaCur: Partial<QueixaData> = current?.queixa || {};
   const base: PrelaudoData = {
     ...EMPTY_PRELAUDO,
     ...(current || {}),
     identificacao: { ...(current?.identificacao || {}) },
     queixa: {
-      comorbidades_fixas: {},
-      comorbidades_extras: [],
-      ...(current?.queixa || {}),
-      comorbidades_fixas: { ...(current?.queixa?.comorbidades_fixas || {}) },
-      comorbidades_extras: Array.isArray(current?.queixa?.comorbidades_extras)
-        ? [...current!.queixa!.comorbidades_extras!]
+      ...queixaCur,
+      comorbidades_fixas: { ...(queixaCur.comorbidades_fixas || {}) },
+      comorbidades_extras: Array.isArray(queixaCur.comorbidades_extras)
+        ? [...queixaCur.comorbidades_extras]
         : [],
     },
     exame_fisico: { ...(current?.exame_fisico || {}) },
