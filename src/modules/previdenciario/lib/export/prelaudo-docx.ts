@@ -75,39 +75,29 @@ const paragraph = (text: string, opts?: { italic?: boolean }): Paragraph | null 
   });
 };
 
-// Frase de comorbidades com runs em vermelho para as marcadas
-const comorbidadesParagraph = (queixa: any): Paragraph => {
-  const fixas = queixa?.comorbidades_fixas || {};
-  const extras: { marcado: boolean; texto: string }[] = Array.isArray(
-    queixa?.comorbidades_extras,
-  )
-    ? queixa.comorbidades_extras
-    : [];
-  const marcadas: string[] = [];
-  for (const k of COMORBIDADES_FIXAS_KEYS) {
-    if (fixas[k]) {
-      const def = COMORBIDADES_FIXAS.find((c) => c.key === k)!;
-      marcadas.push(def.label);
-    }
+// "Prova escolar": título + lista vertical de opções (X)/( ), marcadas em vermelho/negrito.
+const optionsBlock = (title: string, rows: OptionRow[]): Paragraph[] => {
+  const out: Paragraph[] = [];
+  out.push(
+    new Paragraph({
+      children: [baseRun(`${title}:`, { bold: true })],
+      spacing: { before: 60, after: 60 },
+    }),
+  );
+  for (const r of rows) {
+    const mark = r.marked ? "(X)" : "(  )";
+    out.push(
+      new Paragraph({
+        children: [
+          baseRun(`${mark} `, { bold: r.marked, color: r.marked ? COLORS_HEX.red : undefined }),
+          baseRun(r.label, { bold: r.marked, color: r.marked ? COLORS_HEX.red : undefined }),
+        ],
+        spacing: { after: 40 },
+        indent: { left: 200 },
+      }),
+    );
   }
-  for (const e of extras) {
-    if (e.marcado && e.texto?.trim()) marcadas.push(e.texto.trim());
-  }
-  const children: TextRun[] = [baseRun("Informa demais comorbidades: ")];
-  if (marcadas.length === 0) {
-    children.push(baseRun("nenhuma referida."));
-  } else {
-    marcadas.forEach((m, i) => {
-      children.push(baseRun(m, { color: COLORS_HEX.red }));
-      if (i < marcadas.length - 1) children.push(baseRun(", "));
-    });
-    children.push(baseRun("."));
-  }
-  return new Paragraph({
-    children,
-    spacing: { after: 140 },
-    alignment: AlignmentType.JUSTIFIED,
-  });
+  return out;
 };
 
 // ---------- Metadados ----------
