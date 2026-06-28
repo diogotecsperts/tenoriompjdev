@@ -601,6 +601,17 @@ Deno.serve(async (req: Request) => {
       console.warn("[prev-pre-processar] queixa unificada falhou (não-fatal):", e);
     }
 
+    // 5b) Resumo de Exames Complementares (terceira passada IA, não-fatal)
+    let resumoExames = "";
+    try {
+      resumoExames = await gerarResumoExames({ aiConfig, userId, ocrText });
+      if (resumoExames) {
+        parsed.resumo_exames = resumoExames;
+      }
+    } catch (e) {
+      console.warn("[prev-pre-processar] resumo de exames falhou (não-fatal):", e);
+    }
+
     // 6) Persistência: prev_extracao + status + documentos
     const extracao = {
       ...parsed,
@@ -611,9 +622,11 @@ Deno.serve(async (req: Request) => {
         ai_model: aiResp.model,
         used_fallback: aiResp.usedFallback,
         queixa_unificada_ok: !!queixaUnificada,
+        resumo_exames_ok: !!resumoExames,
         extracted_at: new Date().toISOString(),
       },
     };
+
 
 
     const periciado_nome =
