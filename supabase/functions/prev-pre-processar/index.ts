@@ -14,6 +14,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractWithMistralOCR, getMistralAPIKey } from "../_shared/mistral-ocr.ts";
 import { getAIConfig, callAI } from "../_shared/ai-config.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
+import { classifyMistralError, isMistralError } from "./_mistral-errors.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -682,8 +683,29 @@ Deno.serve(async (req: Request) => {
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Erro desconhecido";
+
+    // Classifica erros vindos da Mistral (OCR) para devolver mensagem específica
+    if (isMistralError(msg)) {
+      const classified = classifyMistralError(msg);
+      console.error(
+        `[prev-pre-processar] mistral_error code=${classified.code} upstreamStatus=${classified.upstreamStatus ?? "n/a"}`,
+      );
+      return new Response(
+        JSON.stringify({
+          error: classified.userMessage,
+          code: classified.code,
+          stage: "ocr",
+          upstreamStatus: classified.upstreamStatus,
+        }),
+        {
+          status: classified.httpStatus,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
+      );
+    }
+
     console.error("[prev-pre-processar] FATAL:", msg);
-    return new Response(JSON.stringify({ error: msg }), {
+    return new Response(JSON.stringify({ error: msg, code: "unknown" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
