@@ -55,11 +55,19 @@ FORMATO DE SAÍDA (JSON puro, sem markdown, sem comentários):
      - estado_civil: usar SOMENTE um destes valores literais, quando explícito no
        processo: "União estável", "Solteiro(a)", "Casado(a)", "Divorciado(a)",
        "Viúvo(a)". Se não estiver explícito, "".
-     - escolaridade: usar SOMENTE um destes valores literais, quando explícito:
-       "Analfabeto", "Ensino fundamental incompleto", "Ensino fundamental completo",
-       "Ensino médio incompleto", "Ensino médio completo",
-       "Ensino superior incompleto", "Ensino superior completo". Se não estiver
-       explícito, "". */
+     - escolaridade: SEMPRE preencher quando houver QUALQUER menção
+       (carteira de trabalho, qualificação na petição inicial, anamnese,
+       depoimento, formulários do INSS, currículo). Usar OBRIGATORIAMENTE
+       um destes valores literais (escolha o mais próximo, mapeando sinônimos):
+       "Analfabeto" (não-alfabetizado, sem instrução),
+       "Ensino fundamental incompleto" (primário incompleto, 1º grau incompleto, série inicial),
+       "Ensino fundamental completo" (primário completo, 1º grau completo, 8ª/9ª série),
+       "Ensino médio incompleto" (2º grau incompleto, colegial incompleto),
+       "Ensino médio completo" (2º grau completo, colegial completo, ensino técnico),
+       "Ensino superior incompleto" (universitário incompleto, graduação incompleta),
+       "Ensino superior completo" (graduado, universitário, pós-graduação).
+       Use EXATAMENTE um dos 7 rótulos acima. Se realmente não houver
+       nenhuma menção, deixe "". */
   "processo": {
     "numero": "",
     "vara": "",
