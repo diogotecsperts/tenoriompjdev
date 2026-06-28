@@ -1,42 +1,52 @@
-## Diagnóstico
+## Entendimento
 
-Verifiquei no banco e nos exporters:
+Confirmado. Em todos os campos com opções fixas (Estado Civil, Escolaridade, Comorbidades), o **documento exportado (DOCX/PDF)** deve mostrar **a lista completa** no estilo "prova escolar":
 
-1. **"Para os sintomas referidos, informa uso contínuo de medicações"** → o código (`prev-pre-processar/index.ts`) já tem a instrução para preencher `medicacoes_uso`, **mas a IA não está usando**.
-2. **Checkboxes de comorbidades** → o código também já tem o mapeamento (`has`, `dm2`, `dislipidemia`, …) com regra "marcar só quando explícito no processo", **mas chega tudo `false`**.
-3. **Exportação DOCX/PDF** → os dois exporters já leem `medicacoes_uso`, `comorbidades_fixas` e `comorbidades_extras` e aplicam o grifo vermelho (#C00000). Estão corretos — o problema é só que chegam vazios.
+```
+Estado Civil:
+(X) Casado(a)
+( ) Solteiro(a)
+( ) União Estável
+...
+```
 
-### Causa raiz
+A IA marca com **(X)** o(s) item(ns) pertinente(s); os demais saem com **( )** para o operador alterar manualmente no Word/PDF se quiser. Regras antigas preservadas: itens marcados saem **em vermelho** (#C00000), nada muda no editor do sistema (continua usando Select/Checkbox), e o texto continua corrido — apenas estes três blocos viram lista vertical de opções.
 
-A edge function carrega o prompt do banco (`system_config.id = 'prompt_prev_extracao_processo'`), e não o default do código. Consultei o banco e confirmei que a versão salva lá foi **auto-registrada antes da reestruturação GUIA 23.06** — ela não contém as palavras `medicacoes_uso` nem `comorbidades_fixas`. Resultado: a IA devolve um JSON sem esses campos e o pré-laudo abre vazio.
+## Plano
 
-Os logs reforçam: `[prompt-manager] Prompt carregado do banco: prompt_prev_extracao_processo` (versão antiga, sem as novas chaves).
+### 1. Helper compartilhado em `_shared.ts`
+Adicionar utilitário `buildOptionsList(opcoes, marcados)` que devolve uma estrutura `{ label, marcado }[]` consumível por PDF e DOCX. Centraliza a regra para evitar divergência entre exportadores.
 
-## Plano de correção (cirúrgico, isolado ao módulo Previdenciário)
+### 2. Exportador DOCX (`prelaudo-docx.ts`)
+- Nova função `optionsParagraphs(titulo, opcoes, marcados)` que emite:
+  - 1 parágrafo com o título (ex.: "Estado civil:")
+  - 1 parágrafo por opção: `(X) Texto` em **vermelho/negrito** se marcado, `( ) Texto` em cor padrão se não — usando `TextRun` separados (parêntese + espaço + label).
+- Substituir, no bloco de Identificação:
+  - `labeled("Estado civil", ...)` → `optionsParagraphs("Estado civil", ESTADO_CIVIL_OPCOES, [valor])`
+  - `labeled("Escolaridade", ...)` → idem com `ESCOLARIDADE_OPCOES`
+  - Quando o valor escolhido for "Outros" + texto livre, acrescentar uma linha extra `(X) Outros: <texto>` em vermelho ao final.
+- Substituir `comorbidadesParagraph()` (que hoje gera uma frase corrida) por:
+  - Título "Informa demais comorbidades:"
+  - Lista das 12 comorbidades fixas com `(X)`/`( )` conforme `comorbidades_fixas`
+  - Extras (campos livres) renderizadas como linhas adicionais; só aparece a linha se houver texto. Marcadas saem em vermelho.
 
-### 1. Ressincronizar o prompt no banco (1 migration)
-- `UPDATE public.system_config SET value = <DEFAULT_EXTRACTION_PROMPT atual do código>, updated_at = now() WHERE id = 'prompt_prev_extracao_processo';`
-- Conteúdo idêntico ao default que já está em `supabase/functions/prev-pre-processar/index.ts` (inclui `medicacoes_uso`, `comorbidades_fixas` com mapeamento dos 12 CIDs, regra de só marcar quando explícito).
-- Não toca em `prompt_prev_queixa_unificada` nem `prompt_prev_resumo_exames` — esses já estão corretos.
-- Não toca em prompts do Trabalhista.
+### 3. Exportador PDF (`prelaudo-pdf.ts`)
+Replicar mesma estrutura usando o helper de richParagraph já existente: cada opção como linha individual, com "(X) " em vermelho/negrito quando marcada. Mesmas três seções (Estado Civil, Escolaridade, Comorbidades).
 
-### 2. Pequeno reforço de defesa no edge function (opcional, mas recomendado)
-- Em `prev-pre-processar/index.ts`, após o `JSON.parse`, normalizar `comorbidades_fixas`:
-  - se a chave vier ausente, criar objeto vazio;
-  - se vier valor não-booleano, converter (`!!`) — evita que strings tipo `"sim"` quebrem os checkboxes.
-- Sanitizar `medicacoes_uso` (string, trim, sem markdown).
-- Não muda comportamento quando a IA acerta; só protege contra variações futuras.
+### 4. Validação de extração da IA (comorbidades sem marcar)
+- Conferir via `supabase--read_query` se o prompt em `system_config` (`prompt_prev_extracao_processo`) realmente contém o bloco `comorbidades_fixas` com as 12 chaves e a instrução "marque true SOMENTE quando…". Se não estiver sincronizado, fazer `UPDATE` para alinhar com o default do código.
+- Reforçar no prompt: "É ESPERADO marcar como true ao menos as comorbidades EXPLICITAMENTE citadas em laudos, receitas ou anamnese do processo. Não marcar nenhuma quando o processo de fato não cita."
+- Manter a normalização defensiva já existente no edge function (não muda).
 
-### 3. Validação
-- Reprocessar o PDF atual da perícia aberta.
-- Confirmar no editor (Etapa 2):
-  - campo "Para os sintomas referidos…" preenchido;
-  - checkboxes das comorbidades explícitas no processo marcadas, com possibilidade de o operador alterar livremente (lógica já existente em `Step02Queixa`).
-- Exportar DOCX e PDF e conferir:
-  - medicações em parágrafo contínuo;
-  - comorbidades marcadas listadas em **vermelho** (#C00000), comorbidades extras marcadas idem.
+### 5. Editor (UI do sistema)
+Sem mudanças visuais. Selects e checkboxes seguem como hoje — o formato "prova" é exclusivo da exportação, como você pediu.
 
-## Garantias de segurança
-- Mudança restrita a uma linha do `system_config` (id `prompt_prev_extracao_processo`) + reforço defensivo em uma única edge function.
-- Nenhum dado de pré-laudo já salvo é alterado (regra "Zero-Touch / Stale Data Regeneration" preservada — só novos processamentos passam a vir completos).
-- Trabalhista, DevPrompts UI, outros prompts e exporters não são tocados.
+### 6. Isolamento
+Tudo dentro de `src/modules/previdenciario/` e `supabase/functions/prev-pre-processar/`. Módulo Trabalhista e helpers compartilhados globais não são tocados.
+
+## Arquivos afetados
+- `src/modules/previdenciario/lib/export/_shared.ts` (novo helper)
+- `src/modules/previdenciario/lib/export/prelaudo-docx.ts`
+- `src/modules/previdenciario/lib/export/prelaudo-pdf.ts`
+- `supabase/functions/prev-pre-processar/index.ts` (só reforço de prompt, se necessário)
+- `system_config` (UPDATE SQL do prompt, se desincronizado)
