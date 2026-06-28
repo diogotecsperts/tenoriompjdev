@@ -335,9 +335,17 @@ export const generatePrelaudoPdf = async (
       "Relata acompanhamento médico e realização regular de fisioterapia.",
       y,
     );
-    // Comorbidades (com runs em vermelho)
-    const comorbRuns = buildComorbidadesRuns(q);
-    y = richParagraph(doc, comorbRuns, y);
+    // Comorbidades — lista (X)/( ) com todas as opções, marcadas em vermelho
+    y = optionsBlock(
+      doc,
+      "Informa demais comorbidades",
+      buildMultiOptionRows(
+        COMORBIDADES_FIXAS,
+        (q.comorbidades_fixas || {}) as Record<string, boolean | undefined>,
+        Array.isArray(q.comorbidades_extras) ? q.comorbidades_extras : [],
+      ),
+      y,
+    );
     y += 2;
   }
 
