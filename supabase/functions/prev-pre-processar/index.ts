@@ -43,13 +43,22 @@ FORMATO DE SAÍDA (JSON puro, sem markdown, sem comentários):
     "escolaridade": "",
     "profissao": "",
     "ultima_atividade": "",
-    "endereco": "",
-    "telefone": "",
-    "tempo_sem_trabalhar": "",
     "pessoas_mesmo_teto": ""
   },
-  /* tempo_sem_trabalhar: tempo afastado do trabalho conforme relato/documentos (ex: "8 meses", "desde 03/2024"). Vazio se não houver menção explícita. NÃO inventar.
-     pessoas_mesmo_teto: nº/descrição das pessoas que residem com o periciado (ex: "3 pessoas: esposa e dois filhos"). Vazio se não houver menção. NÃO inventar. */
+  /* REGRAS de identificacao:
+     - tempo_sem_trabalhar: NÃO extrair. Este campo é preenchido manualmente pelo perito.
+     - pessoas_mesmo_teto: SOMENTE preencher se o benefício pleiteado for BPC/LOAS
+       (Benefício de Prestação Continuada / amparo assistencial). Em todos os outros
+       benefícios (auxílio-doença, aposentadoria por invalidez, etc.), deixe "".
+       Quando aplicável, descrever brevemente, ex.: "3 pessoas: esposa e dois filhos".
+     - estado_civil: usar SOMENTE um destes valores literais, quando explícito no
+       processo: "União estável", "Solteiro(a)", "Casado(a)", "Divorciado(a)",
+       "Viúvo(a)". Se não estiver explícito, "".
+     - escolaridade: usar SOMENTE um destes valores literais, quando explícito:
+       "Analfabeto", "Ensino fundamental incompleto", "Ensino fundamental completo",
+       "Ensino médio incompleto", "Ensino médio completo",
+       "Ensino superior incompleto", "Ensino superior completo". Se não estiver
+       explícito, "". */
   "processo": {
     "numero": "",
     "vara": "",
@@ -62,6 +71,40 @@ FORMATO DE SAÍDA (JSON puro, sem markdown, sem comentários):
   "queixa_principal": "",
   "comorbidades": "",
   "medicacoes": [],
+  "medicacoes_uso": "",
+  /* medicacoes_uso: TEXTO CORRIDO com as medicações de uso contínuo declaradas
+     pelo periciado/processo, separadas por vírgula (ex.: "Losartana 50mg 1x/dia,
+     Metformina 850mg 2x/dia, Dipirona se dor"). Vazio se não houver. */
+  "comorbidades_fixas": {
+    "has": false,
+    "dm2": false,
+    "dislipidemia": false,
+    "hipotireoidismo": false,
+    "ansiedade": false,
+    "depressao": false,
+    "fibromialgia": false,
+    "obesidade": false,
+    "cardiopatia": false,
+    "dpoc": false,
+    "irc": false,
+    "ar": false
+  },
+  /* comorbidades_fixas: marque true SOMENTE quando a comorbidade estiver
+     EXPLICITAMENTE descrita no processo (laudo, receita, anamnese, CID).
+     Mapeamento:
+       has = Hipertensão arterial sistêmica (CID I10);
+       dm2 = Diabetes mellitus tipo 2 (E11);
+       dislipidemia = Dislipidemia (E78);
+       hipotireoidismo = Hipotireoidismo (E03);
+       ansiedade = Transtorno de ansiedade (F41);
+       depressao = Transtorno depressivo (F32/F33);
+       fibromialgia = Fibromialgia (M79.7);
+       obesidade = Obesidade (E66);
+       cardiopatia = Cardiopatia / insuf. cardíaca / IAM prévio (I20-I25/I50);
+       dpoc = Doença pulmonar obstrutiva crônica (J44);
+       irc = Insuficiência renal crônica (N18);
+       ar = Artrite reumatoide (M05/M06).
+     NÃO inferir por sintoma; só marcar quando o nome ou o CID aparecer. */
   "cids_alegados": [],
   "tratamentos": "",
   "afastamentos": "",
@@ -83,6 +126,7 @@ REGRAS:
 
 TEXTO OCR DO PROCESSO:
 \${ocrText}`;
+
 
 const SYSTEM_PROMPT =
   'Você extrai dados objetivos de processos judiciais previdenciários e devolve APENAS JSON válido, sem markdown e sem texto adicional. É proibido usar a expressão "IA".';
