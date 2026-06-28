@@ -23,7 +23,8 @@ import type { PrelaudoData, StepId } from "../prelaudo-structure";
 import {
   ALL_STEP_IDS,
   COMORBIDADES_FIXAS,
-  COMORBIDADES_FIXAS_KEYS,
+  ESTADO_CIVIL_OPCOES,
+  ESCOLARIDADE_OPCOES,
   EXAME_FISICO_TEXTOS,
   INCAPACIDADE_LABEL,
 } from "../prelaudo-structure";
@@ -38,7 +39,9 @@ import {
   buildFilename,
   isFieldEmpty,
   stripLightMarkdown,
-  resolveEnumValue,
+  buildOptionRows,
+  buildMultiOptionRows,
+  type OptionRow,
 } from "./_shared";
 
 // ---------- builders ----------
