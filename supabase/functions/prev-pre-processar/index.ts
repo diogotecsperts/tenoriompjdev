@@ -14,6 +14,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractWithMistralOCR, getMistralAPIKey } from "../_shared/mistral-ocr.ts";
 import { getAIConfig, callAI } from "../_shared/ai-config.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
+import { classifyMistralError, isMistralError } from "./_mistral-errors.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
