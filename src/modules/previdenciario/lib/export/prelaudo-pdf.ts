@@ -189,36 +189,39 @@ const richParagraph = (doc: jsPDF, runs: Run[], y: number): number => {
   return y + LINE + 2;
 };
 
-// ---------- Builder da frase de comorbidades ----------
-function buildComorbidadesRuns(queixa: any): Run[] {
-  const fixas = queixa?.comorbidades_fixas || {};
-  const extras: { marcado: boolean; texto: string }[] = Array.isArray(
-    queixa?.comorbidades_extras,
-  )
-    ? queixa.comorbidades_extras
-    : [];
-  const marcadas: string[] = [];
-  for (const k of COMORBIDADES_FIXAS_KEYS) {
-    if (fixas[k]) {
-      const def = COMORBIDADES_FIXAS.find((c) => c.key === k)!;
-      marcadas.push(def.label);
-    }
+// ---------- "Prova escolar": título + lista (X)/( ) vertical ----------
+const optionsBlock = (doc: jsPDF, title: string, rows: OptionRow[], y: number): number => {
+  // Título
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+  y = checkNewPage(doc, y, LINE);
+  doc.text(`${title}:`, MARGINS.left, y);
+  y += LINE;
+  // Linhas
+  for (const r of rows) {
+    y = checkNewPage(doc, y, LINE);
+    const mark = r.marked ? "(X) " : "(  ) ";
+    const c = r.marked ? COLORS.red : COLORS.text;
+    doc.setFont("helvetica", r.marked ? "bold" : "normal");
+    doc.setTextColor(c.r, c.g, c.b);
+    const markW = doc.getTextWidth(mark);
+    doc.text(mark, MARGINS.left + 4, y);
+    // Quebra de linha para labels longos
+    const labelLines = doc.splitTextToSize(r.label, PAGE.contentWidth - 4 - markW);
+    labelLines.forEach((ln: string, idx: number) => {
+      if (idx > 0) {
+        y += LINE;
+        y = checkNewPage(doc, y, LINE);
+      }
+      doc.text(ln, MARGINS.left + 4 + markW, y);
+    });
+    y += LINE;
   }
-  for (const e of extras) {
-    if (e.marcado && e.texto?.trim()) marcadas.push(e.texto.trim());
-  }
-  const runs: Run[] = [{ text: "Informa demais comorbidades: " }];
-  if (marcadas.length === 0) {
-    runs.push({ text: "nenhuma referida." });
-    return runs;
-  }
-  marcadas.forEach((m, i) => {
-    runs.push({ text: m, color: COLORS.red });
-    if (i < marcadas.length - 1) runs.push({ text: ", " });
-  });
-  runs.push({ text: "." });
-  return runs;
-}
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+  return y + 2;
+};
 
 // ---------- Metadados públicos ----------
 export interface PrelaudoPdfMeta {
