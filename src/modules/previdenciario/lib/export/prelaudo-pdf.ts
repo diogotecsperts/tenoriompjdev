@@ -189,8 +189,27 @@ const richParagraph = (doc: jsPDF, runs: Run[], y: number): number => {
   return y + LINE + 2;
 };
 
-// ---------- "Prova escolar": título + lista (X)/( ) vertical ----------
-const optionsBlock = (doc: jsPDF, title: string, rows: OptionRow[], y: number): number => {
+// Título de seção discreto: mesmo tamanho do corpo (10pt), apenas negrito.
+const sectionTitle = (doc: jsPDF, text: string, y: number): number => {
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+  y = checkNewPage(doc, y + 2, LINE);
+  doc.text(text, MARGINS.left, y);
+  doc.setFont("helvetica", "normal");
+  return y + LINE + 1;
+};
+
+// ---------- "Prova escolar": título + lista vertical ----------
+// showMarkers=false → omite "(X)"/"(  )" (usado só em comorbidades).
+const optionsBlock = (
+  doc: jsPDF,
+  title: string,
+  rows: OptionRow[],
+  y: number,
+  opts?: { showMarkers?: boolean },
+): number => {
+  const showMarkers = opts?.showMarkers !== false;
   // Título
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
@@ -201,13 +220,12 @@ const optionsBlock = (doc: jsPDF, title: string, rows: OptionRow[], y: number): 
   // Linhas
   for (const r of rows) {
     y = checkNewPage(doc, y, LINE);
-    const mark = r.marked ? "(X) " : "(  ) ";
     const c = r.marked ? COLORS.red : COLORS.text;
     doc.setFont("helvetica", r.marked ? "bold" : "normal");
     doc.setTextColor(c.r, c.g, c.b);
-    const markW = doc.getTextWidth(mark);
-    doc.text(mark, MARGINS.left + 4, y);
-    // Quebra de linha para labels longos
+    const mark = showMarkers ? (r.marked ? "(X) " : "(  ) ") : "";
+    const markW = showMarkers ? doc.getTextWidth(mark) : 0;
+    if (showMarkers) doc.text(mark, MARGINS.left + 4, y);
     const labelLines = doc.splitTextToSize(r.label, PAGE.contentWidth - 4 - markW);
     labelLines.forEach((ln: string, idx: number) => {
       if (idx > 0) {
@@ -222,6 +240,7 @@ const optionsBlock = (doc: jsPDF, title: string, rows: OptionRow[], y: number): 
   doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   return y + 2;
 };
+
 
 // ---------- Metadados públicos ----------
 export interface PrelaudoPdfMeta {
@@ -320,22 +339,27 @@ export const generatePrelaudoPdf = async (
   // ============================================================
   if (included.has("queixa")) {
     const q = data.queixa || {};
+
+    // Título "Queixa principal" + parágrafo em branco antes do texto
+    y = sectionTitle(doc, "Queixa principal", y);
+    y += 3;
     if (q.queixa_principal) y = paragraph(doc, q.queixa_principal, y);
-    // Medicações
-    if (q.medicacoes_uso && q.medicacoes_uso.trim()) {
-      y = paragraph(
-        doc,
-        `Para os sintomas referidos, informa uso contínuo de medicações: ${q.medicacoes_uso.trim()}`,
-        y,
-      );
-    }
+
+    // Prefixo FIXO das medicações (sempre presente) + conteúdo dinâmico
+    const medRaw = (q.medicacoes_uso || "").trim();
+    const medText = medRaw
+      ? `Para os sintomas referidos, informa uso contínuo de medicações: ${medRaw}`
+      : `Para os sintomas referidos, informa uso contínuo de medicações:`;
+    y = paragraph(doc, medText, y);
+    y += 3;
+
     // Parágrafo fixo
     y = paragraph(
       doc,
       "Relata acompanhamento médico e realização regular de fisioterapia.",
       y,
     );
-    // Comorbidades — lista (X)/( ) com todas as opções, marcadas em vermelho
+    // Comorbidades — SEM parênteses; grifo vermelho/negrito mantido
     y = optionsBlock(
       doc,
       "Informa demais comorbidades",
@@ -345,6 +369,7 @@ export const generatePrelaudoPdf = async (
         Array.isArray(q.comorbidades_extras) ? q.comorbidades_extras : [],
       ),
       y,
+      { showMarkers: false },
     );
     y += 2;
   }
@@ -353,6 +378,7 @@ export const generatePrelaudoPdf = async (
   // 3) Exame físico (texto fixo + radios de incapacidade)
   // ============================================================
   if (included.has("exame_fisico")) {
+    y = sectionTitle(doc, "Exame físico", y);
     y = paragraph(doc, EXAME_FISICO_TEXTOS.estado_mental, y);
     y = paragraph(doc, EXAME_FISICO_TEXTOS.ectoscopia, y);
     y = paragraph(doc, EXAME_FISICO_TEXTOS.inspecao_dinamica, y);
@@ -361,6 +387,9 @@ export const generatePrelaudoPdf = async (
     const ex = data.exame_fisico || {};
     const fh = INCAPACIDADE_LABEL[ex.incap_funcao_habitual ?? ""];
     const vi = INCAPACIDADE_LABEL[ex.incap_vida_independente ?? ""];
+    if (fh || vi) {
+      y = sectionTitle(doc, "Conclusão", y);
+    }
     if (fh) {
       y = paragraph(doc, `Apresenta, para a sua função habitual: ${fh}.`, y);
     }
@@ -369,6 +398,7 @@ export const generatePrelaudoPdf = async (
     }
     y += 2;
   }
+
 
   // ============================================================
   // 4) Resumo (texto da IA, somente leitura)
