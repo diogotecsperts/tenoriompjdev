@@ -32,16 +32,15 @@ export function Step03ExameFisico({ value, onChange }: Props) {
         <FixedParagraph body={EXAME_FISICO_TEXTOS.inspecao_dinamica} />
       </Section>
 
-      <FixedBlock title="Complementação" body={EXAME_FISICO_TEXTOS.complementacao} />
-
-      <Section title="Conclusões">
+      <Section title="Conclusão">
+        <FixedParagraph body={EXAME_FISICO_TEXTOS.complementacao} />
         <RadioGroupLine
-          legend="Incapacidade para sua função habitual"
+          legend="Incapacidade para sua função habitual:"
           value={value.incap_funcao_habitual ?? ""}
           onChange={(v) => onChange({ incap_funcao_habitual: v })}
         />
         <RadioGroupLine
-          legend="Incapacidade para a vida independente"
+          legend="Incapacidade para a vida independente:"
           value={value.incap_vida_independente ?? ""}
           onChange={(v) => onChange({ incap_vida_independente: v })}
         />

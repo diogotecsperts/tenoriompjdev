@@ -13,6 +13,7 @@ import {
   ESCOLARIDADE_OPCOES,
   EXAME_FISICO_TEXTOS,
   INCAPACIDADE_LABEL,
+  INCAPACIDADE_OPCOES,
 } from "../prelaudo-structure";
 import {
   COLORS,
@@ -382,20 +383,29 @@ export const generatePrelaudoPdf = async (
     y = paragraph(doc, EXAME_FISICO_TEXTOS.estado_mental, y);
     y = paragraph(doc, EXAME_FISICO_TEXTOS.ectoscopia, y);
     y = paragraph(doc, EXAME_FISICO_TEXTOS.inspecao_dinamica, y);
+
+    y = sectionTitle(doc, "Conclusão", y);
     y = paragraph(doc, EXAME_FISICO_TEXTOS.complementacao, y);
 
     const ex = data.exame_fisico || {};
-    const fh = INCAPACIDADE_LABEL[ex.incap_funcao_habitual ?? ""];
-    const vi = INCAPACIDADE_LABEL[ex.incap_vida_independente ?? ""];
-    if (fh || vi) {
-      y = sectionTitle(doc, "Conclusão", y);
-    }
-    if (fh) {
-      y = paragraph(doc, `Apresenta, para a sua função habitual: ${fh}.`, y);
-    }
-    if (vi) {
-      y = paragraph(doc, `Apresenta, para a vida independente: ${vi}.`, y);
-    }
+    const incapLabels = INCAPACIDADE_OPCOES.map((o) => o.label);
+    const fhLabel = INCAPACIDADE_LABEL[ex.incap_funcao_habitual ?? ""] || "";
+    const viLabel = INCAPACIDADE_LABEL[ex.incap_vida_independente ?? ""] || "";
+    // Casa o rótulo mapeado (minúsculas) com a opção fixa (Case original).
+    const fhSelected = incapLabels.find((l) => l.toLowerCase() === fhLabel.toLowerCase());
+    const viSelected = incapLabels.find((l) => l.toLowerCase() === viLabel.toLowerCase());
+    y = optionsBlock(
+      doc,
+      "Incapacidade para sua função habitual",
+      buildOptionRows(incapLabels, fhSelected),
+      y,
+    );
+    y = optionsBlock(
+      doc,
+      "Incapacidade para a vida independente",
+      buildOptionRows(incapLabels, viSelected),
+      y,
+    );
     y += 2;
   }
 
