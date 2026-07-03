@@ -13,6 +13,7 @@ import {
   ESCOLARIDADE_OPCOES,
   EXAME_FISICO_TEXTOS,
   INCAPACIDADE_LABEL,
+  INCAPACIDADE_OPCOES,
 } from "../prelaudo-structure";
 import {
   COLORS,
