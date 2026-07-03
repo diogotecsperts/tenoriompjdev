@@ -215,21 +215,32 @@ export const generatePrelaudoDocx = async (
   // ===== 2) Queixa principal + medicações + comorbidades =====
   if (included.has("queixa")) {
     const q = data.queixa || {};
+
+    // Título "Queixa principal" + parágrafo em branco antes do texto
+    paragraphs.push(sectionTitle("Queixa principal"));
+    paragraphs.push(new Paragraph({ spacing: { after: 80 } }));
     const queixaPar = paragraph(q.queixa_principal || "");
     if (queixaPar) paragraphs.push(queixaPar);
 
-    if (q.medicacoes_uso && q.medicacoes_uso.trim()) {
-      const medPar = paragraph(
-        `Para os sintomas referidos, informa uso contínuo de medicações: ${q.medicacoes_uso.trim()}`,
-      );
-      if (medPar) paragraphs.push(medPar);
-    }
+    // Prefixo FIXO das medicações (sempre presente) + conteúdo dinâmico
+    const medRaw = (q.medicacoes_uso || "").trim();
+    const medText = medRaw
+      ? `Para os sintomas referidos, informa uso contínuo de medicações: ${medRaw}`
+      : `Para os sintomas referidos, informa uso contínuo de medicações:`;
+    const medPar = new Paragraph({
+      children: [baseRun(stripLightMarkdown(medText))],
+      spacing: { after: 120 },
+      alignment: AlignmentType.JUSTIFIED,
+    });
+    paragraphs.push(medPar);
+    paragraphs.push(new Paragraph({ spacing: { after: 80 } }));
 
     const fixedPar = paragraph(
       "Relata acompanhamento médico e realização regular de fisioterapia.",
     );
     if (fixedPar) paragraphs.push(fixedPar);
 
+    // Comorbidades: SEM parênteses, mantendo grifo em vermelho/negrito
     optionsBlock(
       "Informa demais comorbidades",
       buildMultiOptionRows(
@@ -237,11 +248,13 @@ export const generatePrelaudoDocx = async (
         (q.comorbidades_fixas || {}) as Record<string, boolean | undefined>,
         Array.isArray(q.comorbidades_extras) ? q.comorbidades_extras : [],
       ),
+      { showMarkers: false },
     ).forEach((p) => paragraphs.push(p));
   }
 
   // ===== 3) Exame físico (fixo + incapacidades) =====
   if (included.has("exame_fisico")) {
+    paragraphs.push(sectionTitle("Exame físico"));
     [
       paragraph(EXAME_FISICO_TEXTOS.estado_mental),
       paragraph(EXAME_FISICO_TEXTOS.ectoscopia),
@@ -252,12 +265,16 @@ export const generatePrelaudoDocx = async (
     const ex = data.exame_fisico || {};
     const fh = INCAPACIDADE_LABEL[ex.incap_funcao_habitual ?? ""];
     const vi = INCAPACIDADE_LABEL[ex.incap_vida_independente ?? ""];
+    if (fh || vi) {
+      paragraphs.push(sectionTitle("Conclusão"));
+    }
     if (fh) {
       const p = paragraph(`Apresenta, para a sua função habitual: ${fh}.`);
       if (p) paragraphs.push(p);
     }
     if (vi) {
       const p = paragraph(`Apresenta, para a vida independente: ${vi}.`);
+
       if (p) paragraphs.push(p);
     }
   }
