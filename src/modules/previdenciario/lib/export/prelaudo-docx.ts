@@ -75,8 +75,21 @@ const paragraph = (text: string, opts?: { italic?: boolean }): Paragraph | null 
   });
 };
 
-// "Prova escolar": título + lista vertical de opções (X)/( ), marcadas em vermelho/negrito.
-const optionsBlock = (title: string, rows: OptionRow[]): Paragraph[] => {
+// Título de seção discreto: mesmo tamanho do corpo, apenas negrito.
+const sectionTitle = (text: string): Paragraph =>
+  new Paragraph({
+    children: [baseRun(text, { bold: true })],
+    spacing: { before: 120, after: 80 },
+  });
+
+// "Prova escolar": título + lista vertical de opções. Marcadas em vermelho/negrito.
+// Quando showMarkers = false, omite os prefixos "(X)" / "(  )" (usado em comorbidades).
+const optionsBlock = (
+  title: string,
+  rows: OptionRow[],
+  opts?: { showMarkers?: boolean },
+): Paragraph[] => {
+  const showMarkers = opts?.showMarkers !== false;
   const out: Paragraph[] = [];
   out.push(
     new Paragraph({
@@ -85,13 +98,26 @@ const optionsBlock = (title: string, rows: OptionRow[]): Paragraph[] => {
     }),
   );
   for (const r of rows) {
-    const mark = r.marked ? "(X)" : "(  )";
+    const children = showMarkers
+      ? [
+          baseRun(`${r.marked ? "(X)" : "(  )"} `, {
+            bold: r.marked,
+            color: r.marked ? COLORS_HEX.red : undefined,
+          }),
+          baseRun(r.label, {
+            bold: r.marked,
+            color: r.marked ? COLORS_HEX.red : undefined,
+          }),
+        ]
+      : [
+          baseRun(r.label, {
+            bold: r.marked,
+            color: r.marked ? COLORS_HEX.red : undefined,
+          }),
+        ];
     out.push(
       new Paragraph({
-        children: [
-          baseRun(`${mark} `, { bold: r.marked, color: r.marked ? COLORS_HEX.red : undefined }),
-          baseRun(r.label, { bold: r.marked, color: r.marked ? COLORS_HEX.red : undefined }),
-        ],
+        children,
         spacing: { after: 40 },
         indent: { left: 200 },
       }),
@@ -99,6 +125,7 @@ const optionsBlock = (title: string, rows: OptionRow[]): Paragraph[] => {
   }
   return out;
 };
+
 
 // ---------- Metadados ----------
 export interface PrelaudoDocxMeta {
