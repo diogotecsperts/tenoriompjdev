@@ -260,24 +260,26 @@ export const generatePrelaudoDocx = async (
       paragraph(EXAME_FISICO_TEXTOS.estado_mental),
       paragraph(EXAME_FISICO_TEXTOS.ectoscopia),
       paragraph(EXAME_FISICO_TEXTOS.inspecao_dinamica),
-      paragraph(EXAME_FISICO_TEXTOS.complementacao),
     ].forEach((p) => p && paragraphs.push(p));
 
-    const ex = data.exame_fisico || {};
-    const fh = INCAPACIDADE_LABEL[ex.incap_funcao_habitual ?? ""];
-    const vi = INCAPACIDADE_LABEL[ex.incap_vida_independente ?? ""];
-    if (fh || vi) {
-      paragraphs.push(sectionTitle("Conclusão"));
-    }
-    if (fh) {
-      const p = paragraph(`Apresenta, para a sua função habitual: ${fh}.`);
-      if (p) paragraphs.push(p);
-    }
-    if (vi) {
-      const p = paragraph(`Apresenta, para a vida independente: ${vi}.`);
+    paragraphs.push(sectionTitle("Conclusão"));
+    const complementPar = paragraph(EXAME_FISICO_TEXTOS.complementacao);
+    if (complementPar) paragraphs.push(complementPar);
 
-      if (p) paragraphs.push(p);
-    }
+    const ex = data.exame_fisico || {};
+    const incapLabels = INCAPACIDADE_OPCOES.map((o) => o.label);
+    const fhLabel = INCAPACIDADE_LABEL[ex.incap_funcao_habitual ?? ""] || "";
+    const viLabel = INCAPACIDADE_LABEL[ex.incap_vida_independente ?? ""] || "";
+    const fhSelected = incapLabels.find((l) => l.toLowerCase() === fhLabel.toLowerCase());
+    const viSelected = incapLabels.find((l) => l.toLowerCase() === viLabel.toLowerCase());
+    optionsBlock(
+      "Incapacidade para sua função habitual",
+      buildOptionRows(incapLabels, fhSelected),
+    ).forEach((p) => paragraphs.push(p));
+    optionsBlock(
+      "Incapacidade para a vida independente",
+      buildOptionRows(incapLabels, viSelected),
+    ).forEach((p) => paragraphs.push(p));
   }
 
   // ===== 4) Resumo (texto fixo gerado pela IA) =====
