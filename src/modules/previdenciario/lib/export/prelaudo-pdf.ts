@@ -189,8 +189,27 @@ const richParagraph = (doc: jsPDF, runs: Run[], y: number): number => {
   return y + LINE + 2;
 };
 
-// ---------- "Prova escolar": título + lista (X)/( ) vertical ----------
-const optionsBlock = (doc: jsPDF, title: string, rows: OptionRow[], y: number): number => {
+// Título de seção discreto: mesmo tamanho do corpo (10pt), apenas negrito.
+const sectionTitle = (doc: jsPDF, text: string, y: number): number => {
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
+  y = checkNewPage(doc, y + 2, LINE);
+  doc.text(text, MARGINS.left, y);
+  doc.setFont("helvetica", "normal");
+  return y + LINE + 1;
+};
+
+// ---------- "Prova escolar": título + lista vertical ----------
+// showMarkers=false → omite "(X)"/"(  )" (usado só em comorbidades).
+const optionsBlock = (
+  doc: jsPDF,
+  title: string,
+  rows: OptionRow[],
+  y: number,
+  opts?: { showMarkers?: boolean },
+): number => {
+  const showMarkers = opts?.showMarkers !== false;
   // Título
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
@@ -201,13 +220,12 @@ const optionsBlock = (doc: jsPDF, title: string, rows: OptionRow[], y: number): 
   // Linhas
   for (const r of rows) {
     y = checkNewPage(doc, y, LINE);
-    const mark = r.marked ? "(X) " : "(  ) ";
     const c = r.marked ? COLORS.red : COLORS.text;
     doc.setFont("helvetica", r.marked ? "bold" : "normal");
     doc.setTextColor(c.r, c.g, c.b);
-    const markW = doc.getTextWidth(mark);
-    doc.text(mark, MARGINS.left + 4, y);
-    // Quebra de linha para labels longos
+    const mark = showMarkers ? (r.marked ? "(X) " : "(  ) ") : "";
+    const markW = showMarkers ? doc.getTextWidth(mark) : 0;
+    if (showMarkers) doc.text(mark, MARGINS.left + 4, y);
     const labelLines = doc.splitTextToSize(r.label, PAGE.contentWidth - 4 - markW);
     labelLines.forEach((ln: string, idx: number) => {
       if (idx > 0) {
@@ -222,6 +240,7 @@ const optionsBlock = (doc: jsPDF, title: string, rows: OptionRow[], y: number): 
   doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
   return y + 2;
 };
+
 
 // ---------- Metadados públicos ----------
 export interface PrelaudoPdfMeta {
