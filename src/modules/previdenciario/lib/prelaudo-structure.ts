@@ -489,12 +489,17 @@ export function mergeFromExtracao(
   fill(base.queixa, "medicacoes_uso", extracao.medicacoes_uso);
 
   // Comorbidades fixas — checkboxes marcados pela IA
+  // Regra: nunca desmarca marcações do usuário (true permanece true);
+  // se a IA marcou true, aplica; caso contrário mantém o valor atual.
   const com = extracao.comorbidades_fixas;
   if (com && typeof com === "object") {
     const cur = base.queixa.comorbidades_fixas || {};
     for (const k of COMORBIDADES_FIXAS_KEYS) {
-      if (cur[k] === undefined && typeof com[k] === "boolean") {
-        cur[k] = com[k];
+      if (cur[k] === true) continue; // preserva marcação do usuário
+      if (com[k] === true) {
+        cur[k] = true;
+      } else if (cur[k] === undefined) {
+        cur[k] = false;
       }
     }
     base.queixa.comorbidades_fixas = cur;

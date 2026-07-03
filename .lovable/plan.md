@@ -1,40 +1,26 @@
-## Objetivo
 
-Adicionar títulos discretos (apenas **negrito**, mesmo tamanho do corpo) em pontos específicos do documento exportado (DOCX e PDF), transformar o prefixo das medicações em texto realmente fixo, e remover os parênteses `(X) / (  )` apenas da seção de comorbidades — mantendo o grifo em vermelho/negrito das opções marcadas.
+## Diagnóstico
 
-## Pontos exatos dos títulos (confirmação de entendimento)
+- O edge function `prev-pre-processar` já extrai corretamente `comorbidades_fixas` a partir do processo (mapeamento por sinônimos e CIDs) e normaliza os 12 campos sempre presentes como booleanos.
+- O frontend aplica esse resultado em `src/modules/previdenciario/lib/prelaudo-structure.ts` (linhas 491–501), mas o merge só grava quando `cur[k] === undefined`.
+- Depois da primeira aplicação (ou de qualquer save que já tenha materializado os 12 booleanos como `false`), todos os campos deixam de ser `undefined`. A partir daí, um novo processamento **nunca** consegue marcar um checkbox — mesmo que a IA retorne `true`. É por isso que "nada aconteceu" ao gerar novamente.
 
-Localização atual no arquivo `src/modules/previdenciario/lib/export/prelaudo-docx.ts` (e espelho em `prelaudo-pdf.ts`):
+## Correção proposta (mínima e cirúrgica)
 
-1. **"Queixa principal"** — título em negrito imediatamente antes do parágrafo unificado da queixa (`q.queixa_principal`). Depois do título, um parágrafo em branco antes do texto.
-2. **"Para os sintomas referidos, informa uso contínuo de medicações:"** — hoje só aparece se `q.medicacoes_uso` estiver preenchido. Passa a ser **linha fixa**, sempre renderizada, seguida do conteúdo dinâmico das medicações (quando houver). Um parágrafo em branco após o bloco.
-3. **"Exame físico"** — título em negrito antes do primeiro parágrafo fixo (`EXAME_FISICO_TEXTOS.estado_mental`) da etapa 3.
-4. **"Conclusão"** — título em negrito antes das duas frases de incapacidade (função habitual e vida independente) — última subseção da etapa Exame físico.
+Somente em `src/modules/previdenciario/lib/prelaudo-structure.ts`, no bloco de merge de `comorbidades_fixas`:
 
-Todos os títulos:
-- Mesma fonte e tamanho do corpo (`FONT.sizeDefault` = 10pt no DOCX; equivalente no PDF).
-- Apenas `bold: true`, cor padrão do texto (sem cor primária, sem uppercase, sem tamanho maior).
-- Sem numeração ("1.", "2." etc.).
-- Espaçamento leve antes/depois para respirar, sem destacar demais.
+Nova regra por chave `k`:
+- Se o usuário já marcou (`cur[k] === true`) → mantém `true` (nunca desmarca por reprocessamento).
+- Senão, se a IA marcou (`com[k] === true`) → passa a `true`.
+- Caso contrário → mantém o valor atual (ou `false` se ainda não existir).
 
-## Regra especial das comorbidades
+## O que NÃO muda
 
-Seção **"Informa demais comorbidades"** passa a renderizar **sem** o prefixo `(X)` / `(  )`:
+- Não altero prompt, DB, edge functions, DevPanel, exportações DOCX/PDF nem outras seções.
+- Não altero o comportamento de `comorbidades_extras` (lista livre digitada pelo usuário).
+- Não mexo no módulo Trabalhista nem em nenhum outro fluxo.
 
-- Todas as opções continuam listadas (fixas + extras).
-- A opção marcada pela IA continua em **vermelho + negrito** (`COLORS_HEX.red`).
-- As não marcadas continuam em texto normal.
-- É a **única** seção sem parênteses — Estado civil e Escolaridade seguem com `(X) / (  )` como hoje.
+## Verificação
 
-Implementação: adicionar um parâmetro opcional `{ showMarkers?: boolean }` (default `true`) em `optionsBlock` (DOCX) e no helper equivalente do PDF, passando `false` só na chamada de comorbidades.
-
-## Arquivos a alterar
-
-- `src/modules/previdenciario/lib/export/prelaudo-docx.ts` — adicionar títulos, tornar o prefixo de medicações fixo, opção `showMarkers` em `optionsBlock`.
-- `src/modules/previdenciario/lib/export/prelaudo-pdf.ts` — mesmos ajustes espelhados.
-
-Nenhuma mudança em telas, prompts, banco ou edge functions. Escopo restrito ao módulo Previdenciário.
-
-## Ponto de atenção para confirmação
-
-Sobre a linha "Para os sintomas referidos, informa uso contínuo de medicações:" — vou torná-la **sempre visível** (fixa), com o texto das medicações concatenado depois quando houver. Se você prefere que ela apareça **só quando houver medicações**, mas garantindo que o prefixo seja idêntico/imutável, me avise antes que eu implemente.
+- Reprocessar a perícia atual: comorbidades citadas no processo devem aparecer marcadas em "Informa demais comorbidades".
+- Marcar manualmente uma comorbidade adicional e reprocessar: a marcação manual deve permanecer.
