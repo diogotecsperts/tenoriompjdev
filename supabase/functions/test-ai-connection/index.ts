@@ -330,17 +330,27 @@ async function testOpenAICompatible(endpoint: string, apiKey: string, model: str
   }
 
   try {
+    const isDeepSeek = endpoint.includes('deepseek.com');
+    const isDeepSeekReasoner = isDeepSeek && model.includes('reasoner');
+
+    const body: Record<string, any> = {
+      model,
+      messages: [{ role: 'user', content: 'Respond with exactly: OK' }],
+      max_tokens: 10
+    };
+
+    // DeepSeek V4 tem thinking mode ON por default — desligar no teste para latência previsível
+    if (isDeepSeek && !isDeepSeekReasoner) {
+      body.thinking = { type: 'disabled' };
+    }
+
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: 'Respond with exactly: OK' }],
-        max_tokens: 10
-      })
+      body: JSON.stringify(body)
     });
 
     if (!response.ok) {
