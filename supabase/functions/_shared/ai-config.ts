@@ -34,7 +34,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-4o',
   claude: 'claude-3-7-sonnet-20250219',
   groq: 'llama-3.3-70b-versatile',
-  deepseek: 'deepseek-chat',
+  deepseek: 'deepseek-v4-flash',
   openrouter: 'openai/gpt-4o'
 };
 
