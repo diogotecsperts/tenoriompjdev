@@ -1199,16 +1199,27 @@ export function DevSettings() {
     return { configured, totalModels, avgLatency, healthPct };
   };
 
-  // Render Gemini model with details (token limit, PDF support)
+  // Render Gemini model with details (token limit, PDF support, billing flag)
   const renderGeminiModelOption = (modelId: string) => {
     const details = geminiModelDetails[modelId];
     const isVersioned = versionedGeminiModels.includes(modelId);
+    // Modelos Pro do Gemini têm free tier = 0 e exigem billing habilitado
+    const requiresBilling = /(^|-)(pro)(-|$)/i.test(modelId) || /pro-preview/i.test(modelId);
     
     return (
       <SelectItem key={modelId} value={modelId}>
         <div className="flex items-center justify-between gap-2 w-full">
           <span className="font-mono text-xs truncate">{modelId}</span>
           <div className="flex items-center gap-1 shrink-0">
+            {requiresBilling ? (
+              <Badge variant="outline" className="text-[9px] px-1 py-0 text-red-600 border-red-300">
+                billing
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[9px] px-1 py-0 text-green-600 border-green-300">
+                free
+              </Badge>
+            )}
             {isVersioned && (
               <Badge variant="outline" className="text-[9px] px-1 py-0 text-amber-600 border-amber-300">
                 v
