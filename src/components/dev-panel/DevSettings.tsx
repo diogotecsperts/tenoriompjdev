@@ -104,16 +104,16 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   name: "Google Gemini",
   description: "Modelos Gemini via Google AI Studio. Use 'Atualizar Modelos' para ver modelos disponíveis.",
   models: [
-    // Gemini 2.5 (aliases estáveis)
-    "gemini-2.5-pro",
+    // Flash — FREE TIER (recomendados como padrão)
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-2.5-flash-8b",
-    // Gemini 2.0 (estáveis)
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
-    // Gemini 1.5 (estáveis)
-    "gemini-1.5-pro",
-    "gemini-1.5-flash"
+    "gemini-1.5-flash",
+    // Pro — REQUEREM BILLING habilitado no Google AI Studio
+    "gemini-2.5-pro",
+    "gemini-1.5-pro"
   ],
   requiresKey: true,
   color: "hsl(217, 91%, 60%)",
