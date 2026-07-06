@@ -99,8 +99,10 @@ const AI_MODELS: Record<string, { id: string; name: string }[]> = {
     { id: "whisper-large-v3-turbo", name: "Whisper V3 Turbo" },
   ],
   deepseek: [
-    { id: "deepseek-chat", name: "DeepSeek V3 Chat" },
-    { id: "deepseek-reasoner", name: "DeepSeek V3 Reasoner" },
+    { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash (recomendado, 1M ctx)" },
+    { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro (mais poderoso, 1M ctx)" },
+    { id: "deepseek-chat", name: "DeepSeek Chat (legacy — deprecado 07/2026)" },
+    { id: "deepseek-reasoner", name: "DeepSeek Reasoner (legacy — deprecado 07/2026)" },
   ],
   openrouter: [
     { id: "openai/gpt-4o", name: "GPT-4o (via OpenRouter)" },
