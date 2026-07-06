@@ -71,12 +71,12 @@ const AI_MODELS: Record<string, { id: string; name: string }[]> = {
     { id: "o1-mini", name: "o1 Mini" },
   ],
   gemini: [
-    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-    { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash-Lite" },
-    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
-    { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro" },
-    { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash" },
+    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (free tier — recomendado)" },
+    { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash-Lite (free tier — mais rápido)" },
+    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash (free tier)" },
+    { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash (free tier — legado)" },
+    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro (requer billing)" },
+    { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro (requer billing)" },
   ],
   claude: [
     { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet" },
