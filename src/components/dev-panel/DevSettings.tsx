@@ -141,7 +141,7 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   id: "deepseek",
   name: "DeepSeek",
   description: "Modelos de alta qualidade com preços competitivos.",
-  models: ["deepseek-chat", "deepseek-reasoner"],
+  models: ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner"],
   requiresKey: true,
   color: "hsl(200, 95%, 48%)",
   keyPlaceholder: "sk-..."
