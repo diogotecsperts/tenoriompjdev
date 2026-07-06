@@ -133,8 +133,7 @@ const paragraph = (doc: jsPDF, text: string, y: number, opts?: { italic?: boolea
   return y + 2;
 };
 
-const labeled = (doc: jsPDF, label: string, value: string, y: number): number => {
-  if (isFieldEmpty(value)) return y;
+const labeledAlways = (doc: jsPDF, label: string, value: string, y: number): number => {
   doc.setFontSize(10);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(COLORS.text.r, COLORS.text.g, COLORS.text.b);
@@ -143,17 +142,26 @@ const labeled = (doc: jsPDF, label: string, value: string, y: number): number =>
   y = checkNewPage(doc, y, LINE);
   doc.text(labelText, MARGINS.left, y);
   doc.setFont("helvetica", "normal");
-  const lines = doc.splitTextToSize(stripLightMarkdown(value), PAGE.contentWidth - labelW);
-  lines.forEach((ln: string, idx: number) => {
-    if (idx === 0) {
-      doc.text(ln, MARGINS.left + labelW, y);
-    } else {
-      y = checkNewPage(doc, y + LINE, LINE);
-      doc.text(ln, MARGINS.left + labelW, y);
-    }
-  });
+  const cleaned = stripLightMarkdown(value || "");
+  if (cleaned) {
+    const lines = doc.splitTextToSize(cleaned, PAGE.contentWidth - labelW);
+    lines.forEach((ln: string, idx: number) => {
+      if (idx === 0) {
+        doc.text(ln, MARGINS.left + labelW, y);
+      } else {
+        y = checkNewPage(doc, y + LINE, LINE);
+        doc.text(ln, MARGINS.left + labelW, y);
+      }
+    });
+  }
   return y + LINE + 1;
 };
+
+const labeled = (doc: jsPDF, label: string, value: string, y: number): number => {
+  if (isFieldEmpty(value)) return y;
+  return labeledAlways(doc, label, value, y);
+};
+
 
 // ---------- Rich paragraph com runs coloridos (para comorbidades em vermelho) ----------
 type Run = { text: string; color?: { r: number; g: number; b: number }; bold?: boolean };
@@ -331,7 +339,6 @@ export const generatePrelaudoPdf = async (
     y = labeled(doc, "Profissão", id.profissao || "", y);
     y = labeled(doc, "Última atividade", id.ultima_atividade || "", y);
     y = labeled(doc, "Pessoas sob o mesmo teto", id.pessoas_mesmo_teto || "", y);
-    y = labeled(doc, "Tempo sem trabalhar", id.tempo_sem_trabalhar || "", y);
     y += 2;
   }
 
@@ -341,10 +348,15 @@ export const generatePrelaudoPdf = async (
   if (included.has("queixa")) {
     const q = data.queixa || {};
 
+    // "Tempo que está sem trabalhar" — sempre visível, mesmo vazio
+    y = labeledAlways(doc, "Tempo que está sem trabalhar", id.tempo_sem_trabalhar || "", y);
+    y += 2;
+
     // Título "Queixa principal" + parágrafo em branco antes do texto
     y = sectionTitle(doc, "Queixa principal", y);
     y += 3;
     if (q.queixa_principal) y = paragraph(doc, q.queixa_principal, y);
+
 
     // Prefixo FIXO das medicações (sempre presente) + conteúdo dinâmico
     const medRaw = (q.medicacoes_uso || "").trim();

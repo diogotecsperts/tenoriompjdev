@@ -208,8 +208,8 @@ export const generatePrelaudoDocx = async (
       labeled("Profissão", id.profissao || ""),
       labeled("Última atividade", id.ultima_atividade || ""),
       labeled("Pessoas sob o mesmo teto", id.pessoas_mesmo_teto || ""),
-      labeled("Tempo sem trabalhar", id.tempo_sem_trabalhar || ""),
     ].forEach((p) => p && paragraphs.push(p));
+
     paragraphs.push(new Paragraph({ spacing: { after: 100 } }));
   }
 
@@ -217,9 +217,21 @@ export const generatePrelaudoDocx = async (
   if (included.has("queixa")) {
     const q = data.queixa || {};
 
+    // "Tempo que está sem trabalhar" — sempre visível, mesmo vazio
+    paragraphs.push(
+      new Paragraph({
+        children: [
+          baseRun("Tempo que está sem trabalhar: ", { bold: true }),
+          baseRun(stripLightMarkdown(id.tempo_sem_trabalhar || "")),
+        ],
+        spacing: { after: 120 },
+      }),
+    );
+
     // Título "Queixa principal" + parágrafo em branco antes do texto
     paragraphs.push(sectionTitle("Queixa principal"));
     paragraphs.push(new Paragraph({ spacing: { after: 80 } }));
+
     const queixaPar = paragraph(q.queixa_principal || "");
     if (queixaPar) paragraphs.push(queixaPar);
 
