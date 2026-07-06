@@ -339,7 +339,6 @@ export const generatePrelaudoPdf = async (
     y = labeled(doc, "Profissão", id.profissao || "", y);
     y = labeled(doc, "Última atividade", id.ultima_atividade || "", y);
     y = labeled(doc, "Pessoas sob o mesmo teto", id.pessoas_mesmo_teto || "", y);
-    y = labeled(doc, "Tempo sem trabalhar", id.tempo_sem_trabalhar || "", y);
     y += 2;
   }
 
@@ -349,10 +348,15 @@ export const generatePrelaudoPdf = async (
   if (included.has("queixa")) {
     const q = data.queixa || {};
 
+    // "Tempo que está sem trabalhar" — sempre visível, mesmo vazio
+    y = labeledAlways(doc, "Tempo que está sem trabalhar", id.tempo_sem_trabalhar || "", y);
+    y += 2;
+
     // Título "Queixa principal" + parágrafo em branco antes do texto
     y = sectionTitle(doc, "Queixa principal", y);
     y += 3;
     if (q.queixa_principal) y = paragraph(doc, q.queixa_principal, y);
+
 
     // Prefixo FIXO das medicações (sempre presente) + conteúdo dinâmico
     const medRaw = (q.medicacoes_uso || "").trim();
