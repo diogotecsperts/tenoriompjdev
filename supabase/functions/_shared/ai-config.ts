@@ -34,7 +34,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-4o',
   claude: 'claude-3-7-sonnet-20250219',
   groq: 'llama-3.3-70b-versatile',
-  deepseek: 'deepseek-chat',
+  deepseek: 'deepseek-v4-flash',
   openrouter: 'openai/gpt-4o'
 };
 
@@ -579,15 +579,26 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
     generationConfig.responseMimeType = 'application/json';
     console.log('[callGeminiDirect] JSON mode enabled (responseMimeType: application/json)');
   }
+
+  // Safety settings — desativar bloqueios automáticos (contexto médico/legal)
+  const safetySettings = [
+    { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+  ];
   
   const response = await fetchWithRetry(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{
-        parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }]
+        role: 'user',
+        parts: [{ text: userPrompt }]
       }],
-      generationConfig
+      generationConfig,
+      safetySettings,
     })
   });
 
@@ -597,18 +608,40 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
   }
 
   const data = await response.json();
+  const candidate = data.candidates?.[0];
+  const text = candidate?.content?.parts?.map((p: any) => p.text || '').join('') || '';
+  const finishReason = candidate?.finishReason || 'UNKNOWN';
+
+  // Detectar resposta vazia (SAFETY, MAX_TOKENS, etc.) para acionar fallback em vez de silêncio
+  if (!text) {
+    throw new Error(`Gemini returned empty response (finishReason: ${finishReason})`);
+  }
+
   return {
-    text: data.candidates?.[0]?.content?.parts?.[0]?.text || '',
+    text,
     provider: config.provider,
     model: config.displayModel
   };
 }
 
 async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean }) {
+  const isDeepSeek = config.provider === 'deepseek';
+  const isDeepSeekReasoner = isDeepSeek && config.model.includes('reasoner');
+
+  // DeepSeek JSON quirk: exige a palavra "json" no prompt (system ou user) senão pode retornar vazio
+  let finalSystemPrompt = systemPrompt;
+  if (isDeepSeek && options?.jsonMode) {
+    const hasJsonKeyword = /json/i.test(systemPrompt) || /json/i.test(userPrompt);
+    if (!hasJsonKeyword) {
+      finalSystemPrompt = `${systemPrompt}\n\nResponda em formato JSON válido.`;
+      console.log('[callOpenAICompatible] DeepSeek JSON mode: injecting "json" keyword');
+    }
+  }
+
   const body: any = {
     model: config.model,
     messages: [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: finalSystemPrompt },
       { role: 'user', content: userPrompt }
     ],
   };
@@ -622,6 +655,11 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
   if (options?.jsonMode) {
     body.response_format = { type: 'json_object' };
     console.log(`[callOpenAICompatible] JSON mode enabled for ${config.provider}`);
+  }
+
+  // DeepSeek V4 default: desligar thinking mode (mais rápido/previsível). Manter só no legacy `-reasoner`.
+  if (isDeepSeek && !isDeepSeekReasoner) {
+    body.thinking = { type: 'disabled' };
   }
   
   const response = await fetchWithRetry(config.endpoint, {
@@ -639,8 +677,15 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
   }
 
   const data = await response.json();
+  const text = data.choices?.[0]?.message?.content || '';
+
+  // DeepSeek em JSON mode pode retornar content vazio (issue documentado) — lançar erro para acionar fallback
+  if (isDeepSeek && !text) {
+    throw new Error('DeepSeek returned empty content (known JSON mode issue)');
+  }
+
   return {
-    text: data.choices?.[0]?.message?.content || '',
+    text,
     provider: config.provider,
     model: config.displayModel
   };
@@ -1121,7 +1166,13 @@ export async function callGeminiVision(
           topP: 0.95,
           maxOutputTokens: 32768,
           responseMimeType: "application/json"
-        }
+        },
+        safetySettings: [
+          { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+          { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+        ]
       })
     });
 
