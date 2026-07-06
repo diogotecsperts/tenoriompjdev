@@ -208,8 +208,8 @@ export const generatePrelaudoDocx = async (
       labeled("Profissão", id.profissao || ""),
       labeled("Última atividade", id.ultima_atividade || ""),
       labeled("Pessoas sob o mesmo teto", id.pessoas_mesmo_teto || ""),
-      labeled("Tempo sem trabalhar", id.tempo_sem_trabalhar || ""),
     ].forEach((p) => p && paragraphs.push(p));
+
     paragraphs.push(new Paragraph({ spacing: { after: 100 } }));
   }
 
