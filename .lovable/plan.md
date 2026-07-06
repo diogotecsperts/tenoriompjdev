@@ -1,82 +1,38 @@
-## Onde o texto está
+## Objetivo
+Fazer o campo "Tempo que está sem trabalhar" aparecer no documento exportado (DOCX e PDF) imediatamente **acima do título "Queixa principal"**, **sempre** — mesmo quando vazio no app.
 
-O parágrafo "Diante do exposto, destituído de qualquer parcialidade..." é o texto fixo `EXAME_FISICO_TEXTOS.complementacao` em `src/modules/previdenciario/lib/prelaudo-structure.ts` e é usado em três lugares:
+## Diagnóstico
+O campo `identificacao.tempo_sem_trabalhar` já existe no editor (Step01) e é exportado hoje dentro do bloco de Identificação (rótulo "Tempo sem trabalhar"):
 
-1. Editor — `src/modules/previdenciario/components/steps/Step03ExameFisico.tsx` (linha 35), hoje dentro de um bloco cujo título é **"Complementação"**.
-2. Export PDF — `src/modules/previdenciario/lib/export/prelaudo-pdf.ts` (linha 385), sem título antes; existe um `sectionTitle("Conclusão")` mais abaixo, só quando algum radio de incapacidade está preenchido.
-3. Export DOCX — `src/modules/previdenciario/lib/export/prelaudo-docx.ts` (linha 262), mesma situação.
+- `prelaudo-docx.ts` linha 211
+- `prelaudo-pdf.ts` linha 334
 
-Os radios de incapacidade (função habitual / vida independente) já existem no app:
+Além de ficar no lugar errado (topo, junto dos dados pessoais), passa pelo `isFieldEmpty` — quando vazio, some. Por isso o cliente diz que "não sai no documento".
 
-- Fonte: `INCAPACIDADE_OPCOES` em `prelaudo-structure.ts` (4 opções: Não há incapacidade / Temporária, já cessada / Temporária, ainda presente / Permanente).
-- Editor: renderizados na `Section title="Conclusões"` do Step03, logo abaixo do bloco "Complementação".
-- Export: renderizados como frase curta "Apresenta, para a sua função habitual: <valor>." (formato diferente do que o cliente pediu).
+## Mudança
 
-O projeto já tem helper pronto para o formato "(X)/( )" que o cliente pediu: `buildOptionRows` em `src/modules/previdenciario/lib/export/_shared.ts` (usado hoje em Estado civil, Escolaridade, Comorbidades). Vou reutilizar esse mesmo helper — nada novo é criado.
+1. **`src/modules/previdenciario/lib/export/prelaudo-docx.ts`**
+   - Remover `labeled("Tempo sem trabalhar", id.tempo_sem_trabalhar || "")` do bloco Identificação (linha 211).
+   - Dentro do `if (included.has("queixa"))`, **antes** do `sectionTitle("Queixa principal")`, inserir um parágrafo **sempre visível** no formato:
+     `Tempo que está sem trabalhar: <valor ou vazio>`
+     — construído diretamente com `new Paragraph({ children: [baseRun("Tempo que está sem trabalhar: ", { bold: true }), baseRun(stripLightMarkdown(id.tempo_sem_trabalhar || ""))] })`, **sem** passar pelo helper `labeled` (que oculta quando vazio). Manter parágrafo em branco entre essa linha e o título "Queixa principal".
 
-## O que muda (mínimo, cirúrgico)
+2. **`src/modules/previdenciario/lib/export/prelaudo-pdf.ts`**
+   - Remover a chamada `labeled(doc, "Tempo sem trabalhar", id.tempo_sem_trabalhar || "", y)` do bloco Identificação (linha 334).
+   - Dentro do `if (included.has("queixa"))`, **antes** do `sectionTitle(doc, "Queixa principal", y)`, renderizar a linha "Tempo que está sem trabalhar: <valor ou vazio>" **sempre**, usando o renderizador de rótulo bruto (não o `labeled` que faz early-return quando `isFieldEmpty`). Seguir a espessura/estilo já usado em rótulos do cabeçalho (label negrito + valor). Espaço em branco antes do título "Queixa principal".
 
-### 1) Editor — Step03ExameFisico.tsx
+3. **Rótulo:** padronizar como "Tempo que está sem trabalhar" (igual ao editor), substituindo "Tempo sem trabalhar".
 
-- Renomear o bloco `title="Complementação"` (linha 35) para **`title="Conclusão"`**. O corpo permanece `EXAME_FISICO_TEXTOS.complementacao` e o layout `FixedBlock` já insere o espaçamento entre o título e o parágrafo.
-- Mover a `Section title="Conclusões"` (com os dois `RadioGroupLine`) para **dentro** do bloco "Conclusão", logo abaixo do parágrafo fixo, para bater com a ordem exportada. Renomear a legenda interna para exatamente o que o cliente escreveu:
-  - "Incapacidade para sua função habitual:"
-  - "Incapacidade para a vida independente:"
-- Nenhuma mudança em `INCAPACIDADE_OPCOES`, no `onChange`, no salvamento ou no comportamento dos radios.
+4. **Exportar mesmo quando o step Identificação estiver desmarcado:** a nova linha vive dentro do bloco `queixa`, então basta a etapa "Queixa" estar incluída para a linha aparecer. Isso resolve o caso em que o cliente exporta só parte do documento.
 
-### 2) Export PDF — prelaudo-pdf.ts (bloco `exame_fisico`, linhas 380–400)
+## Comportamento resultante
+- Preenchido: `Tempo que está sem trabalhar: 8 meses`
+- Vazio: `Tempo que está sem trabalhar: ` (rótulo aparece, valor em branco)
 
-Nova ordem:
-
-```text
-sectionTitle("Exame físico")
-paragraph(EXAME_FISICO_TEXTOS.estado_mental)
-paragraph(EXAME_FISICO_TEXTOS.ectoscopia)
-paragraph(EXAME_FISICO_TEXTOS.inspecao_dinamica)
-
-sectionTitle("Conclusão")             // NOVO título fixo
-paragraph(EXAME_FISICO_TEXTOS.complementacao)   // parágrafo fixo (com o espaçamento padrão que sectionTitle já dá)
-
-// Bloco 1 — checkboxes (formato pedido pelo cliente)
-paragraph("Incapacidade para sua função habitual:")
-renderOptionRows(buildOptionRows(
-  INCAPACIDADE_OPCOES.map(o => o.label),
-  INCAPACIDADE_LABEL[ex.incap_funcao_habitual ?? ""]
-))
-
-// Bloco 2
-paragraph("Incapacidade para a vida independente:")
-renderOptionRows(buildOptionRows(
-  INCAPACIDADE_OPCOES.map(o => o.label),
-  INCAPACIDADE_LABEL[ex.incap_vida_independente ?? ""]
-))
-```
-
-- Remover o `sectionTitle("Conclusão")` duplicado (linhas 390–392) e as duas linhas "Apresenta, para a sua função habitual: ..." / "Apresenta, para a vida independente: ..." (linhas 393–398) — substituídas pelos blocos acima.
-- A renderização de linhas `(X) / ( )` reaproveita o mesmo mecanismo já usado em Comorbidades/Escolaridade (`renderOptionsBlock`/equivalente já presente no arquivo — mesmo padrão do restante do laudo, com o mesmo estilo visual).
-
-### 3) Export DOCX — prelaudo-docx.ts (bloco `exame_fisico`, linhas 255–280)
-
-Mesmas mudanças do PDF, usando `buildOptionRows` e o mesmo helper `buildMultiOptionRows`/formatter de linhas `(X)/( )` que hoje já é usado nas outras listas do DOCX (Comorbidades etc.). Remover o `sectionTitle("Conclusão")` condicional e as duas frases "Apresenta, para a..." (linhas 268–279).
-
-## Regras herdadas que continuam valendo
-
-- **IA:** este bloco continua 100% fixo (texto do dicionário + seleção manual dos radios). Nenhum campo aqui é gerado por IA, portanto não há botão de regenerar, nem "aura" de campo IA, nem interpolação de prompt — coerente com as regras de "Anti-Hallucination" e "Zero-Touch Import".
-- **Grifado laranja `[DB]` (fixed field styling):** as opções de incapacidade são conteúdo fixo escolhido pelo médico (radio), não texto vindo do banco por interpolação de prompt, então não recebem `[DB]` — segue o mesmo padrão das listas de Estado civil, Escolaridade e Comorbidades fixas, que também não recebem `[DB]`. Nada nas regras de export compliance é violado: sem "IA", sem markdown, negrito → CAIXA ALTA quando aplicável, título "Conclusão" em maiúsculas conforme o padrão do `sectionTitle`.
-- **Parágrafo separando título e texto:** o `sectionTitle`/`FixedBlock` já aplica o espaçamento padrão entre o título e o parágrafo (mesmo comportamento de "Exame físico", "Queixa principal" etc.). Não é preciso injetar `<br>` manual.
+Em ambos os casos, o título "Queixa principal" vem logo abaixo, com o espaçamento padrão.
 
 ## O que NÃO muda
-
-- Texto de `EXAME_FISICO_TEXTOS.complementacao` — idêntico.
-- `INCAPACIDADE_OPCOES` / `INCAPACIDADE_LABEL` / tipos de `ExameFisicoData` — idênticos.
-- Nenhuma alteração em prompts, DB, edge functions, DevPanel, módulo Trabalhista, outras etapas do Previdenciário, PDF de Impugnação ou Laudo Trabalhista.
-- Dados já salvos (`incap_funcao_habitual`, `incap_vida_independente`) continuam válidos e passam a ser exportados no novo formato automaticamente.
-
-## Verificação
-
-- Editor Step 3: o bloco antes do "Diante do exposto..." lê **Conclusão**; logo abaixo do parágrafo aparecem "Incapacidade para sua função habitual:" e "Incapacidade para a vida independente:" com os quatro botões cada.
-- Exportar PDF e DOCX de uma perícia com uma opção marcada em cada grupo:
-  - Aparece um título **CONCLUSÃO** único.
-  - Abaixo dele, o parágrafo "Diante do exposto...".
-  - Em seguida, duas listas `(X)/( )` no formato exato pedido pelo cliente, com apenas a opção escolhida marcada.
-- Exportar sem nenhuma opção marcada: o título e o parágrafo fixo aparecem; as duas listas aparecem com todas as opções `( )` (nenhuma marcada), coerente com o que hoje já acontece em Estado civil quando vazio.
+- Estrutura de dados, tipos, prompts, IA, DB, edge functions, DevPanel, Trabalhista, Impugnação.
+- Editor Step01 (campo continua onde está, preenchimento manual).
+- Regras de textos fixos, comorbidades, incapacidades e "Conclusão" recém-adicionadas ficam intactas.
+- Helper `labeled`/`isFieldEmpty` continua com o comportamento atual — apenas esta linha específica passa a ser renderizada de forma incondicional.
