@@ -579,15 +579,26 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
     generationConfig.responseMimeType = 'application/json';
     console.log('[callGeminiDirect] JSON mode enabled (responseMimeType: application/json)');
   }
+
+  // Safety settings — desativar bloqueios automáticos (contexto médico/legal)
+  const safetySettings = [
+    { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+    { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+  ];
   
   const response = await fetchWithRetry(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{
-        parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }]
+        role: 'user',
+        parts: [{ text: userPrompt }]
       }],
-      generationConfig
+      generationConfig,
+      safetySettings,
     })
   });
 
@@ -597,8 +608,17 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
   }
 
   const data = await response.json();
+  const candidate = data.candidates?.[0];
+  const text = candidate?.content?.parts?.map((p: any) => p.text || '').join('') || '';
+  const finishReason = candidate?.finishReason || 'UNKNOWN';
+
+  // Detectar resposta vazia (SAFETY, MAX_TOKENS, etc.) para acionar fallback em vez de silêncio
+  if (!text) {
+    throw new Error(`Gemini returned empty response (finishReason: ${finishReason})`);
+  }
+
   return {
-    text: data.candidates?.[0]?.content?.parts?.[0]?.text || '',
+    text,
     provider: config.provider,
     model: config.displayModel
   };
