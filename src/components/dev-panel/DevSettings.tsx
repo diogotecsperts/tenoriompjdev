@@ -112,8 +112,9 @@ const sortGeminiModelsSafely = (models: string[]) => Array.from(new Set(models.m
 });
 
 const getSafeGeminiDefaultModel = (currentModel?: string | null, models: string[] = []) => {
-  const normalizedCurrent = normalizeGeminiModelId(currentModel);
-  if (normalizedCurrent && isGeminiFlashModel(normalizedCurrent) && !isGeminiNonTextUtilityModel(normalizedCurrent)) {
+  const rawCurrent = currentModel || "";
+  const normalizedCurrent = normalizeGeminiModelId(rawCurrent);
+  if (!rawCurrent.startsWith("google/") && normalizedCurrent && isGeminiFlashModel(normalizedCurrent) && !isGeminiNonTextUtilityModel(normalizedCurrent)) {
     return normalizedCurrent;
   }
 
@@ -235,10 +236,6 @@ const DEFAULT_CONFIG: SystemConfig = {
 
 // Gemini Vision models available for PDF extraction (aliases estáveis)
 const GEMINI_PDF_MODELS = [{
-  id: 'gemini-2.5-pro',
-  name: 'Gemini 2.5 Pro',
-  description: 'Maior precisão, ideal para PDFs complexos'
-}, {
   id: 'gemini-2.5-flash',
   name: 'Gemini 2.5 Flash',
   description: 'Rápido e eficiente (recomendado)'
@@ -246,6 +243,10 @@ const GEMINI_PDF_MODELS = [{
   id: 'gemini-2.0-flash',
   name: 'Gemini 2.0 Flash',
   description: 'Versão estável'
+}, {
+  id: 'gemini-2.5-pro',
+  name: 'Gemini 2.5 Pro',
+  description: 'Maior precisão, requer billing'
 }, {
   id: 'gemini-1.5-pro',
   name: 'Gemini 1.5 Pro',
@@ -1824,7 +1825,7 @@ export function DevSettings() {
               setConfig({
                 ...config,
                 fallback_ai_provider: value,
-                fallback_ai_model: provider?.models[0] || ""
+                fallback_ai_model: value === 'gemini' ? getSafeGeminiDefaultModel(null, provider?.models || []) : provider?.models[0] || ""
               });
             }}>
                   <SelectTrigger>
@@ -2006,7 +2007,7 @@ export function DevSettings() {
               if (value === "openrouter") {
                 defaultModel = OPENROUTER_PDF_MODELS[0].id;
               } else if (value === "gemini") {
-                defaultModel = GEMINI_PDF_MODELS[0].id;
+                defaultModel = GEMINI_SAFE_DEFAULT_MODEL;
               } else if (value === "lovable") {
                 defaultModel = "google/gemini-2.5-flash";
               } else if (value === "mistral-ocr") {
@@ -2216,7 +2217,7 @@ export function DevSettings() {
               if (value === "openrouter") {
                 defaultModel = OPENROUTER_PDF_MODELS[0].id;
               } else if (value === "gemini") {
-                defaultModel = GEMINI_PDF_MODELS[0].id;
+                defaultModel = GEMINI_SAFE_DEFAULT_MODEL;
               } else if (value === "lovable") {
                 defaultModel = "google/gemini-2.5-flash";
               } else if (value === "mistral-ocr") {
