@@ -103,18 +103,23 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   id: "gemini",
   name: "Google Gemini",
   description: "Modelos Gemini via Google AI Studio. Use 'Atualizar Modelos' para ver modelos disponíveis.",
-  models: [
+  models: sortGeminiModelsSafely([
     // Flash — FREE TIER (recomendados como padrão)
     "gemini-2.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite-preview",
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash-8b",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
     "gemini-1.5-flash",
     // Pro — REQUEREM BILLING habilitado no Google AI Studio
+    "gemini-3-pro-preview",
     "gemini-2.5-pro",
     "gemini-1.5-pro"
-  ],
+  ]),
   requiresKey: true,
   color: "hsl(217, 91%, 60%)",
   keyPlaceholder: "AIza..."
@@ -160,7 +165,7 @@ const AI_PROVIDERS: ProviderInfo[] = [{
 
 const DEFAULT_CONFIG: SystemConfig = {
   default_ai_provider: "lovable",
-  default_ai_model: "google/gemini-3-flash-preview",
+  default_ai_model: "google/gemini-2.5-flash",
   fallback_ai_provider: "lovable",
   fallback_ai_model: "google/gemini-2.5-flash",
   gemini_pdf_model: "gemini-2.5-flash",
@@ -416,10 +421,11 @@ export function DevSettings() {
         if (cacheAge < CACHE_TTL && cached.models) {
           // Use cached data
           const stableIds = cached.models.map((m: GeminiModelInfo) => m.id);
-          const versionedIds = cached.versionedModels?.map((m: GeminiModelInfo) => m.id) || [];
+          const sortedStableIds = sortGeminiModelsSafely(stableIds.filter((id: string) => !isGeminiNonTextUtilityModel(id)));
+          const versionedIds = sortGeminiModelsSafely(cached.versionedModels?.map((m: GeminiModelInfo) => m.id) || []);
           const imageIds = cached.imageModels?.map((m: GeminiModelInfo) => m.id) || [];
           
-          setDynamicGeminiModels(stableIds);
+          setDynamicGeminiModels(sortedStableIds);
           setVersionedGeminiModels(versionedIds);
           setGeminiImageModels(imageIds);
           setModelsCacheUpdatedAt(new Date(cached.updatedAt));
@@ -434,10 +440,10 @@ export function DevSettings() {
           // Update provider models list
           const geminiProvider = AI_PROVIDERS.find(p => p.id === 'gemini');
           if (geminiProvider) {
-            geminiProvider.models = stableIds.length > 0 ? stableIds : geminiProvider.models;
+            geminiProvider.models = sortedStableIds.length > 0 ? sortedStableIds : sortGeminiModelsSafely(geminiProvider.models);
           }
           
-          console.log(`[DevSettings] Loaded ${stableIds.length} stable + ${versionedIds.length} versioned models from cache`);
+          console.log(`[DevSettings] Loaded ${sortedStableIds.length} stable + ${versionedIds.length} versioned models from cache`);
         }
       }
     } catch (error) {
@@ -716,11 +722,11 @@ export function DevSettings() {
 
       if (data?.success && data?.models) {
         // Stable text models
-        const stableModelIds = data.models.map((m: GeminiModelInfo) => m.id);
+        const stableModelIds = sortGeminiModelsSafely(data.models.map((m: GeminiModelInfo) => m.id).filter((id: string) => !isGeminiNonTextUtilityModel(id)));
         setDynamicGeminiModels(stableModelIds);
         
         // Versioned models (separate list)
-        const versionedIds = data.versionedModels?.map((m: GeminiModelInfo) => m.id) || [];
+        const versionedIds = sortGeminiModelsSafely(data.versionedModels?.map((m: GeminiModelInfo) => m.id) || []);
         setVersionedGeminiModels(versionedIds);
         
         // Image models (separate list)
@@ -756,6 +762,12 @@ export function DevSettings() {
         if (geminiProvider) {
           geminiProvider.models = stableModelIds;
         }
+
+        setConfig(prev => {
+          if (prev.default_ai_provider !== 'gemini') return prev;
+          const safeModel = getSafeGeminiDefaultModel(prev.default_ai_model, stableModelIds);
+          return safeModel === prev.default_ai_model ? prev : { ...prev, default_ai_model: safeModel };
+        });
 
         toast({
           title: "Modelos Atualizados",
@@ -984,10 +996,13 @@ export function DevSettings() {
     setTestingProvider(providerId);
     try {
       const startTime = Date.now();
+      const modelToTest = providerId === 'gemini'
+        ? getSafeGeminiDefaultModel(config.default_ai_provider === 'gemini' ? config.default_ai_model : null, provider.models)
+        : provider.models[0];
       const { data, error } = await supabase.functions.invoke('test-ai-connection', {
         body: {
           provider: providerId,
-          model: provider.models[0],
+          model: modelToTest,
           apiKey: provider.requiresKey ? apiKeys[providerId] : null
         }
       });
@@ -1015,7 +1030,7 @@ export function DevSettings() {
         };
         toast({
           title: "Conexão OK",
-          description: `${provider.name} respondeu em ${data.latencyMs || latencyMs}ms`
+          description: `${provider.name} (${modelToTest}) respondeu em ${data.latencyMs || latencyMs}ms`
         });
       } else {
         result = {
@@ -1074,7 +1089,9 @@ export function DevSettings() {
     setConfig(prev => ({
       ...prev,
       default_ai_provider: providerId,
-      default_ai_model: provider.models[0]
+      default_ai_model: providerId === 'gemini'
+        ? getSafeGeminiDefaultModel(prev.default_ai_model, provider.models)
+        : provider.models[0]
     }));
     toast({
       title: "Provider Atualizado",
@@ -1119,10 +1136,9 @@ export function DevSettings() {
   const getActiveProviderModels = () => {
     const provider = AI_PROVIDERS.find(p => p.id === config.default_ai_provider);
     if (!provider) return [];
-    
-    // For Gemini, include versioned models if toggle is on
-    if (provider.id === 'gemini' && showVersionedModels) {
-      return [...(dynamicGeminiModels.length > 0 ? dynamicGeminiModels : provider.models), ...versionedGeminiModels];
+    if (provider.id === 'gemini') {
+      const baseModels = dynamicGeminiModels.length > 0 ? dynamicGeminiModels : provider.models;
+      return sortGeminiModelsSafely(showVersionedModels ? [...baseModels, ...versionedGeminiModels] : baseModels);
     }
     
     return provider.models;
@@ -1131,9 +1147,9 @@ export function DevSettings() {
   const getFallbackProviderModels = () => {
     const provider = AI_PROVIDERS.find(p => p.id === config.fallback_ai_provider);
     if (!provider) return [];
-    
-    if (provider.id === 'gemini' && showVersionedModels) {
-      return [...(dynamicGeminiModels.length > 0 ? dynamicGeminiModels : provider.models), ...versionedGeminiModels];
+    if (provider.id === 'gemini') {
+      const baseModels = dynamicGeminiModels.length > 0 ? dynamicGeminiModels : provider.models;
+      return sortGeminiModelsSafely(showVersionedModels ? [...baseModels, ...versionedGeminiModels] : baseModels);
     }
     
     return provider.models;
@@ -1249,7 +1265,7 @@ export function DevSettings() {
     const details = geminiModelDetails[modelId];
     const isVersioned = versionedGeminiModels.includes(modelId);
     // Modelos Pro do Gemini têm free tier = 0 e exigem billing habilitado
-    const requiresBilling = /(^|-)(pro)(-|$)/i.test(modelId) || /pro-preview/i.test(modelId);
+    const requiresBilling = isGeminiProModel(modelId);
     
     return (
       <SelectItem key={modelId} value={modelId}>
