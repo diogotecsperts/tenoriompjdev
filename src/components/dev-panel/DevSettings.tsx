@@ -76,6 +76,51 @@ interface TestResult {
   testedAt?: Date;
 }
 
+const GEMINI_SAFE_DEFAULT_MODEL = "gemini-2.5-flash";
+const GEMINI_FLASH_PRIORITY = [
+  "gemini-2.5-flash",
+  "gemini-3-flash-preview",
+  "gemini-3.5-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash-8b",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash"
+];
+
+const normalizeGeminiModelId = (modelId?: string | null) => (modelId || "").replace(/^google\//, "");
+
+const isGeminiProModel = (modelId: string) => /(^|-)pro($|-)/i.test(modelId) || /pro-preview/i.test(modelId);
+const isGeminiFlashModel = (modelId: string) => /(^|-)flash($|-)/i.test(modelId) || /flash-lite/i.test(modelId);
+const isGeminiNonTextUtilityModel = (modelId: string) => /(?:image|imagen|tts|audio|lyria|robotics|computer-use|deep-research|omni|banana|antigravity)/i.test(modelId);
+
+const getGeminiModelRank = (modelId: string) => {
+  const normalized = normalizeGeminiModelId(modelId);
+  const preferredIndex = GEMINI_FLASH_PRIORITY.indexOf(normalized);
+  if (preferredIndex >= 0) return preferredIndex;
+  if (isGeminiFlashModel(normalized) && !isGeminiNonTextUtilityModel(normalized)) return 100;
+  if (isGeminiNonTextUtilityModel(normalized)) return 700;
+  if (isGeminiProModel(normalized)) return 900;
+  return 500;
+};
+
+const sortGeminiModelsSafely = (models: string[]) => Array.from(new Set(models.map(normalizeGeminiModelId).filter(Boolean))).sort((a, b) => {
+  const rankDiff = getGeminiModelRank(a) - getGeminiModelRank(b);
+  return rankDiff !== 0 ? rankDiff : a.localeCompare(b);
+});
+
+const getSafeGeminiDefaultModel = (currentModel?: string | null, models: string[] = []) => {
+  const normalizedCurrent = normalizeGeminiModelId(currentModel);
+  if (normalizedCurrent && isGeminiFlashModel(normalizedCurrent) && !isGeminiNonTextUtilityModel(normalizedCurrent)) {
+    return normalizedCurrent;
+  }
+
+  const sortedModels = sortGeminiModelsSafely(models);
+  return sortedModels.find(model => isGeminiFlashModel(model) && !isGeminiNonTextUtilityModel(model)) || GEMINI_SAFE_DEFAULT_MODEL;
+};
+
 const AI_PROVIDERS: ProviderInfo[] = [{
   id: "lovable",
   name: "IA Integrada",
@@ -265,51 +310,6 @@ const formatTokenLimit = (tokens: number): string => {
   if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(0)}M`;
   if (tokens >= 1000) return `${(tokens / 1000).toFixed(0)}K`;
   return tokens.toString();
-};
-
-const GEMINI_SAFE_DEFAULT_MODEL = "gemini-2.5-flash";
-const GEMINI_FLASH_PRIORITY = [
-  "gemini-2.5-flash",
-  "gemini-3-flash-preview",
-  "gemini-3.5-flash",
-  "gemini-3.1-flash-lite",
-  "gemini-3.1-flash-lite-preview",
-  "gemini-2.5-flash-lite",
-  "gemini-2.5-flash-8b",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-flash"
-];
-
-const normalizeGeminiModelId = (modelId?: string | null) => (modelId || "").replace(/^google\//, "");
-
-const isGeminiProModel = (modelId: string) => /(^|-)pro($|-)/i.test(modelId) || /pro-preview/i.test(modelId);
-const isGeminiFlashModel = (modelId: string) => /(^|-)flash($|-)/i.test(modelId) || /flash-lite/i.test(modelId);
-const isGeminiNonTextUtilityModel = (modelId: string) => /(?:image|imagen|tts|audio|lyria|robotics|computer-use|deep-research|omni|banana|antigravity)/i.test(modelId);
-
-const getGeminiModelRank = (modelId: string) => {
-  const normalized = normalizeGeminiModelId(modelId);
-  const preferredIndex = GEMINI_FLASH_PRIORITY.indexOf(normalized);
-  if (preferredIndex >= 0) return preferredIndex;
-  if (isGeminiFlashModel(normalized) && !isGeminiNonTextUtilityModel(normalized)) return 100;
-  if (isGeminiNonTextUtilityModel(normalized)) return 700;
-  if (isGeminiProModel(normalized)) return 900;
-  return 500;
-};
-
-const sortGeminiModelsSafely = (models: string[]) => Array.from(new Set(models.map(normalizeGeminiModelId).filter(Boolean))).sort((a, b) => {
-  const rankDiff = getGeminiModelRank(a) - getGeminiModelRank(b);
-  return rankDiff !== 0 ? rankDiff : a.localeCompare(b);
-});
-
-const getSafeGeminiDefaultModel = (currentModel?: string | null, models: string[] = []) => {
-  const normalizedCurrent = normalizeGeminiModelId(currentModel);
-  if (normalizedCurrent && isGeminiFlashModel(normalizedCurrent) && !isGeminiNonTextUtilityModel(normalizedCurrent)) {
-    return normalizedCurrent;
-  }
-
-  const sortedModels = sortGeminiModelsSafely(models);
-  return sortedModels.find(model => isGeminiFlashModel(model) && !isGeminiNonTextUtilityModel(model)) || GEMINI_SAFE_DEFAULT_MODEL;
 };
 
 export function DevSettings() {
