@@ -93,7 +93,7 @@ export function DevUsersList() {
     data?.forEach(row => { cfg[row.id] = row.value as string; });
     setGlobalConfig({
       provider: cfg.default_ai_provider || "openrouter",
-      model: cfg.default_ai_model || "google/gemini-3-flash-preview",
+      model: cfg.default_ai_model || "openai/gpt-4o",
     });
   };
 
@@ -185,7 +185,7 @@ export function DevUsersList() {
         return {
           ...profile,
           ai_provider: userSettings?.ai_provider || "openrouter",
-          ai_model: userSettings?.ai_model || "google/gemini-3-flash-preview",
+          ai_model: userSettings?.ai_model || "openai/gpt-4o",
           ai_requests_used: userSettings?.ai_requests_used || 0,
           monthly_ai_limit: userSettings?.monthly_ai_limit || 100,
           roles: userRoles,
@@ -593,7 +593,7 @@ export function DevUsersList() {
                   </div>
                   <div>
                     <span className="text-muted-foreground">Modelo: </span>
-                    <strong className="text-foreground">{globalConfig?.model || "google/gemini-3-flash-preview"}</strong>
+                    <strong className="text-foreground">{globalConfig?.model || "openai/gpt-4o"}</strong>
                   </div>
                 </div>
                 <p className="text-sm text-muted-foreground">
