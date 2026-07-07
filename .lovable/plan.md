@@ -1,64 +1,37 @@
-## Diagnóstico confirmado
 
-O problema não foi só visual. O painel ainda pode usar `gemini-3-pro-preview` porque:
+## Objetivo
 
-- A lista dinâmica/cacheada de modelos do Gemini vem do backend com modelos Pro no topo, e o painel substitui a lista fixa por essa lista cacheada.
-- Ao clicar na linha do Gemini, `selectProvider()` usa `provider.models[0]`; se o cache começa com `gemini-3-pro-preview`, ele vira o modelo padrão.
-- O botão `Test` também usa `provider.models[0]`, não o modelo selecionado no card “Modelo Padrão”. Então mesmo após escolher Flash, o teste pode continuar testando Pro.
-- A função de teste ainda mapeia `gemini-3-pro-preview` para `gemini-2.5-pro`, que continua exigindo billing/free tier zero, mantendo o erro de limite.
+Adicionar, ao lado do botão "Etapas do export" no editor de Pré-Laudo Previdenciário, um novo botão compacto (apenas ícone) que abre um popover permitindo marcar/desmarcar **Cabeçalho** e **Rodapé** timbrados. A escolha vale simultaneamente para PDF e DOCX e é lembrada entre laudos (localStorage), sem alterar nada de lógica de negócio.
 
-OpenRouter não precisa ser alterado e será preservado.
+## Ícone
 
-## Plano de correção
+Usar `LayoutTemplate` do lucide-react — remete visualmente a "página com cabeçalho e rodapé" e é intuitivo mesmo sem rótulo. Tooltip: "Cabeçalho e rodapé". Só o ícone no botão para não poluir a linha no mobile.
 
-1. **Criar uma regra única de modelos seguros do Gemini**
-   - Definir `gemini-2.5-flash` como modelo padrão seguro do provider Gemini.
-   - Tratar como preferenciais/seguros os modelos Flash, incluindo `gemini-3-flash-preview`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`, `gemini-2.5-flash`, `gemini-2.0-flash`.
-   - Ordenar qualquer lista dinâmica/cacheada para que Flash venha antes de Pro.
-   - Empurrar modelos Pro/Pro Preview para o fim e marcar como “requer billing”.
+## Arquivos a criar/editar
 
-2. **Corrigir seleção do provider no Provider Inventory**
-   - Ao clicar em Google Gemini, definir sempre `default_ai_model = gemini-2.5-flash`, salvo se já houver um modelo Gemini Flash válido selecionado.
-   - Nunca escolher `provider.models[0]` cru para Gemini.
-   - Não tocar no comportamento de OpenRouter, DeepSeek, Lovable ou outros providers.
+### 1. Novo componente `src/modules/previdenciario/components/ExportChromeSelector.tsx`
+- Popover no mesmo padrão visual de `ExportStepsSelector`.
+- Trigger: `Button variant="outline" size="sm"` com apenas `<LayoutTemplate className="h-4 w-4" />`, `title="Cabeçalho e rodapé"`.
+- Conteúdo: título "Cabeçalho e rodapé no export", texto curto de ajuda, e dois checkboxes: "Cabeçalho timbrado" e "Rodapé timbrado" (com numeração de página).
+- Props: `value: { header: boolean; footer: boolean }`, `onChange`, `disabled?`.
 
-3. **Corrigir o botão Test**
-   - Para Gemini, testar o modelo efetivamente selecionado no card “Modelo Padrão” quando Gemini for o provider ativo.
-   - Se o Gemini não estiver ativo, testar `gemini-2.5-flash` como smoke test seguro, em vez do primeiro modelo da lista cacheada.
-   - Assim, salvar/reaplicar a chave Gemini também usará Flash no auto-teste.
+### 2. `src/modules/previdenciario/pages/PrelaudoEditor.tsx`
+- Novo state `exportChrome` inicializado do localStorage (`prev:prelaudo:export-chrome`, default `{ header: true, footer: true }`) com persistência via `useEffect`.
+- Renderizar `<ExportChromeSelector>` imediatamente após `<ExportStepsSelector>` no header.
+- Passar `exportChrome` para `downloadPrelaudoPdf` e `downloadPrelaudoDocx` como quarto argumento.
 
-4. **Corrigir cache/modelos dinâmicos do Gemini**
-   - Ao carregar `gemini_models_cache` e ao clicar “Atualizar Modelos”, ordenar e sanear a lista antes de atualizar o provider.
-   - Garantir que modelos TTS/imagem não virem modelo padrão textual por acidente.
-   - Preservar a função “Atualizar Modelos” e os modelos novos, apenas com ordenação segura.
+### 3. `src/modules/previdenciario/lib/export/prelaudo-pdf.ts`
+- Nova opção `chrome?: { header?: boolean; footer?: boolean }` em `generatePrelaudoPdf` e `downloadPrelaudoPdf` (default `{ header: true, footer: true }`).
+- Se `header === false`: não carregar/aplicar `headerB64` (passar `null` em `calculateDynamicLayout` e pular `addHeaderToPages`). Layout usa `contentStartY` padrão (margem topo simples).
+- Se `footer === false`: idem para o rodapé, pular `addFooterToPages` (some também a numeração "Página X de Y", que hoje é desenhada em branco sobre o timbrado).
 
-5. **Corrigir a função de teste Gemini**
-   - Remover o mapeamento perigoso de `gemini-3-pro-preview -> gemini-2.5-pro` para o teste padrão.
-   - Para aliases preview Flash, manter rota para Flash seguro quando necessário.
-   - Aumentar `maxOutputTokens` do teste Gemini para evitar falso erro por truncamento.
-   - Quando houver erro `free_tier_requests` com `limit: 0`, retornar mensagem clara: modelo Pro/Preview sem cota gratuita; use Flash ou habilite billing.
+### 4. `src/modules/previdenciario/lib/export/prelaudo-docx.ts`
+- Mesma opção `chrome` no `generatePrelaudoDocx`/`downloadPrelaudoDocx`.
+- Se `header === false`: não incluir o `ImageRun` do cabeçalho e reduzir `page.margin.top` para `"20mm"` (valor padrão sem timbrado).
+- Se `footer === false`: não incluir `ImageRun` do rodapé nem o parágrafo "Página X de Y" (sem timbrado, o número em branco ficaria invisível), e reduzir `page.margin.bottom` para `"20mm"`.
+- Se ambos ativos: comportamento atual preservado.
 
-6. **Correção pontual dos dados atuais, sem mexer no OpenRouter**
-   - Se a configuração global estiver com provider Gemini e modelo Pro/Preview, trocar para `gemini-2.5-flash`.
-   - Se o provider global estiver OpenRouter, não alterar o provider nem seus modelos.
-   - Opcionalmente limpar/reescrever apenas a ordem do cache Gemini para Flash aparecer primeiro.
+## O que não muda
 
-7. **Validação**
-   - Conferir no banco que o OpenRouter continua igual.
-   - Testar a função `test-ai-connection` com Gemini usando `gemini-2.5-flash`.
-   - Verificar logs para confirmar que o teste não chama mais `gemini-3-pro-preview` nem `gemini-2.5-pro` ao testar Gemini por padrão.
-   - Conferir no DevPanel que, ao mudar para Google Gemini, o card “Modelo Padrão” mostra Flash primeiro e o botão Test usa o mesmo modelo seguro.
-
-## Arquivos envolvidos
-
-- `src/components/dev-panel/DevSettings.tsx`
-- `src/components/dev-panel/DevUserSettings.tsx`
-- `supabase/functions/test-ai-connection/index.ts`
-- Possível ajuste pontual em dados de `system_config` apenas para cache/config Gemini, sem alterar OpenRouter.
-
-## Garantia de escopo
-
-- Não alterar a função operacional do OpenRouter.
-- Não alterar modelos OpenRouter.
-- Não trocar provider global atual se ele estiver OpenRouter.
-- Não alterar DeepSeek nesta correção, exceto se algum teste confirmar interferência direta, o que até agora não apareceu.
+- Nada de business logic, nada em `laudo-structure`, nada em prompts/IA, nada nas outras exportações (laudo assistencial, impugnação). Apenas presença visual do cabeçalho/rodapé nos exports do pré-laudo previdenciário.
+- `ExportStepsSelector` permanece intacto.
