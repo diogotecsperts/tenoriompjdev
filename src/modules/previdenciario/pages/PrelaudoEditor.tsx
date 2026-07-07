@@ -47,12 +47,6 @@ const AUTOSAVE_MS = 900;
 const VIEW_MODE_STORAGE_KEY = "prev-prelaudo-view-mode";
 const EXPORT_STEPS_STORAGE_KEY = "prev:prelaudo:export-steps";
 const EXPORT_CHROME_STORAGE_KEY = "prev:prelaudo:export-chrome";
-import { Step03ExameFisico } from "../components/steps/Step03ExameFisico";
-import { Step04Resumo } from "../components/steps/Step04Resumo";
-
-const AUTOSAVE_MS = 900;
-const VIEW_MODE_STORAGE_KEY = "prev-prelaudo-view-mode";
-const EXPORT_STEPS_STORAGE_KEY = "prev:prelaudo:export-steps";
 type ViewMode = "paginated" | "infinite";
 
 export default function PrelaudoEditor() {
