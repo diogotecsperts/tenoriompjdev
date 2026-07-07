@@ -83,6 +83,20 @@ export default function PrelaudoEditor() {
       return [...ALL_STEP_IDS];
     }
   });
+  const [exportChrome, setExportChrome] = useState<ExportChromeValue>(() => {
+    if (typeof window === "undefined") return { header: true, footer: true };
+    try {
+      const raw = window.localStorage.getItem(EXPORT_CHROME_STORAGE_KEY);
+      if (!raw) return { header: true, footer: true };
+      const parsed = JSON.parse(raw);
+      return {
+        header: parsed?.header !== false,
+        footer: parsed?.footer !== false,
+      };
+    } catch {
+      return { header: true, footer: true };
+    }
+  });
   const dirtyRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFirstSaveRef = useRef(true);
@@ -117,6 +131,12 @@ export default function PrelaudoEditor() {
       window.localStorage.setItem(EXPORT_STEPS_STORAGE_KEY, JSON.stringify(exportSteps));
     }
   }, [exportSteps]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(EXPORT_CHROME_STORAGE_KEY, JSON.stringify(exportChrome));
+    }
+  }, [exportChrome]);
 
   // Load
   useEffect(() => {
