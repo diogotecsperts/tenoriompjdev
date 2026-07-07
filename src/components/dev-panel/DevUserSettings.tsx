@@ -46,6 +46,17 @@ interface RolesState {
   developer: boolean;
 }
 
+const GEMINI_SAFE_DEFAULT_MODEL = "gemini-2.5-flash";
+const normalizeGeminiModelId = (modelId?: string | null) => (modelId || "").replace(/^google\//, "");
+const isGeminiFlashModel = (modelId: string) => /(^|-)flash($|-)/i.test(modelId) || /flash-lite/i.test(modelId);
+const isGeminiNonTextUtilityModel = (modelId: string) => /(?:image|imagen|tts|audio|lyria|robotics|computer-use|deep-research|omni|banana|antigravity)/i.test(modelId);
+const getSafeGeminiUserModel = (modelId?: string | null) => {
+  const normalized = normalizeGeminiModelId(modelId);
+  return normalized && isGeminiFlashModel(normalized) && !isGeminiNonTextUtilityModel(normalized)
+    ? normalized
+    : GEMINI_SAFE_DEFAULT_MODEL;
+};
+
 const AI_PROVIDERS = [
   { id: "lovable", name: "IA Integrada (backup)", requiresKey: false },
   { id: "openai", name: "OpenAI", requiresKey: true },
@@ -113,7 +124,7 @@ const AI_MODELS: Record<string, { id: string; name: string }[]> = {
 
 const DEFAULT_SETTINGS: UserSettings = {
   ai_provider: "openrouter",
-  ai_model: "google/gemini-3-flash-preview",
+  ai_model: "openai/gpt-4o",
   ai_temperature: 0.7,
   ai_max_tokens: 4096,
   monthly_ai_limit: 100,
@@ -169,9 +180,11 @@ export function DevUserSettings({
       }
 
       if (data) {
+        const provider = data.ai_provider || "openrouter";
+        const savedModel = data.ai_model || DEFAULT_SETTINGS.ai_model;
         setSettings({
-          ai_provider: data.ai_provider || "openrouter",
-          ai_model: data.ai_model || "google/gemini-3-flash-preview",
+          ai_provider: provider,
+          ai_model: provider === "gemini" ? getSafeGeminiUserModel(savedModel) : savedModel,
           ai_temperature: Number(data.ai_temperature) || 0.7,
           ai_max_tokens: data.ai_max_tokens || 4096,
           monthly_ai_limit: data.monthly_ai_limit || 100,
@@ -284,7 +297,7 @@ export function DevUserSettings({
     setSettings({
       ...settings,
       ai_provider: provider,
-      ai_model: models[0]?.id || "",
+      ai_model: provider === "gemini" ? getSafeGeminiUserModel(settings.ai_model) : models[0]?.id || "",
       custom_api_key: provider === "lovable" ? null : settings.custom_api_key,
     });
   };
@@ -309,7 +322,9 @@ export function DevUserSettings({
       setSettings(prev => ({
         ...prev,
         ai_provider: config.default_ai_provider || "openrouter",
-        ai_model: config.default_ai_model || "google/gemini-3-flash-preview",
+        ai_model: (config.default_ai_provider || "openrouter") === "gemini"
+          ? getSafeGeminiUserModel(config.default_ai_model)
+          : config.default_ai_model || DEFAULT_SETTINGS.ai_model,
       }));
 
       toast({

@@ -76,6 +76,52 @@ interface TestResult {
   testedAt?: Date;
 }
 
+const GEMINI_SAFE_DEFAULT_MODEL = "gemini-2.5-flash";
+const GEMINI_FLASH_PRIORITY = [
+  "gemini-2.5-flash",
+  "gemini-3-flash-preview",
+  "gemini-3.5-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash-8b",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash"
+];
+
+const normalizeGeminiModelId = (modelId?: string | null) => (modelId || "").replace(/^google\//, "");
+
+const isGeminiProModel = (modelId: string) => /(^|-)pro($|-)/i.test(modelId) || /pro-preview/i.test(modelId);
+const isGeminiFlashModel = (modelId: string) => /(^|-)flash($|-)/i.test(modelId) || /flash-lite/i.test(modelId);
+const isGeminiNonTextUtilityModel = (modelId: string) => /(?:image|imagen|tts|audio|lyria|robotics|computer-use|deep-research|omni|banana|antigravity)/i.test(modelId);
+
+const getGeminiModelRank = (modelId: string) => {
+  const normalized = normalizeGeminiModelId(modelId);
+  const preferredIndex = GEMINI_FLASH_PRIORITY.indexOf(normalized);
+  if (preferredIndex >= 0) return preferredIndex;
+  if (isGeminiFlashModel(normalized) && !isGeminiNonTextUtilityModel(normalized)) return 100;
+  if (isGeminiNonTextUtilityModel(normalized)) return 700;
+  if (isGeminiProModel(normalized)) return 900;
+  return 500;
+};
+
+const sortGeminiModelsSafely = (models: string[]) => Array.from(new Set(models.map(normalizeGeminiModelId).filter(Boolean))).sort((a, b) => {
+  const rankDiff = getGeminiModelRank(a) - getGeminiModelRank(b);
+  return rankDiff !== 0 ? rankDiff : a.localeCompare(b);
+});
+
+const getSafeGeminiDefaultModel = (currentModel?: string | null, models: string[] = []) => {
+  const rawCurrent = currentModel || "";
+  const normalizedCurrent = normalizeGeminiModelId(rawCurrent);
+  if (!rawCurrent.startsWith("google/") && normalizedCurrent && isGeminiFlashModel(normalizedCurrent) && !isGeminiNonTextUtilityModel(normalizedCurrent)) {
+    return normalizedCurrent;
+  }
+
+  const sortedModels = sortGeminiModelsSafely(models);
+  return sortedModels.find(model => isGeminiFlashModel(model) && !isGeminiNonTextUtilityModel(model)) || GEMINI_SAFE_DEFAULT_MODEL;
+};
+
 const AI_PROVIDERS: ProviderInfo[] = [{
   id: "lovable",
   name: "IA Integrada",
@@ -103,18 +149,23 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   id: "gemini",
   name: "Google Gemini",
   description: "Modelos Gemini via Google AI Studio. Use 'Atualizar Modelos' para ver modelos disponíveis.",
-  models: [
+  models: sortGeminiModelsSafely([
     // Flash — FREE TIER (recomendados como padrão)
     "gemini-2.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite-preview",
     "gemini-2.5-flash-lite",
     "gemini-2.5-flash-8b",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
     "gemini-1.5-flash",
     // Pro — REQUEREM BILLING habilitado no Google AI Studio
+    "gemini-3-pro-preview",
     "gemini-2.5-pro",
     "gemini-1.5-pro"
-  ],
+  ]),
   requiresKey: true,
   color: "hsl(217, 91%, 60%)",
   keyPlaceholder: "AIza..."
@@ -160,7 +211,7 @@ const AI_PROVIDERS: ProviderInfo[] = [{
 
 const DEFAULT_CONFIG: SystemConfig = {
   default_ai_provider: "lovable",
-  default_ai_model: "google/gemini-3-flash-preview",
+  default_ai_model: "google/gemini-2.5-flash",
   fallback_ai_provider: "lovable",
   fallback_ai_model: "google/gemini-2.5-flash",
   gemini_pdf_model: "gemini-2.5-flash",
@@ -185,10 +236,6 @@ const DEFAULT_CONFIG: SystemConfig = {
 
 // Gemini Vision models available for PDF extraction (aliases estáveis)
 const GEMINI_PDF_MODELS = [{
-  id: 'gemini-2.5-pro',
-  name: 'Gemini 2.5 Pro',
-  description: 'Maior precisão, ideal para PDFs complexos'
-}, {
   id: 'gemini-2.5-flash',
   name: 'Gemini 2.5 Flash',
   description: 'Rápido e eficiente (recomendado)'
@@ -196,6 +243,10 @@ const GEMINI_PDF_MODELS = [{
   id: 'gemini-2.0-flash',
   name: 'Gemini 2.0 Flash',
   description: 'Versão estável'
+}, {
+  id: 'gemini-2.5-pro',
+  name: 'Gemini 2.5 Pro',
+  description: 'Maior precisão, requer billing'
 }, {
   id: 'gemini-1.5-pro',
   name: 'Gemini 1.5 Pro',
@@ -371,10 +422,11 @@ export function DevSettings() {
         if (cacheAge < CACHE_TTL && cached.models) {
           // Use cached data
           const stableIds = cached.models.map((m: GeminiModelInfo) => m.id);
-          const versionedIds = cached.versionedModels?.map((m: GeminiModelInfo) => m.id) || [];
+          const sortedStableIds = sortGeminiModelsSafely(stableIds.filter((id: string) => !isGeminiNonTextUtilityModel(id)));
+          const versionedIds = sortGeminiModelsSafely(cached.versionedModels?.map((m: GeminiModelInfo) => m.id) || []);
           const imageIds = cached.imageModels?.map((m: GeminiModelInfo) => m.id) || [];
           
-          setDynamicGeminiModels(stableIds);
+          setDynamicGeminiModels(sortedStableIds);
           setVersionedGeminiModels(versionedIds);
           setGeminiImageModels(imageIds);
           setModelsCacheUpdatedAt(new Date(cached.updatedAt));
@@ -389,10 +441,10 @@ export function DevSettings() {
           // Update provider models list
           const geminiProvider = AI_PROVIDERS.find(p => p.id === 'gemini');
           if (geminiProvider) {
-            geminiProvider.models = stableIds.length > 0 ? stableIds : geminiProvider.models;
+            geminiProvider.models = sortedStableIds.length > 0 ? sortedStableIds : sortGeminiModelsSafely(geminiProvider.models);
           }
           
-          console.log(`[DevSettings] Loaded ${stableIds.length} stable + ${versionedIds.length} versioned models from cache`);
+          console.log(`[DevSettings] Loaded ${sortedStableIds.length} stable + ${versionedIds.length} versioned models from cache`);
         }
       }
     } catch (error) {
@@ -671,11 +723,11 @@ export function DevSettings() {
 
       if (data?.success && data?.models) {
         // Stable text models
-        const stableModelIds = data.models.map((m: GeminiModelInfo) => m.id);
+        const stableModelIds = sortGeminiModelsSafely(data.models.map((m: GeminiModelInfo) => m.id).filter((id: string) => !isGeminiNonTextUtilityModel(id)));
         setDynamicGeminiModels(stableModelIds);
         
         // Versioned models (separate list)
-        const versionedIds = data.versionedModels?.map((m: GeminiModelInfo) => m.id) || [];
+        const versionedIds = sortGeminiModelsSafely(data.versionedModels?.map((m: GeminiModelInfo) => m.id) || []);
         setVersionedGeminiModels(versionedIds);
         
         // Image models (separate list)
@@ -711,6 +763,12 @@ export function DevSettings() {
         if (geminiProvider) {
           geminiProvider.models = stableModelIds;
         }
+
+        setConfig(prev => {
+          if (prev.default_ai_provider !== 'gemini') return prev;
+          const safeModel = getSafeGeminiDefaultModel(prev.default_ai_model, stableModelIds);
+          return safeModel === prev.default_ai_model ? prev : { ...prev, default_ai_model: safeModel };
+        });
 
         toast({
           title: "Modelos Atualizados",
@@ -939,10 +997,13 @@ export function DevSettings() {
     setTestingProvider(providerId);
     try {
       const startTime = Date.now();
+      const modelToTest = providerId === 'gemini'
+        ? getSafeGeminiDefaultModel(config.default_ai_provider === 'gemini' ? config.default_ai_model : null, provider.models)
+        : provider.models[0];
       const { data, error } = await supabase.functions.invoke('test-ai-connection', {
         body: {
           provider: providerId,
-          model: provider.models[0],
+          model: modelToTest,
           apiKey: provider.requiresKey ? apiKeys[providerId] : null
         }
       });
@@ -970,7 +1031,7 @@ export function DevSettings() {
         };
         toast({
           title: "Conexão OK",
-          description: `${provider.name} respondeu em ${data.latencyMs || latencyMs}ms`
+          description: `${provider.name} (${modelToTest}) respondeu em ${data.latencyMs || latencyMs}ms`
         });
       } else {
         result = {
@@ -1029,7 +1090,9 @@ export function DevSettings() {
     setConfig(prev => ({
       ...prev,
       default_ai_provider: providerId,
-      default_ai_model: provider.models[0]
+      default_ai_model: providerId === 'gemini'
+        ? getSafeGeminiDefaultModel(prev.default_ai_model, provider.models)
+        : provider.models[0]
     }));
     toast({
       title: "Provider Atualizado",
@@ -1074,10 +1137,9 @@ export function DevSettings() {
   const getActiveProviderModels = () => {
     const provider = AI_PROVIDERS.find(p => p.id === config.default_ai_provider);
     if (!provider) return [];
-    
-    // For Gemini, include versioned models if toggle is on
-    if (provider.id === 'gemini' && showVersionedModels) {
-      return [...(dynamicGeminiModels.length > 0 ? dynamicGeminiModels : provider.models), ...versionedGeminiModels];
+    if (provider.id === 'gemini') {
+      const baseModels = dynamicGeminiModels.length > 0 ? dynamicGeminiModels : provider.models;
+      return sortGeminiModelsSafely(showVersionedModels ? [...baseModels, ...versionedGeminiModels] : baseModels);
     }
     
     return provider.models;
@@ -1086,9 +1148,9 @@ export function DevSettings() {
   const getFallbackProviderModels = () => {
     const provider = AI_PROVIDERS.find(p => p.id === config.fallback_ai_provider);
     if (!provider) return [];
-    
-    if (provider.id === 'gemini' && showVersionedModels) {
-      return [...(dynamicGeminiModels.length > 0 ? dynamicGeminiModels : provider.models), ...versionedGeminiModels];
+    if (provider.id === 'gemini') {
+      const baseModels = dynamicGeminiModels.length > 0 ? dynamicGeminiModels : provider.models;
+      return sortGeminiModelsSafely(showVersionedModels ? [...baseModels, ...versionedGeminiModels] : baseModels);
     }
     
     return provider.models;
@@ -1204,7 +1266,7 @@ export function DevSettings() {
     const details = geminiModelDetails[modelId];
     const isVersioned = versionedGeminiModels.includes(modelId);
     // Modelos Pro do Gemini têm free tier = 0 e exigem billing habilitado
-    const requiresBilling = /(^|-)(pro)(-|$)/i.test(modelId) || /pro-preview/i.test(modelId);
+    const requiresBilling = isGeminiProModel(modelId);
     
     return (
       <SelectItem key={modelId} value={modelId}>
@@ -1763,7 +1825,7 @@ export function DevSettings() {
               setConfig({
                 ...config,
                 fallback_ai_provider: value,
-                fallback_ai_model: provider?.models[0] || ""
+                fallback_ai_model: value === 'gemini' ? getSafeGeminiDefaultModel(null, provider?.models || []) : provider?.models[0] || ""
               });
             }}>
                   <SelectTrigger>
@@ -1945,7 +2007,7 @@ export function DevSettings() {
               if (value === "openrouter") {
                 defaultModel = OPENROUTER_PDF_MODELS[0].id;
               } else if (value === "gemini") {
-                defaultModel = GEMINI_PDF_MODELS[0].id;
+                defaultModel = GEMINI_SAFE_DEFAULT_MODEL;
               } else if (value === "lovable") {
                 defaultModel = "google/gemini-2.5-flash";
               } else if (value === "mistral-ocr") {
@@ -2155,7 +2217,7 @@ export function DevSettings() {
               if (value === "openrouter") {
                 defaultModel = OPENROUTER_PDF_MODELS[0].id;
               } else if (value === "gemini") {
-                defaultModel = GEMINI_PDF_MODELS[0].id;
+                defaultModel = GEMINI_SAFE_DEFAULT_MODEL;
               } else if (value === "lovable") {
                 defaultModel = "google/gemini-2.5-flash";
               } else if (value === "mistral-ocr") {
@@ -2467,7 +2529,7 @@ export function DevSettings() {
                               const details = geminiModelDetails[modelId];
                               return details?.supportsPdf !== false;
                             })
-                          : ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash-preview", "gemini-3-pro-preview"]
+                          : ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3.5-flash", "gemini-2.5-pro", "gemini-3-pro-preview"]
                         ).map(modelId => {
                           const details = geminiModelDetails[modelId];
                           return (

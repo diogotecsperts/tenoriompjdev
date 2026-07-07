@@ -1,69 +1,64 @@
-## Objetivo
+## Diagnóstico confirmado
 
-Ao selecionar o provedor **Google Gemini** no DevPanel, o app deve sugerir por padrão um modelo **Flash** (free tier), evitando o erro `limit: 0` que ocorre em `gemini-2.5-pro` / `gemini-3-pro-preview` sem billing habilitado.
+O problema não foi só visual. O painel ainda pode usar `gemini-3-pro-preview` porque:
 
-## Sobre os modelos Flash e free tier (situação atual — nov/2026)
+- A lista dinâmica/cacheada de modelos do Gemini vem do backend com modelos Pro no topo, e o painel substitui a lista fixa por essa lista cacheada.
+- Ao clicar na linha do Gemini, `selectProvider()` usa `provider.models[0]`; se o cache começa com `gemini-3-pro-preview`, ele vira o modelo padrão.
+- O botão `Test` também usa `provider.models[0]`, não o modelo selecionado no card “Modelo Padrão”. Então mesmo após escolher Flash, o teste pode continuar testando Pro.
+- A função de teste ainda mapeia `gemini-3-pro-preview` para `gemini-2.5-pro`, que continua exigindo billing/free tier zero, mantendo o erro de limite.
 
-Confirmado na documentação oficial do Google (`ai.google.dev/gemini-api/docs/rate-limits`):
+OpenRouter não precisa ser alterado e será preservado.
 
-| Modelo | Free tier | Observação |
-|---|---|---|
-| `gemini-2.5-flash` | ✅ Sim | Estável, recomendado como default seguro |
-| `gemini-2.5-flash-lite` | ✅ Sim | Mais rápido/barato, menos capacidade |
-| `gemini-2.0-flash` | ✅ Sim | Geração anterior, funciona |
-| `gemini-3-flash-preview` | ✅ Sim (preview) | Mais novo, pode ter cota reduzida por ser preview |
-| `gemini-3.5-flash` | ✅ Sim | Mais recente da linha Flash |
-| `gemini-2.5-pro` | ❌ limit: 0 | Requer billing |
-| `gemini-3-pro-preview` | ❌ limit: 0 | Requer billing |
+## Plano de correção
 
-Sua intuição está correta: **Flash 3 preview e 3.5 Flash têm free tier**. A escolha mais segura como default absoluto é **`gemini-2.5-flash`** — é o modelo Flash mais estável (não-preview), com free tier garantido há mais tempo e menor risco de ser puxado/renomeado pelo Google.
+1. **Criar uma regra única de modelos seguros do Gemini**
+   - Definir `gemini-2.5-flash` como modelo padrão seguro do provider Gemini.
+   - Tratar como preferenciais/seguros os modelos Flash, incluindo `gemini-3-flash-preview`, `gemini-3.5-flash`, `gemini-3.1-flash-lite`, `gemini-2.5-flash`, `gemini-2.0-flash`.
+   - Ordenar qualquer lista dinâmica/cacheada para que Flash venha antes de Pro.
+   - Empurrar modelos Pro/Pro Preview para o fim e marcar como “requer billing”.
 
-## Mudanças propostas (mínimas, cirúrgicas)
+2. **Corrigir seleção do provider no Provider Inventory**
+   - Ao clicar em Google Gemini, definir sempre `default_ai_model = gemini-2.5-flash`, salvo se já houver um modelo Gemini Flash válido selecionado.
+   - Nunca escolher `provider.models[0]` cru para Gemini.
+   - Não tocar no comportamento de OpenRouter, DeepSeek, Lovable ou outros providers.
 
-### 1. `supabase/functions/_shared/ai-config.ts`
-- `DEFAULT_MODELS.gemini`: já está como `'gemini-2.5-flash'` (linha 33) ✅ — nenhuma alteração necessária no fallback do backend.
+3. **Corrigir o botão Test**
+   - Para Gemini, testar o modelo efetivamente selecionado no card “Modelo Padrão” quando Gemini for o provider ativo.
+   - Se o Gemini não estiver ativo, testar `gemini-2.5-flash` como smoke test seguro, em vez do primeiro modelo da lista cacheada.
+   - Assim, salvar/reaplicar a chave Gemini também usará Flash no auto-teste.
 
-### 2. `src/components/dev-panel/DevSettings.tsx` e `DevUserSettings.tsx`
-No componente do seletor de modelo, quando o usuário troca o **provedor** para `gemini`:
-- Se o campo de modelo estiver **vazio** ou contiver um modelo **Pro** (`gemini-2.5-pro`, `gemini-3-pro-preview`), auto-preencher com **`gemini-2.5-flash`**.
-- Se já contiver um Flash válido, preservar a escolha do usuário.
+4. **Corrigir cache/modelos dinâmicos do Gemini**
+   - Ao carregar `gemini_models_cache` e ao clicar “Atualizar Modelos”, ordenar e sanear a lista antes de atualizar o provider.
+   - Garantir que modelos TTS/imagem não virem modelo padrão textual por acidente.
+   - Preservar a função “Atualizar Modelos” e os modelos novos, apenas com ordenação segura.
 
-### 3. Reordenação da lista de modelos Gemini (visual)
-Reordenar a dropdown para mostrar os modelos com free tier no topo, e marcar os Pro com sufixo `(requer billing)`:
+5. **Corrigir a função de teste Gemini**
+   - Remover o mapeamento perigoso de `gemini-3-pro-preview -> gemini-2.5-pro` para o teste padrão.
+   - Para aliases preview Flash, manter rota para Flash seguro quando necessário.
+   - Aumentar `maxOutputTokens` do teste Gemini para evitar falso erro por truncamento.
+   - Quando houver erro `free_tier_requests` com `limit: 0`, retornar mensagem clara: modelo Pro/Preview sem cota gratuita; use Flash ou habilite billing.
 
-```
-gemini-2.5-flash            (recomendado — free tier)
-gemini-2.5-flash-lite       (free tier — mais rápido)
-gemini-3-flash-preview      (free tier — preview)
-gemini-3.5-flash            (free tier — mais recente)
-gemini-2.0-flash            (free tier — legado)
-─────────
-gemini-2.5-pro              (requer billing)
-gemini-3-pro-preview        (requer billing)
-```
+6. **Correção pontual dos dados atuais, sem mexer no OpenRouter**
+   - Se a configuração global estiver com provider Gemini e modelo Pro/Preview, trocar para `gemini-2.5-flash`.
+   - Se o provider global estiver OpenRouter, não alterar o provider nem seus modelos.
+   - Opcionalmente limpar/reescrever apenas a ordem do cache Gemini para Flash aparecer primeiro.
 
-A lista puxada dinamicamente pela função `list-gemini-models` continua funcionando; a ordenação/rotulagem é aplicada só na renderização.
+7. **Validação**
+   - Conferir no banco que o OpenRouter continua igual.
+   - Testar a função `test-ai-connection` com Gemini usando `gemini-2.5-flash`.
+   - Verificar logs para confirmar que o teste não chama mais `gemini-3-pro-preview` nem `gemini-2.5-pro` ao testar Gemini por padrão.
+   - Conferir no DevPanel que, ao mudar para Google Gemini, o card “Modelo Padrão” mostra Flash primeiro e o botão Test usa o mesmo modelo seguro.
 
-### 4. Mensagem de erro amigável (opcional, mas recomendado)
-Em `test-ai-connection` e no fluxo real de chamada Gemini, detectar o padrão `free_tier_requests` + `limit: 0` na resposta 429 e transformar em mensagem clara:
+## Arquivos envolvidos
 
-> "Este modelo Gemini requer billing habilitado no Google AI Studio. Use um modelo Flash (free tier) ou habilite billing em aistudio.google.com/apikey."
+- `src/components/dev-panel/DevSettings.tsx`
+- `src/components/dev-panel/DevUserSettings.tsx`
+- `supabase/functions/test-ai-connection/index.ts`
+- Possível ajuste pontual em dados de `system_config` apenas para cache/config Gemini, sem alterar OpenRouter.
 
-## O que NÃO será tocado
+## Garantia de escopo
 
-- **OpenRouter**: nenhuma linha alterada. É o provedor principal em produção e continua intocado.
-- **DeepSeek**: mantido como está (V4 Flash default, ajustes anteriores preservados).
-- **Lovable / Claude / Groq / OpenAI**: sem mudanças.
-- **`callGeminiDirect` / `callGeminiVision`**: as correções anteriores (`safetySettings`, `systemInstruction`, detecção de resposta vazia) permanecem — apenas o default de UI muda.
-
-## Validação após implementação
-
-1. DevPanel → trocar provedor para `gemini` → confirmar que o campo modelo auto-preenche com `gemini-2.5-flash`.
-2. Clicar "Testar conexão" → deve retornar OK (já funciona, confirmado por você).
-3. Gerar um campo real → verificar em `DevAIUsageLogs` que a chamada saiu como `gemini / gemini-2.5-flash` sem fallback e sem erro 429.
-4. (Opcional) Trocar manualmente para `gemini-2.5-pro` e clicar testar → deve mostrar a mensagem amigável de billing.
-
-## Perguntas de decisão
-
-1. **Default final:** confirma `gemini-2.5-flash` como o default automático ao trocar para provedor Gemini? Ou prefere `gemini-3-flash-preview` (mais novo, porém preview, com risco maior de instabilidade/renomeação pelo Google)?
-2. **Mensagem amigável de billing (item 4):** quer que eu inclua nessa mesma leva, ou deixa para depois?
+- Não alterar a função operacional do OpenRouter.
+- Não alterar modelos OpenRouter.
+- Não trocar provider global atual se ele estiver OpenRouter.
+- Não alterar DeepSeek nesta correção, exceto se algum teste confirmar interferência direta, o que até agora não apareceu.

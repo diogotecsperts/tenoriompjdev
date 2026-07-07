@@ -116,30 +116,22 @@ async function testLovableAI(model: string): Promise<{ success: boolean; errorMe
   }
 }
 
-// Mapeamento de nomes amigáveis para nomes estáveis da API Gemini
-// IMPORTANTE: Usar aliases estáveis que a Google mantém, não versões preview específicas!
+// Mapeamento mínimo: não rebaixa modelos Pro/Preview para outro Pro, para evitar falso teste em modelo sem free tier.
 const GEMINI_MODEL_MAP: Record<string, string> = {
-  // Gemini 3.0 Preview
-  'gemini-3-pro': 'gemini-2.5-pro', // fallback até 3.0 GA
-  'gemini-3-pro-preview': 'gemini-2.5-pro',
-  'gemini-3-flash': 'gemini-2.5-flash',
-  'gemini-3-flash-preview': 'gemini-2.5-flash',
-  'gemini-3-flash-lite': 'gemini-2.5-flash-8b',
-  'gemini-3-flash-lite-preview': 'gemini-2.5-flash-8b',
-  // Gemini 2.5 - Usar aliases estáveis diretamente
-  'gemini-2.5-pro': 'gemini-2.5-pro',
-  'gemini-2.5-flash': 'gemini-2.5-flash',
-  'gemini-2.5-flash-lite': 'gemini-2.5-flash-8b',
-  'gemini-2.5-flash-8b': 'gemini-2.5-flash-8b',
-  // Gemini 2.0 (estáveis)
-  'gemini-2.0-flash': 'gemini-2.0-flash',
-  'gemini-2.0-flash-exp': 'gemini-2.0-flash-exp',
-  'gemini-2.0-flash-lite': 'gemini-2.0-flash-lite',
-  // Gemini 1.5 (estáveis)
-  'gemini-1.5-pro': 'gemini-1.5-pro',
-  'gemini-1.5-flash': 'gemini-1.5-flash',
-  'gemini-1.5-flash-8b': 'gemini-1.5-flash-8b',
+  'gemini-3-flash': 'gemini-3-flash-preview',
+  'gemini-3-flash-lite': 'gemini-3.1-flash-lite',
 };
+
+function formatGeminiError(rawError: unknown): string {
+  const text = typeof rawError === 'string' ? rawError : JSON.stringify(rawError || {});
+  if (/free_tier_requests/i.test(text) && /limit[^0-9]*0/i.test(text)) {
+    return 'Modelo Gemini sem cota gratuita nesta chave (free_tier_requests limit 0). Use um modelo Flash como gemini-2.5-flash ou habilite billing no Google AI Studio para modelos Pro/Preview.';
+  }
+  if (/quota|rate limit|429/i.test(text)) {
+    return `Limite/quota do Gemini: ${text.substring(0, 500)}`;
+  }
+  return text;
+}
 
 function isImageModel(modelId: string): boolean {
   return modelId.includes('image') || 
@@ -188,10 +180,9 @@ async function testGemini(apiKey: string, model: string): Promise<{ success: boo
     // Standard text model test
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
     
-    // Configuração de geração com tokens suficientes
-    // IMPORTANTE: 256 tokens para evitar truncamento em modelos com "thinking"
+    // Configuração de geração com tokens suficientes para evitar falso MAX_TOKENS em modelos com thinking
     const generationConfig: Record<string, any> = { 
-      maxOutputTokens: 256,
+      maxOutputTokens: 8192,
       temperature: 0.1  // Baixa para respostas determinísticas
     };
     
@@ -220,13 +211,13 @@ async function testGemini(apiKey: string, model: string): Promise<{ success: boo
 
     // Verificar erro mesmo com HTTP 200
     if (data.error) {
-      const errorMsg = data.error.message || JSON.stringify(data.error);
+      const errorMsg = formatGeminiError(data.error.message || data.error);
       console.error('[test-ai-connection] Gemini API error:', errorMsg);
       return { success: false, errorMessage: errorMsg };
     }
 
     if (!response.ok) {
-      const errorText = JSON.stringify(data);
+      const errorText = formatGeminiError(data);
       return { success: false, errorMessage: `HTTP ${response.status}: ${errorText.substring(0, 100)}` };
     }
 
