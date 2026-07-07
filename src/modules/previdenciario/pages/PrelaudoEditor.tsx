@@ -35,10 +35,18 @@ import {
 } from "../lib/prelaudo-structure";
 import { StepNav } from "../components/StepNav";
 import { ExportStepsSelector } from "../components/ExportStepsSelector";
+import { ExportChromeSelector, type ExportChromeValue } from "../components/ExportChromeSelector";
 import { PainelLateralProcesso } from "../components/PainelLateralProcesso";
 import { ProcessoHeader } from "../components/ProcessoHeader";
 import { Step01Identificacao } from "../components/steps/Step01Identificacao";
 import { Step02Queixa } from "../components/steps/Step02Queixa";
+import { Step03ExameFisico } from "../components/steps/Step03ExameFisico";
+import { Step04Resumo } from "../components/steps/Step04Resumo";
+
+const AUTOSAVE_MS = 900;
+const VIEW_MODE_STORAGE_KEY = "prev-prelaudo-view-mode";
+const EXPORT_STEPS_STORAGE_KEY = "prev:prelaudo:export-steps";
+const EXPORT_CHROME_STORAGE_KEY = "prev:prelaudo:export-chrome";
 import { Step03ExameFisico } from "../components/steps/Step03ExameFisico";
 import { Step04Resumo } from "../components/steps/Step04Resumo";
 
