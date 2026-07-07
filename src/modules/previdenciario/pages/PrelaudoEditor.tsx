@@ -271,10 +271,10 @@ export default function PrelaudoEditor() {
         numeroProcesso: data.identificacao?.numero_processo || "",
       };
       if (exportFormat === "pdf") {
-        await downloadPrelaudoPdf(data, meta, exportSteps);
+        await downloadPrelaudoPdf(data, meta, exportSteps, exportChrome);
         toast({ title: "PDF gerado" });
       } else {
-        await downloadPrelaudoDocx(data, meta, exportSteps);
+        await downloadPrelaudoDocx(data, meta, exportSteps, exportChrome);
         toast({ title: "DOCX gerado" });
       }
     } catch (err: any) {
@@ -424,6 +424,7 @@ export default function PrelaudoEditor() {
         </TooltipProvider>
 
         <ExportStepsSelector value={exportSteps} onChange={setExportSteps} disabled={exporting} />
+        <ExportChromeSelector value={exportChrome} onChange={setExportChrome} disabled={exporting} />
 
         <div className="flex items-center">
           <Button
