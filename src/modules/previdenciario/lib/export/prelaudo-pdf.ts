@@ -261,19 +261,35 @@ export interface PrelaudoPdfMeta {
   peritoCRM?: string;
 }
 
+export interface PrelaudoChromeOptions {
+  header?: boolean;
+  footer?: boolean;
+}
+
 // ---------- Função principal ----------
 export const generatePrelaudoPdf = async (
   data: PrelaudoData,
   meta: PrelaudoPdfMeta,
   includedSteps?: StepId[],
+  chrome?: PrelaudoChromeOptions,
 ): Promise<jsPDF> => {
   const included = new Set<StepId>(includedSteps ?? ALL_STEP_IDS);
+  const showHeader = chrome?.header !== false;
+  const showFooter = chrome?.footer !== false;
 
   const doc = new jsPDF();
 
-  const headerB64 = await loadImageAsBase64("/timbrado-cabecalho.png");
-  const footerB64 = await loadImageAsBase64("/timbrado-rodape.png");
+  const headerB64 = showHeader ? await loadImageAsBase64("/timbrado-cabecalho.png") : null;
+  const footerB64 = showFooter ? await loadImageAsBase64("/timbrado-rodape.png") : null;
   pageLayout = await calculateDynamicLayout(headerB64, footerB64);
+  if (!showHeader) {
+    pageLayout.headerBottomY = 10;
+    pageLayout.contentStartY = 15;
+  }
+  if (!showFooter) {
+    pageLayout.footerTopY = PAGE.height - 10;
+    pageLayout.contentEndY = PAGE.height - 15;
+  }
 
   let y = pageLayout.contentStartY;
 
@@ -453,8 +469,8 @@ export const generatePrelaudoPdf = async (
   doc.setTextColor(COLORS.muted.r, COLORS.muted.g, COLORS.muted.b);
   doc.text("Médico Perito Judicial", PAGE.width / 2, y, { align: "center" });
 
-  await addHeaderToPages(doc, headerB64);
-  await addFooterToPages(doc, footerB64);
+  if (showHeader) await addHeaderToPages(doc, headerB64);
+  if (showFooter) await addFooterToPages(doc, footerB64);
 
   return doc;
 };
@@ -463,7 +479,8 @@ export const downloadPrelaudoPdf = async (
   data: PrelaudoData,
   meta: PrelaudoPdfMeta,
   includedSteps?: StepId[],
+  chrome?: PrelaudoChromeOptions,
 ): Promise<void> => {
-  const doc = await generatePrelaudoPdf(data, meta, includedSteps);
+  const doc = await generatePrelaudoPdf(data, meta, includedSteps, chrome);
   doc.save(buildFilename("pdf", meta));
 };

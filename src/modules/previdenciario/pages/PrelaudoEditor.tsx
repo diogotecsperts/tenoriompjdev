@@ -35,6 +35,7 @@ import {
 } from "../lib/prelaudo-structure";
 import { StepNav } from "../components/StepNav";
 import { ExportStepsSelector } from "../components/ExportStepsSelector";
+import { ExportChromeSelector, type ExportChromeValue } from "../components/ExportChromeSelector";
 import { PainelLateralProcesso } from "../components/PainelLateralProcesso";
 import { ProcessoHeader } from "../components/ProcessoHeader";
 import { Step01Identificacao } from "../components/steps/Step01Identificacao";
@@ -45,6 +46,7 @@ import { Step04Resumo } from "../components/steps/Step04Resumo";
 const AUTOSAVE_MS = 900;
 const VIEW_MODE_STORAGE_KEY = "prev-prelaudo-view-mode";
 const EXPORT_STEPS_STORAGE_KEY = "prev:prelaudo:export-steps";
+const EXPORT_CHROME_STORAGE_KEY = "prev:prelaudo:export-chrome";
 type ViewMode = "paginated" | "infinite";
 
 export default function PrelaudoEditor() {
@@ -81,6 +83,20 @@ export default function PrelaudoEditor() {
       return [...ALL_STEP_IDS];
     }
   });
+  const [exportChrome, setExportChrome] = useState<ExportChromeValue>(() => {
+    if (typeof window === "undefined") return { header: true, footer: true };
+    try {
+      const raw = window.localStorage.getItem(EXPORT_CHROME_STORAGE_KEY);
+      if (!raw) return { header: true, footer: true };
+      const parsed = JSON.parse(raw);
+      return {
+        header: parsed?.header !== false,
+        footer: parsed?.footer !== false,
+      };
+    } catch {
+      return { header: true, footer: true };
+    }
+  });
   const dirtyRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFirstSaveRef = useRef(true);
@@ -115,6 +131,12 @@ export default function PrelaudoEditor() {
       window.localStorage.setItem(EXPORT_STEPS_STORAGE_KEY, JSON.stringify(exportSteps));
     }
   }, [exportSteps]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(EXPORT_CHROME_STORAGE_KEY, JSON.stringify(exportChrome));
+    }
+  }, [exportChrome]);
 
   // Load
   useEffect(() => {
@@ -249,10 +271,10 @@ export default function PrelaudoEditor() {
         numeroProcesso: data.identificacao?.numero_processo || "",
       };
       if (exportFormat === "pdf") {
-        await downloadPrelaudoPdf(data, meta, exportSteps);
+        await downloadPrelaudoPdf(data, meta, exportSteps, exportChrome);
         toast({ title: "PDF gerado" });
       } else {
-        await downloadPrelaudoDocx(data, meta, exportSteps);
+        await downloadPrelaudoDocx(data, meta, exportSteps, exportChrome);
         toast({ title: "DOCX gerado" });
       }
     } catch (err: any) {
@@ -402,6 +424,7 @@ export default function PrelaudoEditor() {
         </TooltipProvider>
 
         <ExportStepsSelector value={exportSteps} onChange={setExportSteps} disabled={exporting} />
+        <ExportChromeSelector value={exportChrome} onChange={setExportChrome} disabled={exporting} />
 
         <div className="flex items-center">
           <Button

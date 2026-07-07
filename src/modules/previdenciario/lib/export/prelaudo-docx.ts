@@ -138,13 +138,21 @@ export interface PrelaudoDocxMeta {
   peritoCRM?: string;
 }
 
+export interface PrelaudoDocxChromeOptions {
+  header?: boolean;
+  footer?: boolean;
+}
+
 // ---------- Função principal ----------
 export const generatePrelaudoDocx = async (
   data: PrelaudoData,
   meta: PrelaudoDocxMeta,
   includedSteps?: StepId[],
+  chrome?: PrelaudoDocxChromeOptions,
 ): Promise<Blob> => {
   const included = new Set<StepId>(includedSteps ?? ALL_STEP_IDS);
+  const showHeader = chrome?.header !== false;
+  const showFooter = chrome?.footer !== false;
   const id = data.identificacao || {};
   const paragraphs: Paragraph[] = [];
 
@@ -328,12 +336,16 @@ export const generatePrelaudoDocx = async (
   );
 
   // ========== Banner topo/rodapé ==========
-  const headerBuffer = await loadImageAsArrayBuffer("/timbrado-cabecalho.png");
-  const footerBuffer = await loadImageAsArrayBuffer("/timbrado-rodape.png");
+  const headerBuffer = showHeader ? await loadImageAsArrayBuffer("/timbrado-cabecalho.png") : null;
+  const footerBuffer = showFooter ? await loadImageAsArrayBuffer("/timbrado-rodape.png") : null;
   let headerDimensions = { width: 595, height: 89 };
   let footerDimensions = { width: 595, height: 71 };
-  try { headerDimensions = await getImageDimensions("/timbrado-cabecalho.png"); } catch { /* fallback */ }
-  try { footerDimensions = await getImageDimensions("/timbrado-rodape.png"); } catch { /* fallback */ }
+  if (showHeader) {
+    try { headerDimensions = await getImageDimensions("/timbrado-cabecalho.png"); } catch { /* fallback */ }
+  }
+  if (showFooter) {
+    try { footerDimensions = await getImageDimensions("/timbrado-rodape.png"); } catch { /* fallback */ }
+  }
 
   const A4_WIDTH_PIXELS = 793;
   const FOOTER_SAFETY_MARGIN_MM = 12;
@@ -343,10 +355,11 @@ export const generatePrelaudoDocx = async (
   const footerWidth = A4_WIDTH_PIXELS;
   const footerHeight = Math.round(footerWidth * (footerDimensions.height / footerDimensions.width));
   const footerHeightMm = Math.round(footerHeight * 0.265);
-  const bottomMarginMm = footerHeightMm + FOOTER_SAFETY_MARGIN_MM;
+  const bottomMarginMm = showFooter ? footerHeightMm + FOOTER_SAFETY_MARGIN_MM : 20;
+  const topMarginMm = showHeader ? 45 : 20;
 
   const headerContent: Paragraph[] = [];
-  if (headerBuffer) {
+  if (showHeader && headerBuffer) {
     headerContent.push(
       new Paragraph({
         children: [
@@ -373,7 +386,7 @@ export const generatePrelaudoDocx = async (
   }
 
   const footerContent: Paragraph[] = [];
-  if (footerBuffer) {
+  if (showFooter && footerBuffer) {
     footerContent.push(
       new Paragraph({
         children: [
@@ -397,22 +410,22 @@ export const generatePrelaudoDocx = async (
         ],
       }),
     );
+    const pageNumberSpacingTwips = Math.round((footerHeightMm - 8) * 20 * 2);
+    footerContent.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            children: ["Página ", PageNumber.CURRENT, " de ", PageNumber.TOTAL_PAGES],
+            size: FONT.sizeSmall,
+            color: "FFFFFF",
+            font: FONT.name,
+          }),
+        ],
+        alignment: AlignmentType.CENTER,
+        spacing: { before: pageNumberSpacingTwips },
+      }),
+    );
   }
-  const pageNumberSpacingTwips = Math.round((footerHeightMm - 8) * 20 * 2);
-  footerContent.push(
-    new Paragraph({
-      children: [
-        new TextRun({
-          children: ["Página ", PageNumber.CURRENT, " de ", PageNumber.TOTAL_PAGES],
-          size: FONT.sizeSmall,
-          color: "FFFFFF",
-          font: FONT.name,
-        }),
-      ],
-      alignment: AlignmentType.CENTER,
-      spacing: { before: pageNumberSpacingTwips },
-    }),
-  );
 
   const doc = new Document({
     compatibility: { doNotExpandShiftReturn: true },
@@ -421,7 +434,7 @@ export const generatePrelaudoDocx = async (
         properties: {
           page: {
             margin: {
-              top: "45mm",
+              top: `${topMarginMm}mm`,
               bottom: `${bottomMarginMm}mm`,
               left: "20mm",
               right: "15mm",
@@ -444,7 +457,8 @@ export const downloadPrelaudoDocx = async (
   data: PrelaudoData,
   meta: PrelaudoDocxMeta,
   includedSteps?: StepId[],
+  chrome?: PrelaudoDocxChromeOptions,
 ): Promise<void> => {
-  const blob = await generatePrelaudoDocx(data, meta, includedSteps);
+  const blob = await generatePrelaudoDocx(data, meta, includedSteps, chrome);
   saveAs(blob, buildFilename("docx", meta));
 };
