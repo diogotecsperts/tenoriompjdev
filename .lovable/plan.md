@@ -1,37 +1,25 @@
+## Avaliação do novo prompt
 
-## Objetivo
+Verifiquei o único ponto de integração técnica no código (`supabase/functions/prev-pre-processar/index.ts`, linhas ~402/458–474). O runtime exige apenas:
 
-Adicionar, ao lado do botão "Etapas do export" no editor de Pré-Laudo Previdenciário, um novo botão compacto (apenas ícone) que abre um popover permitindo marcar/desmarcar **Cabeçalho** e **Rodapé** timbrados. A escolha vale simultaneamente para PDF e DOCX e é lembrada entre laudos (localStorage), sem alterar nada de lógica de negócio.
+1. **Variável `${textoSelecionado}`** — o texto bruto (queixa + medicações + comorbidades já extraídos) é injetado nessa variável via `interpolatePrompt`. ✅ O novo prompt mantém `${textoSelecionado}` exatamente com esse nome, no lugar correto (após "TEXTOS / SEÇÕES SELECIONADAS:").
+2. **Saída em texto plano, sem markdown/títulos/aspas** — o campo `queixa_principal` é gravado direto no editor e exportado para DOCX/PDF, sem parser. ✅ O novo prompt encerra com "Retorne apenas o texto final em parágrafo técnico, coeso, sem introdução, sem aspas, sem numeração e sem títulos" e ainda proíbe explicitamente markdown, bullets e travessão — perfeitamente alinhado com a regra global do projeto ("Exported DOCX/PDFs must NEVER contain markdown / IA jargon").
+3. **Retorno string curta o suficiente para caber num parágrafo do laudo** — o prompt limita escopo a queixa/anamnese inicial e proíbe medicações, exames, conclusão. ✅ Não há risco de estourar o campo.
+4. **Fallback quando `textoSelecionado` for muito curto** — o código já pula a chamada se o texto tiver <80 caracteres, independente do prompt. ✅ Nada a ajustar.
 
-## Ícone
+Nenhum outro placeholder, marcador JSON, cabeçalho ou convenção interna é consumido pelo backend para esse prompt. Portanto o texto do cliente é **100% aplicável** sem adaptações — basta substituir o corpo do prompt no banco (`system_config.value.prompt` do id `prompt_prev_queixa_unificada`), preservando os demais metadados (id, description, cardId, sectionId, isClassified, createdAt).
 
-Usar `LayoutTemplate` do lucide-react — remete visualmente a "página com cabeçalho e rodapé" e é intuitivo mesmo sem rótulo. Tooltip: "Cabeçalho e rodapé". Só o ícone no botão para não poluir a linha no mobile.
+## Plano de execução (build mode)
 
-## Arquivos a criar/editar
+1. Ler o registro atual `prompt_prev_queixa_unificada` em `system_config` para preservar metadados.
+2. Rodar um `UPDATE` mínimo em `system_config` trocando somente `value.prompt` pelo texto novo enviado pelo cliente (mantendo `id`, `description`, `cardId`, `sectionId`, `variables=["textoSelecionado"]`, `isClassified`, `createdAt`; atualizando `updatedAt`).
+3. Não alterar código — o pipeline em `prev-pre-processar/index.ts` continua idêntico.
+4. Confirmar no log da próxima execução que `queixa_unificada_ok: true`.
 
-### 1. Novo componente `src/modules/previdenciario/components/ExportChromeSelector.tsx`
-- Popover no mesmo padrão visual de `ExportStepsSelector`.
-- Trigger: `Button variant="outline" size="sm"` com apenas `<LayoutTemplate className="h-4 w-4" />`, `title="Cabeçalho e rodapé"`.
-- Conteúdo: título "Cabeçalho e rodapé no export", texto curto de ajuda, e dois checkboxes: "Cabeçalho timbrado" e "Rodapé timbrado" (com numeração de página).
-- Props: `value: { header: boolean; footer: boolean }`, `onChange`, `disabled?`.
+## Detalhes técnicos
 
-### 2. `src/modules/previdenciario/pages/PrelaudoEditor.tsx`
-- Novo state `exportChrome` inicializado do localStorage (`prev:prelaudo:export-chrome`, default `{ header: true, footer: true }`) com persistência via `useEffect`.
-- Renderizar `<ExportChromeSelector>` imediatamente após `<ExportStepsSelector>` no header.
-- Passar `exportChrome` para `downloadPrelaudoPdf` e `downloadPrelaudoDocx` como quarto argumento.
+- Alvo: linha em `system_config` com `id = 'prompt_prev_queixa_unificada'`.
+- Cache do `prompt-manager` (TTL 5 min) é invalidado automaticamente na próxima leitura fria da edge function — sem ação extra.
+- Nenhum arquivo do repositório precisa ser editado.
 
-### 3. `src/modules/previdenciario/lib/export/prelaudo-pdf.ts`
-- Nova opção `chrome?: { header?: boolean; footer?: boolean }` em `generatePrelaudoPdf` e `downloadPrelaudoPdf` (default `{ header: true, footer: true }`).
-- Se `header === false`: não carregar/aplicar `headerB64` (passar `null` em `calculateDynamicLayout` e pular `addHeaderToPages`). Layout usa `contentStartY` padrão (margem topo simples).
-- Se `footer === false`: idem para o rodapé, pular `addFooterToPages` (some também a numeração "Página X de Y", que hoje é desenhada em branco sobre o timbrado).
-
-### 4. `src/modules/previdenciario/lib/export/prelaudo-docx.ts`
-- Mesma opção `chrome` no `generatePrelaudoDocx`/`downloadPrelaudoDocx`.
-- Se `header === false`: não incluir o `ImageRun` do cabeçalho e reduzir `page.margin.top` para `"20mm"` (valor padrão sem timbrado).
-- Se `footer === false`: não incluir `ImageRun` do rodapé nem o parágrafo "Página X de Y" (sem timbrado, o número em branco ficaria invisível), e reduzir `page.margin.bottom` para `"20mm"`.
-- Se ambos ativos: comportamento atual preservado.
-
-## O que não muda
-
-- Nada de business logic, nada em `laudo-structure`, nada em prompts/IA, nada nas outras exportações (laudo assistencial, impugnação). Apenas presença visual do cabeçalho/rodapé nos exports do pré-laudo previdenciário.
-- `ExportStepsSelector` permanece intacto.
+Confirma que posso aplicar a substituição no banco?
