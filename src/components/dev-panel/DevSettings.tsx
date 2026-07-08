@@ -2456,7 +2456,8 @@ export function DevSettings() {
                   Fase 1: Extração Visual (OCR)
                 </h4>
                 <p className="text-xs text-muted-foreground">
-                  Selecione o provedor de OCR para extração de texto do PDF. 
+                  Selecione o provedor de OCR para extração de texto do PDF.
+                  Esta configuração vale para <strong>todos os módulos</strong> (Trabalhista, Previdenciário e Impugnação).
                   Mistral OCR tem precisão elite (~94.9%) para tabelas e documentos escaneados.
                 </p>
                 
