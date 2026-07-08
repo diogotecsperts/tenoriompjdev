@@ -121,6 +121,9 @@ const AI_MODELS: Record<string, { id: string; name: string }[]> = {
     { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet (via OpenRouter)" },
     { id: "google/gemini-pro", name: "Gemini Pro (via OpenRouter)" },
   ],
+  minimax: [
+    { id: "MiniMax-M3", name: "MiniMax M3 (thinking desativado, temperature=0)" },
+  ],
 };
 
 const DEFAULT_SETTINGS: UserSettings = {
