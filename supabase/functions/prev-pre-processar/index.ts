@@ -11,7 +11,7 @@
  * Isolado do módulo trabalhista. Não toca em `laudos` nem em `processos-pdf`.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { extractWithMistralOCR, getMistralAPIKey } from "../_shared/mistral-ocr.ts";
+import { runOcrWithConfiguredProvider } from "../_shared/ocr-router.ts";
 import { getAIConfig, callAI } from "../_shared/ai-config.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
 import { classifyMistralError, isMistralError } from "./_mistral-errors.ts";
@@ -657,16 +657,13 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 3) OCR via Mistral
-    const mistralKey = getMistralAPIKey();
-    if (!mistralKey) {
-      return new Response(JSON.stringify({ error: "MISTRAL_API_KEY não configurada" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const ocr = await extractWithMistralOCR(pdfBytes, mistralKey);
-    console.log(`[prev-pre-processar] OCR: ${ocr.pageCount}p, ${ocr.text.length} chars`);
+    // 3) OCR — provider definido pelo DevPanel (phase1_ocr_provider), com fallback automático
+    const ocr = await runOcrWithConfiguredProvider(pdfBytes, {
+      logPrefix: "[prev-pre-processar]",
+    });
+    console.log(
+      `[prev-pre-processar] OCR: ${ocr.pageCount}p, ${ocr.text.length} chars via ${ocr.provider}/${ocr.model}`,
+    );
 
     // 4) Extração estruturada via IA configurada no DevPanel
     const aiConfig = await getAIConfig();
