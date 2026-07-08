@@ -74,7 +74,7 @@ export async function runMinimaxClientOcr(
   const parallelism = opts.parallelism ?? DEFAULT_PARALLELISM;
 
   const bytes = await toUint8Array(source);
-  const doc = await pdfjs.getDocument({ data: bytes, disableWorker: false }).promise;
+  const doc = await pdfjs.getDocument({ data: bytes }).promise;
   const pageCount = doc.numPages;
   const totalChunks = Math.ceil(pageCount / chunkSize);
 
