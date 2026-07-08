@@ -1,25 +1,67 @@
-## Avaliação do novo prompt
 
-Verifiquei o único ponto de integração técnica no código (`supabase/functions/prev-pre-processar/index.ts`, linhas ~402/458–474). O runtime exige apenas:
+# Plano replanejado
 
-1. **Variável `${textoSelecionado}`** — o texto bruto (queixa + medicações + comorbidades já extraídos) é injetado nessa variável via `interpolatePrompt`. ✅ O novo prompt mantém `${textoSelecionado}` exatamente com esse nome, no lugar correto (após "TEXTOS / SEÇÕES SELECIONADAS:").
-2. **Saída em texto plano, sem markdown/títulos/aspas** — o campo `queixa_principal` é gravado direto no editor e exportado para DOCX/PDF, sem parser. ✅ O novo prompt encerra com "Retorne apenas o texto final em parágrafo técnico, coeso, sem introdução, sem aspas, sem numeração e sem títulos" e ainda proíbe explicitamente markdown, bullets e travessão — perfeitamente alinhado com a regra global do projeto ("Exported DOCX/PDFs must NEVER contain markdown / IA jargon").
-3. **Retorno string curta o suficiente para caber num parágrafo do laudo** — o prompt limita escopo a queixa/anamnese inicial e proíbe medicações, exames, conclusão. ✅ Não há risco de estourar o campo.
-4. **Fallback quando `textoSelecionado` for muito curto** — o código já pula a chamada se o texto tiver <80 caracteres, independente do prompt. ✅ Nada a ajustar.
+## Resposta ao ponto 2 (verificação, sem código)
 
-Nenhum outro placeholder, marcador JSON, cabeçalho ou convenção interna é consumido pelo backend para esse prompt. Portanto o texto do cliente é **100% aplicável** sem adaptações — basta substituir o corpo do prompt no banco (`system_config.value.prompt` do id `prompt_prev_queixa_unificada`), preservando os demais metadados (id, description, cardId, sectionId, isClassified, createdAt).
+Confirmado: a comunicação **Provider Inventory v2.0 → Extração de PDF ainda existe** e está funcionando.
 
-## Plano de execução (build mode)
+- Em `DevSettings.tsx` linha 2525–2532, o `<Select>` do modelo Gemini para OCR usa `dynamicGeminiModels`, que é a mesma lista carregada pelo Provider Inventory (via `list-gemini-models` edge function).
+- Filtra ainda por `supportsPdf !== false`, então modelos sem suporte a PDF são omitidos automaticamente.
+- Ou seja: qualquer modelo Gemini novo que aparecer no Provider Inventory aparece também no card "Extração de PDF" como opção de OCR, sem intervenção manual.
 
-1. Ler o registro atual `prompt_prev_queixa_unificada` em `system_config` para preservar metadados.
-2. Rodar um `UPDATE` mínimo em `system_config` trocando somente `value.prompt` pelo texto novo enviado pelo cliente (mantendo `id`, `description`, `cardId`, `sectionId`, `variables=["textoSelecionado"]`, `isClassified`, `createdAt`; atualizando `updatedAt`).
-3. Não alterar código — o pipeline em `prev-pre-processar/index.ts` continua idêntico.
-4. Confirmar no log da próxima execução que `queixa_unificada_ok: true`.
+Limitação atual (não é bug, é escopo): o seletor "Provedor de OCR" só oferece **Gemini** e **Mistral**. Provider Inventory não injeta *novos providers* aqui — só novos *modelos Gemini*. Se um dia você quiser um provider OCR novo (ex.: MiniMax), tem que adicionar a opção manualmente no `<Select>`.
 
-## Detalhes técnicos
+## Regra a memorizar (ponto 1)
 
-- Alvo: linha em `system_config` com `id = 'prompt_prev_queixa_unificada'`.
-- Cache do `prompt-manager` (TTL 5 min) é invalidado automaticamente na próxima leitura fria da edge function — sem ação extra.
-- Nenhum arquivo do repositório precisa ser editado.
+Vou salvar como regra Core de projeto, aplicada a toda ação futura:
 
-Confirma que posso aplicar a substituição no banco?
+> **Toda configuração de IA feita no DevPanel (provider padrão, modelo, provider de OCR, modelo de OCR, fallbacks, chaves) DEVE valer para todos os módulos do app (Trabalhista, Previdenciário, Impugnação e qualquer módulo futuro). É proibido hardcodear provider ou modelo de IA em edge function de módulo — sempre ler de `system_config` via os helpers existentes (`getAIConfig`, `phase1_ocr_provider`, `phase1_gemini_model`). Prompts e lógica de negócio ficam fora dessa regra: não são afetados pela troca de IA.**
+
+## Correções de código (ponto 1, execução)
+
+Três edge functions hoje ignoram o DevPanel e usam Mistral hardcoded. Vou corrigir as duas que faltam para respeitar `phase1_ocr_provider` + `phase1_gemini_model` (a de Trabalhista, `processar-autos`, já respeita).
+
+### 1. `supabase/functions/prev-pre-processar/index.ts` (Previdenciário)
+
+Trecho atual (linhas 660–669) chama `extractWithMistralOCR` direto. Substituir por um switch:
+
+```ts
+const aiConfig = await getAIConfig();          // já é chamado logo abaixo
+const ocrProvider = aiConfig.phase1_ocr_provider || "gemini";
+
+let ocr;
+if (ocrProvider === "mistral") {
+  const mistralKey = getMistralAPIKey();
+  if (!mistralKey) return jsonError("MISTRAL_API_KEY não configurada", 500);
+  ocr = await extractWithMistralOCR(pdfBytes, mistralKey);
+} else {
+  // Gemini (padrão) — reusa o extractor visual já usado em processar-autos
+  ocr = await extractWithGeminiVisual(pdfBytes, {
+    model: aiConfig.phase1_gemini_model || "gemini-2.5-flash",
+  });
+}
+```
+
+Reaproveita `supabase/functions/_shared/pdf-visual-extractor.ts`, que já existe e é o mesmo que `processar-autos` usa. Nada de novo.
+
+### 2. `supabase/functions/extrair-texto-pdf/index.ts` (Impugnação)
+
+Mesmo tratamento: ler `phase1_ocr_provider` de `system_config` e rotear entre Mistral e Gemini. Fallback: se a chave do provider escolhido estiver faltando, tenta o outro e loga o motivo.
+
+### 3. DevPanel — só texto explicativo
+
+Atualizar o subtítulo do card "Extração de PDF" para deixar claro que a escolha vale para **todos os módulos** (hoje o texto sugere que é só da "Fase 1" da importação). Sem mudar o comportamento visual.
+
+## O que NÃO muda
+
+- Nenhum prompt em `system_config`.
+- Nenhum schema de banco.
+- Nenhum fluxo de UI/UX.
+- `processar-autos` (Trabalhista) fica intocado — já está correto.
+- Fallback automático da Fase 2 (preenchimento de campos) fica intocado.
+
+## Resultado esperado
+
+Depois desta mudança: você troca "Provedor de OCR" no DevPanel → **os três pipelines** (Trabalhista, Previdenciário, Impugnação) passam a usar o provider escolhido a partir da próxima requisição. Sem cold start manual, sem código para editar de novo.
+
+Aprovar para eu executar?
