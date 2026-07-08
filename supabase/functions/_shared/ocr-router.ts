@@ -9,7 +9,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractWithMistralOCR, getMistralAPIKey } from "./mistral-ocr.ts";
 import { extractVisualContent } from "./pdf-visual-extractor.ts";
-import { extractWithMinimaxOCR, getMinimaxAPIKey } from "./minimax-client.ts";
+import { getMinimaxAPIKey, MINIMAX_CLIENT_RASTERIZE_ERROR } from "./minimax-client.ts";
 
 export type OcrProvider = "gemini" | "mistral" | "minimax";
 
