@@ -2609,10 +2609,12 @@ export function DevSettings() {
                     </div>
                   </div>
                 )}
-              </div>
-              
+          </div>
+
+          {config.import_strategy === "two_phase" && (
+            <>
               <Separator />
-              
+
               {/* Phase 2 Provider Configuration */}
               <div className="space-y-4">
                 <h4 className="font-medium text-sm">Fase 2: Preenchimento de Campos</h4>
