@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { runMinimaxClientOcr, type MinimaxOcrProgress } from "@/lib/minimax-ocr-client";
 
 export interface PreProcessarResult {
   ok: true;
