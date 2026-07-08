@@ -15,7 +15,7 @@
  */
 
 import * as pdfjs from "pdfjs-dist";
-// @ts-expect-error worker importado como URL via ?url (Vite)
+// @ts-ignore worker importado como URL via ?url (Vite)
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { supabase } from "@/integrations/supabase/client";
 
