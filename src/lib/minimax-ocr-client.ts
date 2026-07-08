@@ -103,7 +103,8 @@ export async function runMinimaxClientOcr(
     });
   }
   try {
-    await doc.destroy();
+    // deno-lint-ignore no-explicit-any
+    await (doc as any).destroy?.();
   } catch { /* ignore */ }
 
   // Monta chunks
