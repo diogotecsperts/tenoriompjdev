@@ -2410,7 +2410,9 @@ export function DevSettings() {
             )}
           </div>
           <CardDescription>
-            Configurações para processamento de PDF em duas fases (economia de 60%+ em custos)
+            Afeta apenas o pipeline de importação do módulo <strong>Trabalhista</strong>
+            (economia de ~60% em custos no modo Duas Fases). Previdenciário e Impugnação
+            sempre usam o Provedor de OCR abaixo, independente desta escolha.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
