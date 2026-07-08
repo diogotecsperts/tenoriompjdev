@@ -12,6 +12,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { runOcrWithConfiguredProvider } from "../_shared/ocr-router.ts";
+import { isMinimaxClientRasterizeError } from "../_shared/minimax-client.ts";
 import { getAIConfig, callAI } from "../_shared/ai-config.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
 import { classifyMistralError, isMistralError } from "./_mistral-errors.ts";
@@ -23,6 +24,15 @@ const corsHeaders = {
 
 interface ReqBody {
   periciaId: string;
+  /**
+   * Texto OCR já extraído pelo pipeline client-side (usado quando o provider
+   * configurado é MiniMax — rasterização é feita no navegador para não estourar
+   * o limite de CPU de 2s da edge function).
+   */
+  preExtractedText?: string;
+  preExtractedProvider?: string;
+  preExtractedModel?: string;
+  preExtractedPageCount?: number;
 }
 
 const DEFAULT_EXTRACTION_PROMPT = `Você é um perito médico judicial extraindo dados objetivos de um processo previdenciário (INSS) para uso em uma futura perícia.
@@ -635,35 +645,71 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // 2) Download do PDF
-    console.log(`[prev-pre-processar] downloading ${pericia.pdf_path}`);
-    const { data: blob, error: dlErr } = await admin.storage
-      .from("prev-pdfs")
-      .download(pericia.pdf_path);
-    if (dlErr || !blob) {
-      return new Response(JSON.stringify({ error: `Falha ao baixar PDF: ${dlErr?.message ?? "vazio"}` }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const pdfBytes = new Uint8Array(await blob.arrayBuffer());
-    const sizeMB = (pdfBytes.byteLength / 1024 / 1024).toFixed(2);
-    console.log(`[prev-pre-processar] PDF ${sizeMB}MB`);
+    // 2+3) OCR — se o frontend já rodou o pipeline client-side (MiniMax), usamos o texto pronto.
+    //        Caso contrário, baixamos o PDF e rodamos o provider configurado no DevPanel.
+    let ocr: { text: string; pageCount: number; provider: string; model: string };
 
-    if (pdfBytes.byteLength > 50_000_000) {
-      return new Response(
-        JSON.stringify({ error: `PDF muito grande: ${sizeMB}MB (limite 50MB).` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    if (body.preExtractedText && body.preExtractedText.trim().length > 0) {
+      console.log(
+        `[prev-pre-processar] usando texto pré-extraído pelo frontend ` +
+        `(${body.preExtractedText.length} chars, provider=${body.preExtractedProvider}/${body.preExtractedModel})`,
+      );
+      ocr = {
+        text: body.preExtractedText,
+        pageCount: body.preExtractedPageCount || 0,
+        provider: body.preExtractedProvider || "minimax-ocr-client",
+        model: body.preExtractedModel || "MiniMax-M3",
+      };
+    } else {
+      console.log(`[prev-pre-processar] downloading ${pericia.pdf_path}`);
+      const { data: blob, error: dlErr } = await admin.storage
+        .from("prev-pdfs")
+        .download(pericia.pdf_path);
+      if (dlErr || !blob) {
+        return new Response(JSON.stringify({ error: `Falha ao baixar PDF: ${dlErr?.message ?? "vazio"}` }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const pdfBytes = new Uint8Array(await blob.arrayBuffer());
+      const sizeMB = (pdfBytes.byteLength / 1024 / 1024).toFixed(2);
+      console.log(`[prev-pre-processar] PDF ${sizeMB}MB`);
+
+      if (pdfBytes.byteLength > 50_000_000) {
+        return new Response(
+          JSON.stringify({ error: `PDF muito grande: ${sizeMB}MB (limite 50MB).` }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      try {
+        ocr = await runOcrWithConfiguredProvider(pdfBytes, {
+          logPrefix: "[prev-pre-processar]",
+        });
+      } catch (e) {
+        if (isMinimaxClientRasterizeError(e)) {
+          // Sinaliza ao frontend que ele precisa rodar o pipeline client-side
+          // (rasterização + chamadas ao endpoint minimax-ocr-chunk) e re-invocar
+          // esta função passando `preExtractedText`.
+          return new Response(
+            JSON.stringify({
+              needsClientRasterize: true,
+              mode: "minimax-client-rasterize",
+              chunkEndpoint: "minimax-ocr-chunk",
+              pdfPath: pericia.pdf_path,
+              bucket: "prev-pdfs",
+              message:
+                "Provider MiniMax selecionado. Rode a rasterização no navegador e re-invoque com preExtractedText.",
+            }),
+            { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        throw e;
+      }
+      console.log(
+        `[prev-pre-processar] OCR: ${ocr.pageCount}p, ${ocr.text.length} chars via ${ocr.provider}/${ocr.model}`,
       );
     }
-
-    // 3) OCR — provider definido pelo DevPanel (phase1_ocr_provider), com fallback automático
-    const ocr = await runOcrWithConfiguredProvider(pdfBytes, {
-      logPrefix: "[prev-pre-processar]",
-    });
-    console.log(
-      `[prev-pre-processar] OCR: ${ocr.pageCount}p, ${ocr.text.length} chars via ${ocr.provider}/${ocr.model}`,
-    );
 
     // 4) Extração estruturada via IA configurada no DevPanel
     const aiConfig = await getAIConfig();

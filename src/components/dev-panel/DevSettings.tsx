@@ -2459,8 +2459,9 @@ export function DevSettings() {
             <p className="text-xs text-muted-foreground">
               Escolha o provider de OCR usado por <strong>Previdenciário</strong> e <strong>Impugnação</strong> em
               qualquer estratégia, e também pelo <strong>Trabalhista</strong> na Fase 1 quando em Duas Fases.
-              Mistral tem precisão elite (~94.9%) para tabelas/escaneados. MiniMax M3 processa em chunks
-              de 10 páginas com paralelismo (mais resiliente para PDFs grandes).
+              Mistral tem precisão elite (~94.9%) para tabelas/escaneados. <strong>MiniMax M3</strong> usa
+              rasterização no navegador (pdfjs) + chunks de 10 páginas com 3 paralelismos e backoff automático
+              em rate limit — ideal para PDFs grandes (100+ páginas) sem estourar CPU da edge function.
             </p>
 
             {/* Provider Selector */}

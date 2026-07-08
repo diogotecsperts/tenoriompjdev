@@ -1,29 +1,31 @@
 ---
-name: MiniMax OCR execution strategy
-description: Chunking/paralelismo exclusivo do MiniMax M3 no OCR; Mistral e Gemini continuam single-shot.
-type: architecture
+name: MiniMax OCR — estratégia client-rasterize + chunk endpoint
+description: Rasterização no navegador (pdfjs) + minimax-ocr-chunk. Parâmetros oficiais MiniMax jul/2026.
+type: feature
 ---
+**Regra:** OCR do MiniMax M3 NUNCA roda dentro de edge function (rasterizar WASM estoura ~2s de CPU → WORKER_RESOURCE_LIMIT / 546). Sempre client-side.
 
-**Escopo:** aplica-se APENAS ao provider MiniMax M3 quando escolhido como OCR.
-Mistral e Gemini continuam single-shot por parte (splitter client-side de ~50 páginas alimenta 1 request).
+**Arquitetura:**
+- `src/lib/minimax-ocr-client.ts` → `runMinimaxClientOcr(fileOrBlob, opts)` rasteriza no browser via `pdfjs-dist` e orquestra chunks
+- `supabase/functions/minimax-ocr-chunk/index.ts` → endpoint fino, só HTTP para `api.minimax.io`, zero CPU pesada
+- `supabase/functions/_shared/ocr-router.ts` → branch `minimax` LANÇA `MINIMAX_CLIENT_RASTERIZE_ERROR`; callers detectam via `isMinimaxClientRasterizeError(e)` e respondem 409 com `{ needsClientRasterize: true, pdfPath, bucket, chunkEndpoint }`
+- Frontend detecta 409, baixa PDF do storage, roda OCR client-side, re-invoca a edge function passando `preExtractedText`
 
-**Motivo:** a API do MiniMax não tem endpoint OCR nativo — cada página tem que virar JPEG base64
-dentro de um `messages[].content[]` de chat completions. Mandar 50 imagens num só request
-estoura payload/timeout e sofre lost-in-the-middle.
+**Parâmetros validados (LOVABLE-QA.md jul/2026):**
+- Chunk: 10 páginas (sweet spot 8-12; >30 degrada severamente lost-in-the-middle)
+- Imagem: 1500px maior lado + JPEG q=0.80 (~3k tokens/img)
+- Paralelismo: 3 sustentado, 6 burst curto (RPM 200 do Plus plan; 4+ sustentado estoura)
+- Cross-chunk context: `role: "assistant"` com resumo ≤500 tokens (~2000 chars) — NUNCA system message (invalida cache, perde -80% cached_tokens)
+- Checkpoint merge: a cada 5 chunks (`isCheckpoint: true`) para re-consolidar contexto
+- Body request: até 50MB (teto 64MB), 10MB por imagem
+- API fixa: `thinking: {type:"disabled"}`, `temperature: 0`, `response_format: {type:"json_object"}`
+- Retry: backoff 1s→2s→4s em 429/5xx respeitando `Retry-After`
 
-**Parâmetros fixos em `supabase/functions/_shared/minimax-client.ts`:**
-- Chunk = **10 páginas** por request (sweet spot recomendado pelo time do M3).
-- Paralelismo = **4** requests simultâneos (semáforo com `nextIdx++`).
-- Rasterização = **150 dpi**, JPEG qualidade **80** via `npm:mupdf@1.3.0` (WASM, funciona em Deno Deploy).
-- Cross-chunk context = `role:"assistant"` com resumo ~200 tokens do chunk imediatamente anterior.
-- Retry por chunk = **2 tentativas com backoff exponencial** (1.5s, 3s) apenas em 429/500/502/503/504.
-- Falha de chunk = marca `[FALHA CHUNK páginas X-Y]` e **continua** — não perde o doc todo.
-- `thinking: { type: "disabled" }` sempre — economia 30-40% de tokens de output, evita lixo.
+**Prompts:** `supabase/functions/_shared/prompts/minimax-ocr.ts`
+- `MINIMAX_OCR_SYSTEM_PROMPT`: estável entre chunks (cacheia), schema JSON completo, regras LGPD-safe (null em vez de invenção), preserva CNJ/CPF/RG formatados, anti-markdown
+- `buildMinimaxOcrUserText(chunkIndex, pageStart, pageEnd, isCheckpoint)`: instrução por chunk
 
-**Não mudar esses números sem entender o trade-off:**
-- Chunk <8: overhead de request domina.
-- Chunk >12: precisão cai em páginas centrais.
-- Paralelismo >6: 429 do MiniMax vira frequente.
+**Integração backend (contrato):**
+Edge functions que ofereçam OCR devem aceitar `preExtractedText` + `preExtractedProvider/Model/PageCount` e pular download+OCR quando presentes. Ver `prev-pre-processar/index.ts` como referência canônica. Aplicar o mesmo pattern ao adicionar novos módulos.
 
-**Se `npm:mupdf` falhar em runtime:** o `extractWithMinimaxOCR` lança erro claro e o `ocr-router.ts`
-faz fallback automático para Gemini/Mistral. IA geral (chat) do MiniMax não depende disso.
+**Files API MiniMax para PDF direto:** não usar em chat completion enquanto MiniMax não documentar explicitamente `mm_file://` para documents. Recomendação oficial deles: manter rasterização client-side.
