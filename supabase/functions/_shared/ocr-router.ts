@@ -9,6 +9,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractWithMistralOCR, getMistralAPIKey } from "./mistral-ocr.ts";
 import { extractVisualContent } from "./pdf-visual-extractor.ts";
+import { extractWithMinimaxOCR, getMinimaxAPIKey } from "./minimax-client.ts";
+
+export type OcrProvider = "gemini" | "mistral" | "minimax";
 
 export interface OcrRouterResult {
   text: string;
@@ -18,7 +21,7 @@ export interface OcrRouterResult {
 }
 
 export interface OcrRouterConfig {
-  provider: "gemini" | "mistral";
+  provider: OcrProvider;
   geminiModel: string;
 }
 
@@ -41,12 +44,15 @@ export async function getOcrRouterConfig(): Promise<OcrRouterConfig> {
 
     const map: Record<string, string> = {};
     for (const row of data || []) {
+      // deno-lint-ignore no-explicit-any
       const v = (row as any).value;
+      // deno-lint-ignore no-explicit-any
       map[(row as any).id] = typeof v === "string" ? v : (v?.value ?? "");
     }
     const providerRaw = (map.phase1_ocr_provider || "gemini").toLowerCase();
-    const provider: "gemini" | "mistral" =
-      providerRaw === "mistral" ? "mistral" : "gemini";
+    const provider: OcrProvider =
+      providerRaw === "mistral" ? "mistral" :
+      providerRaw === "minimax" ? "minimax" : "gemini";
     const geminiModel = map.phase1_gemini_model || "gemini-2.5-flash";
     return { provider, geminiModel };
   } catch (_e) {
@@ -56,7 +62,8 @@ export async function getOcrRouterConfig(): Promise<OcrRouterConfig> {
 
 /**
  * Executa OCR usando o provider configurado no DevPanel.
- * Se o provider escolhido estiver sem chave, faz fallback silencioso para o outro.
+ * Se o provider escolhido estiver sem chave, faz fallback silencioso na ordem
+ * declarada pelo próprio provider escolhido → gemini → mistral → minimax.
  */
 export async function runOcrWithConfiguredProvider(
   pdfBytes: Uint8Array,
@@ -70,34 +77,49 @@ export async function runOcrWithConfiguredProvider(
 
   const mistralKey = getMistralAPIKey();
   const geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("LOVABLE_API_KEY");
+  const minimaxKey = getMinimaxAPIKey();
 
-  let effective: "gemini" | "mistral" = cfg.provider;
-  if (effective === "mistral" && !mistralKey) {
-    console.warn(`${prefix} MISTRAL_API_KEY ausente — fallback para Gemini`);
-    effective = "gemini";
-  }
-  if (effective === "gemini" && !geminiKey) {
-    console.warn(`${prefix} GEMINI_API_KEY ausente — fallback para Mistral`);
-    effective = "mistral";
-  }
+  const hasKey = (p: OcrProvider) =>
+    p === "mistral" ? !!mistralKey : p === "minimax" ? !!minimaxKey : !!geminiKey;
 
-  if (effective === "mistral") {
-    if (!mistralKey) throw new Error("Nenhum provider de OCR disponível (Mistral e Gemini sem chave)");
-    const r = await extractWithMistralOCR(pdfBytes, mistralKey);
-    return {
-      text: r.text,
-      pageCount: r.pageCount,
-      provider: r.provider,
-      model: r.model,
-    };
+  // Cadeia: escolhido → gemini → mistral → minimax (dedupe + só quem tem chave)
+  const chain: OcrProvider[] = [];
+  const push = (p: OcrProvider) => { if (!chain.includes(p) && hasKey(p)) chain.push(p); };
+  push(cfg.provider);
+  push("gemini");
+  push("mistral");
+  push("minimax");
+
+  if (chain.length === 0) {
+    throw new Error("Nenhum provider de OCR disponível (Gemini, Mistral e MiniMax sem chave)");
   }
 
-  // Gemini visual
-  const r = await extractVisualContent(pdfBytes, { model: cfg.geminiModel });
-  return {
-    text: r.rawText,
-    pageCount: r.pageCount,
-    provider: r.provider || "gemini-visual",
-    model: r.model || cfg.geminiModel,
-  };
+  let lastErr: Error | null = null;
+  for (const provider of chain) {
+    if (provider !== cfg.provider) {
+      console.warn(`${prefix} fallback → ${provider} (motivo: ${lastErr?.message?.slice(0, 200) || "sem chave do provider anterior"})`);
+    }
+    try {
+      if (provider === "mistral") {
+        const r = await extractWithMistralOCR(pdfBytes, mistralKey!);
+        return { text: r.text, pageCount: r.pageCount, provider: r.provider, model: r.model };
+      }
+      if (provider === "minimax") {
+        const r = await extractWithMinimaxOCR(pdfBytes, { logPrefix: prefix, apiKey: minimaxKey! });
+        return { text: r.text, pageCount: r.pageCount, provider: r.provider, model: r.model };
+      }
+      // gemini visual
+      const r = await extractVisualContent(pdfBytes, { model: cfg.geminiModel });
+      return {
+        text: r.rawText,
+        pageCount: r.pageCount,
+        provider: r.provider || "gemini-visual",
+        model: r.model || cfg.geminiModel,
+      };
+    } catch (e) {
+      lastErr = e as Error;
+      console.error(`${prefix} provider ${provider} falhou: ${lastErr.message.slice(0, 300)}`);
+    }
+  }
+  throw lastErr || new Error("Todos os providers de OCR falharam");
 }

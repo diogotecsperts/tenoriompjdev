@@ -207,6 +207,14 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   customModelInput: true,
   modelPlaceholder: "provider/model-name ou provider/model:variant",
   modelDocsUrl: "https://openrouter.ai/models"
+}, {
+  id: "minimax",
+  name: "MiniMax",
+  description: "MiniMax M3 — chat multimodal, thinking desativado, temperature=0.",
+  models: ["MiniMax-M3"],
+  requiresKey: true,
+  color: "hsl(45, 93%, 47%)",
+  keyPlaceholder: "sk-cp-..."
 }];
 
 const DEFAULT_CONFIG: SystemConfig = {
@@ -221,7 +229,7 @@ const DEFAULT_CONFIG: SystemConfig = {
   pdf_fallback_model: "google/gemini-2.5-flash",
   maintenance_mode: false,
   max_pdf_size_mb: 50,
-  allowed_ai_providers: ["lovable", "openai", "gemini", "claude", "groq", "deepseek", "openrouter"],
+  allowed_ai_providers: ["lovable", "openai", "gemini", "claude", "groq", "deepseek", "openrouter", "minimax"],
   retry_enabled: true,
   retry_max_attempts: 3,
   retry_base_delay_ms: 1000,
@@ -1972,26 +1980,19 @@ export function DevSettings() {
       <Separator />
 
       {/* Section: PDF Extraction */}
-      <Card className={cn(
-        config.import_strategy === "two_phase" && "opacity-60 border-dashed"
-      )}>
+      <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              Extração de PDF
+              Extração de PDF (OCR)
             </CardTitle>
-            {config.import_strategy === "two_phase" && (
-              <Badge variant="outline" className="text-muted-foreground">
-                Inativo (modo duas fases)
-              </Badge>
-            )}
           </div>
           <CardDescription>
-            {config.import_strategy === "two_phase" 
-              ? "Estas configurações são usadas apenas no modo 'Passagem Única'"
-              : "Configurações específicas para processamento de documentos PDF com IA"
-            }
+            Provider e modelo usados para OCR em <strong>todos os módulos</strong> —
+            Previdenciário e Impugnação sempre; Trabalhista apenas quando a estratégia
+            estiver em <em>Duas Fases</em> (em Passagem Única o Trabalhista usa o modelo
+            do Provider Inventory para extrair e preencher em um único passo).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -2409,7 +2410,9 @@ export function DevSettings() {
             )}
           </div>
           <CardDescription>
-            Configurações para processamento de PDF em duas fases (economia de 60%+ em custos)
+            Afeta apenas o pipeline de importação do módulo <strong>Trabalhista</strong>
+            (economia de ~60% em custos no modo Duas Fases). Previdenciário e Impugnação
+            sempre usam o Provedor de OCR abaixo, independente desta escolha.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -2445,50 +2448,56 @@ export function DevSettings() {
             </Select>
           </div>
 
-          {config.import_strategy === "two_phase" && (
-            <>
-              <Separator />
-              
-              {/* Phase 1 OCR Provider Selection */}
-              <div className="space-y-4 p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
-                <h4 className="font-medium text-sm flex items-center gap-2">
-                  <Cpu className="h-4 w-4 text-blue-600" />
-                  Fase 1: Extração Visual (OCR)
-                </h4>
-                <p className="text-xs text-muted-foreground">
-                  Selecione o provedor de OCR para extração de texto do PDF.
-                  Esta configuração vale para <strong>todos os módulos</strong> (Trabalhista, Previdenciário e Impugnação).
-                  Mistral OCR tem precisão elite (~94.9%) para tabelas e documentos escaneados.
-                </p>
-                
-                {/* Provider Selector */}
-                <div className="space-y-2">
-                  <Label>Provedor de OCR</Label>
-                  <Select 
-                    value={config.phase1_ocr_provider || "gemini"} 
-                    onValueChange={value => setConfig({...config, phase1_ocr_provider: value})}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="gemini">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-primary" />
-                          <span>Google Gemini</span>
-                          <Badge variant="outline" className="text-[10px]">Padrão</Badge>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="mistral">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-primary" />
-                          <span>Mistral OCR</span>
-                          <Badge variant="secondary" className="text-[10px]">Elite</Badge>
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+          <Separator />
+
+          {/* Provedor de OCR — SEMPRE visível (aplica-se a todos os módulos) */}
+          <div className="space-y-4 p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
+            <h4 className="font-medium text-sm flex items-center gap-2">
+              <Cpu className="h-4 w-4 text-blue-600" />
+              Provedor de OCR (todos os módulos)
+            </h4>
+            <p className="text-xs text-muted-foreground">
+              Escolha o provider de OCR usado por <strong>Previdenciário</strong> e <strong>Impugnação</strong> em
+              qualquer estratégia, e também pelo <strong>Trabalhista</strong> na Fase 1 quando em Duas Fases.
+              Mistral tem precisão elite (~94.9%) para tabelas/escaneados. MiniMax M3 processa em chunks
+              de 10 páginas com paralelismo (mais resiliente para PDFs grandes).
+            </p>
+
+            {/* Provider Selector */}
+            <div className="space-y-2">
+              <Label>Provedor de OCR</Label>
+              <Select
+                value={config.phase1_ocr_provider || "gemini"}
+                onValueChange={value => setConfig({...config, phase1_ocr_provider: value})}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gemini">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-primary" />
+                      <span>Google Gemini</span>
+                      <Badge variant="outline" className="text-[10px]">Padrão</Badge>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="mistral">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-primary" />
+                      <span>Mistral OCR</span>
+                      <Badge variant="secondary" className="text-[10px]">Elite</Badge>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="minimax">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "hsl(45, 93%, 47%)" }} />
+                      <span>MiniMax M3</span>
+                      <Badge variant="secondary" className="text-[10px]">Chunked</Badge>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
                 
                 {/* Gemini Model Selector (only if Gemini selected) */}
                 {config.phase1_ocr_provider === "gemini" && (
@@ -2600,10 +2609,12 @@ export function DevSettings() {
                     </div>
                   </div>
                 )}
-              </div>
-              
+          </div>
+
+          {config.import_strategy === "two_phase" && (
+            <>
               <Separator />
-              
+
               {/* Phase 2 Provider Configuration */}
               <div className="space-y-4">
                 <h4 className="font-medium text-sm">Fase 2: Preenchimento de Campos</h4>

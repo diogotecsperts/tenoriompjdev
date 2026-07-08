@@ -24,7 +24,8 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
   claude: 'https://api.anthropic.com/v1/messages',
   groq: 'https://api.groq.com/openai/v1/chat/completions',
   deepseek: 'https://api.deepseek.com/v1/chat/completions',
-  openrouter: 'https://openrouter.ai/api/v1/chat/completions'
+  openrouter: 'https://openrouter.ai/api/v1/chat/completions',
+  minimax: 'https://api.minimax.io/v1/chat/completions',
 };
 
 // Modelos padrão de cada provider
@@ -35,7 +36,8 @@ const DEFAULT_MODELS: Record<string, string> = {
   claude: 'claude-3-7-sonnet-20250219',
   groq: 'llama-3.3-70b-versatile',
   deepseek: 'deepseek-v4-flash',
-  openrouter: 'openai/gpt-4o'
+  openrouter: 'openai/gpt-4o',
+  minimax: 'MiniMax-M3',
 };
 
 // ============= RETRY CONFIGURATION =============
@@ -285,6 +287,22 @@ export async function getAIConfig(forceRefresh = false): Promise<AIConfig> {
         endpoint: PROVIDER_ENDPOINTS.lovable,
         displayModel: model.replace('google/', '')
       };
+    } else if (provider === 'minimax') {
+      // MiniMax: chave via env (MINIMAX_API_KEY), consistente com Mistral OCR
+      const minimaxKey = Deno.env.get('MINIMAX_API_KEY');
+      if (!minimaxKey) {
+        console.warn('[AI Config] MINIMAX_API_KEY não configurada, fallback para Lovable AI');
+        primaryConfig = getDefaultConfig();
+      } else {
+        // Model é sempre MiniMax-M3 — força caso venha algo diferente
+        primaryConfig = {
+          provider: 'minimax',
+          model: 'MiniMax-M3',
+          apiKey: minimaxKey,
+          endpoint: PROVIDER_ENDPOINTS.minimax,
+          displayModel: 'MiniMax-M3',
+        };
+      }
     } else {
       // Buscar API key do provider selecionado
       const { data: keyData, error: keyError } = await supabase
@@ -324,6 +342,26 @@ export async function getAIConfig(forceRefresh = false): Promise<AIConfig> {
         endpoint: PROVIDER_ENDPOINTS.lovable,
         displayModel: fallbackModel.replace('google/', '')
       };
+    } else if (fallbackProvider === 'minimax') {
+      const minimaxKey = Deno.env.get('MINIMAX_API_KEY');
+      if (minimaxKey) {
+        fallbackConfig = {
+          provider: 'minimax',
+          model: 'MiniMax-M3',
+          apiKey: minimaxKey,
+          endpoint: PROVIDER_ENDPOINTS.minimax,
+          displayModel: 'MiniMax-M3',
+        };
+      } else {
+        const lovableKey = Deno.env.get('LOVABLE_API_KEY');
+        fallbackConfig = {
+          provider: 'lovable',
+          model: 'google/gemini-2.5-flash',
+          apiKey: lovableKey || null,
+          endpoint: PROVIDER_ENDPOINTS.lovable,
+          displayModel: 'gemini-2.5-flash'
+        };
+      }
     } else {
       // Buscar API key do fallback provider
       const { data: fallbackKeyData } = await supabase
@@ -514,6 +552,7 @@ async function callProvider(
     case 'groq':
     case 'deepseek':
     case 'openrouter':
+    case 'minimax':
       return await callOpenAICompatible(config, systemPrompt, userPrompt, maxOutputTokens, options);
     case 'claude':
       return await callClaude(config, systemPrompt, userPrompt, maxOutputTokens);
@@ -627,6 +666,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
 async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean }) {
   const isDeepSeek = config.provider === 'deepseek';
   const isDeepSeekReasoner = isDeepSeek && config.model.includes('reasoner');
+  const isMinimax = config.provider === 'minimax';
 
   // DeepSeek JSON quirk: exige a palavra "json" no prompt (system ou user) senão pode retornar vazio
   let finalSystemPrompt = systemPrompt;
@@ -639,7 +679,7 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
   }
 
   const body: any = {
-    model: config.model,
+    model: isMinimax ? 'MiniMax-M3' : config.model, // MiniMax é sempre M3 (id case-sensitive)
     messages: [
       { role: 'system', content: finalSystemPrompt },
       { role: 'user', content: userPrompt }
@@ -660,6 +700,11 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
   // DeepSeek V4 default: desligar thinking mode (mais rápido/previsível). Manter só no legacy `-reasoner`.
   if (isDeepSeek && !isDeepSeekReasoner) {
     body.thinking = { type: 'disabled' };
+  }
+  // MiniMax M3: thinking SEMPRE desabilitado (economia 30-40% output, evita lixo)
+  if (isMinimax) {
+    body.thinking = { type: 'disabled' };
+    body.temperature = body.temperature ?? 0;
   }
   
   const response = await fetchWithRetry(config.endpoint, {

@@ -65,6 +65,7 @@ const AI_PROVIDERS = [
   { id: "groq", name: "Groq", requiresKey: true },
   { id: "deepseek", name: "DeepSeek", requiresKey: true },
   { id: "openrouter", name: "OpenRouter", requiresKey: true },
+  { id: "minimax", name: "MiniMax", requiresKey: true },
 ];
 
 const AI_MODELS: Record<string, { id: string; name: string }[]> = {
@@ -119,6 +120,9 @@ const AI_MODELS: Record<string, { id: string; name: string }[]> = {
     { id: "openai/gpt-4o", name: "GPT-4o (via OpenRouter)" },
     { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet (via OpenRouter)" },
     { id: "google/gemini-pro", name: "Gemini Pro (via OpenRouter)" },
+  ],
+  minimax: [
+    { id: "MiniMax-M3", name: "MiniMax M3 (thinking desativado, temperature=0)" },
   ],
 };
 
