@@ -38,6 +38,16 @@ export class PreProcessarError extends Error {
   }
 }
 
+type ClientRasterizeSignal = Record<string, unknown> & {
+  needsClientRasterize: true;
+  pdfPath?: string;
+  bucket?: string;
+};
+
+function isClientRasterizeSignal(value: unknown): value is ClientRasterizeSignal {
+  return !!value && typeof value === "object" && (value as Record<string, unknown>).needsClientRasterize === true;
+}
+
 /**
  * Tenta extrair o corpo JSON da resposta de erro vinda do
  * supabase-js (FunctionsHttpError carrega a Response em `context`).
@@ -74,19 +84,23 @@ export async function preProcessarPericia(
   opts: { onMinimaxProgress?: (p: MinimaxOcrProgress) => void } = {},
 ): Promise<PreProcessarResult> {
   // 1ª tentativa: envia só o periciaId. Se o DevPanel estiver com MiniMax como
-  // provider de OCR, a edge function responde 409 com needsClientRasterize e
-  // rodamos o pipeline no navegador.
+  // provider de OCR, a edge function sinaliza needsClientRasterize e rodamos o
+  // pipeline no navegador.
   const first = await supabase.functions.invoke("prev-pre-processar", {
     body: { periciaId },
   });
 
-  const firstData = first.data as
-    | (Record<string, unknown> & { needsClientRasterize?: boolean; pdfPath?: string; bucket?: string })
-    | null;
-  if (firstData?.needsClientRasterize) {
+  const errorBody = first.error ? await readErrorBody(first.error) : null;
+  const firstSignal = isClientRasterizeSignal(first.data)
+    ? first.data
+    : isClientRasterizeSignal(errorBody)
+      ? errorBody
+      : null;
+
+  if (firstSignal) {
     // Baixa o PDF direto do storage e roda OCR client-side
-    const bucket = String(firstData.bucket || "prev-pdfs");
-    const pdfPath = String(firstData.pdfPath || "");
+    const bucket = String(firstSignal.bucket || "prev-pdfs");
+    const pdfPath = String(firstSignal.pdfPath || "");
     if (!pdfPath) {
       throw new PreProcessarError("Servidor sinalizou rasterização client-side sem pdfPath.");
     }

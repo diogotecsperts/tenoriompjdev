@@ -1,57 +1,62 @@
-## Estratégia: MiniMax M3 OCR para PDFs grandes
-Rasterização client-side + fila paralela + cross-chunk via `assistant` role. Baseado em dados oficiais MiniMax jul/2026 (LOVABLE-QA.md).
+## Diagnóstico
 
-## Parâmetros validados
-- **Chunk**: 10 páginas (sweet spot 8-12)
-- **Imagem**: 1500px maior lado, JPEG q=0.80 (~3k tokens/img)
-- **Paralelismo**: 3 sustentado, 6 burst, backoff 1/2/4/8s no HTTP 429
-- **Cross-chunk**: `role: assistant` com resumo ≤500 tokens (preserva cache, -80% input)
-- **Checkpoint merge**: a cada 5 chunks re-envia consolidado
-- **API**: `thinking:{type:"disabled"}`, `temperature:0`, `response_format:{type:"json_object"}`
+Você não precisava mudar nada no DevPanel se o OCR já estava configurado como MiniMax. O próprio log confirma isso: `provider=minimax`.
 
-## Arquivos
+O erro continuou porque o backend fez isto:
 
-### 1. `src/lib/minimax-ocr-client.ts` (novo, browser)
-- `rasterizePdfForMinimax(file, opts)` via `pdfjs-dist`
-- Fila com 3 paralelas (`p-limit`), burst 6, backoff exponencial respeitando `Retry-After`
-- Checkpoint merge automático
-- Retorna texto concatenado + JSONs estruturados por chunk
+```text
+MiniMax selecionado
+→ detectou que MiniMax precisa rasterizar no navegador
+→ tratou isso como “falha”
+→ caiu em fallback para Gemini dentro da função
+→ Gemini tentou processar o PDF grande na função
+→ WORKER_RESOURCE_LIMIT / 546
+```
 
-### 2. `supabase/functions/minimax-ocr-chunk/index.ts` (novo)
-- Body: `{ images:b64[], contextSummary, chunkIndex, isCheckpoint? }`
-- Mensagens: `system` (estável, cacheado) + `assistant` (resumo) + `user` (imagens+prompt)
-- Zero CPU pesada — só HTTP para `api.minimax.io`
-- Retorna `{ text, summary, structured }`
+Ou seja: a estratégia nova está parcialmente implementada, mas o roteador de OCR ainda está engolindo o sinal especial do MiniMax e fazendo fallback para Gemini, exatamente o caminho que queríamos evitar.
 
-### 3. `supabase/functions/_shared/prompts/minimax-ocr.ts` (novo)
-- `OCR_SYSTEM_PROMPT`: regras + schema JSON completo (do QA doc)
-- Templates: `receita_medica`, `certidao`, genérico
-- Anti-markdown, null em vez de invenção (LGPD-safe), preserva CNJ/CPF/RG formatados
+## Plano de correção
 
-### 4. `supabase/functions/_shared/minimax-client.ts` (limpar)
-- Remover `rasterizePdfPages`, dependência `npm:mupdf`, `extractWithMinimaxOCR`
-- Manter `callMinimaxChat` (IA geral) intacto
+1. **Corrigir o roteador de OCR**
+   - Quando o provider configurado for `minimax`, não tratar o erro `MINIMAX_OCR_REQUIRES_CLIENT_RASTERIZE` como falha comum.
+   - Propagar imediatamente esse sinal para `prev-pre-processar`.
+   - Isso impede fallback para Gemini/Mistral quando o usuário escolheu MiniMax.
 
-### 5. `supabase/functions/_shared/ocr-router.ts`
-- Branch `minimax` retorna `{ mode: "client-rasterize", chunkEndpoint: "minimax-ocr-chunk" }`
-- Gemini/Mistral inalterados
+2. **Ajustar `prev-pre-processar` para sinalizar o frontend sem virar runtime error**
+   - Quando receber o sinal de rasterização client-side, retornar uma resposta controlada com:
+     - `needsClientRasterize: true`
+     - `pdfPath`
+     - `bucket`
+     - `chunkEndpoint`
+   - Preferencialmente retornar isso como resposta normal, não como erro HTTP, para o `supabase.functions.invoke()` não transformar o fluxo esperado em erro.
 
-### 6. `prev-pre-processar` + `processar-autos`
-- Detectar sinal `client-rasterize`, delegar ao frontend
-- Após texto concatenado, seguir fluxo normal de extração/geração
+3. **Fortalecer o frontend previdenciário**
+   - Em `preProcessarPericia`, detectar `needsClientRasterize` tanto em resposta normal quanto, defensivamente, em corpo de erro antigo.
+   - Baixar o PDF do storage.
+   - Rodar `runMinimaxClientOcr()` no navegador.
+   - Reinvocar `prev-pre-processar` com `preExtractedText`.
 
-### 7. Frontend (hooks de importação Prev + Trabalhista)
-- Detectar sinal, chamar `rasterizePdfForMinimax`, aguardar conclusão, prosseguir
+4. **Melhorar mensagem para o usuário durante o processamento**
+   - Garantir que o progresso mostre fases tipo:
+     - rasterizando páginas
+     - extraindo chunks MiniMax
+     - consolidando extração
+   - Assim o usuário entende que PDF grande pode demorar, mas não travou.
 
-### 8. DevPanel — OCR card
-- Copy MiniMax: *"Rasterização no navegador. Ótimo para PDFs grandes (100+ páginas). 3 chunks paralelos, backoff automático."*
+5. **Validar com logs**
+   - Confirmar que o novo caminho esperado fica assim:
 
-### 9. Memórias
-- Atualizar `mem://architecture/minimax-ocr-execution-strategy.md` com parâmetros oficiais
-- Nova `mem://architecture/minimax-ocr-cross-chunk-context.md`
+```text
+prev-pre-processar: provider=minimax
+prev-pre-processar: needsClientRasterize=true
+frontend: rasterizando PDF
+minimax-ocr-chunk: chunks 1..N
+prev-pre-processar: usando texto pré-extraído
+prev-pre-processar: extração estruturada concluída
+```
 
-## Não muda
-Gemini, Mistral, IA geral (chat), Impugnação, config global DevPanel, prompts de geração existentes.
+## Resultado esperado
 
-## Trade-off aceito
-Files API do MiniMax para PDF direto não é bulletproof ainda — mantemos rasterização client-side. Migração futura quando MiniMax documentar `mm_file://` para documentos em chat completion.
+- Nenhuma alteração necessária no DevPanel além de manter OCR = MiniMax.
+- PDFs grandes do Previdenciário deixam de cair no processamento pesado dentro da função.
+- O erro `WORKER_RESOURCE_LIMIT` deve parar para esse fluxo MiniMax.
