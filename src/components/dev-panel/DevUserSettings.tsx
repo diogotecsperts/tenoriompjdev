@@ -65,6 +65,7 @@ const AI_PROVIDERS = [
   { id: "groq", name: "Groq", requiresKey: true },
   { id: "deepseek", name: "DeepSeek", requiresKey: true },
   { id: "openrouter", name: "OpenRouter", requiresKey: true },
+  { id: "minimax", name: "MiniMax", requiresKey: true },
 ];
 
 const AI_MODELS: Record<string, { id: string; name: string }[]> = {
