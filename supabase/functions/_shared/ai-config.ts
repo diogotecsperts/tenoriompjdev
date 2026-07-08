@@ -24,7 +24,8 @@ const PROVIDER_ENDPOINTS: Record<string, string> = {
   claude: 'https://api.anthropic.com/v1/messages',
   groq: 'https://api.groq.com/openai/v1/chat/completions',
   deepseek: 'https://api.deepseek.com/v1/chat/completions',
-  openrouter: 'https://openrouter.ai/api/v1/chat/completions'
+  openrouter: 'https://openrouter.ai/api/v1/chat/completions',
+  minimax: 'https://api.minimax.io/v1/chat/completions',
 };
 
 // Modelos padrão de cada provider
@@ -35,7 +36,8 @@ const DEFAULT_MODELS: Record<string, string> = {
   claude: 'claude-3-7-sonnet-20250219',
   groq: 'llama-3.3-70b-versatile',
   deepseek: 'deepseek-v4-flash',
-  openrouter: 'openai/gpt-4o'
+  openrouter: 'openai/gpt-4o',
+  minimax: 'MiniMax-M3',
 };
 
 // ============= RETRY CONFIGURATION =============
@@ -285,6 +287,22 @@ export async function getAIConfig(forceRefresh = false): Promise<AIConfig> {
         endpoint: PROVIDER_ENDPOINTS.lovable,
         displayModel: model.replace('google/', '')
       };
+    } else if (provider === 'minimax') {
+      // MiniMax: chave via env (MINIMAX_API_KEY), consistente com Mistral OCR
+      const minimaxKey = Deno.env.get('MINIMAX_API_KEY');
+      if (!minimaxKey) {
+        console.warn('[AI Config] MINIMAX_API_KEY não configurada, fallback para Lovable AI');
+        primaryConfig = getDefaultConfig();
+      } else {
+        // Model é sempre MiniMax-M3 — força caso venha algo diferente
+        primaryConfig = {
+          provider: 'minimax',
+          model: 'MiniMax-M3',
+          apiKey: minimaxKey,
+          endpoint: PROVIDER_ENDPOINTS.minimax,
+          displayModel: 'MiniMax-M3',
+        };
+      }
     } else {
       // Buscar API key do provider selecionado
       const { data: keyData, error: keyError } = await supabase
