@@ -24,6 +24,15 @@ const corsHeaders = {
 
 interface ReqBody {
   periciaId: string;
+  /**
+   * Texto OCR já extraído pelo pipeline client-side (usado quando o provider
+   * configurado é MiniMax — rasterização é feita no navegador para não estourar
+   * o limite de CPU de 2s da edge function).
+   */
+  preExtractedText?: string;
+  preExtractedProvider?: string;
+  preExtractedModel?: string;
+  preExtractedPageCount?: number;
 }
 
 const DEFAULT_EXTRACTION_PROMPT = `Você é um perito médico judicial extraindo dados objetivos de um processo previdenciário (INSS) para uso em uma futura perícia.
