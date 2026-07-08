@@ -693,6 +693,7 @@ Deno.serve(async (req: Request) => {
           // esta função passando `preExtractedText`.
           return new Response(
             JSON.stringify({
+              ok: false,
               needsClientRasterize: true,
               mode: "minimax-client-rasterize",
               chunkEndpoint: "minimax-ocr-chunk",
@@ -701,7 +702,7 @@ Deno.serve(async (req: Request) => {
               message:
                 "Provider MiniMax selecionado. Rode a rasterização no navegador e re-invoque com preExtractedText.",
             }),
-            { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
           );
         }
         throw e;

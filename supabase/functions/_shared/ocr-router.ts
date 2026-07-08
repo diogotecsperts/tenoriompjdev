@@ -123,6 +123,10 @@ export async function runOcrWithConfiguredProvider(
       };
     } catch (e) {
       lastErr = e as Error;
+      if (lastErr.message.includes(MINIMAX_CLIENT_RASTERIZE_ERROR)) {
+        console.warn(`${prefix} MiniMax requer rasterização client-side; sinalizando caller sem fallback pesado`);
+        throw lastErr;
+      }
       console.error(`${prefix} provider ${provider} falhou: ${lastErr.message.slice(0, 300)}`);
     }
   }

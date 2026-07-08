@@ -26,6 +26,7 @@ import {
   uploadPericiaPdf,
 } from "../api/pautas";
 import { preProcessarPericia } from "../api/processar";
+import type { MinimaxOcrProgress } from "@/lib/minimax-ocr-client";
 import { NovaPericiaDialog } from "../components/NovaPericiaDialog";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
 import type { PrevPauta, PrevPericia } from "../types";
@@ -47,6 +48,7 @@ export default function PautaDetalhe() {
   const [novaOpen, setNovaOpen] = useState(false);
   const [processandoIds, setProcessandoIds] = useState<Set<string>>(new Set());
   const [processandoLote, setProcessandoLote] = useState(false);
+  const [processandoDetalhes, setProcessandoDetalhes] = useState<Record<string, string>>({});
   const [loteProgresso, setLoteProgresso] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
   const { progress, finish } = useFakeProgress(processandoIds.size > 0 || processandoLote);
 
@@ -113,14 +115,26 @@ export default function PautaDetalhe() {
 
   const pendentes = pericias.filter((p) => p.pdf_path && !p.pdf_processado);
 
+  const formatMinimaxProgress = (p: MinimaxOcrProgress) => {
+    if (p.message) return p.message;
+    if (p.phase === "rasterizing") return `Rasterizando página ${p.currentPage}/${p.totalPages}`;
+    if (p.phase === "extracting") return `Extraindo MiniMax ${p.currentChunk}/${p.totalChunks}`;
+    return "Consolidando extração";
+  };
+
   const handleProcessar = async (pericia: PrevPericia) => {
     if (!pericia.pdf_path) {
       toast({ variant: "destructive", title: "Sem PDF", description: "Anexe um PDF primeiro." });
       return;
     }
     setProcessandoIds((s) => new Set(s).add(pericia.id));
+    setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: "Preparando PDF" }));
     try {
-      const r = await preProcessarPericia(pericia.id);
+      const r = await preProcessarPericia(pericia.id, {
+        onMinimaxProgress: (p) => {
+          setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: formatMinimaxProgress(p) }));
+        },
+      });
       toast({
         title: "Processado com IA",
         description: `${r.pages} págs · ${r.documentosCriados} doc(s) · ${r.provider}/${r.model}`,
@@ -148,6 +162,10 @@ export default function PautaDetalhe() {
         n.delete(pericia.id);
         return n;
       });
+      setProcessandoDetalhes((s) => {
+        const { [pericia.id]: _removed, ...rest } = s;
+        return rest;
+      });
       finish();
     }
   };
@@ -161,12 +179,20 @@ export default function PautaDetalhe() {
     for (let i = 0; i < pendentes.length; i++) {
       const p = pendentes[i];
       try {
-        await preProcessarPericia(p.id);
+        await preProcessarPericia(p.id, {
+          onMinimaxProgress: (progress) => {
+            setProcessandoDetalhes((s) => ({ ...s, [p.id]: formatMinimaxProgress(progress) }));
+          },
+        });
         ok++;
       } catch (err: any) {
         console.error("[lote] falha em", p.id, err);
         fail++;
       }
+      setProcessandoDetalhes((s) => {
+        const { [p.id]: _removed, ...rest } = s;
+        return rest;
+      });
       setLoteProgresso({ done: i + 1, total: pendentes.length });
     }
     setProcessandoLote(false);
@@ -363,7 +389,7 @@ export default function PautaDetalhe() {
                     </Button>
                     {processandoIds.has(p.id) && (
                       <span className="text-[10px] text-muted-foreground tabular-nums leading-none mt-0.5">
-                        {progress}%
+                        {processandoDetalhes[p.id] || `${progress}%`}
                       </span>
                     )}
                   </div>
