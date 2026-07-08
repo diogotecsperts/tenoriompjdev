@@ -48,6 +48,11 @@ serve(async (req) => {
       case 'openrouter':
         ({ success, errorMessage } = await testOpenAICompatible('https://openrouter.ai/api/v1/chat/completions', apiKey!, model));
         break;
+      case 'minimax': {
+        const key = apiKey || Deno.env.get('MINIMAX_API_KEY') || '';
+        ({ success, errorMessage } = await testOpenAICompatible('https://api.minimax.io/v1/chat/completions', key, model || 'MiniMax-M3'));
+        break;
+      }
       default:
         throw new Error(`Unknown provider: ${provider}`);
     }
