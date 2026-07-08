@@ -552,6 +552,7 @@ async function callProvider(
     case 'groq':
     case 'deepseek':
     case 'openrouter':
+    case 'minimax':
       return await callOpenAICompatible(config, systemPrompt, userPrompt, maxOutputTokens, options);
     case 'claude':
       return await callClaude(config, systemPrompt, userPrompt, maxOutputTokens);
@@ -665,6 +666,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
 async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean }) {
   const isDeepSeek = config.provider === 'deepseek';
   const isDeepSeekReasoner = isDeepSeek && config.model.includes('reasoner');
+  const isMinimax = config.provider === 'minimax';
 
   // DeepSeek JSON quirk: exige a palavra "json" no prompt (system ou user) senão pode retornar vazio
   let finalSystemPrompt = systemPrompt;
@@ -677,7 +679,7 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
   }
 
   const body: any = {
-    model: config.model,
+    model: isMinimax ? 'MiniMax-M3' : config.model, // MiniMax é sempre M3 (id case-sensitive)
     messages: [
       { role: 'system', content: finalSystemPrompt },
       { role: 'user', content: userPrompt }
@@ -698,6 +700,11 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
   // DeepSeek V4 default: desligar thinking mode (mais rápido/previsível). Manter só no legacy `-reasoner`.
   if (isDeepSeek && !isDeepSeekReasoner) {
     body.thinking = { type: 'disabled' };
+  }
+  // MiniMax M3: thinking SEMPRE desabilitado (economia 30-40% output, evita lixo)
+  if (isMinimax) {
+    body.thinking = { type: 'disabled' };
+    body.temperature = body.temperature ?? 0;
   }
   
   const response = await fetchWithRetry(config.endpoint, {
