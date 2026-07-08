@@ -1980,26 +1980,19 @@ export function DevSettings() {
       <Separator />
 
       {/* Section: PDF Extraction */}
-      <Card className={cn(
-        config.import_strategy === "two_phase" && "opacity-60 border-dashed"
-      )}>
+      <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              Extração de PDF
+              Extração de PDF (OCR)
             </CardTitle>
-            {config.import_strategy === "two_phase" && (
-              <Badge variant="outline" className="text-muted-foreground">
-                Inativo (modo duas fases)
-              </Badge>
-            )}
           </div>
           <CardDescription>
-            {config.import_strategy === "two_phase" 
-              ? "Estas configurações são usadas apenas no modo 'Passagem Única'"
-              : "Configurações específicas para processamento de documentos PDF com IA"
-            }
+            Provider e modelo usados para OCR em <strong>todos os módulos</strong> —
+            Previdenciário e Impugnação sempre; Trabalhista apenas quando a estratégia
+            estiver em <em>Duas Fases</em> (em Passagem Única o Trabalhista usa o modelo
+            do Provider Inventory para extrair e preencher em um único passo).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
