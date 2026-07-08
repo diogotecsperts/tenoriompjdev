@@ -10,7 +10,7 @@
  * - Sem polling, sem resumos, sem atualização de jobs
  */
 
-import { extractWithMistralOCR, getMistralAPIKey } from "../_shared/mistral-ocr.ts";
+import { runOcrWithConfiguredProvider } from "../_shared/ocr-router.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
@@ -97,23 +97,17 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Get Mistral API key
-    const mistralKey = getMistralAPIKey();
-    if (!mistralKey) {
-      console.error("[extrair-texto-pdf] MISTRAL_API_KEY not configured");
-      return new Response(
-        JSON.stringify({ error: "MISTRAL_API_KEY não configurada no servidor" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Extract text via Mistral OCR
-    console.log("[extrair-texto-pdf] Starting OCR extraction...");
-    const ocrResult = await extractWithMistralOCR(pdfBytes, mistralKey);
+    // Extract text via provider configurado no DevPanel (Gemini ou Mistral)
+    console.log("[extrair-texto-pdf] Starting OCR extraction (provider dinâmico)...");
+    const ocrResult = await runOcrWithConfiguredProvider(pdfBytes, {
+      logPrefix: "[extrair-texto-pdf]",
+    });
 
     const totalDuration = Date.now() - startTime;
     console.log(`[extrair-texto-pdf] Extraction complete in ${totalDuration}ms`);
-    console.log(`[extrair-texto-pdf] Pages: ${ocrResult.pageCount}, Chars: ${ocrResult.text.length}`);
+    console.log(
+      `[extrair-texto-pdf] Pages: ${ocrResult.pageCount}, Chars: ${ocrResult.text.length}, Provider: ${ocrResult.provider}`,
+    );
 
     const result: ExtractionResult = {
       texto: ocrResult.text,
