@@ -2448,50 +2448,56 @@ export function DevSettings() {
             </Select>
           </div>
 
-          {config.import_strategy === "two_phase" && (
-            <>
-              <Separator />
-              
-              {/* Phase 1 OCR Provider Selection */}
-              <div className="space-y-4 p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
-                <h4 className="font-medium text-sm flex items-center gap-2">
-                  <Cpu className="h-4 w-4 text-blue-600" />
-                  Fase 1: Extração Visual (OCR)
-                </h4>
-                <p className="text-xs text-muted-foreground">
-                  Selecione o provedor de OCR para extração de texto do PDF.
-                  Esta configuração vale para <strong>todos os módulos</strong> (Trabalhista, Previdenciário e Impugnação).
-                  Mistral OCR tem precisão elite (~94.9%) para tabelas e documentos escaneados.
-                </p>
-                
-                {/* Provider Selector */}
-                <div className="space-y-2">
-                  <Label>Provedor de OCR</Label>
-                  <Select 
-                    value={config.phase1_ocr_provider || "gemini"} 
-                    onValueChange={value => setConfig({...config, phase1_ocr_provider: value})}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="gemini">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-primary" />
-                          <span>Google Gemini</span>
-                          <Badge variant="outline" className="text-[10px]">Padrão</Badge>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="mistral">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-primary" />
-                          <span>Mistral OCR</span>
-                          <Badge variant="secondary" className="text-[10px]">Elite</Badge>
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+          <Separator />
+
+          {/* Provedor de OCR — SEMPRE visível (aplica-se a todos os módulos) */}
+          <div className="space-y-4 p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
+            <h4 className="font-medium text-sm flex items-center gap-2">
+              <Cpu className="h-4 w-4 text-blue-600" />
+              Provedor de OCR (todos os módulos)
+            </h4>
+            <p className="text-xs text-muted-foreground">
+              Escolha o provider de OCR usado por <strong>Previdenciário</strong> e <strong>Impugnação</strong> em
+              qualquer estratégia, e também pelo <strong>Trabalhista</strong> na Fase 1 quando em Duas Fases.
+              Mistral tem precisão elite (~94.9%) para tabelas/escaneados. MiniMax M3 processa em chunks
+              de 10 páginas com paralelismo (mais resiliente para PDFs grandes).
+            </p>
+
+            {/* Provider Selector */}
+            <div className="space-y-2">
+              <Label>Provedor de OCR</Label>
+              <Select
+                value={config.phase1_ocr_provider || "gemini"}
+                onValueChange={value => setConfig({...config, phase1_ocr_provider: value})}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gemini">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-primary" />
+                      <span>Google Gemini</span>
+                      <Badge variant="outline" className="text-[10px]">Padrão</Badge>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="mistral">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-primary" />
+                      <span>Mistral OCR</span>
+                      <Badge variant="secondary" className="text-[10px]">Elite</Badge>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="minimax">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "hsl(45, 93%, 47%)" }} />
+                      <span>MiniMax M3</span>
+                      <Badge variant="secondary" className="text-[10px]">Chunked</Badge>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
                 
                 {/* Gemini Model Selector (only if Gemini selected) */}
                 {config.phase1_ocr_provider === "gemini" && (
