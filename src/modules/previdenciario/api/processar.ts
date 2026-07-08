@@ -69,18 +69,59 @@ async function readErrorBody(error: unknown): Promise<Record<string, unknown> | 
  * Dispara o pré-processamento IA de uma perícia previdenciária.
  * Reusa exatamente a infra de IA configurada no DevPanel (provider/fallback/retry).
  */
-export async function preProcessarPericia(periciaId: string): Promise<PreProcessarResult> {
-  const { data, error } = await supabase.functions.invoke("prev-pre-processar", {
+export async function preProcessarPericia(
+  periciaId: string,
+  opts: { onMinimaxProgress?: (p: MinimaxOcrProgress) => void } = {},
+): Promise<PreProcessarResult> {
+  // 1ª tentativa: envia só o periciaId. Se o DevPanel estiver com MiniMax como
+  // provider de OCR, a edge function responde 409 com needsClientRasterize e
+  // rodamos o pipeline no navegador.
+  const first = await supabase.functions.invoke("prev-pre-processar", {
     body: { periciaId },
   });
 
+  const firstData = first.data as
+    | (Record<string, unknown> & { needsClientRasterize?: boolean; pdfPath?: string; bucket?: string })
+    | null;
+  if (firstData?.needsClientRasterize) {
+    // Baixa o PDF direto do storage e roda OCR client-side
+    const bucket = String(firstData.bucket || "prev-pdfs");
+    const pdfPath = String(firstData.pdfPath || "");
+    if (!pdfPath) {
+      throw new PreProcessarError("Servidor sinalizou rasterização client-side sem pdfPath.");
+    }
+    const { data: blob, error: dlErr } = await supabase.storage.from(bucket).download(pdfPath);
+    if (dlErr || !blob) {
+      throw new PreProcessarError(`Falha ao baixar PDF do storage: ${dlErr?.message ?? "vazio"}`);
+    }
+    const ocr = await runMinimaxClientOcr(blob, { onProgress: opts.onMinimaxProgress });
+    // 2ª tentativa: reenvio com texto pré-extraído
+    const second = await supabase.functions.invoke("prev-pre-processar", {
+      body: {
+        periciaId,
+        preExtractedText: ocr.text,
+        preExtractedProvider: ocr.provider,
+        preExtractedModel: ocr.model,
+        preExtractedPageCount: ocr.pageCount,
+      },
+    });
+    return unwrap(second.data, second.error);
+  }
+
+  return unwrap(first.data, first.error);
+}
+
+async function unwrap(
+  data: unknown,
+  error: unknown,
+): Promise<PreProcessarResult> {
   if (error) {
     const body = await readErrorBody(error);
     if (body && typeof body === "object") {
       const code = (body.code as PreProcessarErrorCode) || "unknown";
       const message =
         (typeof body.error === "string" && body.error) ||
-        error.message ||
+        (error as { message?: string })?.message ||
         "Falha no pré-processamento.";
       throw new PreProcessarError(
         message,
@@ -89,19 +130,19 @@ export async function preProcessarPericia(periciaId: string): Promise<PreProcess
         typeof body.upstreamStatus === "number" ? body.upstreamStatus : null,
       );
     }
-    throw new PreProcessarError(error.message || "Falha no pré-processamento.");
+    throw new PreProcessarError((error as { message?: string })?.message || "Falha no pré-processamento.");
   }
-
-  if (data?.error) {
+  const d = data as Record<string, unknown> | null;
+  if (d?.error) {
     throw new PreProcessarError(
-      data.error,
-      (data.code as PreProcessarErrorCode) || "unknown",
-      typeof data.stage === "string" ? data.stage : undefined,
-      typeof data.upstreamStatus === "number" ? data.upstreamStatus : null,
+      String(d.error),
+      (d.code as PreProcessarErrorCode) || "unknown",
+      typeof d.stage === "string" ? d.stage : undefined,
+      typeof d.upstreamStatus === "number" ? d.upstreamStatus : null,
     );
   }
-  if (!data?.ok) {
+  if (!d?.ok) {
     throw new PreProcessarError("Resposta inesperada do servidor.");
   }
-  return data as PreProcessarResult;
+  return d as unknown as PreProcessarResult;
 }
