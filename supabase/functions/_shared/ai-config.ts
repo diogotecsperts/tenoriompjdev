@@ -342,6 +342,26 @@ export async function getAIConfig(forceRefresh = false): Promise<AIConfig> {
         endpoint: PROVIDER_ENDPOINTS.lovable,
         displayModel: fallbackModel.replace('google/', '')
       };
+    } else if (fallbackProvider === 'minimax') {
+      const minimaxKey = Deno.env.get('MINIMAX_API_KEY');
+      if (minimaxKey) {
+        fallbackConfig = {
+          provider: 'minimax',
+          model: 'MiniMax-M3',
+          apiKey: minimaxKey,
+          endpoint: PROVIDER_ENDPOINTS.minimax,
+          displayModel: 'MiniMax-M3',
+        };
+      } else {
+        const lovableKey = Deno.env.get('LOVABLE_API_KEY');
+        fallbackConfig = {
+          provider: 'lovable',
+          model: 'google/gemini-2.5-flash',
+          apiKey: lovableKey || null,
+          endpoint: PROVIDER_ENDPOINTS.lovable,
+          displayModel: 'gemini-2.5-flash'
+        };
+      }
     } else {
       // Buscar API key do fallback provider
       const { data: fallbackKeyData } = await supabase
