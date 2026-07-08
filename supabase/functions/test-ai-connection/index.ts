@@ -48,6 +48,11 @@ serve(async (req) => {
       case 'openrouter':
         ({ success, errorMessage } = await testOpenAICompatible('https://openrouter.ai/api/v1/chat/completions', apiKey!, model));
         break;
+      case 'minimax': {
+        const key = apiKey || Deno.env.get('MINIMAX_API_KEY') || '';
+        ({ success, errorMessage } = await testOpenAICompatible('https://api.minimax.io/v1/chat/completions', key, model || 'MiniMax-M3'));
+        break;
+      }
       default:
         throw new Error(`Unknown provider: ${provider}`);
     }
@@ -323,6 +328,7 @@ async function testOpenAICompatible(endpoint: string, apiKey: string, model: str
   try {
     const isDeepSeek = endpoint.includes('deepseek.com');
     const isDeepSeekReasoner = isDeepSeek && model.includes('reasoner');
+    const isMinimax = endpoint.includes('minimax.io');
 
     const body: Record<string, any> = {
       model,
@@ -333,6 +339,12 @@ async function testOpenAICompatible(endpoint: string, apiKey: string, model: str
     // DeepSeek V4 tem thinking mode ON por default — desligar no teste para latência previsível
     if (isDeepSeek && !isDeepSeekReasoner) {
       body.thinking = { type: 'disabled' };
+    }
+
+    // MiniMax M3: thinking desabilitado e temperatura 0 (padrão global do projeto)
+    if (isMinimax) {
+      body.thinking = { type: 'disabled' };
+      body.temperature = 0;
     }
 
     const response = await fetch(endpoint, {
