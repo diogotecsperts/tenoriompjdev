@@ -105,8 +105,13 @@ export async function runOcrWithConfiguredProvider(
         return { text: r.text, pageCount: r.pageCount, provider: r.provider, model: r.model };
       }
       if (provider === "minimax") {
-        const r = await extractWithMinimaxOCR(pdfBytes, { logPrefix: prefix, apiKey: minimaxKey! });
-        return { text: r.text, pageCount: r.pageCount, provider: r.provider, model: r.model };
+        // MiniMax OCR não pode rodar dentro da edge function (rasterização WASM
+        // estoura o limite de CPU ~2s → WORKER_RESOURCE_LIMIT). O caller precisa
+        // detectar este erro e delegar ao frontend (src/lib/minimax-ocr-client.ts).
+        throw new Error(
+          `${MINIMAX_CLIENT_RASTERIZE_ERROR}: MiniMax OCR requer rasterização no navegador. ` +
+          `Frontend deve chamar 'minimax-ocr-chunk' endpoint diretamente.`,
+        );
       }
       // gemini visual
       const r = await extractVisualContent(pdfBytes, { model: cfg.geminiModel });
