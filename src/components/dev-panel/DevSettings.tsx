@@ -207,6 +207,14 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   customModelInput: true,
   modelPlaceholder: "provider/model-name ou provider/model:variant",
   modelDocsUrl: "https://openrouter.ai/models"
+}, {
+  id: "minimax",
+  name: "MiniMax",
+  description: "MiniMax M3 — chat multimodal, thinking desativado, temperature=0.",
+  models: ["MiniMax-M3"],
+  requiresKey: true,
+  color: "hsl(45, 93%, 47%)",
+  keyPlaceholder: "sk-cp-..."
 }];
 
 const DEFAULT_CONFIG: SystemConfig = {
@@ -221,7 +229,7 @@ const DEFAULT_CONFIG: SystemConfig = {
   pdf_fallback_model: "google/gemini-2.5-flash",
   maintenance_mode: false,
   max_pdf_size_mb: 50,
-  allowed_ai_providers: ["lovable", "openai", "gemini", "claude", "groq", "deepseek", "openrouter"],
+  allowed_ai_providers: ["lovable", "openai", "gemini", "claude", "groq", "deepseek", "openrouter", "minimax"],
   retry_enabled: true,
   retry_max_attempts: 3,
   retry_base_delay_ms: 1000,
