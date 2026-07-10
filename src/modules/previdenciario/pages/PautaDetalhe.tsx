@@ -29,6 +29,7 @@ import {
 import { preProcessarPericia } from "../api/processar";
 import type { MinimaxOcrProgress } from "@/lib/minimax-ocr-client";
 import { NovaPericiaDialog } from "../components/NovaPericiaDialog";
+import { EditarPautaDialog } from "../components/EditarPautaDialog";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
 import type { PrevPauta, PrevPericia } from "../types";
 import { useAuth } from "@/contexts/AuthContext";
