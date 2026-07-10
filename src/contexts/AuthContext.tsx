@@ -355,7 +355,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Marcar offline ANTES do signOut (enquanto JWT ainda é válido)
     // Mas apenas se NÃO for sessão impersonada (não queremos mexer
     // no presence do cliente ao dev encerrar a impersonation).
-    const impersonating = !!(user?.user_metadata as any)?.impersonated_by;
+    const impersonating =
+      !!(user?.user_metadata as any)?.impersonated_by ||
+      (typeof window !== "undefined" &&
+        window.sessionStorage.getItem("lovable_impersonation_active") === "1");
     if (user && !impersonating) {
       await (supabase.from("user_presence") as any).update({
         is_online: false,
@@ -369,8 +372,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUserRole(null);
     // Se era aba de impersonation, limpa o flag e fecha a aba
     if (impersonating) {
-    window.sessionStorage.removeItem("lovable_impersonation_active");
-    window.sessionStorage.removeItem("lovable_impersonation_meta");
+      window.sessionStorage.removeItem("lovable_impersonation_active");
+      window.sessionStorage.removeItem("lovable_impersonation_meta");
       // Tenta fechar; se o browser bloquear, cai para navigate
       window.close();
     }
