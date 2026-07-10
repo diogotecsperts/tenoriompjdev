@@ -431,6 +431,12 @@ export default function PautaDetalhe() {
         proximaOrdem={proximaOrdem}
         onCreated={reload}
       />
+      <EditarPautaDialog
+        open={editarOpen}
+        onOpenChange={setEditarOpen}
+        pauta={pauta}
+        onSaved={reload}
+      />
     </div>
   );
 }
