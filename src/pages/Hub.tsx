@@ -75,12 +75,12 @@ export default function Hub() {
           block_message: m.block_message ?? "",
         };
       });
-      // Admin/dev: liberar todos e ignorar bloqueio
-      if (isAdmin || dev === true) {
-        MODULES.forEach((m) => {
-          map[m.id] = { enabled: true, block_mode: "none", block_message: "" };
-        });
-      }
+      // Ensure both modules exist in the map so admin/dev bypass works uniformly
+      MODULES.forEach((m) => {
+        if (!map[m.id]) {
+          map[m.id] = { enabled: false, block_mode: "none", block_message: "" };
+        }
+      });
       setAccess(map);
       setIsDeveloper(dev === true);
       setLoading(false);
@@ -164,9 +164,12 @@ export default function Hub() {
             const enabledModule = st.enabled;
             const isBlocked = st.block_mode === "blocked";
             const hasNotice = st.block_mode === "notice";
-            const canEnter = enabledModule && !isBlocked;
+            const isAdminBypass = isAdmin || isDeveloper;
+            // Admin/dev can always enter (for QA); regular users obey enabled+block state
+            const canEnter = isAdminBypass || (enabledModule && !isBlocked);
             const isPrev = mod.id === "previdenciario";
             const Icon = mod.icon;
+            const hasMessage = !!st.block_message;
             return (
               <Card
                 key={mod.id}
@@ -175,6 +178,8 @@ export default function Hub() {
                   canEnter
                     ? "hover:border-primary hover:shadow-lg cursor-pointer"
                     : "opacity-60 border-dashed cursor-not-allowed",
+                  isAdminBypass && (isBlocked || hasNotice || !enabledModule) &&
+                    "ring-1 ring-amber-300",
                 )}
                 onClick={() => canEnter && navigate(mod.route)}
               >
@@ -183,40 +188,47 @@ export default function Hub() {
                     <div
                       className={cn(
                         "h-14 w-14 rounded-2xl flex items-center justify-center",
-                        canEnter
+                        canEnter && !isBlocked && enabledModule
                           ? "bg-primary/10 text-primary"
                           : "bg-muted text-muted-foreground",
                       )}
                     >
                       <Icon className="h-7 w-7" />
                     </div>
-                    {isBlocked ? (
-                      <div className="flex items-center gap-1.5 text-xs text-destructive bg-destructive/10 px-2.5 py-1 rounded-full">
-                        <Lock className="h-3 w-3" />
-                        Bloqueado
-                      </div>
-                    ) : hasNotice ? (
-                      <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
-                        </span>
-                        Aviso
-                      </div>
-                    ) : !enabledModule ? (
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted px-2.5 py-1 rounded-full">
-                        <Lock className="h-3 w-3" />
-                        Sem acesso
-                      </div>
-                    ) : isPrev ? (
-                      <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
-                        </span>
-                        Beta
-                      </div>
-                    ) : null}
+                    <div className="flex items-center gap-2">
+                      {isAdminBypass && (isBlocked || hasNotice || !enabledModule) && (
+                        <div className="text-[10px] uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                          Preview admin
+                        </div>
+                      )}
+                      {isBlocked ? (
+                        <div className="flex items-center gap-1.5 text-xs text-destructive bg-destructive/10 px-2.5 py-1 rounded-full">
+                          <Lock className="h-3 w-3" />
+                          Bloqueado
+                        </div>
+                      ) : hasNotice ? (
+                        <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                          </span>
+                          Aviso
+                        </div>
+                      ) : !enabledModule ? (
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted px-2.5 py-1 rounded-full">
+                          <Lock className="h-3 w-3" />
+                          Sem acesso
+                        </div>
+                      ) : isPrev ? (
+                        <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                          </span>
+                          Beta
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                   <h3 className="text-xl font-bold text-foreground mb-2">
                     {mod.title}
@@ -224,7 +236,7 @@ export default function Hub() {
                   <p className="text-sm text-muted-foreground leading-relaxed mb-4 flex-1">
                     {mod.description}
                   </p>
-                  {(isBlocked || hasNotice) && st.block_message && (
+                  {hasMessage && (
                     <div
                       className={cn(
                         "text-xs rounded-md px-3 py-2 mb-4 border",
@@ -238,7 +250,9 @@ export default function Hub() {
                   )}
                   {canEnter ? (
                     <Button className="w-full" variant={isPrev ? "secondary" : "default"}>
-                      Acessar módulo
+                      {isAdminBypass && (isBlocked || !enabledModule)
+                        ? "Acessar (bypass admin)"
+                        : "Acessar módulo"}
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
                   ) : (

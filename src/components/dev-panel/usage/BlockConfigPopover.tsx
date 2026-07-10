@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Popover,
   PopoverContent,
@@ -27,7 +27,7 @@ interface BlockConfigPopoverProps {
   module: "trabalhista" | "previdenciario";
   currentMode: BlockMode;
   currentMessage: string;
-  onSaved: (mode: BlockMode, message: string) => void;
+  onSaved: (mode: BlockMode, message: string, enabled: boolean) => void;
 }
 
 export function BlockConfigPopover({
@@ -41,21 +41,33 @@ export function BlockConfigPopover({
   const [mode, setMode] = useState<BlockMode>(currentMode);
   const [message, setMessage] = useState(currentMessage);
   const [saving, setSaving] = useState(false);
+  const initializedRef = useRef(false);
 
+  // Initialize state only when transitioning from closed -> open
   useEffect(() => {
-    if (open) {
+    if (open && !initializedRef.current) {
       setMode(currentMode);
       setMessage(currentMessage);
+      initializedRef.current = true;
+    } else if (!open) {
+      initializedRef.current = false;
     }
   }, [open, currentMode, currentMessage]);
 
+  const trimmed = message.trim();
+  const needsMessage = mode !== "none" && trimmed.length === 0;
+
   const save = async () => {
+    if (needsMessage) return;
     setSaving(true);
+    // Integrate with enabled toggle: blocked -> disable access; notice/none -> enable
+    const nextEnabled = mode !== "blocked";
     const payload = {
       user_id: userId,
       module,
+      enabled: nextEnabled,
       block_mode: mode === "none" ? null : mode,
-      block_message: message.trim() || null,
+      block_message: mode === "none" ? null : trimmed,
     };
     const { error } = await (supabase.from as any)("user_modules").upsert(
       payload,
@@ -71,7 +83,7 @@ export function BlockConfigPopover({
       return;
     }
     toast({ title: "Bloqueio atualizado" });
-    onSaved(mode, message.trim());
+    onSaved(mode, mode === "none" ? "" : trimmed, nextEnabled);
     setOpen(false);
   };
 
@@ -108,7 +120,7 @@ export function BlockConfigPopover({
           <div>
             <h4 className="font-medium text-sm">Bloqueio do módulo</h4>
             <p className="text-xs text-muted-foreground">
-              Configure aviso ou bloqueio total para este módulo/usuário.
+              O modo escolhido aqui já sincroniza o toggle de acesso ao lado.
             </p>
           </div>
 
@@ -122,7 +134,7 @@ export function BlockConfigPopover({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="pointer-events-auto">
-                <SelectItem value="none">Nenhum</SelectItem>
+                <SelectItem value="none">Nenhum (livre)</SelectItem>
                 <SelectItem value="notice">Só aviso (permite entrar)</SelectItem>
                 <SelectItem value="blocked">Bloquear acesso</SelectItem>
               </SelectContent>
@@ -130,7 +142,10 @@ export function BlockConfigPopover({
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">Mensagem exibida no card</Label>
+            <Label className="text-xs">
+              Mensagem exibida no card
+              {mode !== "none" && <span className="text-destructive"> *</span>}
+            </Label>
             <Textarea
               rows={3}
               placeholder="Ex.: Em manutenção até 15/07"
@@ -138,6 +153,11 @@ export function BlockConfigPopover({
               onChange={(e) => setMessage(e.target.value)}
               disabled={mode === "none"}
             />
+            {needsMessage && (
+              <p className="text-[11px] text-destructive">
+                Informe uma mensagem para exibir ao usuário.
+              </p>
+            )}
           </div>
 
           <div className="flex justify-end gap-2 pt-1">
@@ -149,7 +169,7 @@ export function BlockConfigPopover({
             >
               Cancelar
             </Button>
-            <Button size="sm" onClick={save} disabled={saving}>
+            <Button size="sm" onClick={save} disabled={saving || needsMessage}>
               {saving && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
               Salvar
             </Button>
