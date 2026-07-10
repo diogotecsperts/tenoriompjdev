@@ -47,4 +47,9 @@ verify_jwt = true
 [functions.dev-get-pericia-data]
 verify_jwt = true
 
+[functions.send-tracking-email]
+verify_jwt = false
+
+
+
 
