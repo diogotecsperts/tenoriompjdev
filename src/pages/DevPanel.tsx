@@ -40,6 +40,8 @@ import { DevPrompts } from "@/components/dev-panel/DevPrompts";
 import { DevAccessHistory } from "@/components/dev-panel/DevAccessHistory";
 import { DevOriginalFiles } from "@/components/dev-panel/DevOriginalFiles";
 import { DevUserModules } from "@/components/dev-panel/DevUserModules";
+import { DevUsageControl } from "@/components/dev-panel/DevUsageControl";
+
 
 type DevTab = "dashboard" | "users" | "user-modules" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "settings";
 
