@@ -1,52 +1,54 @@
-## Diagnóstico
+## Respostas
 
-Confirmei três problemas reais em "Módulos por Usuário":
+### 1. Mensagem do card para outros usuários — CONFIRMADO 100%
 
-1. **Admin/dev nunca vê bloqueio nem aviso.** Em `Hub.tsx`, quando `isAdmin || isDeveloper`, o loader sobrescreve todos os módulos com `{ enabled: true, block_mode: "none", block_message: "" }`. Como o teste é feito pela própria conta admin/dev, nada aparece — daí a impressão de que "não faz nada".
-2. **Redundância entre toggle e popover.** Hoje `enabled` (toggle) e `block_mode` (popover) são independentes. Bloqueio pelo popover não desliga o toggle e vice-versa, causando estados contraditórios (ex.: `enabled=true` + `block_mode=blocked`).
-3. **Mensagem não aparece.** Além do item 1, no DB há linhas com `block_message` preenchida e `block_mode = NULL` (o save do popover pode ter sido feito com "Nenhum" ao reabrir, porque o `useEffect` reseta o estado local ao abrir). Sem `block_mode` definido, o Hub nunca entra no ramo que renderiza a mensagem.
+Verifiquei `src/pages/Hub.tsx`:
 
-## O que fazer
+- O selo **"Preview admin"** só é renderizado quando `isAdminBypass = isAdmin || isDeveloper` for verdadeiro. `isAdmin` vem do `AuthContext` (role `admin` no banco) e `isDeveloper` vem de `supabase.rpc("is_developer")` — uma função `SECURITY DEFINER` que confere `user_roles` no servidor. Usuário comum tem as duas flags como `false`, então o selo não é montado no DOM.
+- A **mensagem do card** (`st.block_message`) é renderizada por um bloco independente, condicionado apenas a `hasMessage`, junto com o badge de "Bloqueado" ou "Aviso". Ela aparece para **qualquer usuário** cujo módulo esteja com `block_mode = 'notice'` ou `'blocked'` e `block_message` preenchida.
+- O comportamento de acesso também está correto: usuário comum com `block_mode='blocked'` vê o card desabilitado + a mensagem em vermelho; com `notice` vê o card habilitado + mensagem âmbar; admin vê tudo isso mais o selo "Preview admin".
 
-### 1. Integrar toggle ↔ popover (uma única fonte de verdade)
+Confirmado: a mensagem aparece normalmente para os usuários finais.
 
-Em `DevUserModules.tsx` e `BlockConfigPopover.tsx`:
+### 2. Dados do Bruno (MED001) — CONFIRMADO + faltando tempo real
 
-- Ao **salvar o popover**:
-  - `mode = "blocked"` → também gravar `enabled = false` no mesmo upsert.
-  - `mode = "notice"` ou `"none"` → também gravar `enabled = true` (usuário mantém acesso; "notice" é só aviso).
-- Ao **desligar o toggle** (`enabled=false`) e não haver `block_mode` explícito, gravar `block_mode = "blocked"` com uma mensagem padrão ("Acesso desabilitado pelo administrador.") apenas se `block_message` estiver vazia — assim o Hub mostra algo em vez de "Sem acesso" mudo.
-- Ao **ligar o toggle** (`enabled=true`), limpar `block_mode` para `null` e `block_message` para `null` (destrava tudo).
-- Atualizar o estado local (`setUsers`) após cada operação para refletir os dois campos simultaneamente.
+Consultei o banco. Bruno (`e48a06e4-…`) tem exatamente:
 
-Resultado: um único conceito visível ao dev — "Livre / Aviso / Bloqueado" — comandável tanto pelo toggle (atalho rápido) quanto pelo popover (refinado com mensagem).
+- **2 pautas**: `076a2108…` (07/07) e `0c5a52a7…` (06/07)
+- **Pauta 06/07**: 53 perícias, 53 com PDF, 53 processadas
+- **Pauta 07/07**: 17 perícias, 17 com PDF, 17 processadas
 
-### 2. Popover: parar de perder seleção
+Os números do painel Controle de Uso batem: o loader (`dev-list-prev-usage`) faz `SELECT` filtrado por `user_id` em `prev_pautas` e `prev_pericias`, e os KPIs contam a partir dos mesmos campos (`pdf_path` para "upados" e `pdf_processado` para "processados").
 
-- Substituir o `useEffect` que reseta `mode/message` toda vez que `open` muda por inicialização apenas na abertura (guardar snapshot em ref) — evita que reabrir sobrescreva escolha do usuário.
-- Desabilitar o botão "Salvar" quando `mode !== "none"` e `message.trim() === ""` (força mensagem quando há bloqueio/aviso, garantindo que sempre haja texto para exibir).
+**Porém: tempo real está ausente.** Hoje o painel só recarrega quando o dev troca de usuário. Se o cliente subir/processar um PDF enquanto você está olhando, os cards e a tabela não se atualizam sozinhos. Preciso adicionar:
 
-### 3. Corrigir bypass admin/dev no Hub
+## Plano de mudanças (item 2)
 
-Em `Hub.tsx`, remover a sobrescrita que zera `block_mode`/`block_message` para admin/dev. Manter apenas: admin/dev **pode entrar** (canEnter=true) mesmo se bloqueado, mas **vê o badge e a mensagem** (com um selo "visível só para você" ou similar), para poder validar a configuração aplicada aos usuários finais.
+### A. Habilitar Realtime nas tabelas
 
-Implementação: separar "estado real" (vindo do DB) de "pode navegar" (admin/dev sempre true). Renderizar sempre o badge/mensagem a partir do estado real. Para admin/dev com card bloqueado/notice, mostrar um selinho pequeno "Preview admin" e manter o botão de acesso habilitado.
+Migração adicionando `prev_pautas` e `prev_pericias` à publicação `supabase_realtime` e definindo `REPLICA IDENTITY FULL` (para receber payload completo em updates).
 
-### 4. Hub: sempre renderizar mensagem quando presente
+### B. Assinar no `PrevUsagePanel`
 
-Ajustar a condição para renderizar `block_message` sempre que `block_message` estiver preenchida (independente do `block_mode`), com estilização por severidade. Isso protege contra linhas antigas onde `block_mode` ficou nulo.
+Novo `useEffect` (após o usuário estar selecionado) que abre um canal Realtime com dois listeners:
 
-### 5. Backfill leve dos dados existentes
+- `postgres_changes` em `prev_pautas` filtrado por `user_id=eq.<selectedUserId>`
+- `postgres_changes` em `prev_pericias` filtrado por `user_id=eq.<selectedUserId>`
 
-Uma pequena atualização para consertar as linhas onde `block_message IS NOT NULL AND block_mode IS NULL`: setar `block_mode = 'notice'` (mais conservador) para que a mensagem já salva volte a aparecer sem precisar reeditar.
+Cada evento (`INSERT`/`UPDATE`/`DELETE`) atualiza o estado local (`setPautas` / `setPericias`) diretamente — sem refazer o fetch inteiro na maioria dos casos. Fallback: se o payload for grande (UPDATE de `prev_extracao`), simplesmente chamar `loadUsage(selectedUserId)` com debounce curto (500 ms) para reidratar tudo em vez de manter payloads inconsistentes.
 
-## Fora do escopo
+Cleanup obrigatório com `supabase.removeChannel(channel)` no unmount / troca de usuário para evitar leak (regra da nossa doc de Realtime).
 
-- Nenhuma mudança no MiniMax OCR, na página Controle de Uso, nem na estrutura da tabela `user_modules`. Só ajustes de UI/lógica e um UPDATE de conserto.
+### C. Indicador visual "ao vivo"
 
-## Arquivos afetados
+Um pequeno badge verde piscante ao lado do nome do usuário selecionado, tipo "● ao vivo", que confirma que a assinatura está ativa. Simples e discreto.
 
-- `src/components/dev-panel/DevUserModules.tsx` — toggle grava `block_mode`/`block_message` coerentes; recarrega estado após popover.
-- `src/components/dev-panel/usage/BlockConfigPopover.tsx` — save integrado com `enabled`; init sem reset em reabertura; validação de mensagem obrigatória.
-- `src/pages/Hub.tsx` — remover bypass que apaga bloqueio para admin/dev; renderizar mensagem sempre que houver; selo "Preview admin" quando aplicável.
-- 1 UPDATE (via ferramenta de dados) para backfill das linhas com mensagem órfã.
+### D. Segurança
+
+O canal Realtime respeita RLS. As policies atuais de `prev_pautas`/`prev_pericias` restringem SELECT ao próprio `user_id`. Como o painel roda com a sessão do dev, ele **não** receberia eventos de outros usuários por realtime direto. Solução: como dev/admin já é whitelisted em `is_developer()`, adicionar uma policy adicional de SELECT em ambas as tabelas permitindo `public.is_developer()` — sem isso o Realtime não entrega os eventos do Bruno para você. (Alternativa mais restritiva: encaminhar via broadcast do backend, mas é overkill aqui.)
+
+### E. Escopo do plano
+
+- Nenhuma mudança de layout ou lógica de filtros/KPIs.
+- Apenas: (1) migração de publicação + REPLICA IDENTITY, (2) policy SELECT para developer nas duas tabelas, (3) `useEffect` de assinatura em `PrevUsagePanel.tsx`, (4) badge "ao vivo".
+- Módulo Trabalhista fica como está (placeholder "em breve") — realtime dele vem quando o painel for construído.
