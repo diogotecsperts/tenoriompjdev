@@ -23,7 +23,7 @@ const RESEND_ENDPOINT = "https://api.resend.com/emails";
 const FROM_REPORTS = "Relatórios MPJ <relatorios@mpjpericias.tecsperts.com>";
 const FROM_ALERTS = "Avisos MPJ <avisos@mpjpericias.tecsperts.com>";
 
-type EmailType = "login" | "pdf_error" | "daily_summary" | "test";
+type EmailType = "login" | "impersonation_login" | "pdf_error" | "daily_summary" | "test";
 
 interface TrackingConfig {
   enabled: boolean;
