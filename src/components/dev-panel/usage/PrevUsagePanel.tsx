@@ -947,37 +947,78 @@ export function PrevUsagePanel() {
                 const isLoading = metaProgress !== null;
                 const allLoaded = pdfCount > 0 && loadedCount === pdfCount;
                 return (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 text-[11px] gap-1.5 px-2"
-                    disabled={pdfCount === 0 || isLoading}
-                    onClick={() => loadAllVisibleMeta(allLoaded)}
-                    title={
-                      pdfCount === 0
-                        ? "Nenhum PDF disponível na visão atual"
-                        : allLoaded
-                          ? "Recarregar tamanho e páginas"
-                          : "Buscar tamanho e nº de páginas dos PDFs visíveis"
-                    }
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                        Analisando {metaProgress!.done}/{metaProgress!.total}
-                      </>
-                    ) : allLoaded ? (
-                      <>
-                        <RefreshCw className="h-3 w-3" />
-                        Atualizar detalhes
-                      </>
-                    ) : (
-                      <>
-                        <Gauge className="h-3 w-3" />
-                        Carregar tamanho/páginas
-                      </>
-                    )}
-                  </Button>
+                  <div className="inline-flex items-center">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-[11px] gap-1.5 px-2 rounded-r-none"
+                      disabled={pdfCount === 0 || isLoading}
+                      onClick={() => loadAllVisibleMeta(allLoaded, metaConcurrency)}
+                      title={
+                        pdfCount === 0
+                          ? "Nenhum PDF disponível na visão atual"
+                          : allLoaded
+                            ? `Recarregar tamanho e páginas (${metaConcurrency}x)`
+                            : `Buscar tamanho e nº de páginas dos PDFs visíveis (${metaConcurrency}x)`
+                      }
+                    >
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Analisando {metaProgress!.done}/{metaProgress!.total}
+                        </>
+                      ) : allLoaded ? (
+                        <>
+                          <RefreshCw className="h-3 w-3" />
+                          Atualizar detalhes ({metaConcurrency}x)
+                        </>
+                      ) : (
+                        <>
+                          <Gauge className="h-3 w-3" />
+                          Carregar tamanho/páginas ({metaConcurrency}x)
+                        </>
+                      )}
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-1.5 rounded-l-none border-l border-border"
+                          disabled={isLoading}
+                          title="Escolher modo de carregamento"
+                        >
+                          <ChevronDown className="h-3 w-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-56">
+                        <DropdownMenuLabel className="text-[11px]">
+                          Modo de carregamento
+                        </DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setMetaConcurrency(1);
+                            if (pdfCount > 0) void loadAllVisibleMeta(allLoaded, 1);
+                          }}
+                          className="text-xs"
+                        >
+                          <span className={cn("mr-2", metaConcurrency === 1 ? "opacity-100" : "opacity-0")}>✓</span>
+                          Carregar 1 por vez (seguro)
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setMetaConcurrency(2);
+                            if (pdfCount > 0) void loadAllVisibleMeta(allLoaded, 2);
+                          }}
+                          className="text-xs"
+                        >
+                          <span className={cn("mr-2", metaConcurrency === 2 ? "opacity-100" : "opacity-0")}>✓</span>
+                          Carregar 2 em paralelo (mais rápido)
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 );
               })()}
               {metaProgress !== null && (
