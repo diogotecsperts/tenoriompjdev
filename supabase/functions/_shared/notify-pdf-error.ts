@@ -6,7 +6,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 interface NotifyArgs {
-  modulo: "Trabalhista" | "Previdenciário" | "Impugnação";
+  modulo: "Trabalhista" | "Previdenciário";
   errorMessage: string;
   userId?: string | null;
   userName?: string | null;
