@@ -134,6 +134,7 @@ export function PrevUsagePanel() {
     done: number;
     total: number;
   } | null>(null);
+  const metaAbortRef = useRef(false);
 
 
   // Load profiles + persisted filters
