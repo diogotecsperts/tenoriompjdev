@@ -626,9 +626,22 @@ Deno.serve(async (req: Request) => {
     // 1) Carrega perícia
     const { data: pericia, error: perErr } = await admin
       .from("prev_pericias")
-      .select("id, user_id, pdf_path, pauta_id")
+      .select("id, user_id, pdf_path, pauta_id, periciado_nome")
       .eq("id", body.periciaId)
       .maybeSingle();
+
+    if (pericia) {
+      notifyCtx.userId = pericia.user_id;
+      notifyCtx.periciadoNome = (pericia as any).periciado_nome ?? "—";
+      try {
+        const { data: pauta } = await admin
+          .from("prev_pautas")
+          .select("nome_pauta")
+          .eq("id", pericia.pauta_id)
+          .maybeSingle();
+        notifyCtx.pautaNome = (pauta as any)?.nome_pauta ?? "";
+      } catch { /* ignore */ }
+    }
 
     if (perErr || !pericia) {
       return new Response(JSON.stringify({ error: "Perícia não encontrada" }), {
