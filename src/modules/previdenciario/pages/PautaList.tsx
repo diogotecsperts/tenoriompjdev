@@ -14,6 +14,7 @@ import { CalendarDays, MapPin, Plus, Loader2, FolderOpen, Trash2, ArrowUpDown, P
 import { toast } from "@/hooks/use-toast";
 import { listPautas, deletePauta } from "../api/pautas";
 import { NovaPautaDialog } from "../components/NovaPautaDialog";
+import { EditarPautaDialog } from "../components/EditarPautaDialog";
 import type { PrevPauta } from "../types";
 
 function formatData(iso: string) {
