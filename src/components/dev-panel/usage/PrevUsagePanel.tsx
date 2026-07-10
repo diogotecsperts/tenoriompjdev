@@ -218,6 +218,27 @@ export function PrevUsagePanel() {
     if (filters.userId) loadUsage(filters.userId);
   }, [filters.userId, loadUsage]);
 
+  // Hidrata pdfMeta a partir dos campos persistidos no banco (pdf_size_bytes/pdf_pages).
+  // Assim, ao mudar de aba/recarregar, os badges aparecem instantaneamente sem re-fetch.
+  useEffect(() => {
+    setPdfMeta((prev) => {
+      const next = new Map(prev);
+      let changed = false;
+      for (const p of pericias) {
+        if (!p.pdf_path) continue;
+        if (p.pdf_size_bytes == null) continue;
+        const existing = next.get(p.id);
+        const size = Number(p.pdf_size_bytes);
+        const pages = p.pdf_pages ?? null;
+        if (!existing || existing.size !== size || existing.pages !== pages) {
+          next.set(p.id, { size, pages });
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [pericias]);
+
 
   // Realtime subscription: keep pautas + pericias in sync for the selected user
   useEffect(() => {
