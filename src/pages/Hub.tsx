@@ -156,7 +156,15 @@ export default function Hub() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
           {MODULES.map((mod) => {
-            const enabled = allowed.has(mod.id);
+            const st = access[mod.id] ?? {
+              enabled: false,
+              block_mode: "none" as const,
+              block_message: "",
+            };
+            const enabledModule = st.enabled;
+            const isBlocked = st.block_mode === "blocked";
+            const hasNotice = st.block_mode === "notice";
+            const canEnter = enabledModule && !isBlocked;
             const isPrev = mod.id === "previdenciario";
             const Icon = mod.icon;
             return (
@@ -164,68 +172,90 @@ export default function Hub() {
                 key={mod.id}
                 className={cn(
                   "transition-all border-2 h-full",
-                  enabled
+                  canEnter
                     ? "hover:border-primary hover:shadow-lg cursor-pointer"
-                    : "opacity-60 border-dashed cursor-not-allowed"
+                    : "opacity-60 border-dashed cursor-not-allowed",
                 )}
-                onClick={() => enabled && navigate(mod.route)}
+                onClick={() => canEnter && navigate(mod.route)}
               >
                 <CardContent className="p-8 flex flex-col h-full">
                   <div className="flex items-start justify-between mb-6">
                     <div
                       className={cn(
                         "h-14 w-14 rounded-2xl flex items-center justify-center",
-                        isPrev
-                          ? "bg-muted text-muted-foreground"
-                          : enabled
-                            ? "bg-primary/10 text-primary"
-                            : "bg-muted text-muted-foreground"
+                        canEnter
+                          ? "bg-primary/10 text-primary"
+                          : "bg-muted text-muted-foreground",
                       )}
                     >
                       <Icon className="h-7 w-7" />
                     </div>
-                    {isPrev ? (
+                    {isBlocked ? (
+                      <div className="flex items-center gap-1.5 text-xs text-destructive bg-destructive/10 px-2.5 py-1 rounded-full">
+                        <Lock className="h-3 w-3" />
+                        Bloqueado
+                      </div>
+                    ) : hasNotice ? (
                       <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full">
                         <span className="relative flex h-2 w-2">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
                           <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
                         </span>
-                        Em construção
+                        Aviso
                       </div>
-                    ) : !enabled ? (
+                    ) : !enabledModule ? (
                       <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted px-2.5 py-1 rounded-full">
                         <Lock className="h-3 w-3" />
-                        Bloqueado
+                        Sem acesso
+                      </div>
+                    ) : isPrev ? (
+                      <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                        </span>
+                        Beta
                       </div>
                     ) : null}
                   </div>
                   <h3 className="text-xl font-bold text-foreground mb-2">
                     {mod.title}
-                    {isPrev && (
-                      <span className="ml-2 text-xs font-normal text-muted-foreground align-middle">
-                        (beta)
-                      </span>
-                    )}
                   </h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed mb-6 flex-1">
+                  <p className="text-sm text-muted-foreground leading-relaxed mb-4 flex-1">
                     {mod.description}
                   </p>
-                  {enabled ? (
+                  {(isBlocked || hasNotice) && st.block_message && (
+                    <div
+                      className={cn(
+                        "text-xs rounded-md px-3 py-2 mb-4 border",
+                        isBlocked
+                          ? "bg-destructive/5 text-destructive border-destructive/20"
+                          : "bg-amber-50 text-amber-800 border-amber-200",
+                      )}
+                    >
+                      {st.block_message}
+                    </div>
+                  )}
+                  {canEnter ? (
                     <Button className="w-full" variant={isPrev ? "secondary" : "default"}>
-                      {isPrev ? "Acessar módulo (beta)" : "Acessar módulo"}
+                      Acessar módulo
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
                   ) : (
                     <Button className="w-full" variant="outline" disabled>
-                      {isPrev ? "Módulo em construção" : "Solicite acesso ao administrador"}
+                      {isBlocked
+                        ? "Módulo temporariamente bloqueado"
+                        : !enabledModule
+                          ? "Solicite acesso ao administrador"
+                          : "Indisponível"}
                     </Button>
                   )}
                 </CardContent>
               </Card>
-
             );
           })}
         </div>
+
       </main>
 
       <footer className="text-center text-xs text-muted-foreground py-4 border-t">
