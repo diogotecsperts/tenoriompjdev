@@ -157,15 +157,26 @@ export default function PautaList() {
           )}
         </div>
       </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition"
-        onClick={(e) => { e.stopPropagation(); void handleDelete(p.id); }}
-        title="Excluir pauta"
-      >
-        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-      </Button>
+      <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={(e) => { e.stopPropagation(); setEditando(p); }}
+          title="Editar pauta"
+        >
+          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={(e) => { e.stopPropagation(); void handleDelete(p.id); }}
+          title="Excluir pauta"
+        >
+          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+        </Button>
+      </div>
     </Card>
   );
 
