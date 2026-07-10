@@ -120,6 +120,8 @@ export default function DevPanel() {
         return <DevAccessHistory />;
       case "original-files":
         return <DevOriginalFiles />;
+      case "email-tracking":
+        return <DevEmailTracking />;
       case "settings":
         return <DevSettings />;
       default:
