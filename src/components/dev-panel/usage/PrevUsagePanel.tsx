@@ -305,6 +305,8 @@ export function PrevUsagePanel() {
                       periciado_nome: row.periciado_nome,
                       pdf_path: row.pdf_path,
                       pdf_processado: !!row.pdf_processado,
+                      pdf_size_bytes: row.pdf_size_bytes ?? null,
+                      pdf_pages: row.pdf_pages ?? null,
                       processo_numero:
                         row.prev_extracao?.identificacao?.numero_processo ??
                         p.processo_numero,
@@ -321,6 +323,10 @@ export function PrevUsagePanel() {
                 next.delete(row.id);
                 return next;
               });
+              // Zera colunas persistidas para forçar recontagem sob demanda
+              (supabase.from as any)("prev_pericias")
+                .update({ pdf_size_bytes: null, pdf_pages: null })
+                .eq("id", row.id);
             }
             // Heavy fields like prelaudo_data updated: schedule a full reload
             // in case downloads need the fresh copy on cache
