@@ -1,72 +1,109 @@
-## Problemas
+# Rastreamento via Email (Resend)
 
-1. **Out of Memory** ao clicar "Carregar tamanho/páginas": baixamos o PDF inteiro em `arrayBuffer` e passamos para `pdf-lib` — com 4 downloads paralelos de PDFs de 20–150 MB, o navegador estoura memória.
-2. **Dados não persistem**: cache é só em memória. Mudar de aba, trocar de usuário ou recarregar apaga tudo.
+Nova aba **"Rastreamento via Email"** no DevPanel. Dispara alertas para o dev via Resend em três cenários: login do cliente, resumo diário de uso, e erros de processamento de PDF (instantâneo).
 
-## Solução
+## Configuração de envio
 
-### 1. Persistência real no banco (resolve #2 de vez)
+- **Domínio:** `mpjpericias.tecsperts.com` (já verificado no Resend do usuário).
+- **Remetentes:**
+  - `relatorios@mpjpericias.tecsperts.com` → login + resumo diário
+  - `avisos@mpjpericias.tecsperts.com` → alertas de erro
+  - (Local-parts fictícios — domínio verificado é suficiente.)
+- **Destinatários:** livres (lista editável na UI, N emails).
+- **Secret:** `RESEND_API_KEY` (solicitada na entrada em build).
 
-Adicionar duas colunas em `prev_pericias`:
-- `pdf_size_bytes bigint`
-- `pdf_pages integer`
+## Arquitetura
 
-Assim os valores ficam gravados por perícia, aparecem instantaneamente em qualquer sessão/dispositivo, e só é preciso "carregar" uma vez por PDF na vida.
+### 1. Tabelas novas (migration + RLS + GRANTs)
 
-O carregamento automático da lista em `PrevUsagePanel` já traz esses campos (via edge function `dev-list-prev-usage`), então os badges renderizam de cara sem nenhum fetch extra.
+- `email_tracking_config` — linha única (`id = 'default'`):
+  - `enabled`, `recipient_emails text[]`
+  - `notify_on_login`, `notify_on_pdf_error`, `notify_daily_summary`
+  - `daily_summary_hour int`, `daily_summary_minute int` (TZ America/Sao_Paulo)
+  - `last_daily_sent_date date`
+  - RLS: SELECT/UPDATE só para `is_developer()`.
 
-Quando o `pdf_path` muda (realtime UPDATE), zeramos `pdf_size_bytes` e `pdf_pages` para forçar recontagem sob demanda.
+- `email_login_events` — dedup de login (janela 30 min): `user_id`, `session_started_at`, `notified_at`.
 
-### 2. Evitar OOM (resolve #1)
+- `email_tracking_log` — histórico dos últimos envios (para tabela na UI): `type`, `recipients text[]`, `subject`, `status`, `error_message`, `sent_at`. RLS: SELECT só para developers.
 
-Reescrever `loadOneMeta` para ser bem mais leve:
+GRANTs padrão para `authenticated` + `service_role` em todas.
 
-- **Concorrência 1** (uma perícia por vez). PDFs de perícia são pesados; paralelismo aqui não vale o risco.
-- **HEAD primeiro** para obter tamanho. Grava `pdf_size_bytes` no banco imediatamente — se o navegador travar depois, pelo menos o tamanho ficou salvo.
-- **Skip de contagem de páginas para PDFs > 80 MB**: badge exibe só o tamanho (`150 MB`). Evita baixar arquivos gigantes só para contar páginas.
-- **Streaming controlado**: `fetch → arrayBuffer → PDFDocument.load(bytes, { updateMetadata: false }) → getPageCount()` e imediatamente descartamos a referência (`bytes = null`) antes do próximo item. Sem `Promise.all` acumulando buffers.
-- **Import lazy** do `pdf-lib` mantido (`await import("pdf-lib")`), fora do laço para não reimportar.
-- **Try/catch por item**: falha de um PDF não aborta o lote. Registra `pdf_pages = null` e segue.
-- **Botão "Cancelar"** aparece durante o loading para o dev interromper se algo travar.
+### 2. Edge Function `send-tracking-email` (verify_jwt = false; chamada por triggers/cron)
 
-### 3. Ajustes de UI
+Payload: `{ type: 'login' | 'pdf_error' | 'daily_summary' | 'test', payload }`.
 
-- Badge continua igual: `18 MB · 150 pgs`, ou `18 MB` quando páginas não puderam ser contadas (arquivo muito grande / erro).
-- Se a perícia já tem `pdf_size_bytes` no banco, o badge aparece direto — sem precisar clicar em nada.
-- Botão global vira `↻ Atualizar detalhes faltantes` e só processa perícias visíveis **sem** dados salvos ainda.
-- Progresso: `Analisando 12/53...`.
+- Lê `email_tracking_config`. Se `enabled=false` ou flag do tipo desligada → skip.
+- Monta HTML limpo (header colorido por tipo, cards com dados, footer discreto).
+- POST `https://api.resend.com/emails` com `RESEND_API_KEY`.
+- `from`: `relatorios@…` (login/daily) ou `avisos@…` (pdf_error).
+- Grava resultado em `email_tracking_log` (mesmo em falha).
 
-## Detalhes técnicos
+### 3. Disparos
 
-**Migration** (`prev_pericias`):
-```sql
-ALTER TABLE public.prev_pericias
-  ADD COLUMN IF NOT EXISTS pdf_size_bytes bigint,
-  ADD COLUMN IF NOT EXISTS pdf_pages integer;
-```
-Sem mudança de RLS/GRANTs (colunas novas em tabela existente).
+**a) Login** — em `usePresenceHeartbeat`:
+- No primeiro heartbeat, checa última `user_presence.last_seen_at`. Se > 30 min atrás (ou nunca) → invoca function com `type: 'login'` e insere em `email_login_events`.
+- Fire-and-forget.
 
-**Edge function `dev-list-prev-usage`**: adicionar `pdf_size_bytes` e `pdf_pages` no `select` e no objeto `periciasSlim`.
+**b) Erro em PDF** — catches de:
+- `processar-autos` (Trabalhista)
+- `prev-pre-processar` (Previdenciário)
+- `extrair-texto-pdf` (Impugnação)
 
-**`PrevUsagePanel.tsx`**:
-- Estado `pdfMeta` passa a hidratar a partir dos campos das perícias no primeiro load, e sincroniza gravações pontuais.
-- `loadOneMeta` grava resultado via `supabase.from("prev_pericias").update({ pdf_size_bytes, pdf_pages }).eq("id", periciaId)` (política dev/admin já permite).
-- `loadAllVisibleMeta` roda em série (`for...of await`), com `abortRef` para cancelamento.
-- Constante `MAX_PDF_BYTES_FOR_PAGECOUNT = 80 * 1024 * 1024`.
-- Realtime `UPDATE`: se `pdf_path` mudou, disparar `update` zerando `pdf_size_bytes`/`pdf_pages` (opcional; se já vier zerado pelo UPDATE original, apenas remove do `pdfMeta`).
-- Ao trocar de usuário, `pdfMeta` é reconstruído do banco — nada de `new Map()` vazio.
+Payload inclui: nome do usuário, nome do periciado/processo, pauta (se prev), erro original + tradução pt-BR (reaproveita `_mistral-errors.ts` e adiciona classificador leve para Gemini/OpenAI: quota/rate/auth/timeout/parse).
 
-## Fora de escopo
+**c) Resumo diário** — pg_cron a cada 5 min invoca `send-tracking-email` com `type: 'daily_summary'`:
+1. Se hora/minuto atual em TZ SP == configurado E `last_daily_sent_date != CURRENT_DATE` → prossegue.
+2. Agrega dados do dia:
+   - Pautas criadas (`prev_pautas` where `created_at::date = today`)
+   - PDFs upados e processados por pauta (`prev_pericias`)
+   - Laudos processados (`laudos`, módulo Trabalhista)
+   - Erros do dia (join `error_logs` + `backend_logs` filtro pdf-related)
+3. Envia 1 email consolidado por usuário ativo.
+4. Atualiza `last_daily_sent_date`.
 
-- Nenhuma mudança em downloads, filtros, KPIs, `DevOriginalFiles`, exports, ou fluxo do usuário final.
-- Não vamos calcular páginas server-side (evita rodar pdf-lib em edge function; custo/complexidade não justifica).
+pg_cron criado via `supabase--insert` (não migration — URL e anon key são específicos do projeto).
 
-## Verificação
+### 4. UI — `src/components/dev-panel/DevEmailTracking.tsx`
 
-1. Migration roda; colunas aparecem.
-2. Abrir Controle de uso → Bruno (MED001): perícias já processadas antes ainda aparecem sem badge (colunas vazias).
-3. Clicar "Carregar detalhes" → badges preenchem uma por vez, sem OOM.
-4. Mudar de aba, voltar → badges continuam lá.
-5. Recarregar página → badges continuam lá.
-6. Fazer novo upload de PDF numa perícia → badge some (invalidação) até próximo clique.
-7. Testar com PDF > 80 MB: badge mostra só o tamanho, sem travar.
+Card único, limpo:
+
+- **Switch geral** (enabled)
+- **Chave Resend** — status "Configurada ✓" / botão "Configurar/Atualizar" (abre secure form). Nunca exibe valor.
+- **Destinatários** — chips editáveis (add com Enter, remover no X, validação de email básico).
+- **Alertas** — 3 switches: Login / Erro de PDF / Resumo diário.
+- **Horário do resumo** — dois selects (hora + minuto), rotulado "Horário de Brasília".
+- **Botão "Enviar email de teste"** — dispara `type: 'test'` para cada destinatário; toast com resultado.
+- **Últimos disparos** — tabela compacta (últimos 20 do `email_tracking_log`): tipo (badge colorido), destinatário, status, quando.
+
+Nova entrada no `navItems` de `DevPanel.tsx`: `email-tracking` com ícone `Mail`.
+
+## Arquivos afetados
+
+**Migrations (1 nova):** cria as 3 tabelas + RLS + GRANTs.
+
+**Novos:**
+- `supabase/functions/send-tracking-email/index.ts`
+- `src/components/dev-panel/DevEmailTracking.tsx`
+
+**Edits:**
+- `src/pages/DevPanel.tsx`
+- `src/hooks/usePresenceHeartbeat.ts`
+- `supabase/functions/processar-autos/index.ts`
+- `supabase/functions/prev-pre-processar/index.ts`
+- `supabase/functions/extrair-texto-pdf/index.ts`
+- `supabase/config.toml`
+
+**SQL via insert (pg_cron):** agenda `send-tracking-email` a cada 5 min.
+
+## Segurança & resiliência
+
+- Todos os disparos são fire-and-forget com `.catch(() => {})` — nunca quebram o fluxo do usuário.
+- Config protegida por RLS `is_developer()`.
+- Dedup: login (30 min), daily (`last_daily_sent_date`).
+- `RESEND_API_KEY` só no backend.
+- Rate limit implícito: 1 login/sessão, 1 daily/dia, erros são raros por natureza.
+
+## Passo 0 (assim que entrarmos em build)
+
+Solicitar a `RESEND_API_KEY` via `add_secret` — sem ela, function não sobe.
