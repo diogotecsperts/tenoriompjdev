@@ -47,7 +47,10 @@ import {
   X,
   Loader2,
   Search,
+  Gauge,
+  RefreshCw,
 } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -121,6 +124,15 @@ export function PrevUsagePanel() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [userSearch, setUserSearch] = useState("");
   const [liveConnected, setLiveConnected] = useState(false);
+  const [pdfMeta, setPdfMeta] = useState<
+    Map<string, { size: number; pages: number | null }>
+  >(new Map());
+  const [loadingMetaIds, setLoadingMetaIds] = useState<Set<string>>(new Set());
+  const [metaProgress, setMetaProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+
 
   // Load profiles + persisted filters
   useEffect(() => {
