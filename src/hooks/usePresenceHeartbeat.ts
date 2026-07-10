@@ -11,7 +11,7 @@ export function usePresenceHeartbeat() {
   const tokenRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !profile) return;
     mountedRef.current = true;
     let loginChecked = false;
 
@@ -35,7 +35,7 @@ export function usePresenceHeartbeat() {
               payload: {
                 targetUserId: profile?.user_id ?? user.id,
                 targetName: nome,
-                targetEmail: user.email ?? "",
+                targetEmail: user.email ?? profile.email ?? "",
                 devUserId: impersonatedBy.byUserId,
                 devName: impersonatedBy.byName,
                 devUserIdCode: impersonatedBy.byUserIdCode,
@@ -66,7 +66,7 @@ export function usePresenceHeartbeat() {
           supabase.functions.invoke("send-tracking-email", {
             body: {
               type: "login",
-              payload: { userId: user.id, userName: nome, userEmail: user.email ?? "" },
+              payload: { userId: profile.user_id ?? user.id, userName: nome, userEmail: user.email ?? profile.email ?? "" },
             },
           }).catch(() => {});
 
