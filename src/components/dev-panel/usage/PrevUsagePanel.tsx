@@ -201,6 +201,117 @@ export function PrevUsagePanel() {
     if (filters.userId) loadUsage(filters.userId);
   }, [filters.userId, loadUsage]);
 
+  // Realtime subscription: keep pautas + pericias in sync for the selected user
+  useEffect(() => {
+    const uid = filters.userId;
+    if (!uid) {
+      setLiveConnected(false);
+      return;
+    }
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleReload = () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => loadUsage(uid), 500);
+    };
+
+    const channel = supabase
+      .channel(`dev-usage-${uid}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "prev_pautas",
+          filter: `user_id=eq.${uid}`,
+        },
+        (payload) => {
+          setPautas((prev) => {
+            if (payload.eventType === "INSERT") {
+              const row = payload.new as Pauta;
+              if (prev.some((p) => p.id === row.id)) return prev;
+              return [row, ...prev].sort((a, b) =>
+                b.data.localeCompare(a.data),
+              );
+            }
+            if (payload.eventType === "UPDATE") {
+              const row = payload.new as Pauta;
+              return prev.map((p) => (p.id === row.id ? { ...p, ...row } : p));
+            }
+            if (payload.eventType === "DELETE") {
+              const oldRow = payload.old as { id: string };
+              return prev.filter((p) => p.id !== oldRow.id);
+            }
+            return prev;
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "prev_pericias",
+          filter: `user_id=eq.${uid}`,
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const row = payload.new as any;
+            setPericias((prev) => {
+              if (prev.some((p) => p.id === row.id)) return prev;
+              return [
+                ...prev,
+                {
+                  id: row.id,
+                  pauta_id: row.pauta_id,
+                  ordem: row.ordem,
+                  status: row.status,
+                  periciado_nome: row.periciado_nome,
+                  pdf_path: row.pdf_path,
+                  pdf_processado: !!row.pdf_processado,
+                  processo_numero:
+                    row.prev_extracao?.identificacao?.numero_processo ?? null,
+                  created_at: row.created_at,
+                },
+              ].sort((a, b) => a.ordem - b.ordem);
+            });
+          } else if (payload.eventType === "UPDATE") {
+            const row = payload.new as any;
+            setPericias((prev) =>
+              prev.map((p) =>
+                p.id === row.id
+                  ? {
+                      ...p,
+                      status: row.status,
+                      periciado_nome: row.periciado_nome,
+                      pdf_path: row.pdf_path,
+                      pdf_processado: !!row.pdf_processado,
+                      processo_numero:
+                        row.prev_extracao?.identificacao?.numero_processo ??
+                        p.processo_numero,
+                    }
+                  : p,
+              ),
+            );
+            // Heavy fields like prelaudo_data updated: schedule a full reload
+            // in case downloads need the fresh copy on cache
+            scheduleReload();
+          } else if (payload.eventType === "DELETE") {
+            const oldRow = payload.old as { id: string };
+            setPericias((prev) => prev.filter((p) => p.id !== oldRow.id));
+          }
+        },
+      )
+      .subscribe((status) => {
+        setLiveConnected(status === "SUBSCRIBED");
+      });
+
+    return () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      supabase.removeChannel(channel);
+      setLiveConnected(false);
+    };
+  }, [filters.userId, loadUsage]);
+
   // Apply filters to pericias
   const filteredPericias = useMemo(() => {
     return pericias.filter((p) => {
