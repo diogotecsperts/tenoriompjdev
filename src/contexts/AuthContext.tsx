@@ -19,6 +19,13 @@ interface UserRole {
   role: 'admin' | 'user';
 }
 
+interface ImpersonationInfo {
+  byUserId: string;
+  byName: string;
+  byUserIdCode: string;
+  at: string;
+}
+
 interface AuthContextType {
   isAuthenticated: boolean;
   user: User | null;
@@ -26,6 +33,8 @@ interface AuthContextType {
   profile: ProfileData | null;
   userRole: 'admin' | 'user' | null;
   isAdmin: boolean;
+  isImpersonating: boolean;
+  impersonatedBy: ImpersonationInfo | null;
   login: (identifier: string, password: string) => Promise<boolean>;
   signup: (email: string, password: string, fullName: string) => Promise<boolean>;
   logout: () => Promise<void>;
