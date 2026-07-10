@@ -878,7 +878,13 @@ export function PrevUsagePanel() {
                                     size="sm"
                                     variant="ghost"
                                     disabled={downloadingId === p.pdf_path}
-                                    onClick={() => downloadOriginal(p.pdf_path!)}
+                                    onClick={() => {
+                                      const safeName = (p.periciado_nome || "documento")
+                                        .replace(/[^\p{L}\p{N}\s._-]/gu, "")
+                                        .trim() || "documento";
+                                      downloadOriginal(p.pdf_path!, `${safeName}.pdf`);
+                                    }}
+
                                     title="Baixar PDF original"
                                   >
                                     {downloadingId === p.pdf_path ? (
