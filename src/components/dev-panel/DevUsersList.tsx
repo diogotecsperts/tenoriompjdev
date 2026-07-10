@@ -318,6 +318,68 @@ export function DevUsersList() {
     }
   };
 
+  const openImpersonateDialog = (user: UserWithSettings) => {
+    if (user.id === currentUser?.id) {
+      toast({ variant: "destructive", title: "Ação inválida", description: "Você não pode impersonar sua própria conta." });
+      return;
+    }
+    if (user.roles.includes("developer") || user.roles.includes("admin")) {
+      toast({ variant: "destructive", title: "Bloqueado", description: "Não é permitido impersonar outro dev ou admin." });
+      return;
+    }
+    setUserToImpersonate(user);
+    setImpersonateDialogOpen(true);
+  };
+
+  const handleImpersonate = async () => {
+    if (!userToImpersonate) return;
+    setImpersonating(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) throw new Error("Não autenticado");
+
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/dev-impersonate-user`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${sessionData.session.access_token}`,
+          },
+          body: JSON.stringify({ target_user_id: userToImpersonate.id }),
+        }
+      );
+      const result = await resp.json();
+      if (!resp.ok || !result.ok) {
+        throw new Error(result.error || "Falha ao gerar sessão de impersonation");
+      }
+
+      // Abre nova aba com o hash contendo token+email
+      const hash = new URLSearchParams({
+        token: result.token_hash,
+        email: result.email,
+      }).toString();
+      const url = `${window.location.origin}/impersonate#${hash}`;
+      // noopener garante sessionStorage isolado na nova aba
+      window.open(url, "_blank", "noopener");
+
+      toast({
+        title: "Sessão aberta",
+        description: `Abrindo aba como ${userToImpersonate.nome}. Sua sessão de dev permanece nesta aba.`,
+      });
+      setImpersonateDialogOpen(false);
+      setUserToImpersonate(null);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: err instanceof Error ? err.message : "Falha ao impersonar",
+      });
+    } finally {
+      setImpersonating(false);
+    }
+  };
+
   const getRoleBadgeVariant = (role: string): "default" | "secondary" | "outline" | "destructive" => {
     switch (role) {
       case "developer":
