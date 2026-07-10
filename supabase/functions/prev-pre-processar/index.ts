@@ -16,6 +16,7 @@ import { isMinimaxClientRasterizeError } from "../_shared/minimax-client.ts";
 import { getAIConfig, callAI } from "../_shared/ai-config.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
 import { classifyMistralError, isMistralError } from "./_mistral-errors.ts";
+import { notifyPdfErrorFireAndForget } from "../_shared/notify-pdf-error.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
