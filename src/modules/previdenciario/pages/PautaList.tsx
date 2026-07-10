@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CalendarDays, MapPin, Plus, Loader2, FolderOpen, Trash2, ArrowUpDown } from "lucide-react";
+import { CalendarDays, MapPin, Plus, Loader2, FolderOpen, Trash2, ArrowUpDown, Pencil } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { listPautas, deletePauta } from "../api/pautas";
 import { NovaPautaDialog } from "../components/NovaPautaDialog";
