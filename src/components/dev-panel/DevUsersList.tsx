@@ -79,6 +79,11 @@ export function DevUsersList() {
   const [syncingAll, setSyncingAll] = useState(false);
   const [globalConfig, setGlobalConfig] = useState<{ provider: string; model: string } | null>(null);
 
+  // Impersonation state
+  const [impersonateDialogOpen, setImpersonateDialogOpen] = useState(false);
+  const [userToImpersonate, setUserToImpersonate] = useState<UserWithSettings | null>(null);
+  const [impersonating, setImpersonating] = useState(false);
+
   useEffect(() => {
     fetchUsers();
     fetchGlobalConfig();
