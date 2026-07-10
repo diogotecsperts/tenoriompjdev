@@ -908,6 +908,16 @@ Deno.serve(async (req: Request) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Erro desconhecido";
 
+    notifyPdfErrorFireAndForget({
+      modulo: "Previdenciário",
+      errorMessage: msg,
+      userId: notifyCtx.userId,
+      periciadoNome: notifyCtx.periciadoNome,
+      pautaNome: notifyCtx.pautaNome,
+      stage: isMistralError(msg) ? "ocr" : "processamento",
+    });
+
+
     // Classifica erros vindos da Mistral (OCR) para devolver mensagem específica
     if (isMistralError(msg)) {
       const classified = classifyMistralError(msg);
