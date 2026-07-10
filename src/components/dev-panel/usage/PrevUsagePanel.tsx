@@ -445,12 +445,39 @@ export function PrevUsagePanel() {
     return `${mb >= 10 ? Math.round(mb) : mb.toFixed(1)} MB`;
   };
 
-  const loadOneMeta = async (periciaId: string, path: string) => {
+  // PDFs acima deste tamanho: só medimos bytes (HEAD), sem baixar/contar páginas.
+  // Evita OOM ao carregar arquivos gigantes de perícia (>80MB).
+  const MAX_BYTES_FOR_PAGECOUNT = 80 * 1024 * 1024;
+
+  const persistMeta = async (
+    periciaId: string,
+    size: number | null,
+    pages: number | null,
+  ) => {
+    try {
+      await (supabase.from as any)("prev_pericias")
+        .update({
+          pdf_size_bytes: size,
+          pdf_pages: pages,
+        })
+        .eq("id", periciaId);
+    } catch {
+      // silencioso — cache em memória segue funcionando
+    }
+  };
+
+  const loadOneMeta = async (
+    periciaId: string,
+    path: string,
+    pdfLib: typeof import("pdf-lib"),
+  ) => {
     setLoadingMetaIds((prev) => {
       const next = new Set(prev);
       next.add(periciaId);
       return next;
     });
+    let size = 0;
+    let pages: number | null = null;
     try {
       const { data, error } = await supabase.functions.invoke(
         "dev-download-pdf",
@@ -460,39 +487,46 @@ export function PrevUsagePanel() {
       const url = (data as any)?.url;
       if (!url) throw new Error("URL não retornada");
 
-      // 1) HEAD para size (barato)
-      let size = 0;
+      // 1) HEAD para tamanho (barato — só headers).
       try {
         const head = await fetch(url, { method: "HEAD" });
         size = Number(head.headers.get("content-length") ?? 0);
-      } catch {}
+      } catch {
+        /* mantém 0 */
+      }
 
-      // Salva parcial imediatamente
-      setPdfMeta((prev) => {
-        const next = new Map(prev);
-        next.set(periciaId, { size, pages: null });
-        return next;
-      });
-
-      // 2) GET + pdf-lib para páginas
-      try {
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const buf = await resp.arrayBuffer();
-        if (!size) size = buf.byteLength;
-        const { PDFDocument } = await import("pdf-lib");
-        const doc = await PDFDocument.load(buf, {
-          updateMetadata: false,
-          ignoreEncryption: true,
-        });
-        const pages = doc.getPageCount();
+      // Salva parcial imediatamente (cache em memória + banco).
+      if (size > 0) {
         setPdfMeta((prev) => {
           const next = new Map(prev);
-          next.set(periciaId, { size, pages });
+          next.set(periciaId, { size, pages: null });
           return next;
         });
-      } catch {
-        // mantém entrada parcial (só size)
+        void persistMeta(periciaId, size, null);
+      }
+
+      // 2) Se o arquivo não for gigante, baixa e conta páginas.
+      if (size > 0 && size <= MAX_BYTES_FOR_PAGECOUNT) {
+        try {
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          let buf: ArrayBuffer | null = await resp.arrayBuffer();
+          const doc = await pdfLib.PDFDocument.load(buf, {
+            updateMetadata: false,
+            ignoreEncryption: true,
+          });
+          pages = doc.getPageCount();
+          // libera o buffer imediatamente antes do próximo item
+          buf = null;
+          setPdfMeta((prev) => {
+            const next = new Map(prev);
+            next.set(periciaId, { size, pages });
+            return next;
+          });
+          void persistMeta(periciaId, size, pages);
+        } catch {
+          // mantém entrada parcial (só size)
+        }
       }
     } catch {
       // silencioso — badge simplesmente não aparece
@@ -503,6 +537,10 @@ export function PrevUsagePanel() {
         return next;
       });
     }
+  };
+
+  const cancelMetaLoading = () => {
+    metaAbortRef.current = true;
   };
 
   const loadAllVisibleMeta = async (force = false) => {
@@ -517,17 +555,17 @@ export function PrevUsagePanel() {
         return next;
       });
     }
+    metaAbortRef.current = false;
     setMetaProgress({ done: 0, total: targets.length });
-    const CONCURRENCY = 4;
-    let idx = 0;
-    let done = 0;
-    const worker = async () => {
-      while (idx < targets.length) {
-        const my = idx++;
-        const t = targets[my];
-        await loadOneMeta(t.id, t.pdf_path!);
-        done++;
-        setMetaProgress({ done, total: targets.length });
+    // Import único do pdf-lib fora do loop.
+    const pdfLib = await import("pdf-lib");
+    // Sequencial (concorrência 1) — evita OOM em navegador com PDFs pesados.
+    for (let i = 0; i < targets.length; i++) {
+      if (metaAbortRef.current) break;
+      const t = targets[i];
+      await loadOneMeta(t.id, t.pdf_path!, pdfLib);
+      setMetaProgress({ done: i + 1, total: targets.length });
+    }
       }
     };
     await Promise.all(
