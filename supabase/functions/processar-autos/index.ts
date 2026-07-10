@@ -3138,6 +3138,14 @@ async function processarPDFBackground(
     
     const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido no processamento';
     const errorStack = error instanceof Error ? error.stack : undefined;
+
+    notifyPdfErrorFireAndForget({
+      modulo: "Trabalhista",
+      errorMessage,
+      userId,
+      stage: "processamento",
+    });
+
     
     // Log error to backend_logs for visibility in DevPanel
     await logError('processar-autos', `Job falhou: ${errorMessage}`, jobId, {
