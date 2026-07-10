@@ -11,6 +11,7 @@
  */
 
 import { runOcrWithConfiguredProvider } from "../_shared/ocr-router.ts";
+import { notifyPdfErrorFireAndForget } from "../_shared/notify-pdf-error.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const corsHeaders = {
