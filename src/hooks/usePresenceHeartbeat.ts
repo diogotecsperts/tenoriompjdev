@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 const HEARTBEAT_INTERVAL = 60_000;
 
 export function usePresenceHeartbeat() {
-  const { user, isImpersonating, impersonatedBy } = useAuth();
+  const { user, profile, isImpersonating, impersonatedBy } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
   const tokenRef = useRef<string | null>(null);
@@ -19,7 +19,8 @@ export function usePresenceHeartbeat() {
       if (loginChecked) return;
       loginChecked = true;
       try {
-        const nome = (user.user_metadata as any)?.full_name
+        const nome = profile?.nome
+          || (user.user_metadata as any)?.full_name
           || (user.user_metadata as any)?.nome
           || user.email
           || "Usuário";
@@ -32,7 +33,7 @@ export function usePresenceHeartbeat() {
             body: {
               type: "impersonation_login",
               payload: {
-                targetUserId: user.id,
+                targetUserId: profile?.user_id ?? user.id,
                 targetName: nome,
                 targetEmail: user.email ?? "",
                 devUserId: impersonatedBy.byUserId,
@@ -142,6 +143,6 @@ export function usePresenceHeartbeat() {
       if (intervalRef.current) clearInterval(intervalRef.current);
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
-  }, [user?.id, isImpersonating]);
+  }, [user?.id, profile?.nome, profile?.user_id, isImpersonating, impersonatedBy?.byUserId]);
 }
 
