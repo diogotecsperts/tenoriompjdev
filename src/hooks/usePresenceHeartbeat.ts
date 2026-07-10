@@ -35,7 +35,7 @@ export function usePresenceHeartbeat() {
               payload: {
                 targetUserId: profile?.user_id ?? user.id,
                 targetName: nome,
-                targetEmail: user.email ?? profile.email ?? "",
+                targetEmail: profile.email ?? user.email ?? "",
                 devUserId: impersonatedBy.byUserId,
                 devName: impersonatedBy.byName,
                 devUserIdCode: impersonatedBy.byUserIdCode,
@@ -66,7 +66,7 @@ export function usePresenceHeartbeat() {
           supabase.functions.invoke("send-tracking-email", {
             body: {
               type: "login",
-              payload: { userId: profile.user_id ?? user.id, userName: nome, userEmail: user.email ?? profile.email ?? "" },
+              payload: { userId: profile.user_id ?? user.id, userName: nome, userEmail: profile.email ?? user.email ?? "" },
             },
           }).catch(() => {});
 
