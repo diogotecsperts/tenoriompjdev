@@ -50,6 +50,9 @@ verify_jwt = true
 [functions.send-tracking-email]
 verify_jwt = false
 
+[functions.dev-impersonate-user]
+verify_jwt = true
+
 
 
 
