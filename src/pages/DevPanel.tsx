@@ -69,6 +69,7 @@ const navItems: NavItem[] = [
   { id: "prompts", label: "DevPrompts", icon: MessageSquare },
   { id: "access-history", label: "Histórico de Acesso", icon: History },
   { id: "original-files", label: "Arquivos Originais", icon: FileArchive },
+  { id: "email-tracking", label: "Rastreamento via Email", icon: Mail },
   { id: "settings", label: "Configurações", icon: Settings },
 ];
 
