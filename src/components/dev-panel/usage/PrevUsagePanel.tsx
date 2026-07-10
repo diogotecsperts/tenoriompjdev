@@ -372,7 +372,7 @@ export function PrevUsagePanel() {
   const selectedUser = users.find((u) => u.id === filters.userId);
 
   // Downloads
-  const downloadOriginal = async (path: string) => {
+  const downloadOriginal = async (path: string, suggestedName?: string) => {
     setDownloadingId(path);
     try {
       const { data, error } = await supabase.functions.invoke(
@@ -380,7 +380,36 @@ export function PrevUsagePanel() {
         { body: { file_path: path, bucket: "prev-pdfs" } },
       );
       if (error) throw error;
-      window.open(data.url, "_blank");
+      const url = (data as any)?.url;
+      if (!url) throw new Error("URL não retornada");
+
+      const fileName =
+        suggestedName?.trim() ||
+        path.split("/").pop() ||
+        "documento.pdf";
+
+      // Camada 1: fetch → blob → <a download> (sem popup, sem bloqueio).
+      // Camada 2 (fallback): abre em nova aba se o fetch for bloqueado.
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const a = document.createElement("a");
+        const objUrl = URL.createObjectURL(blob);
+        a.href = objUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(objUrl);
+        toast({ title: "Download iniciado", description: fileName });
+      } catch {
+        window.open(url, "_blank", "noopener,noreferrer");
+        toast({
+          title: "Download iniciado",
+          description: `${fileName} (aberto em nova aba)`,
+        });
+      }
     } catch (err: any) {
       toast({
         variant: "destructive",
@@ -398,12 +427,30 @@ export function PrevUsagePanel() {
   ) => {
     setDownloadingId(`${periciaId}-${format}`);
     try {
-      const { data, error } = await supabase.functions.invoke(
-        "dev-get-pericia-data",
-        { body: { pericia_id: periciaId } },
-      );
-      if (error) throw error;
-      const { pericia, profile, pauta } = data;
+      // Query direto no banco (dev/admin tem policy is_developer). Muito mais
+      // rápido do que passar por edge function (sem cold-start).
+      const { data: pericia, error: perErr } = await (supabase.from as any)(
+        "prev_pericias",
+      )
+        .select(
+          "id, user_id, pauta_id, periciado_nome, prelaudo_data",
+        )
+        .eq("id", periciaId)
+        .maybeSingle();
+      if (perErr) throw perErr;
+      if (!pericia) throw new Error("Perícia não encontrada");
+
+      const [{ data: profile }, { data: pauta }] = await Promise.all([
+        (supabase.from as any)("profiles")
+          .select("nome, crm, uf_crm, especialidade")
+          .eq("id", pericia.user_id)
+          .maybeSingle(),
+        (supabase.from as any)("prev_pautas")
+          .select("data, local, cidade, uf")
+          .eq("id", pericia.pauta_id)
+          .maybeSingle(),
+      ]);
+
       const prelaudoData = pericia.prelaudo_data ?? {};
       const localStr = pauta
         ? [pauta.local, pauta.cidade, pauta.uf].filter(Boolean).join(" — ")
@@ -438,6 +485,7 @@ export function PrevUsagePanel() {
       setDownloadingId(null);
     }
   };
+
 
   const clearFilters = () =>
     setFilters({ ...DEFAULT_FILTERS, userId: filters.userId });
@@ -830,7 +878,13 @@ export function PrevUsagePanel() {
                                     size="sm"
                                     variant="ghost"
                                     disabled={downloadingId === p.pdf_path}
-                                    onClick={() => downloadOriginal(p.pdf_path!)}
+                                    onClick={() => {
+                                      const safeName = (p.periciado_nome || "documento")
+                                        .replace(/[^\p{L}\p{N}\s._-]/gu, "")
+                                        .trim() || "documento";
+                                      downloadOriginal(p.pdf_path!, `${safeName}.pdf`);
+                                    }}
+
                                     title="Baixar PDF original"
                                   >
                                     {downloadingId === p.pdf_path ? (

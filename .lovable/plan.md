@@ -1,54 +1,48 @@
-## Respostas
+## Problema
 
-### 1. Mensagem do card para outros usuários — CONFIRMADO 100%
+Em **Controle de uso → Previdenciário**, os botões de download têm dois defeitos:
 
-Verifiquei `src/pages/Hub.tsx`:
+1. **PDF original bloqueado (`ERR_BLOCKED_BY_CLIENT`)** — `downloadOriginal` faz `window.open(data.url, "_blank")`, que o Edge/adblockers bloqueiam quando a URL aponta para `*.supabase.co`. Em **Arquivos Originais** o mesmo botão funciona instantaneamente porque baixa o arquivo via `fetch → blob → <a download>` (sem abrir aba).
+2. **DOCX/PDF do pré-laudo lento** — passa por `supabase.functions.invoke("dev-get-pericia-data")` que faz 3 queries encadeadas (perícia + profile + pauta) no edge function (boot + rede). Quando o próprio perito está logado, os dados já estão em memória, por isso é quase instantâneo.
 
-- O selo **"Preview admin"** só é renderizado quando `isAdminBypass = isAdmin || isDeveloper` for verdadeiro. `isAdmin` vem do `AuthContext` (role `admin` no banco) e `isDeveloper` vem de `supabase.rpc("is_developer")` — uma função `SECURITY DEFINER` que confere `user_roles` no servidor. Usuário comum tem as duas flags como `false`, então o selo não é montado no DOM.
-- A **mensagem do card** (`st.block_message`) é renderizada por um bloco independente, condicionado apenas a `hasMessage`, junto com o badge de "Bloqueado" ou "Aviso". Ela aparece para **qualquer usuário** cujo módulo esteja com `block_mode = 'notice'` ou `'blocked'` e `block_message` preenchida.
-- O comportamento de acesso também está correto: usuário comum com `block_mode='blocked'` vê o card desabilitado + a mensagem em vermelho; com `notice` vê o card habilitado + mensagem âmbar; admin vê tudo isso mais o selo "Preview admin".
+## Solução
 
-Confirmado: a mensagem aparece normalmente para os usuários finais.
+### 1. Alinhar download do PDF original com "Arquivos Originais"
 
-### 2. Dados do Bruno (MED001) — CONFIRMADO + faltando tempo real
+Em `src/components/dev-panel/usage/PrevUsagePanel.tsx`, reescrever `downloadOriginal(path)` usando exatamente o mesmo padrão de duas camadas de `DevOriginalFiles.downloadFile`:
 
-Consultei o banco. Bruno (`e48a06e4-…`) tem exatamente:
+- Chama `dev-download-pdf` para obter a signed URL (bucket `prev-pdfs`).
+- **Camada 1**: `fetch(url) → blob() → createObjectURL → <a download={fileName}>.click()` — download nativo, sem abrir aba, com nome de arquivo correto.
+- **Camada 2 (fallback)**: se o `fetch` cross-origin falhar (proxy do preview), aí sim `window.open(url, "_blank", "noopener,noreferrer")`.
+- Derivar `fileName` a partir do `path` (último segmento) ou usar o nome do periciado + `.pdf`.
+- Ajustar assinatura para receber também o nome sugerido, e atualizar as chamadas nos botões.
 
-- **2 pautas**: `076a2108…` (07/07) e `0c5a52a7…` (06/07)
-- **Pauta 06/07**: 53 perícias, 53 com PDF, 53 processadas
-- **Pauta 07/07**: 17 perícias, 17 com PDF, 17 processadas
+Isso elimina o `ERR_BLOCKED_BY_CLIENT` e traz o comportamento "download instantâneo" idêntico ao da tela de Arquivos Originais.
 
-Os números do painel Controle de Uso batem: o loader (`dev-list-prev-usage`) faz `SELECT` filtrado por `user_id` em `prev_pautas` e `prev_pericias`, e os KPIs contam a partir dos mesmos campos (`pdf_path` para "upados" e `pdf_processado` para "processados").
+### 2. Acelerar download de DOCX/PDF do pré-laudo
 
-**Porém: tempo real está ausente.** Hoje o painel só recarrega quando o dev troca de usuário. Se o cliente subir/processar um PDF enquanto você está olhando, os cards e a tabela não se atualizam sozinhos. Preciso adicionar:
+Como dev/admin já tem policy `is_developer()` de SELECT em `prev_pericias`, `prev_pautas` e `profiles`, dá para pular o edge function e ler direto do banco em paralelo:
 
-## Plano de mudanças (item 2)
+Em `downloadPrelaudo(periciaId, format)`:
 
-### A. Habilitar Realtime nas tabelas
+- Buscar a perícia direto: `supabase.from("prev_pericias").select("id,user_id,pauta_id,periciado_nome,prelaudo_data").eq("id", periciaId).maybeSingle()`.
+- Em paralelo (Promise.all), buscar `profiles` (nome, crm, uf_crm, especialidade) por `user_id` e `prev_pautas` (data, local, cidade, uf) por `pauta_id`.
+- Manter a mesma montagem do objeto `meta` e chamar `downloadPrelaudoDocx` / `downloadPrelaudoPdf` como já está.
+- **Otimização adicional**: como o `prelaudo_data` já é atualizado em tempo real via Realtime `UPDATE` no `pericias` state (ver bloco Realtime existente), podemos guardar um cache `Map<periciaId, prelaudoData>` alimentado sob demanda; mas por ora basta a query direta, que já reduz de ~3 chamadas serializadas no edge para 3 queries paralelas via PostgREST (tipicamente <300 ms).
+- Manter o edge function `dev-get-pericia-data` como fallback opcional para futuras integrações, sem removê-lo agora.
 
-Migração adicionando `prev_pautas` e `prev_pericias` à publicação `supabase_realtime` e definindo `REPLICA IDENTITY FULL` (para receber payload completo em updates).
+### 3. Sem outras mudanças
 
-### B. Assinar no `PrevUsagePanel`
+- Não alterar UI, filtros, KPIs, badge "ao vivo", nem lógica de Realtime.
+- Não alterar `DevOriginalFiles` (já funciona).
+- Não mexer em edge functions nem em migrations.
 
-Novo `useEffect` (após o usuário estar selecionado) que abre um canal Realtime com dois listeners:
+## Arquivos afetados
 
-- `postgres_changes` em `prev_pautas` filtrado por `user_id=eq.<selectedUserId>`
-- `postgres_changes` em `prev_pericias` filtrado por `user_id=eq.<selectedUserId>`
+- `src/components/dev-panel/usage/PrevUsagePanel.tsx` — reescrever `downloadOriginal` e `downloadPrelaudo`.
 
-Cada evento (`INSERT`/`UPDATE`/`DELETE`) atualiza o estado local (`setPautas` / `setPericias`) diretamente — sem refazer o fetch inteiro na maioria dos casos. Fallback: se o payload for grande (UPDATE de `prev_extracao`), simplesmente chamar `loadUsage(selectedUserId)` com debounce curto (500 ms) para reidratar tudo em vez de manter payloads inconsistentes.
+## Verificação
 
-Cleanup obrigatório com `supabase.removeChannel(channel)` no unmount / troca de usuário para evitar leak (regra da nossa doc de Realtime).
-
-### C. Indicador visual "ao vivo"
-
-Um pequeno badge verde piscante ao lado do nome do usuário selecionado, tipo "● ao vivo", que confirma que a assinatura está ativa. Simples e discreto.
-
-### D. Segurança
-
-O canal Realtime respeita RLS. As policies atuais de `prev_pautas`/`prev_pericias` restringem SELECT ao próprio `user_id`. Como o painel roda com a sessão do dev, ele **não** receberia eventos de outros usuários por realtime direto. Solução: como dev/admin já é whitelisted em `is_developer()`, adicionar uma policy adicional de SELECT em ambas as tabelas permitindo `public.is_developer()` — sem isso o Realtime não entrega os eventos do Bruno para você. (Alternativa mais restritiva: encaminhar via broadcast do backend, mas é overkill aqui.)
-
-### E. Escopo do plano
-
-- Nenhuma mudança de layout ou lógica de filtros/KPIs.
-- Apenas: (1) migração de publicação + REPLICA IDENTITY, (2) policy SELECT para developer nas duas tabelas, (3) `useEffect` de assinatura em `PrevUsagePanel.tsx`, (4) badge "ao vivo".
-- Módulo Trabalhista fica como está (placeholder "em breve") — realtime dele vem quando o painel for construído.
+Após implementar, testar no dev-panel:
+1. Clicar em download de PDF original → arquivo baixa direto, sem popup, sem bloqueio do Edge.
+2. Clicar em DOCX/PDF do pré-laudo → geração praticamente instantânea, similar ao do perito logado.
