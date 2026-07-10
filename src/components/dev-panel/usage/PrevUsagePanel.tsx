@@ -82,6 +82,8 @@ interface Pericia {
   periciado_nome: string | null;
   pdf_path: string | null;
   pdf_processado: boolean;
+  pdf_size_bytes: number | null;
+  pdf_pages: number | null;
   processo_numero: string | null;
   created_at: string;
 }
