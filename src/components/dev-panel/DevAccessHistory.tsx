@@ -181,24 +181,62 @@ export function DevAccessHistory() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Usuário</TableHead>
-                  <TableHead>Método</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Método / Detalhe</TableHead>
                   <TableHead>Data/Hora</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredLogs.map((log) => (
-                  <TableRow key={log.id}>
-                    <TableCell className="font-medium">{getProfileName(log.user_id)}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {log.metadata?.method === "email" ? "Email" : "ID"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {filteredLogs.map((log) => {
+                  const md = log.metadata ?? {};
+                  const isImpersonationLogin = log.event_type === "impersonation_login";
+                  const isImpersonationStarted = log.event_type === "impersonation_started";
+                  const isImpersonation = isImpersonationLogin || isImpersonationStarted;
+
+                  // Para impersonation_login: user_id = alvo (cliente), md tem dev.
+                  // Para impersonation_started: user_id = dev, md tem alvo.
+                  const label = isImpersonationLogin
+                    ? `${md.impersonated_by_name ?? "Dev"} entrou como ${getProfileName(log.user_id)}`
+                    : isImpersonationStarted
+                      ? `${getProfileName(log.user_id)} entrou como ${md.target_name ?? getProfileName(md.target_user_id ?? "")}`
+                      : getProfileName(log.user_id);
+
+                  return (
+                    <TableRow key={log.id} className={isImpersonation ? "bg-amber-50/60" : undefined}>
+                      <TableCell className="font-medium">
+                        {isImpersonation ? (
+                          <div className="flex items-center gap-2">
+                            <VenetianMask className="h-4 w-4 text-amber-600 flex-shrink-0" />
+                            <span>{label}</span>
+                          </div>
+                        ) : (
+                          label
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {isImpersonation ? (
+                          <Badge className="bg-amber-500 hover:bg-amber-600 text-amber-950 text-xs">
+                            Impersonation
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-xs">Login</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">
+                          {isImpersonation
+                            ? "dev_impersonation"
+                            : md.method === "email"
+                              ? "Email"
+                              : "ID"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
