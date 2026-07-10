@@ -56,36 +56,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const initialLoadDoneRef = useRef(false);
   const isLoadingUserDataRef = useRef(false);
   const loadedUserIdRef = useRef<string | null>(null);
+  const impersonationLogInsertedRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Timeout de segurança para evitar loading infinito (10 segundos)
     const PROFILE_LOAD_TIMEOUT = 10000;
 
-  const impersonationLogInsertedRef = useRef<string | null>(null);
+    // Função centralizada para carregar dados do usuário
+    const loadUserData = async (session: Session) => {
+      // Evitar chamadas duplicadas
+      if (isLoadingUserDataRef.current) return;
+      isLoadingUserDataRef.current = true;
 
-  // Função centralizada para carregar dados do usuário
-  const loadUserData = async (session: Session) => {
-    // Evitar chamadas duplicadas
-    if (isLoadingUserDataRef.current) return;
-    isLoadingUserDataRef.current = true;
-
-    // Se a sessão for impersonada, registrar UMA vez em access_logs
-    // com event_type='impersonation_login' — nunca 'login'.
-    const meta: any = session.user.user_metadata ?? {};
-    if (meta.impersonated_by && impersonationLogInsertedRef.current !== session.user.id) {
-      impersonationLogInsertedRef.current = session.user.id;
-      (supabase.from("access_logs") as any).insert({
-        user_id: session.user.id,
-        event_type: "impersonation_login",
-        metadata: {
-          method: "dev_impersonation",
-          impersonated_by_user_id: meta.impersonated_by,
-          impersonated_by_name: meta.impersonated_by_name ?? null,
-          impersonated_by_user_id_code: meta.impersonated_by_user_id ?? null,
-          impersonated_at: meta.impersonated_at ?? null,
-        },
-      }).then(() => {}, () => {});
-    }
+      // Se a sessão for impersonada, registrar UMA vez em access_logs
+      // com event_type='impersonation_login' — nunca 'login'.
+      const meta: any = session.user.user_metadata ?? {};
+      if (meta.impersonated_by && impersonationLogInsertedRef.current !== session.user.id) {
+        impersonationLogInsertedRef.current = session.user.id;
+        (supabase.from("access_logs") as any).insert({
+          user_id: session.user.id,
+          event_type: "impersonation_login",
+          metadata: {
+            method: "dev_impersonation",
+            impersonated_by_user_id: meta.impersonated_by,
+            impersonated_by_name: meta.impersonated_by_name ?? null,
+            impersonated_by_user_id_code: meta.impersonated_by_user_id ?? null,
+            impersonated_at: meta.impersonated_at ?? null,
+          },
+        }).then(() => {}, () => {});
+      }
 
       // Timeout de segurança
       const timeoutId = setTimeout(() => {
