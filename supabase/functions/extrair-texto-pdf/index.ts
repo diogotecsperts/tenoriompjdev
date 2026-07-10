@@ -129,13 +129,6 @@ Deno.serve(async (req: Request) => {
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
     console.error("[extrair-texto-pdf] Error:", errorMessage);
 
-    notifyPdfErrorFireAndForget({
-      modulo: "Impugnação",
-      errorMessage,
-      stage: "ocr",
-    });
-
-
     return new Response(
       JSON.stringify({ error: errorMessage }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
