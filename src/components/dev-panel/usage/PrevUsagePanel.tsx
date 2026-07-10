@@ -176,13 +176,17 @@ export function PrevUsagePanel() {
         .select("dev_ui_prefs")
         .eq("user_id", devId)
         .maybeSingle();
-      const prefs = { ...(current?.dev_ui_prefs ?? {}), prevUsageFilters: filters };
+      const prefs = {
+        ...(current?.dev_ui_prefs ?? {}),
+        prevUsageFilters: filters,
+        prevUsageMetaConcurrency: metaConcurrency,
+      };
       await (supabase.from as any)("user_settings")
         .update({ dev_ui_prefs: prefs })
         .eq("user_id", devId);
     }, 400);
     return () => clearTimeout(t);
-  }, [filters, prefsLoaded]);
+  }, [filters, metaConcurrency, prefsLoaded]);
 
   // Load usage for selected user
   const loadUsage = useCallback(async (userId: string) => {
