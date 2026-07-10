@@ -135,6 +135,8 @@ export function PrevUsagePanel() {
     total: number;
   } | null>(null);
   const metaAbortRef = useRef(false);
+  const [metaConcurrency, setMetaConcurrency] = useState<1 | 2>(1);
+
 
 
   // Load profiles + persisted filters
