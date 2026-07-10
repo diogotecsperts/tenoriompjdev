@@ -166,7 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const profileData = profileResult.data;
         // Sincronizar email se houver diferença entre Auth e profiles
-        if (session.user.email && profileData.email !== session.user.email) {
+        if (!meta.impersonated_by && session.user.email && profileData.email !== session.user.email) {
           // Atualizar no banco em background (não bloquear)
           supabase.from("profiles").update({ email: session.user.email }).eq("id", session.user.id);
           profileData.email = session.user.email;
