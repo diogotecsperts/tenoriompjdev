@@ -1051,8 +1051,32 @@ export function PrevUsagePanel() {
                               {format(new Date(p.created_at), "dd/MM/yy HH:mm")}
                             </TableCell>
                             <TableCell className="text-right">
-                              <div className="flex justify-end gap-1">
+                              <div className="flex justify-end items-center gap-1.5">
+                                {p.pdf_path && (() => {
+                                  const meta = pdfMeta.get(p.id);
+                                  const isLoading = loadingMetaIds.has(p.id);
+                                  if (isLoading) {
+                                    return (
+                                      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-mono px-1.5 py-0.5 rounded border border-dashed border-border">
+                                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                      </span>
+                                    );
+                                  }
+                                  if (!meta) return null;
+                                  const parts = [formatSize(meta.size)];
+                                  if (meta.pages != null)
+                                    parts.push(`${meta.pages} pgs`);
+                                  return (
+                                    <span
+                                      className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded border border-border/60 bg-muted/40 whitespace-nowrap"
+                                      title="Tamanho do PDF · nº de páginas"
+                                    >
+                                      {parts.join(" · ")}
+                                    </span>
+                                  );
+                                })()}
                                 {p.pdf_path && (
+
                                   <Button
                                     size="sm"
                                     variant="ghost"
