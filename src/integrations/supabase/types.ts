@@ -878,6 +878,8 @@ export type Database = {
       }
       user_modules: {
         Row: {
+          block_message: string | null
+          block_mode: string | null
           created_at: string
           enabled: boolean
           id: string
@@ -886,6 +888,8 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          block_message?: string | null
+          block_mode?: string | null
           created_at?: string
           enabled?: boolean
           id?: string
@@ -894,6 +898,8 @@ export type Database = {
           user_id: string
         }
         Update: {
+          block_message?: string | null
+          block_mode?: string | null
           created_at?: string
           enabled?: boolean
           id?: string
@@ -951,6 +957,7 @@ export type Database = {
           ai_temperature: number | null
           created_at: string | null
           custom_api_key: string | null
+          dev_ui_prefs: Json
           features_enabled: Json | null
           id: string
           last_reset_date: string | null
@@ -966,6 +973,7 @@ export type Database = {
           ai_temperature?: number | null
           created_at?: string | null
           custom_api_key?: string | null
+          dev_ui_prefs?: Json
           features_enabled?: Json | null
           id?: string
           last_reset_date?: string | null
@@ -981,6 +989,7 @@ export type Database = {
           ai_temperature?: number | null
           created_at?: string | null
           custom_api_key?: string | null
+          dev_ui_prefs?: Json
           features_enabled?: Json | null
           id?: string
           last_reset_date?: string | null

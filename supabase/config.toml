@@ -41,3 +41,10 @@ verify_jwt = true
 verify_jwt = true
 wall_clock_limit = 300
 
+[functions.dev-list-prev-usage]
+verify_jwt = true
+
+[functions.dev-get-pericia-data]
+verify_jwt = true
+
+

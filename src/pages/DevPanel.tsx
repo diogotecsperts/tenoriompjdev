@@ -17,8 +17,10 @@ import {
   Gauge,
   MessageSquare,
   History,
-  FileArchive
+  FileArchive,
+  BarChart3
 } from "lucide-react";
+
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -38,8 +40,10 @@ import { DevPrompts } from "@/components/dev-panel/DevPrompts";
 import { DevAccessHistory } from "@/components/dev-panel/DevAccessHistory";
 import { DevOriginalFiles } from "@/components/dev-panel/DevOriginalFiles";
 import { DevUserModules } from "@/components/dev-panel/DevUserModules";
+import { DevUsageControl } from "@/components/dev-panel/DevUsageControl";
 
-type DevTab = "dashboard" | "users" | "user-modules" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "settings";
+
+type DevTab = "dashboard" | "users" | "user-modules" | "usage-control" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -51,6 +55,8 @@ const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "users", label: "Usuários", icon: Users },
   { id: "user-modules", label: "Módulos por Usuário", icon: LayoutDashboard },
+  { id: "usage-control", label: "Controle de Uso", icon: BarChart3 },
+
   { id: "logs", label: "AI Analytics", icon: FileText },
   { id: "backend-logs", label: "Servidor & Jobs", icon: Server },
   { id: "errors", label: "UI Reports", icon: AlertTriangle },
@@ -83,6 +89,9 @@ export default function DevPanel() {
         return <DevUsersList />;
       case "user-modules":
         return <DevUserModules />;
+      case "usage-control":
+        return <DevUsageControl />;
+
       case "logs":
         return <DevLogs />;
       case "backend-logs":

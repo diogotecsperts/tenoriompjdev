@@ -1,62 +1,117 @@
-## Diagnóstico
+# Plano: Bloqueio de Módulos + Controle de Uso
 
-Você não precisava mudar nada no DevPanel se o OCR já estava configurado como MiniMax. O próprio log confirma isso: `provider=minimax`.
+Duas features novas no DevPanel, sem interferir na estratégia MiniMax (retomamos depois).
 
-O erro continuou porque o backend fez isto:
+---
 
-```text
-MiniMax selecionado
-→ detectou que MiniMax precisa rasterizar no navegador
-→ tratou isso como “falha”
-→ caiu em fallback para Gemini dentro da função
-→ Gemini tentou processar o PDF grande na função
-→ WORKER_RESOURCE_LIMIT / 546
-```
+## Parte 1 — Bloqueio configurável por usuário/módulo
 
-Ou seja: a estratégia nova está parcialmente implementada, mas o roteador de OCR ainda está engolindo o sinal especial do MiniMax e fazendo fallback para Gemini, exatamente o caminho que queríamos evitar.
+### Banco
+Adicionar 2 colunas em `public.user_modules`:
+- `block_mode text` — `null` (sem aviso) | `'notice'` (só aviso) | `'blocked'` (aviso + impede entrada)
+- `block_message text` — texto custom exibido no card (ex.: "Em manutenção até 15/07")
 
-## Plano de correção
+Sem migração destrutiva; defaults `null`.
 
-1. **Corrigir o roteador de OCR**
-   - Quando o provider configurado for `minimax`, não tratar o erro `MINIMAX_OCR_REQUIRES_CLIENT_RASTERIZE` como falha comum.
-   - Propagar imediatamente esse sinal para `prev-pre-processar`.
-   - Isso impede fallback para Gemini/Mistral quando o usuário escolheu MiniMax.
+### DevPanel → "Módulos por Usuário"
+Estender `DevUserModules.tsx`:
+- Cada linha ganha, ao lado do switch de cada módulo, um botão "Bloqueio" que abre um popover com:
+  - Select: Nenhum / Só aviso / Bloquear acesso
+  - Textarea: mensagem custom (placeholder: "Em manutenção…")
+  - Botão Salvar
+- Indicador visual (badge amarelo/vermelho) quando bloqueio ativo.
 
-2. **Ajustar `prev-pre-processar` para sinalizar o frontend sem virar runtime error**
-   - Quando receber o sinal de rasterização client-side, retornar uma resposta controlada com:
-     - `needsClientRasterize: true`
-     - `pdfPath`
-     - `bucket`
-     - `chunkEndpoint`
-   - Preferencialmente retornar isso como resposta normal, não como erro HTTP, para o `supabase.functions.invoke()` não transformar o fluxo esperado em erro.
+### Hub (usuário final)
+Em `src/pages/Hub.tsx`, ao carregar `user_modules`, trazer também `block_mode` e `block_message`. No card:
+- `notice`: mostra faixa amarela com a mensagem, card continua clicável.
+- `blocked`: mostra faixa vermelha com a mensagem, card desabilitado (não navega, ícone de cadeado).
+- Devs/admins ignoram bloqueio (mantém comportamento atual).
 
-3. **Fortalecer o frontend previdenciário**
-   - Em `preProcessarPericia`, detectar `needsClientRasterize` tanto em resposta normal quanto, defensivamente, em corpo de erro antigo.
-   - Baixar o PDF do storage.
-   - Rodar `runMinimaxClientOcr()` no navegador.
-   - Reinvocar `prev-pre-processar` com `preExtractedText`.
+---
 
-4. **Melhorar mensagem para o usuário durante o processamento**
-   - Garantir que o progresso mostre fases tipo:
-     - rasterizando páginas
-     - extraindo chunks MiniMax
-     - consolidando extração
-   - Assim o usuário entende que PDF grande pode demorar, mas não travou.
+## Parte 2 — Nova página "Controle de Uso"
 
-5. **Validar com logs**
-   - Confirmar que o novo caminho esperado fica assim:
+Nova entrada no menu do DevPanel (`src/pages/DevPanel.tsx`) — ícone `BarChart3`, id `usage-control`, novo componente `DevUsageControl.tsx`.
 
-```text
-prev-pre-processar: provider=minimax
-prev-pre-processar: needsClientRasterize=true
-frontend: rasterizando PDF
-minimax-ocr-chunk: chunks 1..N
-prev-pre-processar: usando texto pré-extraído
-prev-pre-processar: extração estruturada concluída
-```
+### Estrutura
+Tabs: **Previdenciário** (completo) | **Trabalhista** (placeholder "Em breve").
 
-## Resultado esperado
+### Aba Previdenciário
 
-- Nenhuma alteração necessária no DevPanel além de manter OCR = MiniMax.
-- PDFs grandes do Previdenciário deixam de cair no processamento pesado dentro da função.
-- O erro `WORKER_RESOURCE_LIMIT` deve parar para esse fluxo MiniMax.
+**Topo — cards de KPI (compactos):**
+- Total de pautas do usuário
+- Total de PDFs upados
+- Total processados (pdf_processado=true)
+- Total pendentes/faltando
+- % de aproveitamento
+
+**Filtros persistentes (nova tabela `dev_usage_filters` ou coluna JSON em `user_settings`):**
+- Combobox de usuário (lista de profiles)
+- Range de datas (created_at) — usar shadcn Calendar em modo range
+- Status da perícia (multi-select: aguardando/em_atendimento/concluído/faltou)
+- Processado sim/não
+- Toggle "só com PDF"
+- Busca por nome do periciado / número do processo
+- Botão "Limpar filtros"
+
+Persistência: chave por dev na coluna JSON. Restaurado ao abrir a página.
+
+**Corpo — espelho da tela de Pautas do usuário selecionado:**
+Lista de pautas (accordion/collapsible) mostrando:
+- Nome da pauta, data, local, cidade/UF
+- Contagens: X perícias · Y PDFs upados · Z processados
+
+Ao expandir uma pauta → tabela de perícias:
+| Ordem | Periciado | Status | PDF upado? | Processado? | Criado em | Ações |
+
+Ações por linha:
+- **Baixar PDF original** (sempre que `pdf_path` existir) — reusa `dev-download-pdf` já existente com bucket `prev-pdfs`.
+- **Baixar Pré-Laudo DOCX** (se processado) — nova rota client-side que carrega `prelaudo_data` via edge function admin e chama `prelaudo-docx.ts`.
+- **Baixar Pré-Laudo PDF** — idem via `prelaudo-pdf.ts`.
+
+### Aba Trabalhista
+Card grande com ícone e texto "Em breve — mesma estrutura será replicada para o módulo trabalhista."
+
+### Edge Function nova: `dev-get-pericia-data`
+Necessária porque `prev_pericias` tem RLS por `user_id` e o dev não é o dono.
+- Valida `is_developer()`
+- Retorna `prelaudo_data`, `prev_extracao`, `periciado_nome` da perícia solicitada
+- Frontend usa para alimentar os exportadores existentes
+
+### Edge Function estendida: `dev-list-pdfs` → nova `dev-list-prev-usage`
+Ou nova função dedicada que retorna, dado um `user_id`:
+- Todas as pautas (`prev_pautas`) com contagens agregadas
+- Todas as perícias por pauta (`prev_pericias`) com todos os campos necessários (status, pdf_path, pdf_processado, created_at, periciado_nome, processo extraído de `prev_extracao`)
+
+Retorno único para a página inteira (evita N+1).
+
+---
+
+## Detalhes técnicos
+
+**Arquivos novos:**
+- `src/components/dev-panel/DevUsageControl.tsx` (container com tabs)
+- `src/components/dev-panel/usage/PrevUsagePanel.tsx` (aba previdenciário)
+- `src/components/dev-panel/usage/PrevUsageFilters.tsx`
+- `src/components/dev-panel/usage/BlockConfigPopover.tsx` (Parte 1)
+- `supabase/functions/dev-list-prev-usage/index.ts`
+- `supabase/functions/dev-get-pericia-data/index.ts`
+
+**Arquivos editados:**
+- `src/pages/DevPanel.tsx` — adicionar tab "Controle de Uso"
+- `src/components/dev-panel/DevUserModules.tsx` — adicionar UI de bloqueio
+- `src/pages/Hub.tsx` — aplicar bloqueio/aviso nos cards
+- `supabase/config.toml` — registrar novas functions
+- Migração: 2 colunas em `user_modules` + 1 coluna JSON `dev_ui_prefs` em `user_settings` (ou tabela nova `dev_usage_filters`)
+
+**Padrões respeitados:**
+- Cores semânticas (teal/amber/red via tokens) — sem hardcode
+- RLS: todas as functions validam `is_developer()` via JWT (padrão de `dev-list-pdfs`)
+- Filtros persistentes via banco (escolha do usuário)
+- Reuso dos exportadores `prelaudo-docx.ts` / `prelaudo-pdf.ts` — nenhum retrabalho
+
+**Fora do escopo desta rodada:**
+- Trabalhista completo (fica "em breve")
+- Retomada do fluxo MiniMax OCR (próxima rodada, como acordado)
+
+Depois de aprovar, começo pela migração e pelas edge functions; a UI vem em seguida.
