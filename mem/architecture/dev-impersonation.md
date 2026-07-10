@@ -7,11 +7,11 @@ type: feature
 ## Fluxo
 
 1. DevPanel → Usuários → botão "Entrar como" (`VenetianMask` amber) chama edge function `dev-impersonate-user` com `{ target_user_id }`.
-2. Edge function (service-role + `is_developer()`, bloqueia alvo com role `developer`/`admin`) chama `auth.admin.generateLink({ type: 'magiclink', ... data: { impersonated_by, impersonated_by_name, impersonated_by_user_id, impersonated_at } })` e devolve `{ email, token_hash }`.
+2. Edge function (service-role + `is_developer()`, bloqueia alvo com role `developer`/`admin`) busca o email oficial do alvo via Auth pelo UUID (`getUserById`) e chama `auth.admin.generateLink({ type: 'magiclink', email: auth.email })`, devolvendo `{ token_hash, ...metadados_de_auditoria }`.
 3. Também grava em `access_logs`: `event_type='impersonation_started'`, `user_id=<dev>`, `metadata.target_user_id=<alvo>` — audit trail server-side irremovível pelo cliente.
-4. Client abre `/impersonate#token=...&email=...` em **nova aba** (`window.open(url, '_blank', 'noopener')`).
+4. Client abre `/impersonate#token=...&dev_name=...&dev_user_id=...` em **nova aba** (`window.open(url, '_blank', 'noopener')`).
 5. `/impersonate` seta `sessionStorage['lovable_impersonation_active']='1'` e recarrega. Após reload, `src/integrations/supabase/client.ts` detecta o flag e usa `sessionStorage` no lugar de `localStorage` → isolamento por aba (a aba original do dev permanece intacta).
-6. `verifyOtp({ type: 'magiclink', token_hash, email })` consome o token uma vez → sessão desta aba autenticada como o cliente, com `user_metadata.impersonated_by` etc.
+6. `verifyOtp({ type: 'magiclink', token_hash })` consome o token uma vez → sessão desta aba autenticada como o cliente. **Nunca enviar `email` junto com `token_hash`**, pois o Auth rejeita com “Only the token_hash and type should be provided”. Os metadados de impersonation ficam no `sessionStorage` isolado da aba.
 7. Navega para `/hub`.
 
 ## Regra dos logs — NUNCA confundir dev com cliente
@@ -24,6 +24,7 @@ type: feature
 ## Regra da segurança
 
 - Senha do alvo nunca é lida nem alterada — `generateLink` só emite token de uso único.
+- O magic link deve usar o email oficial da autenticação, não `profiles.email`, para evitar criação acidental de usuário duplicado quando o perfil tem email divergente/desatualizado.
 - Alvo `developer`/`admin` é bloqueado no server-side (evita escalonamento).
 - Impersonation nunca via RLS permissiva; sempre via edge function service-role (segue `mem/architecture/dev-access-isolation.md`).
 - `logout()` numa aba impersonada: pula update de `user_presence` do cliente, limpa `sessionStorage['lovable_impersonation_active']`, tenta `window.close()`.
