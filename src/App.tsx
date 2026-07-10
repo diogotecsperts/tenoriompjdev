@@ -28,6 +28,7 @@ import Impugnacao from "./pages/Impugnacao";
 import Financeiro from "./pages/Financeiro";
 import DevPanel from "./pages/DevPanel";
 import NotFound from "./pages/NotFound";
+import Impersonate from "./pages/Impersonate";
 
 const queryClient = new QueryClient();
 
