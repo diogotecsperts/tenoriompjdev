@@ -566,11 +566,7 @@ export function PrevUsagePanel() {
       await loadOneMeta(t.id, t.pdf_path!, pdfLib);
       setMetaProgress({ done: i + 1, total: targets.length });
     }
-      }
-    };
-    await Promise.all(
-      Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker),
-    );
+    metaAbortRef.current = false;
     // mantém progresso final visível brevemente e limpa
     setTimeout(() => setMetaProgress(null), 800);
   };
