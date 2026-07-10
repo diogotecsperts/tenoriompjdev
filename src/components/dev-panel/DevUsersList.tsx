@@ -698,6 +698,55 @@ export function DevUsersList() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Impersonation confirmation */}
+      <AlertDialog open={impersonateDialogOpen} onOpenChange={setImpersonateDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <VenetianMask className="h-5 w-5 text-amber-600" />
+              Entrar como {userToImpersonate?.nome}?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  Uma nova aba será aberta com uma sessão temporária como{" "}
+                  <strong>{userToImpersonate?.nome}</strong> ({userToImpersonate?.user_id ?? userToImpersonate?.email}).
+                </p>
+                <p>
+                  A senha do cliente <strong>não é tocada</strong>. Ele continua acessando
+                  normalmente com a própria credencial e não recebe nenhum email.
+                </p>
+                <p className="text-amber-700">
+                  Este acesso ficará registrado no <strong>Histórico de Acesso</strong> como
+                  impersonation, e um alerta será enviado por email (Rastreamento via Email)
+                  identificando você como o dev responsável.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={impersonating}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleImpersonate();
+              }}
+              disabled={impersonating}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              {impersonating ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Abrindo…
+                </>
+              ) : (
+                "Entrar como este usuário"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
