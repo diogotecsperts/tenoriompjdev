@@ -120,6 +120,7 @@ export function PrevUsagePanel() {
   const [loadingUsage, setLoadingUsage] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [userSearch, setUserSearch] = useState("");
+  const [liveConnected, setLiveConnected] = useState(false);
 
   // Load profiles + persisted filters
   useEffect(() => {
@@ -198,6 +199,117 @@ export function PrevUsagePanel() {
 
   useEffect(() => {
     if (filters.userId) loadUsage(filters.userId);
+  }, [filters.userId, loadUsage]);
+
+  // Realtime subscription: keep pautas + pericias in sync for the selected user
+  useEffect(() => {
+    const uid = filters.userId;
+    if (!uid) {
+      setLiveConnected(false);
+      return;
+    }
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleReload = () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => loadUsage(uid), 500);
+    };
+
+    const channel = supabase
+      .channel(`dev-usage-${uid}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "prev_pautas",
+          filter: `user_id=eq.${uid}`,
+        },
+        (payload) => {
+          setPautas((prev) => {
+            if (payload.eventType === "INSERT") {
+              const row = payload.new as Pauta;
+              if (prev.some((p) => p.id === row.id)) return prev;
+              return [row, ...prev].sort((a, b) =>
+                b.data.localeCompare(a.data),
+              );
+            }
+            if (payload.eventType === "UPDATE") {
+              const row = payload.new as Pauta;
+              return prev.map((p) => (p.id === row.id ? { ...p, ...row } : p));
+            }
+            if (payload.eventType === "DELETE") {
+              const oldRow = payload.old as { id: string };
+              return prev.filter((p) => p.id !== oldRow.id);
+            }
+            return prev;
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "prev_pericias",
+          filter: `user_id=eq.${uid}`,
+        },
+        (payload) => {
+          if (payload.eventType === "INSERT") {
+            const row = payload.new as any;
+            setPericias((prev) => {
+              if (prev.some((p) => p.id === row.id)) return prev;
+              return [
+                ...prev,
+                {
+                  id: row.id,
+                  pauta_id: row.pauta_id,
+                  ordem: row.ordem,
+                  status: row.status,
+                  periciado_nome: row.periciado_nome,
+                  pdf_path: row.pdf_path,
+                  pdf_processado: !!row.pdf_processado,
+                  processo_numero:
+                    row.prev_extracao?.identificacao?.numero_processo ?? null,
+                  created_at: row.created_at,
+                },
+              ].sort((a, b) => a.ordem - b.ordem);
+            });
+          } else if (payload.eventType === "UPDATE") {
+            const row = payload.new as any;
+            setPericias((prev) =>
+              prev.map((p) =>
+                p.id === row.id
+                  ? {
+                      ...p,
+                      status: row.status,
+                      periciado_nome: row.periciado_nome,
+                      pdf_path: row.pdf_path,
+                      pdf_processado: !!row.pdf_processado,
+                      processo_numero:
+                        row.prev_extracao?.identificacao?.numero_processo ??
+                        p.processo_numero,
+                    }
+                  : p,
+              ),
+            );
+            // Heavy fields like prelaudo_data updated: schedule a full reload
+            // in case downloads need the fresh copy on cache
+            scheduleReload();
+          } else if (payload.eventType === "DELETE") {
+            const oldRow = payload.old as { id: string };
+            setPericias((prev) => prev.filter((p) => p.id !== oldRow.id));
+          }
+        },
+      )
+      .subscribe((status) => {
+        setLiveConnected(status === "SUBSCRIBED");
+      });
+
+    return () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      supabase.removeChannel(channel);
+      setLiveConnected(false);
+    };
   }, [filters.userId, loadUsage]);
 
   // Apply filters to pericias
@@ -549,23 +661,57 @@ export function PrevUsagePanel() {
 
       {/* KPI cards */}
       {filters.userId && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <KpiCard icon={Users} label="Pautas" value={kpis.totalPautas} />
-          <KpiCard icon={FileText} label="Perícias" value={kpis.totalPericias} />
-          <KpiCard icon={Download} label="PDFs upados" value={kpis.totalPdfs} />
-          <KpiCard
-            icon={CheckCircle2}
-            label="Processados"
-            value={kpis.totalProc}
-            tone="success"
-          />
-          <KpiCard
-            icon={Percent}
-            label="Aproveitamento"
-            value={`${kpis.pct}%`}
-            tone="info"
-          />
-        </div>
+        <>
+          <div className="flex items-center justify-between px-1">
+            <div className="text-xs text-muted-foreground">
+              {selectedUser?.nome}
+              {selectedUser?.user_id ? ` · ${selectedUser.user_id}` : ""}
+            </div>
+            <div
+              className={cn(
+                "inline-flex items-center gap-1.5 text-[11px] rounded-full px-2 py-0.5 border",
+                liveConnected
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  : "bg-muted text-muted-foreground border-border",
+              )}
+              title={
+                liveConnected
+                  ? "Recebendo atualizações em tempo real"
+                  : "Conexão em tempo real inativa"
+              }
+            >
+              <span className="relative flex h-2 w-2">
+                {liveConnected && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                )}
+                <span
+                  className={cn(
+                    "relative inline-flex rounded-full h-2 w-2",
+                    liveConnected ? "bg-emerald-500" : "bg-muted-foreground/50",
+                  )}
+                />
+              </span>
+              {liveConnected ? "ao vivo" : "offline"}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <KpiCard icon={Users} label="Pautas" value={kpis.totalPautas} />
+            <KpiCard icon={FileText} label="Perícias" value={kpis.totalPericias} />
+            <KpiCard icon={Download} label="PDFs upados" value={kpis.totalPdfs} />
+            <KpiCard
+              icon={CheckCircle2}
+              label="Processados"
+              value={kpis.totalProc}
+              tone="success"
+            />
+            <KpiCard
+              icon={Percent}
+              label="Aproveitamento"
+              value={`${kpis.pct}%`}
+              tone="info"
+            />
+          </div>
+        </>
       )}
 
       {/* Corpo */}
