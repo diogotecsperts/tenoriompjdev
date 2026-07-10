@@ -404,8 +404,110 @@ export function PrevUsagePanel() {
 
   const selectedUser = users.find((u) => u.id === filters.userId);
 
+  // ------- PDF metadata (tamanho + páginas), carregamento sob demanda -------
+  const formatSize = (bytes: number) => {
+    if (!bytes || bytes < 0) return "—";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    const mb = bytes / (1024 * 1024);
+    return `${mb >= 10 ? Math.round(mb) : mb.toFixed(1)} MB`;
+  };
+
+  const loadOneMeta = async (periciaId: string, path: string) => {
+    setLoadingMetaIds((prev) => {
+      const next = new Set(prev);
+      next.add(periciaId);
+      return next;
+    });
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "dev-download-pdf",
+        { body: { file_path: path, bucket: "prev-pdfs" } },
+      );
+      if (error) throw error;
+      const url = (data as any)?.url;
+      if (!url) throw new Error("URL não retornada");
+
+      // 1) HEAD para size (barato)
+      let size = 0;
+      try {
+        const head = await fetch(url, { method: "HEAD" });
+        size = Number(head.headers.get("content-length") ?? 0);
+      } catch {}
+
+      // Salva parcial imediatamente
+      setPdfMeta((prev) => {
+        const next = new Map(prev);
+        next.set(periciaId, { size, pages: null });
+        return next;
+      });
+
+      // 2) GET + pdf-lib para páginas
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const buf = await resp.arrayBuffer();
+        if (!size) size = buf.byteLength;
+        const { PDFDocument } = await import("pdf-lib");
+        const doc = await PDFDocument.load(buf, {
+          updateMetadata: false,
+          ignoreEncryption: true,
+        });
+        const pages = doc.getPageCount();
+        setPdfMeta((prev) => {
+          const next = new Map(prev);
+          next.set(periciaId, { size, pages });
+          return next;
+        });
+      } catch {
+        // mantém entrada parcial (só size)
+      }
+    } catch {
+      // silencioso — badge simplesmente não aparece
+    } finally {
+      setLoadingMetaIds((prev) => {
+        const next = new Set(prev);
+        next.delete(periciaId);
+        return next;
+      });
+    }
+  };
+
+  const loadAllVisibleMeta = async (force = false) => {
+    const targets = filteredPericias.filter(
+      (p) => p.pdf_path && (force || !pdfMeta.has(p.id)),
+    );
+    if (targets.length === 0) return;
+    if (force) {
+      setPdfMeta((prev) => {
+        const next = new Map(prev);
+        targets.forEach((t) => next.delete(t.id));
+        return next;
+      });
+    }
+    setMetaProgress({ done: 0, total: targets.length });
+    const CONCURRENCY = 4;
+    let idx = 0;
+    let done = 0;
+    const worker = async () => {
+      while (idx < targets.length) {
+        const my = idx++;
+        const t = targets[my];
+        await loadOneMeta(t.id, t.pdf_path!);
+        done++;
+        setMetaProgress({ done, total: targets.length });
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker),
+    );
+    // mantém progresso final visível brevemente e limpa
+    setTimeout(() => setMetaProgress(null), 800);
+  };
+
   // Downloads
   const downloadOriginal = async (path: string, suggestedName?: string) => {
+
     setDownloadingId(path);
     try {
       const { data, error } = await supabase.functions.invoke(
