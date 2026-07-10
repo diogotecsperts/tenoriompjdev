@@ -9,6 +9,7 @@ import { splitPDF, needsSplit } from "../_shared/pdf-splitter.ts";
 import { extractWithMistralOCR, getMistralAPIKey } from "../_shared/mistral-ocr.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
 import { buildModularImportPrompt, isValidSystemPrompt } from "../_shared/build-import-prompt.ts";
+import { notifyPdfErrorFireAndForget } from "../_shared/notify-pdf-error.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
