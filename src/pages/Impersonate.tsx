@@ -50,6 +50,20 @@ export default function Impersonate() {
 
         setStatus("exchanging");
 
+        // Precisa existir ANTES do verifyOtp: o auth listener dispara durante
+        // verifyOtp e o AuthContext usa estes dados para não tratar como login normal.
+        const impersonationMeta = {
+          impersonated_by: params.get("dev_auth_user_id") ?? "",
+          impersonated_by_name: params.get("dev_name") ?? "Dev",
+          impersonated_by_user_id: params.get("dev_user_id") ?? "",
+          impersonated_at: params.get("at") ?? new Date().toISOString(),
+          impersonation_session_id: params.get("sid") ?? "",
+        };
+        window.sessionStorage.setItem(
+          "lovable_impersonation_meta",
+          JSON.stringify(impersonationMeta)
+        );
+
         // Import dinâmico para garantir que o client.ts já foi avaliado
         // com o flag ativo (sessionStorage no lugar de localStorage).
         const { supabase } = await import("@/integrations/supabase/client");
@@ -60,30 +74,18 @@ export default function Impersonate() {
         });
 
         if (error || !data.session) {
+          window.sessionStorage.removeItem("lovable_impersonation_meta");
           setStatus("error");
           setErrorMsg(error?.message ?? "Falha ao consumir token de impersonation.");
           return;
         }
-
-        // O token_hash exige apenas token_hash + type. Como o Auth não preserva
-        // metadata customizada no generateLink('magiclink'), guardamos os dados
-        // de auditoria só nesta aba para o AuthContext identificar a sessão.
-        window.sessionStorage.setItem(
-          "lovable_impersonation_meta",
-          JSON.stringify({
-            impersonated_by: params.get("dev_auth_user_id") ?? "",
-            impersonated_by_name: params.get("dev_name") ?? "Dev",
-            impersonated_by_user_id: params.get("dev_user_id") ?? "",
-            impersonated_at: params.get("at") ?? new Date().toISOString(),
-            impersonation_session_id: params.get("sid") ?? "",
-          })
-        );
 
         // Limpa o hash da URL antes de navegar
         window.history.replaceState({}, "", "/impersonate");
         // Vai para o hub — daqui o AuthContext detecta a sessão impersonada
         navigate("/hub", { replace: true });
       } catch (err) {
+        window.sessionStorage.removeItem("lovable_impersonation_meta");
         setStatus("error");
         setErrorMsg(err instanceof Error ? err.message : String(err));
       }
@@ -103,6 +105,7 @@ export default function Impersonate() {
               variant="outline"
               onClick={() => {
                 window.sessionStorage.removeItem("lovable_impersonation_active");
+                window.sessionStorage.removeItem("lovable_impersonation_meta");
                 window.close();
               }}
             >
