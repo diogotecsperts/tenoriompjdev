@@ -522,6 +522,20 @@ export function DevUsersList() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          onClick={() => openImpersonateDialog(user)}
+                          className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                          disabled={
+                            user.id === currentUser?.id ||
+                            user.roles.includes("developer") ||
+                            user.roles.includes("admin")
+                          }
+                          title="Entrar como este usuário (impersonation)"
+                        >
+                          <VenetianMask className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => openSettings(user)}
                         >
                           <Settings className="h-4 w-4" />
