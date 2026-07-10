@@ -286,6 +286,8 @@ export function PrevUsagePanel() {
                   periciado_nome: row.periciado_nome,
                   pdf_path: row.pdf_path,
                   pdf_processado: !!row.pdf_processado,
+                  pdf_size_bytes: row.pdf_size_bytes ?? null,
+                  pdf_pages: row.pdf_pages ?? null,
                   processo_numero:
                     row.prev_extracao?.identificacao?.numero_processo ?? null,
                   created_at: row.created_at,
