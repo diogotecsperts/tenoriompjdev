@@ -170,11 +170,18 @@ export function PrevUsagePanel() {
     setPautas([]);
     setPericias([]);
     try {
-      const { data, error } = await supabase.functions.invoke(
-        `dev-list-prev-usage?user_id=${userId}`,
-        { method: "GET" },
+      const session = (await supabase.auth.getSession()).data.session;
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/dev-list-prev-usage?user_id=${userId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${session?.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+        },
       );
-      if (error) throw error;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
       setPautas(data.pautas ?? []);
       setPericias(data.pericias ?? []);
     } catch (err: any) {
@@ -187,6 +194,7 @@ export function PrevUsagePanel() {
       setLoadingUsage(false);
     }
   }, []);
+
 
   useEffect(() => {
     if (filters.userId) loadUsage(filters.userId);
