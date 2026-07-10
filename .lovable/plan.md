@@ -1,48 +1,87 @@
-## Problema
+## Objetivo
 
-Em **Controle de uso → Previdenciário**, os botões de download têm dois defeitos:
+Ao lado do botão **Baixar PDF original** em Controle de uso → Previdenciário, mostrar um badge discreto com **tamanho do arquivo** e **quantidade de páginas** (ex.: `18 MB · 150 pgs`).
 
-1. **PDF original bloqueado (`ERR_BLOCKED_BY_CLIENT`)** — `downloadOriginal` faz `window.open(data.url, "_blank")`, que o Edge/adblockers bloqueiam quando a URL aponta para `*.supabase.co`. Em **Arquivos Originais** o mesmo botão funciona instantaneamente porque baixa o arquivo via `fetch → blob → <a download>` (sem abrir aba).
-2. **DOCX/PDF do pré-laudo lento** — passa por `supabase.functions.invoke("dev-get-pericia-data")` que faz 3 queries encadeadas (perícia + profile + pauta) no edge function (boot + rede). Quando o próprio perito está logado, os dados já estão em memória, por isso é quase instantâneo.
+## Por que sob demanda
 
-## Solução
+Cada perícia é um PDF no bucket `prev-pdfs`. Para descobrir:
 
-### 1. Alinhar download do PDF original com "Arquivos Originais"
+- **Tamanho** — 1 HEAD na signed URL (barato, alguns KB de headers).
+- **Páginas** — precisa baixar o PDF e ler com `pdf-lib` (já instalado). PDFs de perícia costumam ter 20–150 MB. Para um usuário com 53 perícias (caso do Bruno), o carregamento automático faria dezenas de downloads em background — inaceitável.
 
-Em `src/components/dev-panel/usage/PrevUsagePanel.tsx`, reescrever `downloadOriginal(path)` usando exatamente o mesmo padrão de duas camadas de `DevOriginalFiles.downloadFile`:
+Portanto, o carregamento é **opt-in** via botão.
 
-- Chama `dev-download-pdf` para obter a signed URL (bucket `prev-pdfs`).
-- **Camada 1**: `fetch(url) → blob() → createObjectURL → <a download={fileName}>.click()` — download nativo, sem abrir aba, com nome de arquivo correto.
-- **Camada 2 (fallback)**: se o `fetch` cross-origin falhar (proxy do preview), aí sim `window.open(url, "_blank", "noopener,noreferrer")`.
-- Derivar `fileName` a partir do `path` (último segmento) ou usar o nome do periciado + `.pdf`.
-- Ajustar assinatura para receber também o nome sugerido, e atualizar as chamadas nos botões.
+## UX
 
-Isso elimina o `ERR_BLOCKED_BY_CLIENT` e traz o comportamento "download instantâneo" idêntico ao da tela de Arquivos Originais.
+### Botão global no topo da lista de pautas
+Ao lado do título "Pautas & Perícias" (mesma linha do badge "ao vivo"), adicionar:
 
-### 2. Acelerar download de DOCX/PDF do pré-laudo
+```
+[ 📊 Carregar tamanho/páginas ]
+```
 
-Como dev/admin já tem policy `is_developer()` de SELECT em `prev_pericias`, `prev_pautas` e `profiles`, dá para pular o edge function e ler direto do banco em paralelo:
+- Estado idle → texto acima.
+- Estado loading → spinner + `Carregando 12/53...`.
+- Estado done → botão vira `↻ Atualizar` (discreto, `variant="ghost"`).
+- Só habilitado se houver ≥1 perícia com `pdf_path` na visão filtrada.
+- Ao clicar: processa apenas perícias visíveis (respeita filtros) e que ainda não tenham dados em cache. Concorrência limitada a **4 requisições em paralelo** para não travar o navegador nem estourar quota de signed URLs.
 
-Em `downloadPrelaudo(periciaId, format)`:
+### Badge inline em cada linha
+Na coluna "Ações", antes do botão de download do PDF original:
 
-- Buscar a perícia direto: `supabase.from("prev_pericias").select("id,user_id,pauta_id,periciado_nome,prelaudo_data").eq("id", periciaId).maybeSingle()`.
-- Em paralelo (Promise.all), buscar `profiles` (nome, crm, uf_crm, especialidade) por `user_id` e `prev_pautas` (data, local, cidade, uf) por `pauta_id`.
-- Manter a mesma montagem do objeto `meta` e chamar `downloadPrelaudoDocx` / `downloadPrelaudoPdf` como já está.
-- **Otimização adicional**: como o `prelaudo_data` já é atualizado em tempo real via Realtime `UPDATE` no `pericias` state (ver bloco Realtime existente), podemos guardar um cache `Map<periciaId, prelaudoData>` alimentado sob demanda; mas por ora basta a query direta, que já reduz de ~3 chamadas serializadas no edge para 3 queries paralelas via PostgREST (tipicamente <300 ms).
-- Manter o edge function `dev-get-pericia-data` como fallback opcional para futuras integrações, sem removê-lo agora.
+```
+[ 18 MB · 150 pgs ]  [ ⬇ ]
+```
 
-### 3. Sem outras mudanças
+- `variant="outline"`, `text-xs`, `text-muted-foreground`, sem cor forte — apenas informativo.
+- Enquanto o item específico está sendo carregado: `[ ... ]` com Loader2 spin pequeno.
+- Se só o tamanho voltou (falha ao contar páginas): `[ 18 MB ]`.
+- Se o PDF ainda não foi carregado: **não renderiza nada** (linha fica limpa).
+- Se `pdf_path` for null: nada muda (botão de download já fica desabilitado).
 
-- Não alterar UI, filtros, KPIs, badge "ao vivo", nem lógica de Realtime.
-- Não alterar `DevOriginalFiles` (já funciona).
-- Não mexer em edge functions nem em migrations.
+### Cache em memória
+Estado local `Map<periciaId, { sizeBytes: number; pages: number | null }>`. Cache persiste enquanto o usuário está na aba; troca de usuário limpa o cache. Realtime `UPDATE` que troca o `pdf_path` invalida a entrada correspondente.
 
-## Arquivos afetados
+## Detalhes técnicos
 
-- `src/components/dev-panel/usage/PrevUsagePanel.tsx` — reescrever `downloadOriginal` e `downloadPrelaudo`.
+Arquivo único afetado: `src/components/dev-panel/usage/PrevUsagePanel.tsx`.
+
+1. Novo estado:
+   ```ts
+   const [pdfMeta, setPdfMeta] = useState<Map<string, { size: number; pages: number | null }>>(new Map());
+   const [loadingMeta, setLoadingMeta] = useState<Set<string>>(new Set());
+   const [metaProgress, setMetaProgress] = useState<{ done: number; total: number } | null>(null);
+   ```
+
+2. Helper `formatSize(bytes)` → `"18 MB"` / `"850 KB"`.
+
+3. Função `loadOneMeta(periciaId, path)`:
+   - `supabase.functions.invoke("dev-download-pdf", { body: { file_path: path, bucket: "prev-pdfs" } })` → signed URL.
+   - `fetch(url, { method: "HEAD" })` → `size = Number(res.headers.get("content-length"))`. Salva parcial no cache já.
+   - `fetch(url)` → `arrayBuffer` → `PDFDocument.load(bytes, { updateMetadata: false })` → `pages = doc.getPageCount()`. Falhas na contagem não bloqueiam: guarda `pages: null`.
+   - Update no `pdfMeta` via functional setState.
+
+4. Função `loadAllVisibleMeta()`:
+   - Coleta `filteredPericias.filter(p => p.pdf_path && !pdfMeta.has(p.id))`.
+   - Concorrência 4 (fila simples com Promise).
+   - Atualiza `metaProgress` conforme completa.
+
+5. Import: `import { PDFDocument } from "pdf-lib";` (lazy import dentro da função pra não pesar no bundle inicial: `const { PDFDocument } = await import("pdf-lib");`).
+
+6. Realtime `UPDATE` de perícia: se `payload.new.pdf_path !== payload.old.pdf_path`, remover do cache.
+
+7. Troca de `filters.userId` → `setPdfMeta(new Map()); setMetaProgress(null);`.
+
+## Fora de escopo
+
+- Não altera edge functions, migrations, KPIs, filtros, badge "ao vivo", downloads de pré-laudo, nem `DevOriginalFiles`.
+- Nenhuma persistência de metadados no banco — cache é apenas em memória durante a sessão da aba.
+- Nada muda para o usuário final (Bruno etc.); é exclusivo do dev panel.
 
 ## Verificação
 
-Após implementar, testar no dev-panel:
-1. Clicar em download de PDF original → arquivo baixa direto, sem popup, sem bloqueio do Edge.
-2. Clicar em DOCX/PDF do pré-laudo → geração praticamente instantânea, similar ao do perito logado.
+1. Abrir Controle de uso → Previdenciário → selecionar Bruno (MED001).
+2. Confirmar que a lista carrega instantaneamente (sem downloads automáticos).
+3. Clicar "Carregar tamanho/páginas" → progresso incrementa e badges aparecem linha a linha.
+4. Baixar um PDF conferindo que o tamanho bate.
+5. Recarregar a página e confirmar que nada é buscado até novo clique.
