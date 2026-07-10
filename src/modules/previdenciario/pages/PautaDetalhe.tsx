@@ -16,6 +16,7 @@ import {
   User,
   Upload,
   Sparkles,
+  Pencil,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import {
