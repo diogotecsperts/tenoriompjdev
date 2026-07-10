@@ -28,7 +28,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { supabase } from "@/integrations/supabase/client";
-import { Search, Settings, RefreshCw, User, Trash2, AlertTriangle, Loader2, CheckCircle2 } from "lucide-react";
+import { Search, Settings, RefreshCw, User, Trash2, AlertTriangle, Loader2, CheckCircle2, VenetianMask } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/hooks/use-toast";
 import { DevUserSettings } from "./DevUserSettings";
