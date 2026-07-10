@@ -254,6 +254,14 @@ export default function PautaList() {
         onOpenChange={setNovaOpen}
         onCreated={(p) => navigate(`/previdenciario/pauta/${p.id}`)}
       />
+      {editando && (
+        <EditarPautaDialog
+          open={!!editando}
+          onOpenChange={(v) => { if (!v) setEditando(null); }}
+          pauta={editando}
+          onSaved={() => { setEditando(null); void reload(); }}
+        />
+      )}
     </div>
   );
 }
