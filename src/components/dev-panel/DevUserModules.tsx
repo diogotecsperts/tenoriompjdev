@@ -91,6 +91,17 @@ export function DevUserModules() {
   }, []);
 
   const toggle = async (userId: string, mod: AppModule, next: boolean) => {
+    const current = users.find((u) => u.id === userId)?.modules[mod];
+    // Toggle syncs with block state:
+    // - turning OFF: mark as blocked with default message (if none exists)
+    // - turning ON: clear any block/notice
+    const nextBlockMode: BlockMode = next ? "none" : "blocked";
+    const nextBlockMessage = next
+      ? ""
+      : current?.block_message?.trim()
+        ? current.block_message
+        : "Acesso desabilitado pelo administrador.";
+
     setUsers((prev) =>
       prev.map((u) =>
         u.id === userId
@@ -98,14 +109,24 @@ export function DevUserModules() {
               ...u,
               modules: {
                 ...u.modules,
-                [mod]: { ...u.modules[mod], enabled: next },
+                [mod]: {
+                  enabled: next,
+                  block_mode: nextBlockMode,
+                  block_message: nextBlockMessage,
+                },
               },
             }
           : u,
       ),
     );
     const { error } = await (supabase.from as any)("user_modules").upsert(
-      { user_id: userId, module: mod, enabled: next },
+      {
+        user_id: userId,
+        module: mod,
+        enabled: next,
+        block_mode: next ? null : "blocked",
+        block_message: next ? null : nextBlockMessage,
+      },
       { onConflict: "user_id,module" },
     );
     if (error) {
@@ -114,23 +135,23 @@ export function DevUserModules() {
         title: "Erro ao atualizar módulo",
         description: error.message,
       });
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.id === userId
-            ? {
-                ...u,
-                modules: {
-                  ...u.modules,
-                  [mod]: { ...u.modules[mod], enabled: !next },
-                },
-              }
-            : u,
-        ),
-      );
+      // revert
+      if (current) {
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === userId
+              ? {
+                  ...u,
+                  modules: { ...u.modules, [mod]: current },
+                }
+              : u,
+          ),
+        );
+      }
     } else {
       toast({
         title: "Módulo atualizado",
-        description: `${mod} ${next ? "habilitado" : "desabilitado"}.`,
+        description: `${mod} ${next ? "habilitado" : "bloqueado"}.`,
       });
     }
   };
@@ -140,6 +161,7 @@ export function DevUserModules() {
     mod: AppModule,
     block_mode: BlockMode,
     block_message: string,
+    enabled: boolean,
   ) => {
     setUsers((prev) =>
       prev.map((u) =>
@@ -148,7 +170,7 @@ export function DevUserModules() {
               ...u,
               modules: {
                 ...u.modules,
-                [mod]: { ...u.modules[mod], block_mode, block_message },
+                [mod]: { enabled, block_mode, block_message },
               },
             }
           : u,
