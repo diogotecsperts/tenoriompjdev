@@ -13,6 +13,7 @@ import { ModuleProtectedRoute } from "@/components/ModuleProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GlobalErrorListener } from "@/components/GlobalErrorListener";
+import { ImpersonationBanner } from "@/components/ImpersonationBanner";
 import Login from "./pages/Login";
 import Hub from "./pages/Hub";
 import Dashboard from "./pages/Dashboard";
@@ -28,6 +29,7 @@ import Impugnacao from "./pages/Impugnacao";
 import Financeiro from "./pages/Financeiro";
 import DevPanel from "./pages/DevPanel";
 import NotFound from "./pages/NotFound";
+import Impersonate from "./pages/Impersonate";
 
 const queryClient = new QueryClient();
 
@@ -44,6 +46,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Login />} />
+      <Route path="/impersonate" element={<Impersonate />} />
       <Route
         path="/hub"
         element={
@@ -177,6 +180,7 @@ const App = () => (
             <AuthProvider>
               <LaudoProvider>
                 <NavigationGuardProvider>
+                  <ImpersonationBanner />
                   <AppRoutes />
                 </NavigationGuardProvider>
               </LaudoProvider>

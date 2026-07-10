@@ -127,18 +127,21 @@ export type Database = {
       email_login_events: {
         Row: {
           id: string
+          impersonated_by: string | null
           notified_at: string
           session_started_at: string
           user_id: string
         }
         Insert: {
           id?: string
+          impersonated_by?: string | null
           notified_at?: string
           session_started_at?: string
           user_id: string
         }
         Update: {
           id?: string
+          impersonated_by?: string | null
           notified_at?: string
           session_started_at?: string
           user_id?: string

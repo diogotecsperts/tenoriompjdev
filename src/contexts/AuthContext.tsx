@@ -19,6 +19,13 @@ interface UserRole {
   role: 'admin' | 'user';
 }
 
+interface ImpersonationInfo {
+  byUserId: string;
+  byName: string;
+  byUserIdCode: string;
+  at: string;
+}
+
 interface AuthContextType {
   isAuthenticated: boolean;
   user: User | null;
@@ -26,6 +33,8 @@ interface AuthContextType {
   profile: ProfileData | null;
   userRole: 'admin' | 'user' | null;
   isAdmin: boolean;
+  isImpersonating: boolean;
+  impersonatedBy: ImpersonationInfo | null;
   login: (identifier: string, password: string) => Promise<boolean>;
   signup: (email: string, password: string, fullName: string) => Promise<boolean>;
   logout: () => Promise<void>;
@@ -47,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const initialLoadDoneRef = useRef(false);
   const isLoadingUserDataRef = useRef(false);
   const loadedUserIdRef = useRef<string | null>(null);
+  const impersonationLogInsertedRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Timeout de segurança para evitar loading infinito (10 segundos)
@@ -57,6 +67,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Evitar chamadas duplicadas
       if (isLoadingUserDataRef.current) return;
       isLoadingUserDataRef.current = true;
+
+      // Se a sessão for impersonada, registrar UMA vez em access_logs
+      // com event_type='impersonation_login' — nunca 'login'.
+      const meta: any = session.user.user_metadata ?? {};
+      if (meta.impersonated_by && impersonationLogInsertedRef.current !== session.user.id) {
+        impersonationLogInsertedRef.current = session.user.id;
+        (supabase.from("access_logs") as any).insert({
+          user_id: session.user.id,
+          event_type: "impersonation_login",
+          metadata: {
+            method: "dev_impersonation",
+            impersonated_by_user_id: meta.impersonated_by,
+            impersonated_by_name: meta.impersonated_by_name ?? null,
+            impersonated_by_user_id_code: meta.impersonated_by_user_id ?? null,
+            impersonated_at: meta.impersonated_at ?? null,
+          },
+        }).then(() => {}, () => {});
+      }
 
       // Timeout de segurança
       const timeoutId = setTimeout(() => {
@@ -313,7 +341,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     // Marcar offline ANTES do signOut (enquanto JWT ainda é válido)
-    if (user) {
+    // Mas apenas se NÃO for sessão impersonada (não queremos mexer
+    // no presence do cliente ao dev encerrar a impersonation).
+    const impersonating = !!(user?.user_metadata as any)?.impersonated_by;
+    if (user && !impersonating) {
       await (supabase.from("user_presence") as any).update({
         is_online: false,
         last_seen_at: new Date().toISOString(),
@@ -324,8 +355,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setProfile(null);
     setUserRole(null);
+    // Se era aba de impersonation, limpa o flag e fecha a aba
+    if (impersonating) {
+      window.sessionStorage.removeItem("lovable_impersonation_active");
+      // Tenta fechar; se o browser bloquear, cai para navigate
+      window.close();
+    }
     navigate("/");
   };
+
+  const impersonationMeta = (user?.user_metadata as any) ?? {};
+  const impersonatedBy: ImpersonationInfo | null = impersonationMeta.impersonated_by
+    ? {
+        byUserId: String(impersonationMeta.impersonated_by),
+        byName: String(impersonationMeta.impersonated_by_name ?? "Dev"),
+        byUserIdCode: String(impersonationMeta.impersonated_by_user_id ?? ""),
+        at: String(impersonationMeta.impersonated_at ?? ""),
+      }
+    : null;
 
   return (
     <AuthContext.Provider 
@@ -336,6 +383,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile, 
         userRole,
         isAdmin: userRole === 'admin',
+        isImpersonating: !!impersonatedBy,
+        impersonatedBy,
         login, 
         signup, 
         logout,

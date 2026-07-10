@@ -23,7 +23,7 @@ const RESEND_ENDPOINT = "https://api.resend.com/emails";
 const FROM_REPORTS = "Relatórios MPJ <relatorios@mpjpericias.tecsperts.com>";
 const FROM_ALERTS = "Avisos MPJ <avisos@mpjpericias.tecsperts.com>";
 
-type EmailType = "login" | "pdf_error" | "daily_summary" | "test";
+type EmailType = "login" | "impersonation_login" | "pdf_error" | "daily_summary" | "test";
 
 interface TrackingConfig {
   enabled: boolean;
@@ -126,6 +126,42 @@ function buildLoginEmail(p: Record<string, unknown>) {
         ${kv("Nome", userName)}
         ${kv("ID do usuário", userId || "—")}
         ${kv("Email", userEmail || "—")}
+        ${kv("Horário", `${when} (BRT)`)}
+      `,
+    ),
+  };
+}
+
+function buildImpersonationLoginEmail(p: Record<string, unknown>) {
+  const targetName = String(p.targetName ?? "Cliente");
+  const targetEmail = String(p.targetEmail ?? "");
+  const targetUserId = String(p.targetUserId ?? "");
+  const devName = String(p.devName ?? "Dev");
+  const devUserIdCode = String(p.devUserIdCode ?? "");
+  const when = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  return {
+    from: FROM_ALERTS,
+    subject: `🎭 [DEV] Sessão impersonada iniciada — ${devName} entrou como ${targetName}`,
+    html: wrapper(
+      "Sessão de dev (impersonation) iniciada",
+      "#d97706",
+      `
+        <div style="background:#fffbeb;border-left:4px solid #d97706;padding:12px 14px;border-radius:6px;margin-bottom:16px;">
+          <div style="font-weight:700;color:#92400e;font-size:15px;">Este NÃO é um login do cliente.</div>
+          <div style="color:#78350f;font-size:13px;margin-top:4px;">
+            Um usuário com perfil de <strong>developer</strong> abriu uma sessão temporária
+            usando a conta do cliente abaixo. A senha do cliente não foi alterada e ele
+            continua acessando normalmente com a própria credencial.
+          </div>
+        </div>
+        <div style="font-weight:600;color:#111827;margin-bottom:6px;">Quem entrou (dev)</div>
+        ${kv("Nome do dev", devName)}
+        ${kv("ID do dev", devUserIdCode || "—")}
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;"/>
+        <div style="font-weight:600;color:#111827;margin-bottom:6px;">Conta acessada</div>
+        ${kv("Nome do cliente", targetName)}
+        ${kv("ID do cliente", targetUserId || "—")}
+        ${kv("Email do cliente", targetEmail || "—")}
         ${kv("Horário", `${when} (BRT)`)}
       `,
     ),
@@ -458,6 +494,12 @@ Deno.serve(async (req: Request) => {
     switch (type) {
       case "login":
         built = buildLoginEmail(p);
+        break;
+      case "impersonation_login":
+        // Sempre enviado (respeita apenas o toggle global 'enabled').
+        // Não pode ser silenciado pelo notify_on_login, para garantir
+        // auditoria toda vez que um dev entrar como cliente.
+        built = buildImpersonationLoginEmail(p);
         break;
       case "pdf_error":
         built = buildPdfErrorEmail(p);

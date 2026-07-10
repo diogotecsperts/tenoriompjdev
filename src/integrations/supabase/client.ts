@@ -8,9 +8,18 @@ const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
+// Isolamento por aba para impersonation:
+// A rota /impersonate seta sessionStorage['lovable_impersonation_active']='1'
+// e recarrega. Ao recarregar, este módulo escolhe sessionStorage (per-tab)
+// em vez de localStorage, para que a sessão do cliente impersonado NÃO
+// vaze para outras abas (onde o dev continua logado normalmente).
+const useSessionStorage =
+  typeof window !== 'undefined' &&
+  window.sessionStorage?.getItem('lovable_impersonation_active') === '1';
+
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
-    storage: localStorage,
+    storage: useSessionStorage ? sessionStorage : localStorage,
     persistSession: true,
     autoRefreshToken: true,
   }

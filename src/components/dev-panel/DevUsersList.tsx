@@ -28,7 +28,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { supabase } from "@/integrations/supabase/client";
-import { Search, Settings, RefreshCw, User, Trash2, AlertTriangle, Loader2, CheckCircle2 } from "lucide-react";
+import { Search, Settings, RefreshCw, User, Trash2, AlertTriangle, Loader2, CheckCircle2, VenetianMask } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/hooks/use-toast";
 import { DevUserSettings } from "./DevUserSettings";
@@ -78,6 +78,11 @@ export function DevUsersList() {
   const [syncAllDialogOpen, setSyncAllDialogOpen] = useState(false);
   const [syncingAll, setSyncingAll] = useState(false);
   const [globalConfig, setGlobalConfig] = useState<{ provider: string; model: string } | null>(null);
+
+  // Impersonation state
+  const [impersonateDialogOpen, setImpersonateDialogOpen] = useState(false);
+  const [userToImpersonate, setUserToImpersonate] = useState<UserWithSettings | null>(null);
+  const [impersonating, setImpersonating] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -313,6 +318,68 @@ export function DevUsersList() {
     }
   };
 
+  const openImpersonateDialog = (user: UserWithSettings) => {
+    if (user.id === currentUser?.id) {
+      toast({ variant: "destructive", title: "Ação inválida", description: "Você não pode impersonar sua própria conta." });
+      return;
+    }
+    if (user.roles.includes("developer") || user.roles.includes("admin")) {
+      toast({ variant: "destructive", title: "Bloqueado", description: "Não é permitido impersonar outro dev ou admin." });
+      return;
+    }
+    setUserToImpersonate(user);
+    setImpersonateDialogOpen(true);
+  };
+
+  const handleImpersonate = async () => {
+    if (!userToImpersonate) return;
+    setImpersonating(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) throw new Error("Não autenticado");
+
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/dev-impersonate-user`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${sessionData.session.access_token}`,
+          },
+          body: JSON.stringify({ target_user_id: userToImpersonate.id }),
+        }
+      );
+      const result = await resp.json();
+      if (!resp.ok || !result.ok) {
+        throw new Error(result.error || "Falha ao gerar sessão de impersonation");
+      }
+
+      // Abre nova aba com o hash contendo token+email
+      const hash = new URLSearchParams({
+        token: result.token_hash,
+        email: result.email,
+      }).toString();
+      const url = `${window.location.origin}/impersonate#${hash}`;
+      // noopener garante sessionStorage isolado na nova aba
+      window.open(url, "_blank", "noopener");
+
+      toast({
+        title: "Sessão aberta",
+        description: `Abrindo aba como ${userToImpersonate.nome}. Sua sessão de dev permanece nesta aba.`,
+      });
+      setImpersonateDialogOpen(false);
+      setUserToImpersonate(null);
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: err instanceof Error ? err.message : "Falha ao impersonar",
+      });
+    } finally {
+      setImpersonating(false);
+    }
+  };
+
   const getRoleBadgeVariant = (role: string): "default" | "secondary" | "outline" | "destructive" => {
     switch (role) {
       case "developer":
@@ -452,6 +519,20 @@ export function DevUsersList() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openImpersonateDialog(user)}
+                          className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                          disabled={
+                            user.id === currentUser?.id ||
+                            user.roles.includes("developer") ||
+                            user.roles.includes("admin")
+                          }
+                          title="Entrar como este usuário (impersonation)"
+                        >
+                          <VenetianMask className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -612,6 +693,55 @@ export function DevUsersList() {
                 </>
               ) : (
                 "Confirmar Sincronização"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Impersonation confirmation */}
+      <AlertDialog open={impersonateDialogOpen} onOpenChange={setImpersonateDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <VenetianMask className="h-5 w-5 text-amber-600" />
+              Entrar como {userToImpersonate?.nome}?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  Uma nova aba será aberta com uma sessão temporária como{" "}
+                  <strong>{userToImpersonate?.nome}</strong> ({userToImpersonate?.user_id ?? userToImpersonate?.email}).
+                </p>
+                <p>
+                  A senha do cliente <strong>não é tocada</strong>. Ele continua acessando
+                  normalmente com a própria credencial e não recebe nenhum email.
+                </p>
+                <p className="text-amber-700">
+                  Este acesso ficará registrado no <strong>Histórico de Acesso</strong> como
+                  impersonation, e um alerta será enviado por email (Rastreamento via Email)
+                  identificando você como o dev responsável.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={impersonating}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleImpersonate();
+              }}
+              disabled={impersonating}
+              className="bg-amber-600 hover:bg-amber-700"
+            >
+              {impersonating ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Abrindo…
+                </>
+              ) : (
+                "Entrar como este usuário"
               )}
             </AlertDialogAction>
           </AlertDialogFooter>
