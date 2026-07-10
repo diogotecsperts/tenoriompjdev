@@ -132,6 +132,42 @@ function buildLoginEmail(p: Record<string, unknown>) {
   };
 }
 
+function buildImpersonationLoginEmail(p: Record<string, unknown>) {
+  const targetName = String(p.targetName ?? "Cliente");
+  const targetEmail = String(p.targetEmail ?? "");
+  const targetUserId = String(p.targetUserId ?? "");
+  const devName = String(p.devName ?? "Dev");
+  const devUserIdCode = String(p.devUserIdCode ?? "");
+  const when = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+  return {
+    from: FROM_ALERTS,
+    subject: `🎭 [DEV] Sessão impersonada iniciada — ${devName} entrou como ${targetName}`,
+    html: wrapper(
+      "Sessão de dev (impersonation) iniciada",
+      "#d97706",
+      `
+        <div style="background:#fffbeb;border-left:4px solid #d97706;padding:12px 14px;border-radius:6px;margin-bottom:16px;">
+          <div style="font-weight:700;color:#92400e;font-size:15px;">Este NÃO é um login do cliente.</div>
+          <div style="color:#78350f;font-size:13px;margin-top:4px;">
+            Um usuário com perfil de <strong>developer</strong> abriu uma sessão temporária
+            usando a conta do cliente abaixo. A senha do cliente não foi alterada e ele
+            continua acessando normalmente com a própria credencial.
+          </div>
+        </div>
+        <div style="font-weight:600;color:#111827;margin-bottom:6px;">Quem entrou (dev)</div>
+        ${kv("Nome do dev", devName)}
+        ${kv("ID do dev", devUserIdCode || "—")}
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0;"/>
+        <div style="font-weight:600;color:#111827;margin-bottom:6px;">Conta acessada</div>
+        ${kv("Nome do cliente", targetName)}
+        ${kv("ID do cliente", targetUserId || "—")}
+        ${kv("Email do cliente", targetEmail || "—")}
+        ${kv("Horário", `${when} (BRT)`)}
+      `,
+    ),
+  };
+}
+
 function buildPdfErrorEmail(p: Record<string, unknown>) {
   const modulo = String(p.modulo ?? "—");
   const userName = String(p.userName ?? "—");
