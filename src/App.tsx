@@ -45,6 +45,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Login />} />
+      <Route path="/impersonate" element={<Impersonate />} />
       <Route
         path="/hub"
         element={
