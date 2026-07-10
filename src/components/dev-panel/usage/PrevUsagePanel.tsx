@@ -850,33 +850,77 @@ export function PrevUsagePanel() {
               {selectedUser?.nome}
               {selectedUser?.user_id ? ` · ${selectedUser.user_id}` : ""}
             </div>
-            <div
-              className={cn(
-                "inline-flex items-center gap-1.5 text-[11px] rounded-full px-2 py-0.5 border",
-                liveConnected
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                  : "bg-muted text-muted-foreground border-border",
-              )}
-              title={
-                liveConnected
-                  ? "Recebendo atualizações em tempo real"
-                  : "Conexão em tempo real inativa"
-              }
-            >
-              <span className="relative flex h-2 w-2">
-                {liveConnected && (
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <div className="flex items-center gap-2">
+              {(() => {
+                const pdfCount = filteredPericias.filter((p) => p.pdf_path).length;
+                const loadedCount = filteredPericias.filter(
+                  (p) => p.pdf_path && pdfMeta.has(p.id),
+                ).length;
+                const isLoading = metaProgress !== null;
+                const allLoaded = pdfCount > 0 && loadedCount === pdfCount;
+                return (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-[11px] gap-1.5 px-2"
+                    disabled={pdfCount === 0 || isLoading}
+                    onClick={() => loadAllVisibleMeta(allLoaded)}
+                    title={
+                      pdfCount === 0
+                        ? "Nenhum PDF disponível na visão atual"
+                        : allLoaded
+                          ? "Recarregar tamanho e páginas"
+                          : "Buscar tamanho e nº de páginas dos PDFs visíveis"
+                    }
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Analisando {metaProgress!.done}/{metaProgress!.total}
+                      </>
+                    ) : allLoaded ? (
+                      <>
+                        <RefreshCw className="h-3 w-3" />
+                        Atualizar detalhes
+                      </>
+                    ) : (
+                      <>
+                        <Gauge className="h-3 w-3" />
+                        Carregar tamanho/páginas
+                      </>
+                    )}
+                  </Button>
+                );
+              })()}
+              <div
+                className={cn(
+                  "inline-flex items-center gap-1.5 text-[11px] rounded-full px-2 py-0.5 border",
+                  liveConnected
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-muted text-muted-foreground border-border",
                 )}
-                <span
-                  className={cn(
-                    "relative inline-flex rounded-full h-2 w-2",
-                    liveConnected ? "bg-emerald-500" : "bg-muted-foreground/50",
+                title={
+                  liveConnected
+                    ? "Recebendo atualizações em tempo real"
+                    : "Conexão em tempo real inativa"
+                }
+              >
+                <span className="relative flex h-2 w-2">
+                  {liveConnected && (
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                   )}
-                />
-              </span>
-              {liveConnected ? "ao vivo" : "offline"}
+                  <span
+                    className={cn(
+                      "relative inline-flex rounded-full h-2 w-2",
+                      liveConnected ? "bg-emerald-500" : "bg-muted-foreground/50",
+                    )}
+                  />
+                </span>
+                {liveConnected ? "ao vivo" : "offline"}
+              </div>
             </div>
           </div>
+
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <KpiCard icon={Users} label="Pautas" value={kpis.totalPautas} />
             <KpiCard icon={FileText} label="Perícias" value={kpis.totalPericias} />
