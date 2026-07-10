@@ -9,6 +9,8 @@
  * Segurança:
  *  - Chamador precisa ter role 'developer' (via has_role/is_developer).
  *  - Alvo NÃO pode ser developer nem admin (evita escalonamento).
+ *  - Usa SEMPRE o email oficial do Auth do usuário-alvo (não o email editável
+ *    em profiles), para nunca criar uma conta duplicada por divergência de email.
  *  - Toda operação é registrada em access_logs com event_type='impersonation_started'
  *    tendo user_id = do dev impersonador (audit trail server-side).
  */
@@ -80,15 +82,26 @@ Deno.serve(async (req) => {
       return json({ error: "cannot_impersonate_privileged_user" }, 403);
     }
 
-    // 5. Busca perfil do alvo (email obrigatório)
+    // 5. Busca perfil do alvo (nome/ID visual para auditoria)
     const { data: targetProfile, error: profileErr } = await admin
       .from("profiles")
       .select("nome, email, user_id")
       .eq("id", targetId)
       .maybeSingle();
-    if (profileErr || !targetProfile?.email) {
+    if (profileErr || !targetProfile) {
       return json({ error: "target_profile_not_found" }, 404);
     }
+
+    // 5.1. Busca o email OFICIAL do Auth pelo UUID alvo.
+    // Não usar profiles.email aqui: esse campo pode estar desatualizado/alterado.
+    // Se usado, o Auth pode entender como outro email e criar uma conta nova.
+    const { data: targetAuthData, error: targetAuthErr } = await admin.auth.admin.getUserById(targetId);
+    const targetAuthUser = targetAuthData?.user;
+    if (targetAuthErr || !targetAuthUser?.email) {
+      return json({ error: "target_auth_user_not_found", detail: targetAuthErr?.message }, 404);
+    }
+
+    const targetAuthEmail = targetAuthUser.email;
 
     // 6. Busca dados do dev (para embutir no metadata)
     const { data: devProfile } = await admin
@@ -100,21 +113,12 @@ Deno.serve(async (req) => {
     const devName = devProfile?.nome ?? "Dev";
     const devUserId = devProfile?.user_id ?? "";
     const nowIso = new Date().toISOString();
+    const impersonationSessionId = crypto.randomUUID();
 
     // 7. Gera magiclink de uso único (não envia email — pegamos o token direto)
     const { data: linkData, error: linkErr } = await (admin.auth.admin as any).generateLink({
       type: "magiclink",
-      email: targetProfile.email,
-      options: {
-        // Esses campos vão para user_metadata da sessão gerada, permitindo
-        // que o client detecte que é uma sessão impersonada.
-        data: {
-          impersonated_by: callerId,
-          impersonated_by_name: devName,
-          impersonated_by_user_id: devUserId,
-          impersonated_at: nowIso,
-        },
-      },
+      email: targetAuthEmail,
     });
 
     if (linkErr || !linkData?.properties?.hashed_token) {
@@ -130,21 +134,29 @@ Deno.serve(async (req) => {
       metadata: {
         target_user_id: targetId,
         target_name: targetProfile.nome,
-        target_email: targetProfile.email,
+        target_email: targetAuthEmail,
+        target_profile_email: targetProfile.email,
         target_user_id_code: targetProfile.user_id,
         dev_name: devName,
         dev_user_id: devUserId,
+        impersonation_session_id: impersonationSessionId,
         at: nowIso,
       },
     });
 
-    // 9. Retorna token + email para o client consumir via verifyOtp
+    // 9. Retorna token + metadados visuais para o client consumir via verifyOtp.
+    // verifyOtp com token_hash NÃO deve receber email junto.
     return json({
       ok: true,
-      email: targetProfile.email,
+      email: targetAuthEmail,
       token_hash: hashedToken,
       target_name: targetProfile.nome,
       target_user_id_code: targetProfile.user_id,
+      dev_name: devName,
+      dev_user_id: devUserId,
+      dev_auth_user_id: callerId,
+      impersonation_session_id: impersonationSessionId,
+      impersonated_at: nowIso,
     }, 200);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
