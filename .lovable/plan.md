@@ -1,117 +1,52 @@
-# Plano: Bloqueio de Módulos + Controle de Uso
+## Diagnóstico
 
-Duas features novas no DevPanel, sem interferir na estratégia MiniMax (retomamos depois).
+Confirmei três problemas reais em "Módulos por Usuário":
 
----
+1. **Admin/dev nunca vê bloqueio nem aviso.** Em `Hub.tsx`, quando `isAdmin || isDeveloper`, o loader sobrescreve todos os módulos com `{ enabled: true, block_mode: "none", block_message: "" }`. Como o teste é feito pela própria conta admin/dev, nada aparece — daí a impressão de que "não faz nada".
+2. **Redundância entre toggle e popover.** Hoje `enabled` (toggle) e `block_mode` (popover) são independentes. Bloqueio pelo popover não desliga o toggle e vice-versa, causando estados contraditórios (ex.: `enabled=true` + `block_mode=blocked`).
+3. **Mensagem não aparece.** Além do item 1, no DB há linhas com `block_message` preenchida e `block_mode = NULL` (o save do popover pode ter sido feito com "Nenhum" ao reabrir, porque o `useEffect` reseta o estado local ao abrir). Sem `block_mode` definido, o Hub nunca entra no ramo que renderiza a mensagem.
 
-## Parte 1 — Bloqueio configurável por usuário/módulo
+## O que fazer
 
-### Banco
-Adicionar 2 colunas em `public.user_modules`:
-- `block_mode text` — `null` (sem aviso) | `'notice'` (só aviso) | `'blocked'` (aviso + impede entrada)
-- `block_message text` — texto custom exibido no card (ex.: "Em manutenção até 15/07")
+### 1. Integrar toggle ↔ popover (uma única fonte de verdade)
 
-Sem migração destrutiva; defaults `null`.
+Em `DevUserModules.tsx` e `BlockConfigPopover.tsx`:
 
-### DevPanel → "Módulos por Usuário"
-Estender `DevUserModules.tsx`:
-- Cada linha ganha, ao lado do switch de cada módulo, um botão "Bloqueio" que abre um popover com:
-  - Select: Nenhum / Só aviso / Bloquear acesso
-  - Textarea: mensagem custom (placeholder: "Em manutenção…")
-  - Botão Salvar
-- Indicador visual (badge amarelo/vermelho) quando bloqueio ativo.
+- Ao **salvar o popover**:
+  - `mode = "blocked"` → também gravar `enabled = false` no mesmo upsert.
+  - `mode = "notice"` ou `"none"` → também gravar `enabled = true` (usuário mantém acesso; "notice" é só aviso).
+- Ao **desligar o toggle** (`enabled=false`) e não haver `block_mode` explícito, gravar `block_mode = "blocked"` com uma mensagem padrão ("Acesso desabilitado pelo administrador.") apenas se `block_message` estiver vazia — assim o Hub mostra algo em vez de "Sem acesso" mudo.
+- Ao **ligar o toggle** (`enabled=true`), limpar `block_mode` para `null` e `block_message` para `null` (destrava tudo).
+- Atualizar o estado local (`setUsers`) após cada operação para refletir os dois campos simultaneamente.
 
-### Hub (usuário final)
-Em `src/pages/Hub.tsx`, ao carregar `user_modules`, trazer também `block_mode` e `block_message`. No card:
-- `notice`: mostra faixa amarela com a mensagem, card continua clicável.
-- `blocked`: mostra faixa vermelha com a mensagem, card desabilitado (não navega, ícone de cadeado).
-- Devs/admins ignoram bloqueio (mantém comportamento atual).
+Resultado: um único conceito visível ao dev — "Livre / Aviso / Bloqueado" — comandável tanto pelo toggle (atalho rápido) quanto pelo popover (refinado com mensagem).
 
----
+### 2. Popover: parar de perder seleção
 
-## Parte 2 — Nova página "Controle de Uso"
+- Substituir o `useEffect` que reseta `mode/message` toda vez que `open` muda por inicialização apenas na abertura (guardar snapshot em ref) — evita que reabrir sobrescreva escolha do usuário.
+- Desabilitar o botão "Salvar" quando `mode !== "none"` e `message.trim() === ""` (força mensagem quando há bloqueio/aviso, garantindo que sempre haja texto para exibir).
 
-Nova entrada no menu do DevPanel (`src/pages/DevPanel.tsx`) — ícone `BarChart3`, id `usage-control`, novo componente `DevUsageControl.tsx`.
+### 3. Corrigir bypass admin/dev no Hub
 
-### Estrutura
-Tabs: **Previdenciário** (completo) | **Trabalhista** (placeholder "Em breve").
+Em `Hub.tsx`, remover a sobrescrita que zera `block_mode`/`block_message` para admin/dev. Manter apenas: admin/dev **pode entrar** (canEnter=true) mesmo se bloqueado, mas **vê o badge e a mensagem** (com um selo "visível só para você" ou similar), para poder validar a configuração aplicada aos usuários finais.
 
-### Aba Previdenciário
+Implementação: separar "estado real" (vindo do DB) de "pode navegar" (admin/dev sempre true). Renderizar sempre o badge/mensagem a partir do estado real. Para admin/dev com card bloqueado/notice, mostrar um selinho pequeno "Preview admin" e manter o botão de acesso habilitado.
 
-**Topo — cards de KPI (compactos):**
-- Total de pautas do usuário
-- Total de PDFs upados
-- Total processados (pdf_processado=true)
-- Total pendentes/faltando
-- % de aproveitamento
+### 4. Hub: sempre renderizar mensagem quando presente
 
-**Filtros persistentes (nova tabela `dev_usage_filters` ou coluna JSON em `user_settings`):**
-- Combobox de usuário (lista de profiles)
-- Range de datas (created_at) — usar shadcn Calendar em modo range
-- Status da perícia (multi-select: aguardando/em_atendimento/concluído/faltou)
-- Processado sim/não
-- Toggle "só com PDF"
-- Busca por nome do periciado / número do processo
-- Botão "Limpar filtros"
+Ajustar a condição para renderizar `block_message` sempre que `block_message` estiver preenchida (independente do `block_mode`), com estilização por severidade. Isso protege contra linhas antigas onde `block_mode` ficou nulo.
 
-Persistência: chave por dev na coluna JSON. Restaurado ao abrir a página.
+### 5. Backfill leve dos dados existentes
 
-**Corpo — espelho da tela de Pautas do usuário selecionado:**
-Lista de pautas (accordion/collapsible) mostrando:
-- Nome da pauta, data, local, cidade/UF
-- Contagens: X perícias · Y PDFs upados · Z processados
+Uma pequena atualização para consertar as linhas onde `block_message IS NOT NULL AND block_mode IS NULL`: setar `block_mode = 'notice'` (mais conservador) para que a mensagem já salva volte a aparecer sem precisar reeditar.
 
-Ao expandir uma pauta → tabela de perícias:
-| Ordem | Periciado | Status | PDF upado? | Processado? | Criado em | Ações |
+## Fora do escopo
 
-Ações por linha:
-- **Baixar PDF original** (sempre que `pdf_path` existir) — reusa `dev-download-pdf` já existente com bucket `prev-pdfs`.
-- **Baixar Pré-Laudo DOCX** (se processado) — nova rota client-side que carrega `prelaudo_data` via edge function admin e chama `prelaudo-docx.ts`.
-- **Baixar Pré-Laudo PDF** — idem via `prelaudo-pdf.ts`.
+- Nenhuma mudança no MiniMax OCR, na página Controle de Uso, nem na estrutura da tabela `user_modules`. Só ajustes de UI/lógica e um UPDATE de conserto.
 
-### Aba Trabalhista
-Card grande com ícone e texto "Em breve — mesma estrutura será replicada para o módulo trabalhista."
+## Arquivos afetados
 
-### Edge Function nova: `dev-get-pericia-data`
-Necessária porque `prev_pericias` tem RLS por `user_id` e o dev não é o dono.
-- Valida `is_developer()`
-- Retorna `prelaudo_data`, `prev_extracao`, `periciado_nome` da perícia solicitada
-- Frontend usa para alimentar os exportadores existentes
-
-### Edge Function estendida: `dev-list-pdfs` → nova `dev-list-prev-usage`
-Ou nova função dedicada que retorna, dado um `user_id`:
-- Todas as pautas (`prev_pautas`) com contagens agregadas
-- Todas as perícias por pauta (`prev_pericias`) com todos os campos necessários (status, pdf_path, pdf_processado, created_at, periciado_nome, processo extraído de `prev_extracao`)
-
-Retorno único para a página inteira (evita N+1).
-
----
-
-## Detalhes técnicos
-
-**Arquivos novos:**
-- `src/components/dev-panel/DevUsageControl.tsx` (container com tabs)
-- `src/components/dev-panel/usage/PrevUsagePanel.tsx` (aba previdenciário)
-- `src/components/dev-panel/usage/PrevUsageFilters.tsx`
-- `src/components/dev-panel/usage/BlockConfigPopover.tsx` (Parte 1)
-- `supabase/functions/dev-list-prev-usage/index.ts`
-- `supabase/functions/dev-get-pericia-data/index.ts`
-
-**Arquivos editados:**
-- `src/pages/DevPanel.tsx` — adicionar tab "Controle de Uso"
-- `src/components/dev-panel/DevUserModules.tsx` — adicionar UI de bloqueio
-- `src/pages/Hub.tsx` — aplicar bloqueio/aviso nos cards
-- `supabase/config.toml` — registrar novas functions
-- Migração: 2 colunas em `user_modules` + 1 coluna JSON `dev_ui_prefs` em `user_settings` (ou tabela nova `dev_usage_filters`)
-
-**Padrões respeitados:**
-- Cores semânticas (teal/amber/red via tokens) — sem hardcode
-- RLS: todas as functions validam `is_developer()` via JWT (padrão de `dev-list-pdfs`)
-- Filtros persistentes via banco (escolha do usuário)
-- Reuso dos exportadores `prelaudo-docx.ts` / `prelaudo-pdf.ts` — nenhum retrabalho
-
-**Fora do escopo desta rodada:**
-- Trabalhista completo (fica "em breve")
-- Retomada do fluxo MiniMax OCR (próxima rodada, como acordado)
-
-Depois de aprovar, começo pela migração e pelas edge functions; a UI vem em seguida.
+- `src/components/dev-panel/DevUserModules.tsx` — toggle grava `block_mode`/`block_message` coerentes; recarrega estado após popover.
+- `src/components/dev-panel/usage/BlockConfigPopover.tsx` — save integrado com `enabled`; init sem reset em reabertura; validação de mensagem obrigatória.
+- `src/pages/Hub.tsx` — remover bypass que apaga bloqueio para admin/dev; renderizar mensagem sempre que houver; selo "Preview admin" quando aplicável.
+- 1 UPDATE (via ferramenta de dados) para backfill das linhas com mensagem órfã.
