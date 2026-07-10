@@ -257,8 +257,8 @@ export function DevUserModules() {
                               module={m}
                               currentMode={st.block_mode}
                               currentMessage={st.block_message}
-                              onSaved={(mode, msg) =>
-                                updateBlock(u.id, m, mode, msg)
+                              onSaved={(mode, msg, enabled) =>
+                                updateBlock(u.id, m, mode, msg, enabled)
                               }
                             />
                           </div>
