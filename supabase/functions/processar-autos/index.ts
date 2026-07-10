@@ -9,6 +9,7 @@ import { splitPDF, needsSplit } from "../_shared/pdf-splitter.ts";
 import { extractWithMistralOCR, getMistralAPIKey } from "../_shared/mistral-ocr.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
 import { buildModularImportPrompt, isValidSystemPrompt } from "../_shared/build-import-prompt.ts";
+import { notifyPdfErrorFireAndForget } from "../_shared/notify-pdf-error.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -3137,6 +3138,14 @@ async function processarPDFBackground(
     
     const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido no processamento';
     const errorStack = error instanceof Error ? error.stack : undefined;
+
+    notifyPdfErrorFireAndForget({
+      modulo: "Trabalhista",
+      errorMessage,
+      userId,
+      stage: "processamento",
+    });
+
     
     // Log error to backend_logs for visibility in DevPanel
     await logError('processar-autos', `Job falhou: ${errorMessage}`, jobId, {

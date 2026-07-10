@@ -13,10 +13,52 @@ export function usePresenceHeartbeat() {
   useEffect(() => {
     if (!user) return;
     mountedRef.current = true;
+    let loginChecked = false;
+
+    const checkAndNotifyLogin = async () => {
+      if (loginChecked) return;
+      loginChecked = true;
+      try {
+        // Última presença registrada
+        const { data: prev } = await (supabase.from("user_presence") as any)
+          .select("last_seen_at")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        const lastSeen = prev?.last_seen_at ? new Date(prev.last_seen_at).getTime() : 0;
+        const gapMs = Date.now() - lastSeen;
+
+        // Se nunca esteve online ou passou mais de 30 min inativo → nova sessão
+        if (!lastSeen || gapMs > 30 * 60 * 1000) {
+          const nome = (user.user_metadata as any)?.full_name
+            || (user.user_metadata as any)?.nome
+            || user.email
+            || "Usuário";
+
+          // Fire-and-forget: nunca bloqueia UX
+          supabase.functions.invoke("send-tracking-email", {
+            body: {
+              type: "login",
+              payload: { userId: user.id, userName: nome, userEmail: user.email ?? "" },
+            },
+          }).catch(() => {});
+
+          void (supabase.from("email_login_events") as any).insert({
+            user_id: user.id,
+            session_started_at: new Date().toISOString(),
+          }).then(() => {}, () => {});
+        }
+      } catch {
+        // ignora falha na deteccao de login
+      }
+    };
 
     const sendHeartbeat = async () => {
       if (!mountedRef.current) return;
       try {
+        // Checa login ANTES do upsert (para ler o valor anterior)
+        await checkAndNotifyLogin();
+
         const { error } = await (supabase.from("user_presence") as any).upsert(
           {
             user_id: user.id,

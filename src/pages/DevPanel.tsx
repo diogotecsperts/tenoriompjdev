@@ -18,7 +18,8 @@ import {
   MessageSquare,
   History,
   FileArchive,
-  BarChart3
+  BarChart3,
+  Mail
 } from "lucide-react";
 
 import { useNavigate } from "react-router-dom";
@@ -41,9 +42,10 @@ import { DevAccessHistory } from "@/components/dev-panel/DevAccessHistory";
 import { DevOriginalFiles } from "@/components/dev-panel/DevOriginalFiles";
 import { DevUserModules } from "@/components/dev-panel/DevUserModules";
 import { DevUsageControl } from "@/components/dev-panel/DevUsageControl";
+import { DevEmailTracking } from "@/components/dev-panel/DevEmailTracking";
 
 
-type DevTab = "dashboard" | "users" | "user-modules" | "usage-control" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "settings";
+type DevTab = "dashboard" | "users" | "user-modules" | "usage-control" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "email-tracking" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -67,6 +69,7 @@ const navItems: NavItem[] = [
   { id: "prompts", label: "DevPrompts", icon: MessageSquare },
   { id: "access-history", label: "Histórico de Acesso", icon: History },
   { id: "original-files", label: "Arquivos Originais", icon: FileArchive },
+  { id: "email-tracking", label: "Rastreamento via Email", icon: Mail },
   { id: "settings", label: "Configurações", icon: Settings },
 ];
 
@@ -117,6 +120,8 @@ export default function DevPanel() {
         return <DevAccessHistory />;
       case "original-files":
         return <DevOriginalFiles />;
+      case "email-tracking":
+        return <DevEmailTracking />;
       case "settings":
         return <DevSettings />;
       default:

@@ -124,6 +124,102 @@ export type Database = {
           },
         ]
       }
+      email_login_events: {
+        Row: {
+          id: string
+          notified_at: string
+          session_started_at: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          notified_at?: string
+          session_started_at?: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          notified_at?: string
+          session_started_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      email_tracking_config: {
+        Row: {
+          created_at: string
+          daily_summary_hour: number
+          daily_summary_minute: number
+          enabled: boolean
+          id: string
+          last_daily_sent_date: string | null
+          notify_daily_summary: boolean
+          notify_on_login: boolean
+          notify_on_pdf_error: boolean
+          recipient_emails: string[]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          daily_summary_hour?: number
+          daily_summary_minute?: number
+          enabled?: boolean
+          id?: string
+          last_daily_sent_date?: string | null
+          notify_daily_summary?: boolean
+          notify_on_login?: boolean
+          notify_on_pdf_error?: boolean
+          recipient_emails?: string[]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          daily_summary_hour?: number
+          daily_summary_minute?: number
+          enabled?: boolean
+          id?: string
+          last_daily_sent_date?: string | null
+          notify_daily_summary?: boolean
+          notify_on_login?: boolean
+          notify_on_pdf_error?: boolean
+          recipient_emails?: string[]
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      email_tracking_log: {
+        Row: {
+          error_message: string | null
+          id: string
+          metadata: Json | null
+          recipients: string[]
+          sent_at: string
+          status: string
+          subject: string | null
+          type: string
+        }
+        Insert: {
+          error_message?: string | null
+          id?: string
+          metadata?: Json | null
+          recipients?: string[]
+          sent_at?: string
+          status: string
+          subject?: string | null
+          type: string
+        }
+        Update: {
+          error_message?: string | null
+          id?: string
+          metadata?: Json | null
+          recipients?: string[]
+          sent_at?: string
+          status?: string
+          subject?: string | null
+          type?: string
+        }
+        Relationships: []
+      }
       error_logs: {
         Row: {
           component_stack: string | null

@@ -16,6 +16,7 @@ import { isMinimaxClientRasterizeError } from "../_shared/minimax-client.ts";
 import { getAIConfig, callAI } from "../_shared/ai-config.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
 import { classifyMistralError, isMistralError } from "./_mistral-errors.ts";
+import { notifyPdfErrorFireAndForget } from "../_shared/notify-pdf-error.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -582,6 +583,9 @@ Deno.serve(async (req: Request) => {
   const t0 = Date.now();
   console.log("[prev-pre-processar] start");
 
+  // Contexto para notificação de erro (populado ao longo do fluxo)
+  let notifyCtx: { userId?: string; periciadoNome?: string; pautaNome?: string } = {};
+
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
@@ -622,9 +626,22 @@ Deno.serve(async (req: Request) => {
     // 1) Carrega perícia
     const { data: pericia, error: perErr } = await admin
       .from("prev_pericias")
-      .select("id, user_id, pdf_path, pauta_id")
+      .select("id, user_id, pdf_path, pauta_id, periciado_nome")
       .eq("id", body.periciaId)
       .maybeSingle();
+
+    if (pericia) {
+      notifyCtx.userId = pericia.user_id;
+      notifyCtx.periciadoNome = (pericia as any).periciado_nome ?? "—";
+      try {
+        const { data: pauta } = await admin
+          .from("prev_pautas")
+          .select("nome_pauta")
+          .eq("id", pericia.pauta_id)
+          .maybeSingle();
+        notifyCtx.pautaNome = (pauta as any)?.nome_pauta ?? "";
+      } catch { /* ignore */ }
+    }
 
     if (perErr || !pericia) {
       return new Response(JSON.stringify({ error: "Perícia não encontrada" }), {
@@ -890,6 +907,16 @@ Deno.serve(async (req: Request) => {
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Erro desconhecido";
+
+    notifyPdfErrorFireAndForget({
+      modulo: "Previdenciário",
+      errorMessage: msg,
+      userId: notifyCtx.userId,
+      periciadoNome: notifyCtx.periciadoNome,
+      pautaNome: notifyCtx.pautaNome,
+      stage: isMistralError(msg) ? "ocr" : "processamento",
+    });
+
 
     // Classifica erros vindos da Mistral (OCR) para devolver mensagem específica
     if (isMistralError(msg)) {
