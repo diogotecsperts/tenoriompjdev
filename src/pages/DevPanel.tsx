@@ -89,6 +89,9 @@ export default function DevPanel() {
         return <DevUsersList />;
       case "user-modules":
         return <DevUserModules />;
+      case "usage-control":
+        return <DevUsageControl />;
+
       case "logs":
         return <DevLogs />;
       case "backend-logs":
