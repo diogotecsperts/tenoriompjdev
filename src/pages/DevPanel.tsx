@@ -58,6 +58,7 @@ const navItems: NavItem[] = [
   { id: "users", label: "Usuários", icon: Users },
   { id: "user-modules", label: "Módulos por Usuário", icon: LayoutDashboard },
   { id: "usage-control", label: "Controle de Uso", icon: BarChart3 },
+  { id: "email-tracking", label: "Rastreamento via Email", icon: Mail },
 
   { id: "logs", label: "AI Analytics", icon: FileText },
   { id: "backend-logs", label: "Servidor & Jobs", icon: Server },
@@ -69,7 +70,6 @@ const navItems: NavItem[] = [
   { id: "prompts", label: "DevPrompts", icon: MessageSquare },
   { id: "access-history", label: "Histórico de Acesso", icon: History },
   { id: "original-files", label: "Arquivos Originais", icon: FileArchive },
-  { id: "email-tracking", label: "Rastreamento via Email", icon: Mail },
   { id: "settings", label: "Configurações", icon: Settings },
 ];
 
