@@ -43,7 +43,7 @@ import { DevUserModules } from "@/components/dev-panel/DevUserModules";
 import { DevUsageControl } from "@/components/dev-panel/DevUsageControl";
 
 
-type DevTab = "dashboard" | "users" | "user-modules" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "settings";
+type DevTab = "dashboard" | "users" | "user-modules" | "usage-control" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "settings";
 
 interface NavItem {
   id: DevTab;
