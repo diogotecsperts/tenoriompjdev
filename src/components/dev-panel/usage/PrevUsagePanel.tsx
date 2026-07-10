@@ -543,7 +543,7 @@ export function PrevUsagePanel() {
     metaAbortRef.current = true;
   };
 
-  const loadAllVisibleMeta = async (force = false) => {
+  const loadAllVisibleMeta = async (force = false, concurrency = 1) => {
     const targets = filteredPericias.filter(
       (p) => p.pdf_path && (force || !pdfMeta.has(p.id)),
     );
@@ -557,17 +557,22 @@ export function PrevUsagePanel() {
     }
     metaAbortRef.current = false;
     setMetaProgress({ done: 0, total: targets.length });
-    // Import único do pdf-lib fora do loop.
     const pdfLib = await import("pdf-lib");
-    // Sequencial (concorrência 1) — evita OOM em navegador com PDFs pesados.
-    for (let i = 0; i < targets.length; i++) {
-      if (metaAbortRef.current) break;
-      const t = targets[i];
-      await loadOneMeta(t.id, t.pdf_path!, pdfLib);
-      setMetaProgress({ done: i + 1, total: targets.length });
-    }
+    const workers = Math.max(1, Math.min(concurrency, targets.length));
+    let cursor = 0;
+    let done = 0;
+    const runWorker = async () => {
+      while (!metaAbortRef.current) {
+        const idx = cursor++;
+        if (idx >= targets.length) break;
+        const t = targets[idx];
+        await loadOneMeta(t.id, t.pdf_path!, pdfLib);
+        done++;
+        setMetaProgress({ done, total: targets.length });
+      }
+    };
+    await Promise.all(Array.from({ length: workers }, () => runWorker()));
     metaAbortRef.current = false;
-    // mantém progresso final visível brevemente e limpa
     setTimeout(() => setMetaProgress(null), 800);
   };
 
