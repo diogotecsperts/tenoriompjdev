@@ -210,8 +210,12 @@ export function PrevUsagePanel() {
 
 
   useEffect(() => {
+    setPdfMeta(new Map());
+    setLoadingMetaIds(new Set());
+    setMetaProgress(null);
     if (filters.userId) loadUsage(filters.userId);
   }, [filters.userId, loadUsage]);
+
 
   // Realtime subscription: keep pautas + pericias in sync for the selected user
   useEffect(() => {
