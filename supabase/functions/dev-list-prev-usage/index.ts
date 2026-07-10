@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
         admin
           .from("prev_pericias")
           .select(
-            "id, pauta_id, ordem, status, periciado_nome, pdf_path, pdf_processado, prev_extracao, created_at, updated_at",
+            "id, pauta_id, ordem, status, periciado_nome, pdf_path, pdf_processado, pdf_size_bytes, pdf_pages, prev_extracao, created_at, updated_at",
           )
           .eq("user_id", userId)
           .order("ordem", { ascending: true }),
