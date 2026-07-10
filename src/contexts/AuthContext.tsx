@@ -70,7 +70,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Se a sessão for impersonada, registrar UMA vez em access_logs
       // com event_type='impersonation_login' — nunca 'login'.
-      const meta: any = session.user.user_metadata ?? {};
+      const storedImpersonationMeta = (() => {
+        if (typeof window === "undefined") return null;
+        try {
+          const raw = window.sessionStorage.getItem("lovable_impersonation_meta");
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      })();
+      const meta: any = {
+        ...(session.user.user_metadata ?? {}),
+        ...(storedImpersonationMeta ?? {}),
+      };
       if (meta.impersonated_by && impersonationLogInsertedRef.current !== session.user.id) {
         impersonationLogInsertedRef.current = session.user.id;
         (supabase.from("access_logs") as any).insert({
@@ -357,14 +369,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUserRole(null);
     // Se era aba de impersonation, limpa o flag e fecha a aba
     if (impersonating) {
-      window.sessionStorage.removeItem("lovable_impersonation_active");
+    window.sessionStorage.removeItem("lovable_impersonation_active");
+    window.sessionStorage.removeItem("lovable_impersonation_meta");
       // Tenta fechar; se o browser bloquear, cai para navigate
       window.close();
     }
     navigate("/");
   };
 
-  const impersonationMeta = (user?.user_metadata as any) ?? {};
+  const storedImpersonationMeta = (() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.sessionStorage.getItem("lovable_impersonation_meta");
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  })();
+  const impersonationMeta = {
+    ...((user?.user_metadata as any) ?? {}),
+    ...(storedImpersonationMeta ?? {}),
+  };
   const impersonatedBy: ImpersonationInfo | null = impersonationMeta.impersonated_by
     ? {
         byUserId: String(impersonationMeta.impersonated_by),
