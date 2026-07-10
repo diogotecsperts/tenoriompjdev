@@ -958,6 +958,17 @@ export function PrevUsagePanel() {
                   </Button>
                 );
               })()}
+              {metaProgress !== null && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-[11px] px-2 text-destructive hover:text-destructive"
+                  onClick={cancelMetaLoading}
+                  title="Cancelar carregamento de detalhes"
+                >
+                  <X className="h-3 w-3 mr-1" /> Cancelar
+                </Button>
+              )}
               <div
                 className={cn(
                   "inline-flex items-center gap-1.5 text-[11px] rounded-full px-2 py-0.5 border",
