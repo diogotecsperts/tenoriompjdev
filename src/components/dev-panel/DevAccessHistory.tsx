@@ -198,7 +198,7 @@ export function DevAccessHistory() {
                   const label = isImpersonationLogin
                     ? `${md.impersonated_by_name ?? "Dev"} entrou como ${getProfileName(log.user_id)}`
                     : isImpersonationStarted
-                      ? `${getProfileName(log.user_id)} entrou como ${md.target_name ?? getProfileName(md.target_user_id ?? "")}`
+                      ? `${getProfileName(log.user_id)} preparou acesso como ${md.target_name ?? getProfileName(md.target_user_id ?? "")}`
                       : getProfileName(log.user_id);
 
                   return (
@@ -225,7 +225,9 @@ export function DevAccessHistory() {
                       <TableCell>
                         <Badge variant="outline" className="text-xs">
                           {isImpersonation
-                            ? "dev_impersonation"
+                            ? isImpersonationStarted
+                              ? "token_preparado"
+                              : "sessão_aberta"
                             : md.method === "email"
                               ? "Email"
                               : "ID"}

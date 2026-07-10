@@ -70,7 +70,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Se a sessão for impersonada, registrar UMA vez em access_logs
       // com event_type='impersonation_login' — nunca 'login'.
-      const meta: any = session.user.user_metadata ?? {};
+      const storedImpersonationMeta = (() => {
+        if (typeof window === "undefined") return null;
+        try {
+          const raw = window.sessionStorage.getItem("lovable_impersonation_meta");
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      })();
+      const meta: any = {
+        ...(session.user.user_metadata ?? {}),
+        ...(storedImpersonationMeta ?? {}),
+      };
       if (meta.impersonated_by && impersonationLogInsertedRef.current !== session.user.id) {
         impersonationLogInsertedRef.current = session.user.id;
         (supabase.from("access_logs") as any).insert({
@@ -154,7 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const profileData = profileResult.data;
         // Sincronizar email se houver diferença entre Auth e profiles
-        if (session.user.email && profileData.email !== session.user.email) {
+        if (!meta.impersonated_by && session.user.email && profileData.email !== session.user.email) {
           // Atualizar no banco em background (não bloquear)
           supabase.from("profiles").update({ email: session.user.email }).eq("id", session.user.id);
           profileData.email = session.user.email;
@@ -343,7 +355,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Marcar offline ANTES do signOut (enquanto JWT ainda é válido)
     // Mas apenas se NÃO for sessão impersonada (não queremos mexer
     // no presence do cliente ao dev encerrar a impersonation).
-    const impersonating = !!(user?.user_metadata as any)?.impersonated_by;
+    const impersonating =
+      !!(user?.user_metadata as any)?.impersonated_by ||
+      (typeof window !== "undefined" &&
+        window.sessionStorage.getItem("lovable_impersonation_active") === "1");
     if (user && !impersonating) {
       await (supabase.from("user_presence") as any).update({
         is_online: false,
@@ -358,13 +373,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Se era aba de impersonation, limpa o flag e fecha a aba
     if (impersonating) {
       window.sessionStorage.removeItem("lovable_impersonation_active");
+      window.sessionStorage.removeItem("lovable_impersonation_meta");
       // Tenta fechar; se o browser bloquear, cai para navigate
       window.close();
     }
     navigate("/");
   };
 
-  const impersonationMeta = (user?.user_metadata as any) ?? {};
+  const storedImpersonationMeta = (() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.sessionStorage.getItem("lovable_impersonation_meta");
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  })();
+  const impersonationMeta = {
+    ...((user?.user_metadata as any) ?? {}),
+    ...(storedImpersonationMeta ?? {}),
+  };
   const impersonatedBy: ImpersonationInfo | null = impersonationMeta.impersonated_by
     ? {
         byUserId: String(impersonationMeta.impersonated_by),

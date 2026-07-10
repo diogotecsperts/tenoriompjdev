@@ -354,10 +354,15 @@ export function DevUsersList() {
         throw new Error(result.error || "Falha ao gerar sessão de impersonation");
       }
 
-      // Abre nova aba com o hash contendo token+email
+      // Abre nova aba com o hash contendo token + metadados de auditoria.
+      // Não enviamos email ao verifyOtp porque token_hash aceita só token_hash + type.
       const hash = new URLSearchParams({
         token: result.token_hash,
-        email: result.email,
+        dev_auth_user_id: result.dev_auth_user_id ?? "",
+        dev_name: result.dev_name ?? "Dev",
+        dev_user_id: result.dev_user_id ?? "",
+        sid: result.impersonation_session_id ?? "",
+        at: result.impersonated_at ?? "",
       }).toString();
       const url = `${window.location.origin}/impersonate#${hash}`;
       // noopener garante sessionStorage isolado na nova aba

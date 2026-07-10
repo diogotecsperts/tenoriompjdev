@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
  * Rota /impersonate
  *
  * Fluxo:
- *  1. DevPanel abre esta URL em nova aba com #token=<hash>&email=<...>
+ *  1. DevPanel abre esta URL em nova aba com #token=<hash>&dev_name=<...>
  *  2. Se ainda NÃO está em modo "sessionStorage", ativa o flag e recarrega
  *     (o client.ts, ao carregar de novo, passa a persistir a sessão em
  *     sessionStorage — isolado por aba).
@@ -25,15 +25,14 @@ export default function Impersonate() {
   useEffect(() => {
     (async () => {
       try {
-        // Ler token/email do hash (mais seguro que query, não vai em referer)
+        // Ler dados do hash (mais seguro que query, não vai em referer)
         const hash = window.location.hash.startsWith("#")
           ? window.location.hash.slice(1)
           : window.location.hash;
         const params = new URLSearchParams(hash);
         const tokenHash = params.get("token");
-        const email = params.get("email");
 
-        if (!tokenHash || !email) {
+        if (!tokenHash) {
           setStatus("error");
           setErrorMsg("Token de impersonation ausente ou inválido.");
           return;
@@ -51,6 +50,20 @@ export default function Impersonate() {
 
         setStatus("exchanging");
 
+        // Precisa existir ANTES do verifyOtp: o auth listener dispara durante
+        // verifyOtp e o AuthContext usa estes dados para não tratar como login normal.
+        const impersonationMeta = {
+          impersonated_by: params.get("dev_auth_user_id") ?? "",
+          impersonated_by_name: params.get("dev_name") ?? "Dev",
+          impersonated_by_user_id: params.get("dev_user_id") ?? "",
+          impersonated_at: params.get("at") ?? new Date().toISOString(),
+          impersonation_session_id: params.get("sid") ?? "",
+        };
+        window.sessionStorage.setItem(
+          "lovable_impersonation_meta",
+          JSON.stringify(impersonationMeta)
+        );
+
         // Import dinâmico para garantir que o client.ts já foi avaliado
         // com o flag ativo (sessionStorage no lugar de localStorage).
         const { supabase } = await import("@/integrations/supabase/client");
@@ -58,10 +71,10 @@ export default function Impersonate() {
         const { data, error } = await supabase.auth.verifyOtp({
           type: "magiclink",
           token_hash: tokenHash,
-          email,
         });
 
         if (error || !data.session) {
+          window.sessionStorage.removeItem("lovable_impersonation_meta");
           setStatus("error");
           setErrorMsg(error?.message ?? "Falha ao consumir token de impersonation.");
           return;
@@ -72,6 +85,7 @@ export default function Impersonate() {
         // Vai para o hub — daqui o AuthContext detecta a sessão impersonada
         navigate("/hub", { replace: true });
       } catch (err) {
+        window.sessionStorage.removeItem("lovable_impersonation_meta");
         setStatus("error");
         setErrorMsg(err instanceof Error ? err.message : String(err));
       }
@@ -91,6 +105,7 @@ export default function Impersonate() {
               variant="outline"
               onClick={() => {
                 window.sessionStorage.removeItem("lovable_impersonation_active");
+                window.sessionStorage.removeItem("lovable_impersonation_meta");
                 window.close();
               }}
             >
