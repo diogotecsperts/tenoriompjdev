@@ -47,7 +47,10 @@ import {
   X,
   Loader2,
   Search,
+  Gauge,
+  RefreshCw,
 } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -121,6 +124,15 @@ export function PrevUsagePanel() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [userSearch, setUserSearch] = useState("");
   const [liveConnected, setLiveConnected] = useState(false);
+  const [pdfMeta, setPdfMeta] = useState<
+    Map<string, { size: number; pages: number | null }>
+  >(new Map());
+  const [loadingMetaIds, setLoadingMetaIds] = useState<Set<string>>(new Set());
+  const [metaProgress, setMetaProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+
 
   // Load profiles + persisted filters
   useEffect(() => {
@@ -198,8 +210,12 @@ export function PrevUsagePanel() {
 
 
   useEffect(() => {
+    setPdfMeta(new Map());
+    setLoadingMetaIds(new Set());
+    setMetaProgress(null);
     if (filters.userId) loadUsage(filters.userId);
   }, [filters.userId, loadUsage]);
+
 
   // Realtime subscription: keep pautas + pericias in sync for the selected user
   useEffect(() => {
@@ -292,13 +308,30 @@ export function PrevUsagePanel() {
                   : p,
               ),
             );
+            // Invalida cache de meta se o pdf_path mudou
+            const oldPath = (payload.old as any)?.pdf_path;
+            if (oldPath && oldPath !== row.pdf_path) {
+              setPdfMeta((prev) => {
+                if (!prev.has(row.id)) return prev;
+                const next = new Map(prev);
+                next.delete(row.id);
+                return next;
+              });
+            }
             // Heavy fields like prelaudo_data updated: schedule a full reload
             // in case downloads need the fresh copy on cache
             scheduleReload();
           } else if (payload.eventType === "DELETE") {
             const oldRow = payload.old as { id: string };
             setPericias((prev) => prev.filter((p) => p.id !== oldRow.id));
+            setPdfMeta((prev) => {
+              if (!prev.has(oldRow.id)) return prev;
+              const next = new Map(prev);
+              next.delete(oldRow.id);
+              return next;
+            });
           }
+
         },
       )
       .subscribe((status) => {
@@ -371,8 +404,110 @@ export function PrevUsagePanel() {
 
   const selectedUser = users.find((u) => u.id === filters.userId);
 
+  // ------- PDF metadata (tamanho + páginas), carregamento sob demanda -------
+  const formatSize = (bytes: number) => {
+    if (!bytes || bytes < 0) return "—";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    const mb = bytes / (1024 * 1024);
+    return `${mb >= 10 ? Math.round(mb) : mb.toFixed(1)} MB`;
+  };
+
+  const loadOneMeta = async (periciaId: string, path: string) => {
+    setLoadingMetaIds((prev) => {
+      const next = new Set(prev);
+      next.add(periciaId);
+      return next;
+    });
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "dev-download-pdf",
+        { body: { file_path: path, bucket: "prev-pdfs" } },
+      );
+      if (error) throw error;
+      const url = (data as any)?.url;
+      if (!url) throw new Error("URL não retornada");
+
+      // 1) HEAD para size (barato)
+      let size = 0;
+      try {
+        const head = await fetch(url, { method: "HEAD" });
+        size = Number(head.headers.get("content-length") ?? 0);
+      } catch {}
+
+      // Salva parcial imediatamente
+      setPdfMeta((prev) => {
+        const next = new Map(prev);
+        next.set(periciaId, { size, pages: null });
+        return next;
+      });
+
+      // 2) GET + pdf-lib para páginas
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const buf = await resp.arrayBuffer();
+        if (!size) size = buf.byteLength;
+        const { PDFDocument } = await import("pdf-lib");
+        const doc = await PDFDocument.load(buf, {
+          updateMetadata: false,
+          ignoreEncryption: true,
+        });
+        const pages = doc.getPageCount();
+        setPdfMeta((prev) => {
+          const next = new Map(prev);
+          next.set(periciaId, { size, pages });
+          return next;
+        });
+      } catch {
+        // mantém entrada parcial (só size)
+      }
+    } catch {
+      // silencioso — badge simplesmente não aparece
+    } finally {
+      setLoadingMetaIds((prev) => {
+        const next = new Set(prev);
+        next.delete(periciaId);
+        return next;
+      });
+    }
+  };
+
+  const loadAllVisibleMeta = async (force = false) => {
+    const targets = filteredPericias.filter(
+      (p) => p.pdf_path && (force || !pdfMeta.has(p.id)),
+    );
+    if (targets.length === 0) return;
+    if (force) {
+      setPdfMeta((prev) => {
+        const next = new Map(prev);
+        targets.forEach((t) => next.delete(t.id));
+        return next;
+      });
+    }
+    setMetaProgress({ done: 0, total: targets.length });
+    const CONCURRENCY = 4;
+    let idx = 0;
+    let done = 0;
+    const worker = async () => {
+      while (idx < targets.length) {
+        const my = idx++;
+        const t = targets[my];
+        await loadOneMeta(t.id, t.pdf_path!);
+        done++;
+        setMetaProgress({ done, total: targets.length });
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker),
+    );
+    // mantém progresso final visível brevemente e limpa
+    setTimeout(() => setMetaProgress(null), 800);
+  };
+
   // Downloads
   const downloadOriginal = async (path: string, suggestedName?: string) => {
+
     setDownloadingId(path);
     try {
       const { data, error } = await supabase.functions.invoke(
@@ -715,33 +850,77 @@ export function PrevUsagePanel() {
               {selectedUser?.nome}
               {selectedUser?.user_id ? ` · ${selectedUser.user_id}` : ""}
             </div>
-            <div
-              className={cn(
-                "inline-flex items-center gap-1.5 text-[11px] rounded-full px-2 py-0.5 border",
-                liveConnected
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                  : "bg-muted text-muted-foreground border-border",
-              )}
-              title={
-                liveConnected
-                  ? "Recebendo atualizações em tempo real"
-                  : "Conexão em tempo real inativa"
-              }
-            >
-              <span className="relative flex h-2 w-2">
-                {liveConnected && (
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <div className="flex items-center gap-2">
+              {(() => {
+                const pdfCount = filteredPericias.filter((p) => p.pdf_path).length;
+                const loadedCount = filteredPericias.filter(
+                  (p) => p.pdf_path && pdfMeta.has(p.id),
+                ).length;
+                const isLoading = metaProgress !== null;
+                const allLoaded = pdfCount > 0 && loadedCount === pdfCount;
+                return (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-[11px] gap-1.5 px-2"
+                    disabled={pdfCount === 0 || isLoading}
+                    onClick={() => loadAllVisibleMeta(allLoaded)}
+                    title={
+                      pdfCount === 0
+                        ? "Nenhum PDF disponível na visão atual"
+                        : allLoaded
+                          ? "Recarregar tamanho e páginas"
+                          : "Buscar tamanho e nº de páginas dos PDFs visíveis"
+                    }
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Analisando {metaProgress!.done}/{metaProgress!.total}
+                      </>
+                    ) : allLoaded ? (
+                      <>
+                        <RefreshCw className="h-3 w-3" />
+                        Atualizar detalhes
+                      </>
+                    ) : (
+                      <>
+                        <Gauge className="h-3 w-3" />
+                        Carregar tamanho/páginas
+                      </>
+                    )}
+                  </Button>
+                );
+              })()}
+              <div
+                className={cn(
+                  "inline-flex items-center gap-1.5 text-[11px] rounded-full px-2 py-0.5 border",
+                  liveConnected
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : "bg-muted text-muted-foreground border-border",
                 )}
-                <span
-                  className={cn(
-                    "relative inline-flex rounded-full h-2 w-2",
-                    liveConnected ? "bg-emerald-500" : "bg-muted-foreground/50",
+                title={
+                  liveConnected
+                    ? "Recebendo atualizações em tempo real"
+                    : "Conexão em tempo real inativa"
+                }
+              >
+                <span className="relative flex h-2 w-2">
+                  {liveConnected && (
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                   )}
-                />
-              </span>
-              {liveConnected ? "ao vivo" : "offline"}
+                  <span
+                    className={cn(
+                      "relative inline-flex rounded-full h-2 w-2",
+                      liveConnected ? "bg-emerald-500" : "bg-muted-foreground/50",
+                    )}
+                  />
+                </span>
+                {liveConnected ? "ao vivo" : "offline"}
+              </div>
             </div>
           </div>
+
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <KpiCard icon={Users} label="Pautas" value={kpis.totalPautas} />
             <KpiCard icon={FileText} label="Perícias" value={kpis.totalPericias} />
@@ -872,8 +1051,32 @@ export function PrevUsagePanel() {
                               {format(new Date(p.created_at), "dd/MM/yy HH:mm")}
                             </TableCell>
                             <TableCell className="text-right">
-                              <div className="flex justify-end gap-1">
+                              <div className="flex justify-end items-center gap-1.5">
+                                {p.pdf_path && (() => {
+                                  const meta = pdfMeta.get(p.id);
+                                  const isLoading = loadingMetaIds.has(p.id);
+                                  if (isLoading) {
+                                    return (
+                                      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground font-mono px-1.5 py-0.5 rounded border border-dashed border-border">
+                                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                                      </span>
+                                    );
+                                  }
+                                  if (!meta) return null;
+                                  const parts = [formatSize(meta.size)];
+                                  if (meta.pages != null)
+                                    parts.push(`${meta.pages} pgs`);
+                                  return (
+                                    <span
+                                      className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded border border-border/60 bg-muted/40 whitespace-nowrap"
+                                      title="Tamanho do PDF · nº de páginas"
+                                    >
+                                      {parts.join(" · ")}
+                                    </span>
+                                  );
+                                })()}
                                 {p.pdf_path && (
+
                                   <Button
                                     size="sm"
                                     variant="ghost"
