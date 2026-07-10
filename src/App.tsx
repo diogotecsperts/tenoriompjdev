@@ -13,6 +13,7 @@ import { ModuleProtectedRoute } from "@/components/ModuleProtectedRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GlobalErrorListener } from "@/components/GlobalErrorListener";
+import { ImpersonationBanner } from "@/components/ImpersonationBanner";
 import Login from "./pages/Login";
 import Hub from "./pages/Hub";
 import Dashboard from "./pages/Dashboard";
