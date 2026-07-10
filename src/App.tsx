@@ -180,6 +180,7 @@ const App = () => (
             <AuthProvider>
               <LaudoProvider>
                 <NavigationGuardProvider>
+                  <ImpersonationBanner />
                   <AppRoutes />
                 </NavigationGuardProvider>
               </LaudoProvider>
