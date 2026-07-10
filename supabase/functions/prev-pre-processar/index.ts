@@ -583,6 +583,9 @@ Deno.serve(async (req: Request) => {
   const t0 = Date.now();
   console.log("[prev-pre-processar] start");
 
+  // Contexto para notificação de erro (populado ao longo do fluxo)
+  let notifyCtx: { userId?: string; periciadoNome?: string; pautaNome?: string } = {};
+
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
