@@ -78,6 +78,7 @@ export default function PautaList() {
   const [loading, setLoading] = useState(true);
   const [pautas, setPautas] = useState<PrevPauta[]>([]);
   const [novaOpen, setNovaOpen] = useState(false);
+  const [editando, setEditando] = useState<PrevPauta | null>(null);
   const [sortBy, setSortBy] = useState<SortKey>(loadInitialSort);
 
   useEffect(() => {
