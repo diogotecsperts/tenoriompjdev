@@ -158,6 +158,8 @@ export function PrevUsagePanel() {
         if (stored && typeof stored === "object") {
           setFilters({ ...DEFAULT_FILTERS, ...stored });
         }
+        const conc = settings?.dev_ui_prefs?.prevUsageMetaConcurrency;
+        if (conc === 1 || conc === 2) setMetaConcurrency(conc);
       }
       setPrefsLoaded(true);
     })();
