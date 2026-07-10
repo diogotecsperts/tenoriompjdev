@@ -661,23 +661,57 @@ export function PrevUsagePanel() {
 
       {/* KPI cards */}
       {filters.userId && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <KpiCard icon={Users} label="Pautas" value={kpis.totalPautas} />
-          <KpiCard icon={FileText} label="Perícias" value={kpis.totalPericias} />
-          <KpiCard icon={Download} label="PDFs upados" value={kpis.totalPdfs} />
-          <KpiCard
-            icon={CheckCircle2}
-            label="Processados"
-            value={kpis.totalProc}
-            tone="success"
-          />
-          <KpiCard
-            icon={Percent}
-            label="Aproveitamento"
-            value={`${kpis.pct}%`}
-            tone="info"
-          />
-        </div>
+        <>
+          <div className="flex items-center justify-between px-1">
+            <div className="text-xs text-muted-foreground">
+              {selectedUser?.nome}
+              {selectedUser?.user_id ? ` · ${selectedUser.user_id}` : ""}
+            </div>
+            <div
+              className={cn(
+                "inline-flex items-center gap-1.5 text-[11px] rounded-full px-2 py-0.5 border",
+                liveConnected
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                  : "bg-muted text-muted-foreground border-border",
+              )}
+              title={
+                liveConnected
+                  ? "Recebendo atualizações em tempo real"
+                  : "Conexão em tempo real inativa"
+              }
+            >
+              <span className="relative flex h-2 w-2">
+                {liveConnected && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                )}
+                <span
+                  className={cn(
+                    "relative inline-flex rounded-full h-2 w-2",
+                    liveConnected ? "bg-emerald-500" : "bg-muted-foreground/50",
+                  )}
+                />
+              </span>
+              {liveConnected ? "ao vivo" : "offline"}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <KpiCard icon={Users} label="Pautas" value={kpis.totalPautas} />
+            <KpiCard icon={FileText} label="Perícias" value={kpis.totalPericias} />
+            <KpiCard icon={Download} label="PDFs upados" value={kpis.totalPdfs} />
+            <KpiCard
+              icon={CheckCircle2}
+              label="Processados"
+              value={kpis.totalProc}
+              tone="success"
+            />
+            <KpiCard
+              icon={Percent}
+              label="Aproveitamento"
+              value={`${kpis.pct}%`}
+              tone="info"
+            />
+          </div>
+        </>
       )}
 
       {/* Corpo */}
