@@ -75,12 +75,12 @@ export default function Hub() {
           block_message: m.block_message ?? "",
         };
       });
-      // Admin/dev: liberar todos e ignorar bloqueio
-      if (isAdmin || dev === true) {
-        MODULES.forEach((m) => {
-          map[m.id] = { enabled: true, block_mode: "none", block_message: "" };
-        });
-      }
+      // Ensure both modules exist in the map so admin/dev bypass works uniformly
+      MODULES.forEach((m) => {
+        if (!map[m.id]) {
+          map[m.id] = { enabled: false, block_mode: "none", block_message: "" };
+        }
+      });
       setAccess(map);
       setIsDeveloper(dev === true);
       setLoading(false);
