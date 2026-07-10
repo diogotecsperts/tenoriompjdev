@@ -3139,10 +3139,24 @@ async function processarPDFBackground(
     const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido no processamento';
     const errorStack = error instanceof Error ? error.stack : undefined;
 
+    // Enriquecer contexto do alerta buscando dados do job
+    let jobFileName = "";
+    try {
+      const { data: jobRow } = await supabaseAdmin
+        .from('import_jobs')
+        .select('file_path')
+        .eq('id', jobId)
+        .maybeSingle();
+      const fp = (jobRow as any)?.file_path as string | undefined;
+      if (fp) jobFileName = fp.split('/').pop() ?? fp;
+    } catch { /* ignora */ }
+
     notifyPdfErrorFireAndForget({
       modulo: "Trabalhista",
       errorMessage,
       userId,
+      periciadoNome: jobFileName || `Job ${jobId.slice(0, 8)}`,
+      processo: jobId,
       stage: "processamento",
     });
 
