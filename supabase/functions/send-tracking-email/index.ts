@@ -495,6 +495,12 @@ Deno.serve(async (req: Request) => {
       case "login":
         built = buildLoginEmail(p);
         break;
+      case "impersonation_login":
+        // Sempre enviado (respeita apenas o toggle global 'enabled').
+        // Não pode ser silenciado pelo notify_on_login, para garantir
+        // auditoria toda vez que um dev entrar como cliente.
+        built = buildImpersonationLoginEmail(p);
+        break;
       case "pdf_error":
         built = buildPdfErrorEmail(p);
         break;
