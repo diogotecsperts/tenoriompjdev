@@ -120,6 +120,7 @@ export function PrevUsagePanel() {
   const [loadingUsage, setLoadingUsage] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [userSearch, setUserSearch] = useState("");
+  const [liveConnected, setLiveConnected] = useState(false);
 
   // Load profiles + persisted filters
   useEffect(() => {
