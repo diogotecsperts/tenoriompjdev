@@ -45,10 +45,16 @@ const MODULES: ModuleCard[] = [
   },
 ];
 
+interface ModuleAccess {
+  enabled: boolean;
+  block_mode: "none" | "notice" | "blocked";
+  block_message: string;
+}
+
 export default function Hub() {
   const { profile, user, logout, isAdmin } = useAuth();
   const navigate = useNavigate();
-  const [allowed, setAllowed] = useState<Set<string>>(new Set());
+  const [access, setAccess] = useState<Record<string, ModuleAccess>>({});
   const [loading, setLoading] = useState(true);
   const [isDeveloper, setIsDeveloper] = useState(false);
 
@@ -57,22 +63,31 @@ export default function Hub() {
       if (!user) return;
       const [{ data: mods }, { data: dev }] = await Promise.all([
         (supabase.from as any)("user_modules")
-          .select("module, enabled")
-          .eq("user_id", user.id)
-          .eq("enabled", true),
+          .select("module, enabled, block_mode, block_message")
+          .eq("user_id", user.id),
         supabase.rpc("is_developer"),
       ]);
-      const set = new Set<string>((mods ?? []).map((m: any) => m.module));
-      // Admin/dev: liberar todos para navegar (ainda assim respeitando módulos)
+      const map: Record<string, ModuleAccess> = {};
+      (mods ?? []).forEach((m: any) => {
+        map[m.module] = {
+          enabled: !!m.enabled,
+          block_mode: (m.block_mode as ModuleAccess["block_mode"]) ?? "none",
+          block_message: m.block_message ?? "",
+        };
+      });
+      // Admin/dev: liberar todos e ignorar bloqueio
       if (isAdmin || dev === true) {
-        MODULES.forEach((m) => set.add(m.id));
+        MODULES.forEach((m) => {
+          map[m.id] = { enabled: true, block_mode: "none", block_message: "" };
+        });
       }
-      setAllowed(set);
+      setAccess(map);
       setIsDeveloper(dev === true);
       setLoading(false);
     };
     load();
   }, [user, isAdmin]);
+
 
   const initials = profile?.nome
     ? profile.nome.split(" ").map((n) => n[0]).join("").substring(0, 2).toUpperCase()
