@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -82,6 +82,8 @@ interface Pericia {
   periciado_nome: string | null;
   pdf_path: string | null;
   pdf_processado: boolean;
+  pdf_size_bytes: number | null;
+  pdf_pages: number | null;
   processo_numero: string | null;
   created_at: string;
 }
@@ -132,6 +134,7 @@ export function PrevUsagePanel() {
     done: number;
     total: number;
   } | null>(null);
+  const metaAbortRef = useRef(false);
 
 
   // Load profiles + persisted filters
@@ -216,6 +219,27 @@ export function PrevUsagePanel() {
     if (filters.userId) loadUsage(filters.userId);
   }, [filters.userId, loadUsage]);
 
+  // Hidrata pdfMeta a partir dos campos persistidos no banco (pdf_size_bytes/pdf_pages).
+  // Assim, ao mudar de aba/recarregar, os badges aparecem instantaneamente sem re-fetch.
+  useEffect(() => {
+    setPdfMeta((prev) => {
+      const next = new Map(prev);
+      let changed = false;
+      for (const p of pericias) {
+        if (!p.pdf_path) continue;
+        if (p.pdf_size_bytes == null) continue;
+        const existing = next.get(p.id);
+        const size = Number(p.pdf_size_bytes);
+        const pages = p.pdf_pages ?? null;
+        if (!existing || existing.size !== size || existing.pages !== pages) {
+          next.set(p.id, { size, pages });
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [pericias]);
+
 
   // Realtime subscription: keep pautas + pericias in sync for the selected user
   useEffect(() => {
@@ -284,6 +308,8 @@ export function PrevUsagePanel() {
                   periciado_nome: row.periciado_nome,
                   pdf_path: row.pdf_path,
                   pdf_processado: !!row.pdf_processado,
+                  pdf_size_bytes: row.pdf_size_bytes ?? null,
+                  pdf_pages: row.pdf_pages ?? null,
                   processo_numero:
                     row.prev_extracao?.identificacao?.numero_processo ?? null,
                   created_at: row.created_at,
@@ -301,6 +327,8 @@ export function PrevUsagePanel() {
                       periciado_nome: row.periciado_nome,
                       pdf_path: row.pdf_path,
                       pdf_processado: !!row.pdf_processado,
+                      pdf_size_bytes: row.pdf_size_bytes ?? null,
+                      pdf_pages: row.pdf_pages ?? null,
                       processo_numero:
                         row.prev_extracao?.identificacao?.numero_processo ??
                         p.processo_numero,
@@ -317,6 +345,10 @@ export function PrevUsagePanel() {
                 next.delete(row.id);
                 return next;
               });
+              // Zera colunas persistidas para forçar recontagem sob demanda
+              (supabase.from as any)("prev_pericias")
+                .update({ pdf_size_bytes: null, pdf_pages: null })
+                .eq("id", row.id);
             }
             // Heavy fields like prelaudo_data updated: schedule a full reload
             // in case downloads need the fresh copy on cache
@@ -413,12 +445,39 @@ export function PrevUsagePanel() {
     return `${mb >= 10 ? Math.round(mb) : mb.toFixed(1)} MB`;
   };
 
-  const loadOneMeta = async (periciaId: string, path: string) => {
+  // PDFs acima deste tamanho: só medimos bytes (HEAD), sem baixar/contar páginas.
+  // Evita OOM ao carregar arquivos gigantes de perícia (>80MB).
+  const MAX_BYTES_FOR_PAGECOUNT = 80 * 1024 * 1024;
+
+  const persistMeta = async (
+    periciaId: string,
+    size: number | null,
+    pages: number | null,
+  ) => {
+    try {
+      await (supabase.from as any)("prev_pericias")
+        .update({
+          pdf_size_bytes: size,
+          pdf_pages: pages,
+        })
+        .eq("id", periciaId);
+    } catch {
+      // silencioso — cache em memória segue funcionando
+    }
+  };
+
+  const loadOneMeta = async (
+    periciaId: string,
+    path: string,
+    pdfLib: typeof import("pdf-lib"),
+  ) => {
     setLoadingMetaIds((prev) => {
       const next = new Set(prev);
       next.add(periciaId);
       return next;
     });
+    let size = 0;
+    let pages: number | null = null;
     try {
       const { data, error } = await supabase.functions.invoke(
         "dev-download-pdf",
@@ -428,39 +487,46 @@ export function PrevUsagePanel() {
       const url = (data as any)?.url;
       if (!url) throw new Error("URL não retornada");
 
-      // 1) HEAD para size (barato)
-      let size = 0;
+      // 1) HEAD para tamanho (barato — só headers).
       try {
         const head = await fetch(url, { method: "HEAD" });
         size = Number(head.headers.get("content-length") ?? 0);
-      } catch {}
+      } catch {
+        /* mantém 0 */
+      }
 
-      // Salva parcial imediatamente
-      setPdfMeta((prev) => {
-        const next = new Map(prev);
-        next.set(periciaId, { size, pages: null });
-        return next;
-      });
-
-      // 2) GET + pdf-lib para páginas
-      try {
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const buf = await resp.arrayBuffer();
-        if (!size) size = buf.byteLength;
-        const { PDFDocument } = await import("pdf-lib");
-        const doc = await PDFDocument.load(buf, {
-          updateMetadata: false,
-          ignoreEncryption: true,
-        });
-        const pages = doc.getPageCount();
+      // Salva parcial imediatamente (cache em memória + banco).
+      if (size > 0) {
         setPdfMeta((prev) => {
           const next = new Map(prev);
-          next.set(periciaId, { size, pages });
+          next.set(periciaId, { size, pages: null });
           return next;
         });
-      } catch {
-        // mantém entrada parcial (só size)
+        void persistMeta(periciaId, size, null);
+      }
+
+      // 2) Se o arquivo não for gigante, baixa e conta páginas.
+      if (size > 0 && size <= MAX_BYTES_FOR_PAGECOUNT) {
+        try {
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          let buf: ArrayBuffer | null = await resp.arrayBuffer();
+          const doc = await pdfLib.PDFDocument.load(buf, {
+            updateMetadata: false,
+            ignoreEncryption: true,
+          });
+          pages = doc.getPageCount();
+          // libera o buffer imediatamente antes do próximo item
+          buf = null;
+          setPdfMeta((prev) => {
+            const next = new Map(prev);
+            next.set(periciaId, { size, pages });
+            return next;
+          });
+          void persistMeta(periciaId, size, pages);
+        } catch {
+          // mantém entrada parcial (só size)
+        }
       }
     } catch {
       // silencioso — badge simplesmente não aparece
@@ -471,6 +537,10 @@ export function PrevUsagePanel() {
         return next;
       });
     }
+  };
+
+  const cancelMetaLoading = () => {
+    metaAbortRef.current = true;
   };
 
   const loadAllVisibleMeta = async (force = false) => {
@@ -485,22 +555,18 @@ export function PrevUsagePanel() {
         return next;
       });
     }
+    metaAbortRef.current = false;
     setMetaProgress({ done: 0, total: targets.length });
-    const CONCURRENCY = 4;
-    let idx = 0;
-    let done = 0;
-    const worker = async () => {
-      while (idx < targets.length) {
-        const my = idx++;
-        const t = targets[my];
-        await loadOneMeta(t.id, t.pdf_path!);
-        done++;
-        setMetaProgress({ done, total: targets.length });
-      }
-    };
-    await Promise.all(
-      Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker),
-    );
+    // Import único do pdf-lib fora do loop.
+    const pdfLib = await import("pdf-lib");
+    // Sequencial (concorrência 1) — evita OOM em navegador com PDFs pesados.
+    for (let i = 0; i < targets.length; i++) {
+      if (metaAbortRef.current) break;
+      const t = targets[i];
+      await loadOneMeta(t.id, t.pdf_path!, pdfLib);
+      setMetaProgress({ done: i + 1, total: targets.length });
+    }
+    metaAbortRef.current = false;
     // mantém progresso final visível brevemente e limpa
     setTimeout(() => setMetaProgress(null), 800);
   };
@@ -892,6 +958,17 @@ export function PrevUsagePanel() {
                   </Button>
                 );
               })()}
+              {metaProgress !== null && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-[11px] px-2 text-destructive hover:text-destructive"
+                  onClick={cancelMetaLoading}
+                  title="Cancelar carregamento de detalhes"
+                >
+                  <X className="h-3 w-3 mr-1" /> Cancelar
+                </Button>
+              )}
               <div
                 className={cn(
                   "inline-flex items-center gap-1.5 text-[11px] rounded-full px-2 py-0.5 border",
