@@ -14,17 +14,33 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
 import { Search, Layers } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import {
+  BlockConfigPopover,
+  type BlockMode,
+} from "./usage/BlockConfigPopover";
 
 type AppModule = "trabalhista" | "previdenciario";
 const ALL_MODULES: AppModule[] = ["trabalhista", "previdenciario"];
+
+interface ModuleState {
+  enabled: boolean;
+  block_mode: BlockMode;
+  block_message: string;
+}
 
 interface UserRow {
   id: string;
   nome: string;
   email: string;
   user_id: string | null;
-  modules: Record<AppModule, boolean>;
+  modules: Record<AppModule, ModuleState>;
 }
+
+const defaultModuleState = (): ModuleState => ({
+  enabled: false,
+  block_mode: "none",
+  block_message: "",
+});
 
 export function DevUserModules() {
   const [loading, setLoading] = useState(true);
@@ -35,15 +51,24 @@ export function DevUserModules() {
     setLoading(true);
     const [{ data: profiles }, { data: mods }] = await Promise.all([
       supabase.from("profiles").select("id, nome, email, user_id").order("nome"),
-      (supabase.from as any)("user_modules").select("user_id, module, enabled"),
+      (supabase.from as any)("user_modules").select(
+        "user_id, module, enabled, block_mode, block_message",
+      ),
     ]);
 
-    const map = new Map<string, Record<AppModule, boolean>>();
+    const map = new Map<string, Record<AppModule, ModuleState>>();
     (mods ?? []).forEach((m: any) => {
       if (!map.has(m.user_id)) {
-        map.set(m.user_id, { trabalhista: false, previdenciario: false });
+        map.set(m.user_id, {
+          trabalhista: defaultModuleState(),
+          previdenciario: defaultModuleState(),
+        });
       }
-      map.get(m.user_id)![m.module as AppModule] = m.enabled;
+      map.get(m.user_id)![m.module as AppModule] = {
+        enabled: !!m.enabled,
+        block_mode: (m.block_mode as BlockMode) ?? "none",
+        block_message: m.block_message ?? "",
+      };
     });
 
     const rows: UserRow[] = (profiles ?? []).map((p: any) => ({
@@ -52,7 +77,10 @@ export function DevUserModules() {
       email: p.email ?? "",
       user_id: p.user_id ?? null,
       modules:
-        map.get(p.id) ?? { trabalhista: false, previdenciario: false },
+        map.get(p.id) ?? {
+          trabalhista: defaultModuleState(),
+          previdenciario: defaultModuleState(),
+        },
     }));
     setUsers(rows);
     setLoading(false);
@@ -63,15 +91,22 @@ export function DevUserModules() {
   }, []);
 
   const toggle = async (userId: string, mod: AppModule, next: boolean) => {
-    // Optimistic update
     setUsers((prev) =>
       prev.map((u) =>
-        u.id === userId ? { ...u, modules: { ...u.modules, [mod]: next } } : u
-      )
+        u.id === userId
+          ? {
+              ...u,
+              modules: {
+                ...u.modules,
+                [mod]: { ...u.modules[mod], enabled: next },
+              },
+            }
+          : u,
+      ),
     );
     const { error } = await (supabase.from as any)("user_modules").upsert(
       { user_id: userId, module: mod, enabled: next },
-      { onConflict: "user_id,module" }
+      { onConflict: "user_id,module" },
     );
     if (error) {
       toast({
@@ -79,11 +114,18 @@ export function DevUserModules() {
         title: "Erro ao atualizar módulo",
         description: error.message,
       });
-      // revert
       setUsers((prev) =>
         prev.map((u) =>
-          u.id === userId ? { ...u, modules: { ...u.modules, [mod]: !next } } : u
-        )
+          u.id === userId
+            ? {
+                ...u,
+                modules: {
+                  ...u.modules,
+                  [mod]: { ...u.modules[mod], enabled: !next },
+                },
+              }
+            : u,
+        ),
       );
     } else {
       toast({
@@ -91,6 +133,27 @@ export function DevUserModules() {
         description: `${mod} ${next ? "habilitado" : "desabilitado"}.`,
       });
     }
+  };
+
+  const updateBlock = (
+    userId: string,
+    mod: AppModule,
+    block_mode: BlockMode,
+    block_message: string,
+  ) => {
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === userId
+          ? {
+              ...u,
+              modules: {
+                ...u.modules,
+                [mod]: { ...u.modules[mod], block_mode, block_message },
+              },
+            }
+          : u,
+      ),
+    );
   };
 
   const filtered = users.filter((u) => {
@@ -111,7 +174,8 @@ export function DevUserModules() {
           Módulos por Usuário
         </CardTitle>
         <p className="text-sm text-muted-foreground">
-          Habilite ou desabilite o acesso a cada módulo da suíte por usuário.
+          Habilite/desabilite acesso e configure avisos ou bloqueios com mensagem
+          customizada por módulo.
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -150,19 +214,35 @@ export function DevUserModules() {
                   <TableRow key={u.id}>
                     <TableCell>
                       <div className="font-medium">{u.nome}</div>
-                      <div className="text-xs text-muted-foreground">{u.email}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {u.email}
+                      </div>
                     </TableCell>
                     <TableCell className="font-mono text-xs">
                       {u.user_id ?? "—"}
                     </TableCell>
-                    {ALL_MODULES.map((m) => (
-                      <TableCell key={m} className="text-center">
-                        <Switch
-                          checked={u.modules[m]}
-                          onCheckedChange={(v) => toggle(u.id, m, v)}
-                        />
-                      </TableCell>
-                    ))}
+                    {ALL_MODULES.map((m) => {
+                      const st = u.modules[m];
+                      return (
+                        <TableCell key={m} className="text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <Switch
+                              checked={st.enabled}
+                              onCheckedChange={(v) => toggle(u.id, m, v)}
+                            />
+                            <BlockConfigPopover
+                              userId={u.id}
+                              module={m}
+                              currentMode={st.block_mode}
+                              currentMessage={st.block_message}
+                              onSaved={(mode, msg) =>
+                                updateBlock(u.id, m, mode, msg)
+                              }
+                            />
+                          </div>
+                        </TableCell>
+                      );
+                    })}
                   </TableRow>
                 ))}
                 {filtered.length === 0 && (
