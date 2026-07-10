@@ -10,10 +10,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CalendarDays, MapPin, Plus, Loader2, FolderOpen, Trash2, ArrowUpDown } from "lucide-react";
+import { CalendarDays, MapPin, Plus, Loader2, FolderOpen, Trash2, ArrowUpDown, Pencil } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { listPautas, deletePauta } from "../api/pautas";
 import { NovaPautaDialog } from "../components/NovaPautaDialog";
+import { EditarPautaDialog } from "../components/EditarPautaDialog";
 import type { PrevPauta } from "../types";
 
 function formatData(iso: string) {
@@ -77,6 +78,7 @@ export default function PautaList() {
   const [loading, setLoading] = useState(true);
   const [pautas, setPautas] = useState<PrevPauta[]>([]);
   const [novaOpen, setNovaOpen] = useState(false);
+  const [editando, setEditando] = useState<PrevPauta | null>(null);
   const [sortBy, setSortBy] = useState<SortKey>(loadInitialSort);
 
   useEffect(() => {
@@ -155,15 +157,26 @@ export default function PautaList() {
           )}
         </div>
       </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition"
-        onClick={(e) => { e.stopPropagation(); void handleDelete(p.id); }}
-        title="Excluir pauta"
-      >
-        <Trash2 className="h-3.5 w-3.5 text-destructive" />
-      </Button>
+      <div className="absolute top-2 right-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={(e) => { e.stopPropagation(); setEditando(p); }}
+          title="Editar pauta"
+        >
+          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={(e) => { e.stopPropagation(); void handleDelete(p.id); }}
+          title="Excluir pauta"
+        >
+          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+        </Button>
+      </div>
     </Card>
   );
 
@@ -241,6 +254,14 @@ export default function PautaList() {
         onOpenChange={setNovaOpen}
         onCreated={(p) => navigate(`/previdenciario/pauta/${p.id}`)}
       />
+      {editando && (
+        <EditarPautaDialog
+          open={!!editando}
+          onOpenChange={(v) => { if (!v) setEditando(null); }}
+          pauta={editando}
+          onSaved={() => { setEditando(null); void reload(); }}
+        />
+      )}
     </div>
   );
 }

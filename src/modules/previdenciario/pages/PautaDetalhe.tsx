@@ -16,6 +16,7 @@ import {
   User,
   Upload,
   Sparkles,
+  Pencil,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import {
@@ -28,6 +29,7 @@ import {
 import { preProcessarPericia } from "../api/processar";
 import type { MinimaxOcrProgress } from "@/lib/minimax-ocr-client";
 import { NovaPericiaDialog } from "../components/NovaPericiaDialog";
+import { EditarPautaDialog } from "../components/EditarPautaDialog";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
 import type { PrevPauta, PrevPericia } from "../types";
 import { useAuth } from "@/contexts/AuthContext";
@@ -46,6 +48,7 @@ export default function PautaDetalhe() {
   const [pauta, setPauta] = useState<PrevPauta | null>(null);
   const [pericias, setPericias] = useState<PrevPericia[]>([]);
   const [novaOpen, setNovaOpen] = useState(false);
+  const [editarOpen, setEditarOpen] = useState(false);
   const [processandoIds, setProcessandoIds] = useState<Set<string>>(new Set());
   const [processandoLote, setProcessandoLote] = useState(false);
   const [processandoDetalhes, setProcessandoDetalhes] = useState<Record<string, string>>({});
@@ -238,7 +241,18 @@ export default function PautaDetalhe() {
 
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">{pauta.local}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold text-foreground">{pauta.local}</h1>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setEditarOpen(true)}
+                title="Editar pauta"
+              >
+                <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+              </Button>
+            </div>
             <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
               <span className="flex items-center gap-1">
                 <CalendarDays className="h-3.5 w-3.5" /> {formatData(pauta.data)}
@@ -416,6 +430,12 @@ export default function PautaDetalhe() {
         pautaId={pauta.id}
         proximaOrdem={proximaOrdem}
         onCreated={reload}
+      />
+      <EditarPautaDialog
+        open={editarOpen}
+        onOpenChange={setEditarOpen}
+        pauta={pauta}
+        onSaved={reload}
       />
     </div>
   );
