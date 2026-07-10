@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 const HEARTBEAT_INTERVAL = 60_000;
 
 export function usePresenceHeartbeat() {
-  const { user } = useAuth();
+  const { user, isImpersonating, impersonatedBy } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
   const tokenRef = useRef<string | null>(null);
@@ -19,6 +19,39 @@ export function usePresenceHeartbeat() {
       if (loginChecked) return;
       loginChecked = true;
       try {
+        const nome = (user.user_metadata as any)?.full_name
+          || (user.user_metadata as any)?.nome
+          || user.email
+          || "Usuário";
+
+        // === SESSÃO IMPERSONADA ===
+        // Nunca notifica como login normal. Envia evento dedicado e grava
+        // com impersonated_by para não poluir métricas de login real.
+        if (isImpersonating && impersonatedBy) {
+          supabase.functions.invoke("send-tracking-email", {
+            body: {
+              type: "impersonation_login",
+              payload: {
+                targetUserId: user.id,
+                targetName: nome,
+                targetEmail: user.email ?? "",
+                devUserId: impersonatedBy.byUserId,
+                devName: impersonatedBy.byName,
+                devUserIdCode: impersonatedBy.byUserIdCode,
+                at: impersonatedBy.at,
+              },
+            },
+          }).catch(() => {});
+
+          void (supabase.from("email_login_events") as any).insert({
+            user_id: user.id,
+            session_started_at: new Date().toISOString(),
+            impersonated_by: impersonatedBy.byUserId,
+          }).then(() => {}, () => {});
+          return;
+        }
+
+        // === LOGIN NORMAL ===
         // Última presença registrada
         const { data: prev } = await (supabase.from("user_presence") as any)
           .select("last_seen_at")
@@ -28,14 +61,7 @@ export function usePresenceHeartbeat() {
         const lastSeen = prev?.last_seen_at ? new Date(prev.last_seen_at).getTime() : 0;
         const gapMs = Date.now() - lastSeen;
 
-        // Se nunca esteve online ou passou mais de 30 min inativo → nova sessão
         if (!lastSeen || gapMs > 30 * 60 * 1000) {
-          const nome = (user.user_metadata as any)?.full_name
-            || (user.user_metadata as any)?.nome
-            || user.email
-            || "Usuário";
-
-          // Fire-and-forget: nunca bloqueia UX
           supabase.functions.invoke("send-tracking-email", {
             body: {
               type: "login",
@@ -59,15 +85,19 @@ export function usePresenceHeartbeat() {
         // Checa login ANTES do upsert (para ler o valor anterior)
         await checkAndNotifyLogin();
 
-        const { error } = await (supabase.from("user_presence") as any).upsert(
-          {
-            user_id: user.id,
-            last_seen_at: new Date().toISOString(),
-            is_online: true,
-          },
-          { onConflict: "user_id" }
-        );
-        if (error) console.warn("[Heartbeat] upsert error:", error.message);
+        // Presence do cliente NÃO é tocado durante impersonation:
+        // o dev não deve fazer o cliente parecer "online".
+        if (!isImpersonating) {
+          const { error } = await (supabase.from("user_presence") as any).upsert(
+            {
+              user_id: user.id,
+              last_seen_at: new Date().toISOString(),
+              is_online: true,
+            },
+            { onConflict: "user_id" }
+          );
+          if (error) console.warn("[Heartbeat] upsert error:", error.message);
+        }
 
         // Atualizar token JWT para uso no beforeunload
         const { data: { session } } = await supabase.auth.getSession();
@@ -83,8 +113,9 @@ export function usePresenceHeartbeat() {
     // Heartbeat periodico
     intervalRef.current = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL);
 
-    // Ao fechar aba: fetch com keepalive usando JWT real
+    // Ao fechar aba: fetch com keepalive usando JWT real (apenas fora de impersonation)
     const handleBeforeUnload = () => {
+      if (isImpersonating) return;
       const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/user_presence?user_id=eq.${user.id}`;
       const body = JSON.stringify({
         is_online: false,
@@ -110,7 +141,7 @@ export function usePresenceHeartbeat() {
       clearTimeout(initTimeout);
       if (intervalRef.current) clearInterval(intervalRef.current);
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      // NAO enviar sendHeartbeat(false) aqui - causa race condition
     };
-  }, [user?.id]);
+  }, [user?.id, isImpersonating]);
 }
+
