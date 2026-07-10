@@ -55,6 +55,8 @@ const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "users", label: "Usuários", icon: Users },
   { id: "user-modules", label: "Módulos por Usuário", icon: LayoutDashboard },
+  { id: "usage-control", label: "Controle de Uso", icon: BarChart3 },
+
   { id: "logs", label: "AI Analytics", icon: FileText },
   { id: "backend-logs", label: "Servidor & Jobs", icon: Server },
   { id: "errors", label: "UI Reports", icon: AlertTriangle },
