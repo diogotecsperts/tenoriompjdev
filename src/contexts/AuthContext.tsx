@@ -322,7 +322,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     // Marcar offline ANTES do signOut (enquanto JWT ainda é válido)
-    if (user) {
+    // Mas apenas se NÃO for sessão impersonada (não queremos mexer
+    // no presence do cliente ao dev encerrar a impersonation).
+    const impersonating = !!(user?.user_metadata as any)?.impersonated_by;
+    if (user && !impersonating) {
       await (supabase.from("user_presence") as any).update({
         is_online: false,
         last_seen_at: new Date().toISOString(),
@@ -333,8 +336,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setProfile(null);
     setUserRole(null);
+    // Se era aba de impersonation, limpa o flag e fecha a aba
+    if (impersonating) {
+      window.sessionStorage.removeItem("lovable_impersonation_active");
+      // Tenta fechar; se o browser bloquear, cai para navigate
+      window.close();
+    }
     navigate("/");
   };
+
+  const impersonationMeta = (user?.user_metadata as any) ?? {};
+  const impersonatedBy: ImpersonationInfo | null = impersonationMeta.impersonated_by
+    ? {
+        byUserId: String(impersonationMeta.impersonated_by),
+        byName: String(impersonationMeta.impersonated_by_name ?? "Dev"),
+        byUserIdCode: String(impersonationMeta.impersonated_by_user_id ?? ""),
+        at: String(impersonationMeta.impersonated_at ?? ""),
+      }
+    : null;
 
   return (
     <AuthContext.Provider 
@@ -345,6 +364,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile, 
         userRole,
         isAdmin: userRole === 'admin',
+        isImpersonating: !!impersonatedBy,
+        impersonatedBy,
         login, 
         signup, 
         logout,
