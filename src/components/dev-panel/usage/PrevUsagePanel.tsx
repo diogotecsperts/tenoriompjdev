@@ -304,13 +304,30 @@ export function PrevUsagePanel() {
                   : p,
               ),
             );
+            // Invalida cache de meta se o pdf_path mudou
+            const oldPath = (payload.old as any)?.pdf_path;
+            if (oldPath && oldPath !== row.pdf_path) {
+              setPdfMeta((prev) => {
+                if (!prev.has(row.id)) return prev;
+                const next = new Map(prev);
+                next.delete(row.id);
+                return next;
+              });
+            }
             // Heavy fields like prelaudo_data updated: schedule a full reload
             // in case downloads need the fresh copy on cache
             scheduleReload();
           } else if (payload.eventType === "DELETE") {
             const oldRow = payload.old as { id: string };
             setPericias((prev) => prev.filter((p) => p.id !== oldRow.id));
+            setPdfMeta((prev) => {
+              if (!prev.has(oldRow.id)) return prev;
+              const next = new Map(prev);
+              next.delete(oldRow.id);
+              return next;
+            });
           }
+
         },
       )
       .subscribe((status) => {
