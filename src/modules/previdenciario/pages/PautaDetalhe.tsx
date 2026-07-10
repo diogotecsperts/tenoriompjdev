@@ -48,6 +48,7 @@ export default function PautaDetalhe() {
   const [pauta, setPauta] = useState<PrevPauta | null>(null);
   const [pericias, setPericias] = useState<PrevPericia[]>([]);
   const [novaOpen, setNovaOpen] = useState(false);
+  const [editarOpen, setEditarOpen] = useState(false);
   const [processandoIds, setProcessandoIds] = useState<Set<string>>(new Set());
   const [processandoLote, setProcessandoLote] = useState(false);
   const [processandoDetalhes, setProcessandoDetalhes] = useState<Record<string, string>>({});
