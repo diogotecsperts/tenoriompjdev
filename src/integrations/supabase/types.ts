@@ -760,8 +760,10 @@ export type Database = {
           id: string
           ordem: number
           pauta_id: string
+          pdf_pages: number | null
           pdf_path: string | null
           pdf_processado: boolean
+          pdf_size_bytes: number | null
           periciado_nome: string | null
           prelaudo_data: Json
           prev_extracao: Json
@@ -774,8 +776,10 @@ export type Database = {
           id?: string
           ordem?: number
           pauta_id: string
+          pdf_pages?: number | null
           pdf_path?: string | null
           pdf_processado?: boolean
+          pdf_size_bytes?: number | null
           periciado_nome?: string | null
           prelaudo_data?: Json
           prev_extracao?: Json
@@ -788,8 +792,10 @@ export type Database = {
           id?: string
           ordem?: number
           pauta_id?: string
+          pdf_pages?: number | null
           pdf_path?: string | null
           pdf_processado?: boolean
+          pdf_size_bytes?: number | null
           periciado_nome?: string | null
           prelaudo_data?: Json
           prev_extracao?: Json

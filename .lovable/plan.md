@@ -1,87 +1,72 @@
-## Objetivo
+## Problemas
 
-Ao lado do botão **Baixar PDF original** em Controle de uso → Previdenciário, mostrar um badge discreto com **tamanho do arquivo** e **quantidade de páginas** (ex.: `18 MB · 150 pgs`).
+1. **Out of Memory** ao clicar "Carregar tamanho/páginas": baixamos o PDF inteiro em `arrayBuffer` e passamos para `pdf-lib` — com 4 downloads paralelos de PDFs de 20–150 MB, o navegador estoura memória.
+2. **Dados não persistem**: cache é só em memória. Mudar de aba, trocar de usuário ou recarregar apaga tudo.
 
-## Por que sob demanda
+## Solução
 
-Cada perícia é um PDF no bucket `prev-pdfs`. Para descobrir:
+### 1. Persistência real no banco (resolve #2 de vez)
 
-- **Tamanho** — 1 HEAD na signed URL (barato, alguns KB de headers).
-- **Páginas** — precisa baixar o PDF e ler com `pdf-lib` (já instalado). PDFs de perícia costumam ter 20–150 MB. Para um usuário com 53 perícias (caso do Bruno), o carregamento automático faria dezenas de downloads em background — inaceitável.
+Adicionar duas colunas em `prev_pericias`:
+- `pdf_size_bytes bigint`
+- `pdf_pages integer`
 
-Portanto, o carregamento é **opt-in** via botão.
+Assim os valores ficam gravados por perícia, aparecem instantaneamente em qualquer sessão/dispositivo, e só é preciso "carregar" uma vez por PDF na vida.
 
-## UX
+O carregamento automático da lista em `PrevUsagePanel` já traz esses campos (via edge function `dev-list-prev-usage`), então os badges renderizam de cara sem nenhum fetch extra.
 
-### Botão global no topo da lista de pautas
-Ao lado do título "Pautas & Perícias" (mesma linha do badge "ao vivo"), adicionar:
+Quando o `pdf_path` muda (realtime UPDATE), zeramos `pdf_size_bytes` e `pdf_pages` para forçar recontagem sob demanda.
 
-```
-[ 📊 Carregar tamanho/páginas ]
-```
+### 2. Evitar OOM (resolve #1)
 
-- Estado idle → texto acima.
-- Estado loading → spinner + `Carregando 12/53...`.
-- Estado done → botão vira `↻ Atualizar` (discreto, `variant="ghost"`).
-- Só habilitado se houver ≥1 perícia com `pdf_path` na visão filtrada.
-- Ao clicar: processa apenas perícias visíveis (respeita filtros) e que ainda não tenham dados em cache. Concorrência limitada a **4 requisições em paralelo** para não travar o navegador nem estourar quota de signed URLs.
+Reescrever `loadOneMeta` para ser bem mais leve:
 
-### Badge inline em cada linha
-Na coluna "Ações", antes do botão de download do PDF original:
+- **Concorrência 1** (uma perícia por vez). PDFs de perícia são pesados; paralelismo aqui não vale o risco.
+- **HEAD primeiro** para obter tamanho. Grava `pdf_size_bytes` no banco imediatamente — se o navegador travar depois, pelo menos o tamanho ficou salvo.
+- **Skip de contagem de páginas para PDFs > 80 MB**: badge exibe só o tamanho (`150 MB`). Evita baixar arquivos gigantes só para contar páginas.
+- **Streaming controlado**: `fetch → arrayBuffer → PDFDocument.load(bytes, { updateMetadata: false }) → getPageCount()` e imediatamente descartamos a referência (`bytes = null`) antes do próximo item. Sem `Promise.all` acumulando buffers.
+- **Import lazy** do `pdf-lib` mantido (`await import("pdf-lib")`), fora do laço para não reimportar.
+- **Try/catch por item**: falha de um PDF não aborta o lote. Registra `pdf_pages = null` e segue.
+- **Botão "Cancelar"** aparece durante o loading para o dev interromper se algo travar.
 
-```
-[ 18 MB · 150 pgs ]  [ ⬇ ]
-```
+### 3. Ajustes de UI
 
-- `variant="outline"`, `text-xs`, `text-muted-foreground`, sem cor forte — apenas informativo.
-- Enquanto o item específico está sendo carregado: `[ ... ]` com Loader2 spin pequeno.
-- Se só o tamanho voltou (falha ao contar páginas): `[ 18 MB ]`.
-- Se o PDF ainda não foi carregado: **não renderiza nada** (linha fica limpa).
-- Se `pdf_path` for null: nada muda (botão de download já fica desabilitado).
-
-### Cache em memória
-Estado local `Map<periciaId, { sizeBytes: number; pages: number | null }>`. Cache persiste enquanto o usuário está na aba; troca de usuário limpa o cache. Realtime `UPDATE` que troca o `pdf_path` invalida a entrada correspondente.
+- Badge continua igual: `18 MB · 150 pgs`, ou `18 MB` quando páginas não puderam ser contadas (arquivo muito grande / erro).
+- Se a perícia já tem `pdf_size_bytes` no banco, o badge aparece direto — sem precisar clicar em nada.
+- Botão global vira `↻ Atualizar detalhes faltantes` e só processa perícias visíveis **sem** dados salvos ainda.
+- Progresso: `Analisando 12/53...`.
 
 ## Detalhes técnicos
 
-Arquivo único afetado: `src/components/dev-panel/usage/PrevUsagePanel.tsx`.
+**Migration** (`prev_pericias`):
+```sql
+ALTER TABLE public.prev_pericias
+  ADD COLUMN IF NOT EXISTS pdf_size_bytes bigint,
+  ADD COLUMN IF NOT EXISTS pdf_pages integer;
+```
+Sem mudança de RLS/GRANTs (colunas novas em tabela existente).
 
-1. Novo estado:
-   ```ts
-   const [pdfMeta, setPdfMeta] = useState<Map<string, { size: number; pages: number | null }>>(new Map());
-   const [loadingMeta, setLoadingMeta] = useState<Set<string>>(new Set());
-   const [metaProgress, setMetaProgress] = useState<{ done: number; total: number } | null>(null);
-   ```
+**Edge function `dev-list-prev-usage`**: adicionar `pdf_size_bytes` e `pdf_pages` no `select` e no objeto `periciasSlim`.
 
-2. Helper `formatSize(bytes)` → `"18 MB"` / `"850 KB"`.
-
-3. Função `loadOneMeta(periciaId, path)`:
-   - `supabase.functions.invoke("dev-download-pdf", { body: { file_path: path, bucket: "prev-pdfs" } })` → signed URL.
-   - `fetch(url, { method: "HEAD" })` → `size = Number(res.headers.get("content-length"))`. Salva parcial no cache já.
-   - `fetch(url)` → `arrayBuffer` → `PDFDocument.load(bytes, { updateMetadata: false })` → `pages = doc.getPageCount()`. Falhas na contagem não bloqueiam: guarda `pages: null`.
-   - Update no `pdfMeta` via functional setState.
-
-4. Função `loadAllVisibleMeta()`:
-   - Coleta `filteredPericias.filter(p => p.pdf_path && !pdfMeta.has(p.id))`.
-   - Concorrência 4 (fila simples com Promise).
-   - Atualiza `metaProgress` conforme completa.
-
-5. Import: `import { PDFDocument } from "pdf-lib";` (lazy import dentro da função pra não pesar no bundle inicial: `const { PDFDocument } = await import("pdf-lib");`).
-
-6. Realtime `UPDATE` de perícia: se `payload.new.pdf_path !== payload.old.pdf_path`, remover do cache.
-
-7. Troca de `filters.userId` → `setPdfMeta(new Map()); setMetaProgress(null);`.
+**`PrevUsagePanel.tsx`**:
+- Estado `pdfMeta` passa a hidratar a partir dos campos das perícias no primeiro load, e sincroniza gravações pontuais.
+- `loadOneMeta` grava resultado via `supabase.from("prev_pericias").update({ pdf_size_bytes, pdf_pages }).eq("id", periciaId)` (política dev/admin já permite).
+- `loadAllVisibleMeta` roda em série (`for...of await`), com `abortRef` para cancelamento.
+- Constante `MAX_PDF_BYTES_FOR_PAGECOUNT = 80 * 1024 * 1024`.
+- Realtime `UPDATE`: se `pdf_path` mudou, disparar `update` zerando `pdf_size_bytes`/`pdf_pages` (opcional; se já vier zerado pelo UPDATE original, apenas remove do `pdfMeta`).
+- Ao trocar de usuário, `pdfMeta` é reconstruído do banco — nada de `new Map()` vazio.
 
 ## Fora de escopo
 
-- Não altera edge functions, migrations, KPIs, filtros, badge "ao vivo", downloads de pré-laudo, nem `DevOriginalFiles`.
-- Nenhuma persistência de metadados no banco — cache é apenas em memória durante a sessão da aba.
-- Nada muda para o usuário final (Bruno etc.); é exclusivo do dev panel.
+- Nenhuma mudança em downloads, filtros, KPIs, `DevOriginalFiles`, exports, ou fluxo do usuário final.
+- Não vamos calcular páginas server-side (evita rodar pdf-lib em edge function; custo/complexidade não justifica).
 
 ## Verificação
 
-1. Abrir Controle de uso → Previdenciário → selecionar Bruno (MED001).
-2. Confirmar que a lista carrega instantaneamente (sem downloads automáticos).
-3. Clicar "Carregar tamanho/páginas" → progresso incrementa e badges aparecem linha a linha.
-4. Baixar um PDF conferindo que o tamanho bate.
-5. Recarregar a página e confirmar que nada é buscado até novo clique.
+1. Migration roda; colunas aparecem.
+2. Abrir Controle de uso → Bruno (MED001): perícias já processadas antes ainda aparecem sem badge (colunas vazias).
+3. Clicar "Carregar detalhes" → badges preenchem uma por vez, sem OOM.
+4. Mudar de aba, voltar → badges continuam lá.
+5. Recarregar página → badges continuam lá.
+6. Fazer novo upload de PDF numa perícia → badge some (invalidação) até próximo clique.
+7. Testar com PDF > 80 MB: badge mostra só o tamanho, sem travar.
