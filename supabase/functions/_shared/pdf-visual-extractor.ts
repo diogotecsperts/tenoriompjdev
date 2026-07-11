@@ -402,8 +402,10 @@ export async function extractVisualContent(
   // estoura o limite de memória da Edge Function (150MB). Só faz sentido
   // inline abaixo desse patamar.
   const AUTO_FILES_API_THRESHOLD = 4 * 1024 * 1024;
+  const resolvedModelForRouting = resolveGeminiModelName(model);
   const shouldUseFilesAPI =
     options.useFilesAPI === true ||
+    shouldUseGeminiInteractionsAPI(resolvedModelForRouting) ||
     (options.useFilesAPI === undefined && approxSizeBytes > AUTO_FILES_API_THRESHOLD);
   if (options.useFilesAPI === undefined && shouldUseFilesAPI) {
     console.log(`[pdf-visual-extractor] Auto-selecting Files API (size ${(approxSizeBytes / (1024 * 1024)).toFixed(2)}MB > ${(AUTO_FILES_API_THRESHOLD / (1024 * 1024)).toFixed(0)}MB threshold) to avoid OOM`);
