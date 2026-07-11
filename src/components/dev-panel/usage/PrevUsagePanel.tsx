@@ -362,10 +362,10 @@ export function PrevUsagePanel() {
                 next.delete(row.id);
                 return next;
               });
-              // Zera colunas persistidas para forçar recontagem sob demanda
-              (supabase.from as any)("prev_pericias")
-                .update({ pdf_size_bytes: null, pdf_pages: null })
-                .eq("id", row.id);
+              // Zera colunas persistidas via edge function (RLS bloqueia UPDATE direto do dev)
+              supabase.functions.invoke("dev-save-pericia-pdf-meta", {
+                body: { periciaId: row.id, sizeBytes: null, pages: null },
+              });
             }
             // Heavy fields like prelaudo_data updated: schedule a full reload
             // in case downloads need the fresh copy on cache
