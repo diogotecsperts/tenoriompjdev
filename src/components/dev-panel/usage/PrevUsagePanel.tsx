@@ -472,12 +472,11 @@ export function PrevUsagePanel() {
     pages: number | null,
   ) => {
     try {
-      await (supabase.from as any)("prev_pericias")
-        .update({
-          pdf_size_bytes: size,
-          pdf_pages: pages,
-        })
-        .eq("id", periciaId);
+      // Dev não tem policy de UPDATE em prev_pericias (dados de outros usuários).
+      // Escrita vai pela edge function com service-role + is_developer().
+      await supabase.functions.invoke("dev-save-pericia-pdf-meta", {
+        body: { periciaId, sizeBytes: size, pages },
+      });
     } catch {
       // silencioso — cache em memória segue funcionando
     }
