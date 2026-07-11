@@ -13,14 +13,17 @@ export interface ExtractedContent {
 // Mapeamento de nomes amigáveis do DevPanel para nomes estáveis da API Gemini
 // IMPORTANTE: Sincronizado com test-ai-connection/index.ts
 const GEMINI_MODEL_MAP: Record<string, string> = {
-  // Gemini 3.0 Preview → mapeia para 2.5 (até 3.0 GA)
-  'gemini-3-pro-preview': 'gemini-2.5-pro',
-  'gemini-3-flash-preview': 'gemini-2.5-flash',
-  'gemini-3-flash-lite-preview': 'gemini-2.5-flash-8b',
+  // Gemini 3.x — modelos reais da API Gemini atual
+  'gemini-3-pro-preview': 'gemini-3-pro-preview',
+  'gemini-3.1-pro-preview': 'gemini-3.1-pro-preview',
+  'gemini-3-flash-preview': 'gemini-3-flash-preview',
+  'gemini-3.1-flash-lite': 'gemini-3.1-flash-lite',
+  'gemini-3.1-flash-lite-preview': 'gemini-3.1-flash-lite-preview',
+  'gemini-3.5-flash': 'gemini-3.5-flash',
   // Gemini 2.5 - aliases estáveis
   'gemini-2.5-pro': 'gemini-2.5-pro',
   'gemini-2.5-flash': 'gemini-2.5-flash',
-  'gemini-2.5-flash-lite': 'gemini-2.5-flash-8b',
+  'gemini-2.5-flash-lite': 'gemini-2.5-flash-lite',
   'gemini-2.5-flash-8b': 'gemini-2.5-flash-8b',
   // Gemini 2.0 (estáveis)
   'gemini-2.0-flash': 'gemini-2.0-flash',
@@ -39,6 +42,40 @@ function resolveGeminiModelName(model: string): string {
     console.log(`[pdf-visual-extractor] Model mapping: ${model} → ${resolved}`);
   }
   return resolved;
+}
+
+function shouldUseGeminiInteractionsAPI(apiModel: string): boolean {
+  return /^gemini-3(?:\.|-|$)/.test(apiModel) || apiModel === 'gemini-3.5-flash';
+}
+
+function sanitizeGeminiError(raw: string, max = 1600): string {
+  return raw
+    .replace(/key=AIza[\w-]+/gi, 'key=[redacted]')
+    .replace(/x-goog-api-key["'\s:=]+[A-Za-z0-9._\-]+/gi, 'x-goog-api-key=[redacted]')
+    .slice(0, max);
+}
+
+function extractTextFromInteraction(data: any): string {
+  const chunks: string[] = [];
+
+  const visitContent = (content: any) => {
+    if (!content) return;
+    if (typeof content === 'string') chunks.push(content);
+    if (typeof content?.text === 'string') chunks.push(content.text);
+    if (Array.isArray(content)) content.forEach(visitContent);
+  };
+
+  if (typeof data?.output_text === 'string') chunks.push(data.output_text);
+  if (Array.isArray(data?.outputs)) data.outputs.forEach(visitContent);
+  if (Array.isArray(data?.steps)) {
+    for (const step of data.steps) {
+      if (step?.type === 'model_output' || step?.type === 'output' || !step?.type) {
+        visitContent(step?.content);
+      }
+    }
+  }
+
+  return chunks.join('').trim();
 }
 
 // Prompt otimizado para extração de texto bruto (OCR)
@@ -216,6 +253,110 @@ async function callGeminiGenerateContentWithFile(
   // All attempts failed
   console.error(`[pdf-visual-extractor] All ${attempts.length} payload attempts failed. Last error: ${lastError}`);
   return { ok: false, error: `All attempts failed. Last: ${lastError}` };
+}
+
+async function callGeminiInteractionsWithFile(
+  apiKey: string,
+  apiModel: string,
+  fileUri: string,
+  prompt: string
+): Promise<{ ok: true; text: string; interactionId?: string } | { ok: false; error: string; interactionId?: string }> {
+  const createUrl = 'https://generativelanguage.googleapis.com/v1beta/interactions';
+  const headers = {
+    'x-goog-api-key': apiKey,
+    'Content-Type': 'application/json',
+    'Api-Revision': '2026-05-20',
+  };
+
+  const payload = {
+    model: apiModel,
+    input: [
+      { type: 'document', uri: fileUri, mime_type: 'application/pdf' },
+      { type: 'text', text: prompt },
+    ],
+    system_instruction: 'Você é um sistema de OCR especializado. Extraia texto de documentos PDF de forma fiel, completa e sem inventar dados.',
+    generation_config: {
+      temperature: 0.1,
+      max_output_tokens: 65536,
+      response_mime_type: 'application/json',
+    },
+    background: true,
+    store: false,
+  };
+
+  console.log(`[pdf-visual-extractor] Creating Gemini background interaction with model: ${apiModel}`);
+  const createResponse = await fetch(createUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  const createText = await createResponse.text();
+
+  if (!createResponse.ok) {
+    return { ok: false, error: `Interactions create failed (${createResponse.status}): ${sanitizeGeminiError(createText)}` };
+  }
+
+  let interaction: any;
+  try {
+    interaction = JSON.parse(createText);
+  } catch (parseErr) {
+    return { ok: false, error: `Interactions create parse error: ${parseErr}` };
+  }
+
+  const interactionId = interaction?.id;
+  if (!interactionId) {
+    const text = extractTextFromInteraction(interaction);
+    if (text) return { ok: true, text };
+    return { ok: false, error: `Interactions create did not return id or output: ${sanitizeGeminiError(createText)}` };
+  }
+
+  const deadline = Date.now() + 8 * 60_000;
+  let lastStatus = interaction?.status || 'in_progress';
+  let lastBody = interaction;
+  let delayMs = 2500;
+
+  while (Date.now() < deadline) {
+    if (lastStatus === 'completed') {
+      const text = extractTextFromInteraction(lastBody);
+      if (!text) {
+        return { ok: false, interactionId, error: `Interactions completed without text output (interactionId=${interactionId})` };
+      }
+      return { ok: true, text, interactionId };
+    }
+
+    if (lastStatus === 'failed' || lastStatus === 'cancelled') {
+      return {
+        ok: false,
+        interactionId,
+        error: `Interactions ${lastStatus} (interactionId=${interactionId}): ${sanitizeGeminiError(JSON.stringify(lastBody))}`,
+      };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    delayMs = Math.min(6000, delayMs + 500);
+
+    const pollResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/interactions/${interactionId}`, {
+      method: 'GET',
+      headers,
+    });
+    const pollText = await pollResponse.text();
+    if (!pollResponse.ok) {
+      return { ok: false, interactionId, error: `Interactions poll failed (${pollResponse.status}, interactionId=${interactionId}): ${sanitizeGeminiError(pollText)}` };
+    }
+    try {
+      lastBody = JSON.parse(pollText);
+      lastStatus = lastBody?.status || 'in_progress';
+      console.log(`[pdf-visual-extractor] Gemini interaction ${interactionId} status=${lastStatus}`);
+    } catch (parseErr) {
+      return { ok: false, interactionId, error: `Interactions poll parse error (interactionId=${interactionId}): ${parseErr}` };
+    }
+  }
+
+  return {
+    ok: false,
+    interactionId,
+    error: `Gemini OCR still processing after background polling timeout (model=${apiModel}, interactionId=${interactionId}).`,
+  };
 }
 
 /**
