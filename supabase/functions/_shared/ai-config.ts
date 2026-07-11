@@ -671,7 +671,7 @@ async function callProvider(
     case 'minimax':
       return await callOpenAICompatible(config, systemPrompt, userPrompt, maxOutputTokens, options);
     case 'claude':
-      return await callClaude(config, systemPrompt, userPrompt, maxOutputTokens);
+      return await callClaude(config, systemPrompt, userPrompt, maxOutputTokens, options);
     default:
       console.warn(`[AI Call] Unknown provider ${config.provider}, falling back to Lovable`);
       return await callLovableAI(config, systemPrompt, userPrompt, maxOutputTokens, options);
