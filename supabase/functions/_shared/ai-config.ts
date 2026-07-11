@@ -47,6 +47,107 @@ interface RetryConfig {
   retryableStatuses: number[];
 }
 
+type AIErrorCode =
+  | 'quota_exceeded'
+  | 'invalid_key'
+  | 'rate_limited'
+  | 'provider_timeout'
+  | 'invalid_request'
+  | 'response_truncated'
+  | 'provider_unavailable'
+  | 'unknown';
+
+export class AIProviderError extends Error {
+  code: AIErrorCode;
+  stage: string;
+  provider: string;
+  model: string;
+  upstreamStatus: number | null;
+  technicalDetail: string;
+
+  constructor(args: {
+    message: string;
+    code?: AIErrorCode;
+    stage?: string;
+    provider: string;
+    model: string;
+    upstreamStatus?: number | null;
+    technicalDetail?: string;
+  }) {
+    super(args.message);
+    this.name = 'AIProviderError';
+    this.code = args.code || 'unknown';
+    this.stage = args.stage || 'ai_generation';
+    this.provider = args.provider;
+    this.model = args.model;
+    this.upstreamStatus = args.upstreamStatus ?? null;
+    this.technicalDetail = args.technicalDetail || args.message;
+  }
+}
+
+function sanitizeErrorDetail(raw: string, max = 1200): string {
+  return raw
+    .replace(/key=AIza[\w-]+/gi, 'key=[redacted]')
+    .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer [redacted]')
+    .replace(/api[_-]?key["'\s:=]+[A-Za-z0-9._\-]+/gi, 'api_key=[redacted]')
+    .slice(0, max);
+}
+
+function extractStatus(message: string): number | null {
+  const match = message.match(/(?:HTTP\s+|status\D+|error\s*\()(\d{3})/i);
+  return match ? Number(match[1]) : null;
+}
+
+export function classifyAIProviderError(
+  error: unknown,
+  provider: string,
+  model: string,
+  stage = 'ai_generation',
+): AIProviderError {
+  if (error instanceof AIProviderError) return error;
+
+  const raw = error instanceof Error ? error.message : String(error || 'Erro desconhecido');
+  const detail = sanitizeErrorDetail(raw);
+  const status = extractStatus(detail);
+  const lower = detail.toLowerCase();
+
+  let code: AIErrorCode = 'unknown';
+  let message = `Falha no provider ${provider}/${model}.`;
+
+  if (status === 402 || /credit|billing|balance|saldo|insufficient[_\s-]?quota|quota exceeded|resource_exhausted/i.test(detail)) {
+    code = 'quota_exceeded';
+    message = `Saldo/cota insuficiente no provider ${provider}/${model}.`;
+  } else if (status === 429 || /rate limit|too many requests|requests per minute|rpm|tpm/i.test(detail)) {
+    code = 'rate_limited';
+    message = `Limite de requisições atingido no provider ${provider}/${model}.`;
+  } else if (status === 401 || status === 403 || /invalid api key|api key not valid|unauthorized|forbidden|authentication/i.test(detail)) {
+    code = 'invalid_key';
+    message = `Credencial inválida ou sem permissão para ${provider}/${model}.`;
+  } else if (status === 400 || /invalid request|invalid_argument|bad request|unsupported|not found|does not exist/i.test(detail)) {
+    code = 'invalid_request';
+    message = `Requisição inválida para ${provider}/${model}. Verifique modelo, parâmetros ou tamanho do contexto.`;
+  } else if (/timeout|timed out|aborterror|request timeout|gateway timeout|504/.test(lower)) {
+    code = 'provider_timeout';
+    message = `Tempo excedido no provider ${provider}/${model}.`;
+  } else if (/truncated|max_tokens|incomplete|json incompleto|unterminated/i.test(detail)) {
+    code = 'response_truncated';
+    message = `Resposta incompleta/truncada do provider ${provider}/${model}.`;
+  } else if ((status && status >= 500) || /unavailable|overloaded|temporarily|server error|bad gateway|service unavailable/i.test(detail)) {
+    code = 'provider_unavailable';
+    message = `Provider ${provider}/${model} indisponível no momento.`;
+  }
+
+  return new AIProviderError({
+    message,
+    code,
+    stage,
+    provider,
+    model,
+    upstreamStatus: status,
+    technicalDetail: detail,
+  });
+}
+
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxRetries: 3,
   baseDelayMs: 1000,
@@ -111,7 +212,7 @@ export function invalidateRetryConfigCache(): void {
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
-  configOverride?: Partial<RetryConfig>
+  configOverride?: Partial<RetryConfig> & { requestTimeoutMs?: number }
 ): Promise<Response> {
   // Load config from database (cached)
   const baseConfig = await getRetryConfig();
@@ -121,7 +222,16 @@ async function fetchWithRetry(
 
   for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
     try {
-      const response = await fetch(url, options);
+      const controller = configOverride?.requestTimeoutMs ? new AbortController() : null;
+      const timeoutId = controller
+        ? setTimeout(() => controller.abort(), configOverride!.requestTimeoutMs)
+        : null;
+      const response = await fetch(url, {
+        ...options,
+        signal: controller?.signal || options.signal,
+      }).finally(() => {
+        if (timeoutId) clearTimeout(timeoutId);
+      });
 
       // Success - return immediately
       if (response.ok) {
@@ -145,6 +255,10 @@ async function fetchWithRetry(
       return response;
     } catch (networkError) {
       lastError = networkError instanceof Error ? networkError : new Error(String(networkError));
+
+      if (networkError instanceof DOMException && networkError.name === 'AbortError') {
+        throw new Error(`Request timeout after ${configOverride?.requestTimeoutMs ?? 0}ms`);
+      }
       
       // Network errors can also be retried
       if (attempt < config.maxRetries) {
