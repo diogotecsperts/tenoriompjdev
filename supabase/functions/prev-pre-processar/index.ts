@@ -778,7 +778,29 @@ Deno.serve(async (req: Request) => {
 
     // 4) Extração estruturada via IA configurada no DevPanel
     const aiConfig = await getAIConfig();
-    const ocrText = trimOcrPreservingTail(ocr.text, 180_000);
+    const ocrText = trimOcrPreservingTail(ocr.text, 120_000);
+
+    const remainingAiBudgetMs = 140_000 - (Date.now() - t0) - 4_000;
+    if (remainingAiBudgetMs < 20_000) {
+      const detail =
+        `OCR concluído (${ocr.pageCount}p, ${ocr.text.length} chars via ${ocr.provider}/${ocr.model}), ` +
+        `mas consumiu tempo demais para a extração estruturada síncrona com segurança. ` +
+        `elapsed=${Date.now() - t0}ms remaining=${remainingAiBudgetMs}ms`;
+      console.error(`[prev-pre-processar] ${detail}`);
+      return new Response(
+        JSON.stringify({
+          error:
+            "Tempo excedido antes da extração estruturada. O OCR terminou, mas o PDF é grande/demorado demais para processar tudo em uma chamada síncrona.",
+          code: "provider_timeout",
+          stage: "ocr",
+          provider: ocr.provider,
+          model: ocr.model,
+          upstreamStatus: 504,
+          technicalDetail: detail,
+        }),
+        { status: 504, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     const userPrompt = await getPrompt(
       "prompt_prev_extracao_processo",
@@ -794,8 +816,9 @@ Deno.serve(async (req: Request) => {
     const aiResp = await callAI(aiConfig, SYSTEM_PROMPT, userPrompt, {
       userId,
       promptType: "prev_extracao_processo",
-      maxOutputTokens: 32000,
+      maxOutputTokens: 12000,
       jsonMode: true,
+      requestTimeoutMs: remainingAiBudgetMs,
     });
 
     if (looksTruncated(aiResp.text)) {
@@ -812,6 +835,12 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({
           error:
             "A IA devolveu JSON incompleto (provavelmente saída truncada). Tente novamente; se persistir, reduza o PDF ou avise o suporte.",
+          code: "response_truncated",
+          stage: "ai_generation",
+          provider: aiResp.provider,
+          model: aiResp.model,
+          upstreamStatus: 502,
+          technicalDetail: `Resposta não pôde ser convertida em JSON. Tamanho=${aiResp.text.length}. Início=${aiResp.text.slice(0, 300)}`,
         }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
