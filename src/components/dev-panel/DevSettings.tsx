@@ -78,11 +78,12 @@ interface TestResult {
 
 const GEMINI_SAFE_DEFAULT_MODEL = "gemini-2.5-flash";
 const GEMINI_FLASH_PRIORITY = [
-  "gemini-2.5-flash",
-  "gemini-3-flash-preview",
-  "gemini-3.5-flash",
   "gemini-3.1-flash-lite",
   "gemini-3.1-flash-lite-preview",
+  "gemini-2.5-flash-lite",
+  "gemini-3.5-flash",
+  "gemini-3-flash-preview",
+  "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
   "gemini-2.5-flash-8b",
   "gemini-2.0-flash",
@@ -148,7 +149,7 @@ const AI_PROVIDERS: ProviderInfo[] = [{
 }, {
   id: "gemini",
   name: "Google Gemini",
-  description: "Modelos Gemini via Google AI Studio. Use 'Atualizar Modelos' para ver modelos disponíveis.",
+  description: "Modelos Gemini via Google AI Studio. Gemini 3.x/3.5 usa Interactions API com processamento em background para OCR longo.",
   models: sortGeminiModelsSafely([
     // Flash — FREE TIER (recomendados como padrão)
     "gemini-2.5-flash",
