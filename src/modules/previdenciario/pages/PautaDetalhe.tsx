@@ -526,6 +526,16 @@ export default function PautaDetalhe() {
         pauta={pauta}
         onSaved={reload}
       />
+      {user && (
+        <UploadLotePdfsDialog
+          open={loteUploadOpen}
+          onOpenChange={setLoteUploadOpen}
+          pautaId={pauta.id}
+          userId={user.id}
+          proximaOrdem={proximaOrdem}
+          onDone={reload}
+        />
+      )}
     </div>
   );
 }
