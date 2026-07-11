@@ -2042,19 +2042,21 @@ export function DevSettings() {
 
           <Separator />
 
-          {/* Provedor de OCR — SEMPRE visível (aplica-se a todos os módulos) */}
+          {/* Provedor de OCR — ÚNICO campo de OCR do sistema (todos os módulos, todas as estratégias) */}
           <div className="space-y-4 p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
             <h4 className="font-medium text-sm flex items-center gap-2">
               <Cpu className="h-4 w-4 text-blue-600" />
-              Provedor de OCR (todos os módulos)
+              OCR — Provedor único para todos os módulos
             </h4>
             <p className="text-xs text-muted-foreground">
-              Escolha o provider de OCR usado por <strong>Previdenciário</strong> e <strong>Impugnação</strong> em
-              qualquer estratégia, e também pelo <strong>Trabalhista</strong> na Fase 1 quando em Duas Fases.
-              Mistral tem precisão elite (~94.9%) para tabelas/escaneados. <strong>MiniMax M3</strong> usa
-              rasterização no navegador (pdfjs) + chunks de 10 páginas com 3 paralelismos e backoff automático
-              em rate limit — ideal para PDFs grandes (100+ páginas) sem estourar CPU da edge function.
+              Este é o <strong>único lugar</strong> para escolher o OCR do sistema. Vale para
+              Previdenciário, Impugnação e Trabalhista (em Passagem Única faz OCR + preenchimento
+              num só request; em Duas Fases faz apenas o OCR). Mistral tem precisão elite (~94.9%)
+              em tabelas/escaneados. <strong>MiniMax M3</strong> rasteriza no navegador (pdfjs) +
+              chunks de 10 páginas com 3 paralelismos e backoff em rate limit — ideal para PDFs
+              grandes (100+ páginas) sem estourar CPU da edge function.
             </p>
+
 
             {/* Provider Selector */}
             <div className="space-y-2">
