@@ -52,7 +52,7 @@ interface SystemConfig {
   pdf_fallback_model: string;
   maintenance_mode: boolean;
   max_pdf_size_mb: number;
-  allowed_ai_providers: string[];
+  
   retry_enabled: boolean;
   retry_max_attempts: number;
   retry_base_delay_ms: number;
@@ -229,7 +229,7 @@ const DEFAULT_CONFIG: SystemConfig = {
   pdf_fallback_model: "google/gemini-2.5-flash",
   maintenance_mode: false,
   max_pdf_size_mb: 50,
-  allowed_ai_providers: ["lovable", "openai", "gemini", "claude", "groq", "deepseek", "openrouter", "minimax"],
+  
   retry_enabled: true,
   retry_max_attempts: 3,
   retry_base_delay_ms: 1000,
@@ -652,7 +652,7 @@ export function DevSettings() {
           pdf_fallback_model: configMap.pdf_fallback_model || DEFAULT_CONFIG.pdf_fallback_model,
           maintenance_mode: configMap.maintenance_mode || DEFAULT_CONFIG.maintenance_mode,
           max_pdf_size_mb: configMap.max_pdf_size_mb || DEFAULT_CONFIG.max_pdf_size_mb,
-          allowed_ai_providers: configMap.allowed_ai_providers || DEFAULT_CONFIG.allowed_ai_providers,
+          
           retry_enabled: configMap.retry_enabled ?? DEFAULT_CONFIG.retry_enabled,
           retry_max_attempts: configMap.retry_max_attempts ?? DEFAULT_CONFIG.retry_max_attempts,
           retry_base_delay_ms: configMap.retry_base_delay_ms ?? DEFAULT_CONFIG.retry_base_delay_ms,
@@ -847,9 +847,6 @@ export function DevSettings() {
       }, {
         id: "max_pdf_size_mb",
         value: config.max_pdf_size_mb
-      }, {
-        id: "allowed_ai_providers",
-        value: config.allowed_ai_providers
       }, {
         id: "retry_enabled",
         value: config.retry_enabled
@@ -1111,12 +1108,6 @@ export function DevSettings() {
     });
   };
 
-  const toggleProvider = (providerId: string) => {
-    setConfig(prev => ({
-      ...prev,
-      allowed_ai_providers: prev.allowed_ai_providers.includes(providerId) ? prev.allowed_ai_providers.filter(p => p !== providerId) : [...prev.allowed_ai_providers, providerId]
-    }));
-  };
 
   const resetAllUserQuotas = async () => {
     if (!confirm("Tem certeza que deseja zerar o uso de IA de TODOS os usuários?")) {
@@ -2010,11 +2001,13 @@ export function DevSettings() {
         <CardContent className="space-y-6">
           {/* Import Strategy Mode */}
           <div className="flex items-center justify-between">
-            <div>
+            <div className="max-w-2xl">
               <Label>Modo de Importação</Label>
-              <p className="text-sm text-muted-foreground">
-                Duas Fases: Gemini extrai texto → Provider mais barato preenche campos
-              </p>
+              <div className="text-sm text-muted-foreground mt-1 space-y-1">
+                <p><strong>Passagem Única</strong> — Um único provedor faz OCR + preenchimento do laudo na mesma chamada. Mais rápido, porém limitado a PDFs pequenos (~20 MB) e exige um provedor multimodal robusto.</p>
+                <p><strong>Duas Fases (Recomendado)</strong> — Etapa 1: o provedor de OCR lê o PDF (Gemini suporta arquivos grandes, até 2 GB, e páginas escaneadas). Etapa 2: o provedor definido no <strong>Provider Inventory</strong> recebe só o texto e preenche o laudo. Mais barato e estável.</p>
+                <p className="text-amber-600 dark:text-amber-500">⚠️ Este toggle afeta <strong>apenas o Trabalhista</strong>. Previdenciário e Impugnação sempre usam Duas Fases.</p>
+              </div>
             </div>
             <Select value={config.import_strategy} onValueChange={value => setConfig({
               ...config,
@@ -2027,13 +2020,13 @@ export function DevSettings() {
                 <SelectItem value="single_pass">
                   <div className="flex flex-col">
                     <span>Passagem Única</span>
-                    <span className="text-[10px] text-muted-foreground">Um provider faz tudo</span>
+                    <span className="text-[10px] text-muted-foreground">OCR + preenchimento num só request</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="two_phase">
                   <div className="flex flex-col">
                     <span>Duas Fases (Recomendado)</span>
-                    <span className="text-[10px] text-muted-foreground">~60% mais econômico</span>
+                    <span className="text-[10px] text-muted-foreground">OCR + Provider Inventory</span>
                   </div>
                 </SelectItem>
               </SelectContent>
@@ -2406,34 +2399,9 @@ export function DevSettings() {
 
           {/* Info box */}
           <div className="p-3 bg-muted/50 rounded-lg text-xs text-muted-foreground space-y-1">
-            <p><strong>Fase 1 (Extração Visual):</strong> Gemini oficial com suporte a PDF Vision extrai todo o texto, incluindo imagens escaneadas.</p>
-            <p><strong>Fase 2 (Preenchimento):</strong> Provider econômico recebe apenas texto puro (~2-5MB) e preenche cada campo do laudo.</p>
-            <p><strong>Benefício:</strong> PDFs de até 2GB são suportados via Google Files API.</p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Separator />
-
-      {/* Section: Allowed Providers */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Providers Permitidos</CardTitle>
-          <CardDescription>
-            Controle quais providers estão disponíveis para uso no sistema
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {AI_PROVIDERS.map(provider => <div key={provider.id} className="flex items-center justify-between p-3 border rounded-lg">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full" style={{
-                backgroundColor: provider.color
-              }} />
-                  <span className="text-sm font-medium">{provider.name}</span>
-                </div>
-                <Switch checked={config.allowed_ai_providers.includes(provider.id)} onCheckedChange={() => toggleProvider(provider.id)} />
-              </div>)}
+            <p><strong>Fase 1 — OCR:</strong> o provedor configurado em "OCR — Provedor único para todos os módulos" lê o PDF e devolve o texto (inclusive de páginas escaneadas). Gemini é o único que suporta PDFs muito grandes via Google Files API (até 2 GB).</p>
+            <p><strong>Fase 2 — Preenchimento:</strong> o provedor/modelo definido no <strong>Provider Inventory</strong> recebe apenas o texto extraído e preenche cada campo do laudo. Como não precisa "ver" o PDF, pode ser um modelo mais barato (ex.: MiniMax M3, DeepSeek).</p>
+            <p className="pt-1 font-mono text-[11px]">PDF → [OCR provider] → texto → [Provider Inventory] → laudo</p>
           </div>
         </CardContent>
       </Card>
