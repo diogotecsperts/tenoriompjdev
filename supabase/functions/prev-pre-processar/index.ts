@@ -532,6 +532,7 @@ async function gerarQueixaUnificada(args: {
     promptType: "prev_queixa_unificada",
     maxOutputTokens: 1200,
     jsonMode: false,
+    requestTimeoutMs: 20_000,
   });
 
   return sanitizeQueixa(resp?.text || "");
@@ -614,6 +615,7 @@ async function gerarResumoExames(args: {
     promptType: "prev_resumo_exames",
     maxOutputTokens: 4000,
     jsonMode: false,
+    requestTimeoutMs: 25_000,
   });
 
   return sanitizeResumo(resp?.text || "");
