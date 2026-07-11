@@ -362,10 +362,10 @@ export function PrevUsagePanel() {
                 next.delete(row.id);
                 return next;
               });
-              // Zera colunas persistidas para forçar recontagem sob demanda
-              (supabase.from as any)("prev_pericias")
-                .update({ pdf_size_bytes: null, pdf_pages: null })
-                .eq("id", row.id);
+              // Zera colunas persistidas via edge function (RLS bloqueia UPDATE direto do dev)
+              supabase.functions.invoke("dev-save-pericia-pdf-meta", {
+                body: { periciaId: row.id, sizeBytes: null, pages: null },
+              });
             }
             // Heavy fields like prelaudo_data updated: schedule a full reload
             // in case downloads need the fresh copy on cache
@@ -472,12 +472,11 @@ export function PrevUsagePanel() {
     pages: number | null,
   ) => {
     try {
-      await (supabase.from as any)("prev_pericias")
-        .update({
-          pdf_size_bytes: size,
-          pdf_pages: pages,
-        })
-        .eq("id", periciaId);
+      // Dev não tem policy de UPDATE em prev_pericias (dados de outros usuários).
+      // Escrita vai pela edge function com service-role + is_developer().
+      await supabase.functions.invoke("dev-save-pericia-pdf-meta", {
+        body: { periciaId, sizeBytes: size, pages },
+      });
     } catch {
       // silencioso — cache em memória segue funcionando
     }

@@ -44,6 +44,9 @@ wall_clock_limit = 300
 [functions.dev-list-prev-usage]
 verify_jwt = true
 
+[functions.dev-save-pericia-pdf-meta]
+verify_jwt = true
+
 [functions.dev-get-pericia-data]
 verify_jwt = true
 

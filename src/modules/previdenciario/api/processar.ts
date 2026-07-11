@@ -57,6 +57,7 @@ export class PreProcessarError extends Error {
   model?: string;
   upstreamStatus?: number | null;
   technicalDetail?: string;
+  jobId?: string;
   constructor(
     message: string,
     code: PreProcessarErrorCode = "unknown",
@@ -65,6 +66,7 @@ export class PreProcessarError extends Error {
     provider?: string,
     model?: string,
     technicalDetail?: string,
+    jobId?: string,
   ) {
     super(message);
     this.name = "PreProcessarError";
@@ -74,6 +76,7 @@ export class PreProcessarError extends Error {
     this.provider = provider;
     this.model = model;
     this.technicalDetail = technicalDetail;
+    this.jobId = jobId;
   }
 }
 
@@ -215,6 +218,7 @@ async function pollPreProcessarJob(
         status.provider || start.provider,
         status.model || start.model,
         status.technicalDetail,
+        start.jobId,
       );
     }
 
@@ -230,6 +234,7 @@ async function pollPreProcessarJob(
     start.provider,
     start.model,
     `jobId=${start.jobId}`,
+    start.jobId,
   );
 }
 
