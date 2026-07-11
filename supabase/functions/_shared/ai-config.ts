@@ -556,8 +556,13 @@ export async function callAI(
     throw new Error(`API key not configured for provider: ${config.provider}`);
   }
 
+  const totalBudgetMs = options?.requestTimeoutMs;
+  const primaryTimeoutMs = totalBudgetMs && config.fallback?.apiKey
+    ? Math.max(15_000, Math.floor(totalBudgetMs * 0.55))
+    : totalBudgetMs;
+
   try {
-    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: options?.requestTimeoutMs });
+    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: primaryTimeoutMs });
     const latencyMs = Date.now() - startTime;
 
     // Log successful call
@@ -597,6 +602,14 @@ export async function callAI(
     if (config.fallback && config.fallback.apiKey) {
       console.log(`[AI Fallback] Trying fallback: ${config.fallback.provider}/${config.fallback.model}`);
       const fallbackStartTime = Date.now();
+      const fallbackBudgetMs = totalBudgetMs
+        ? totalBudgetMs - (fallbackStartTime - startTime) - 2_000
+        : 60_000;
+
+      if (fallbackBudgetMs < 10_000) {
+        console.warn(`[AI Fallback] Skipping fallback: insufficient time budget (${fallbackBudgetMs}ms)`);
+        throw classifiedPrimary;
+      }
 
       try {
         const fallbackConfig: AIConfig = {
@@ -607,7 +620,7 @@ export async function callAI(
           displayModel: config.fallback.displayModel
         };
 
-        const result = await callProvider(fallbackConfig, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: Math.min(options?.requestTimeoutMs || 60_000, 60_000) });
+        const result = await callProvider(fallbackConfig, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: Math.min(fallbackBudgetMs, 60_000) });
         const fallbackLatency = Date.now() - fallbackStartTime;
 
         // Log successful fallback
