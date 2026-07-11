@@ -84,7 +84,6 @@ const GEMINI_FLASH_PRIORITY = [
   "gemini-3.5-flash",
   "gemini-3-flash-preview",
   "gemini-2.5-flash",
-  "gemini-2.5-flash-lite",
   "gemini-2.5-flash-8b",
   "gemini-2.0-flash",
   "gemini-2.0-flash-lite",
