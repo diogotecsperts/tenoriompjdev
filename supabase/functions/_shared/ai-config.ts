@@ -790,16 +790,19 @@ async function getPDFConfig(): Promise<PDFConfig> {
   const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const supabase = createClient(supabaseUrl, supabaseKey);
 
+  // Config unificada: phase1_ocr_provider + phase1_gemini_model são a única fonte
+  // de verdade para OCR em todos os módulos. pdf_fallback_* permanece como
+  // fallback opcional configurável.
   const { data, error } = await supabase
     .from('system_config')
     .select('id, value')
-    .in('id', ['pdf_ai_provider', 'pdf_ai_model', 'pdf_fallback_provider', 'pdf_fallback_model']);
+    .in('id', ['phase1_ocr_provider', 'phase1_gemini_model', 'pdf_fallback_provider', 'pdf_fallback_model']);
 
   if (error) {
     console.error('[getPDFConfig] Error:', error);
-    return { 
-      provider: 'openrouter', 
-      model: 'google/gemini-2.5-flash',
+    return {
+      provider: 'gemini',
+      model: 'gemini-2.5-flash',
       fallbackProvider: 'lovable',
       fallbackModel: 'google/gemini-2.5-flash'
     };
@@ -810,13 +813,22 @@ async function getPDFConfig(): Promise<PDFConfig> {
     configMap[item.id] = typeof item.value === 'string' ? item.value : String(item.value);
   });
 
+  // callPDFProvider aceita 'openrouter' | 'gemini' | 'lovable'.
+  // Mapear valores do OCR unificado para o schema esperado.
+  const rawProvider = (configMap.phase1_ocr_provider || 'gemini').toLowerCase();
+  const provider = rawProvider === 'gemini' ? 'gemini' : 'lovable'; // mistral/minimax caem em lovable como safety net
+  const model = provider === 'gemini'
+    ? (configMap.phase1_gemini_model || 'gemini-2.5-flash')
+    : 'google/gemini-2.5-flash';
+
   return {
-    provider: configMap.pdf_ai_provider || 'openrouter',
-    model: configMap.pdf_ai_model || 'google/gemini-2.5-flash',
+    provider,
+    model,
     fallbackProvider: configMap.pdf_fallback_provider || 'lovable',
     fallbackModel: configMap.pdf_fallback_model || 'google/gemini-2.5-flash'
   };
 }
+
 
 // ============= PDF PROVIDER ROUTER WITH DYNAMIC FALLBACK =============
 export async function callPDFProvider(
