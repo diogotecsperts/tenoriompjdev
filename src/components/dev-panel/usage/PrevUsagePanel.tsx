@@ -59,12 +59,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Checkbox } from "@/components/ui/checkbox";
 
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { downloadPrelaudoDocx } from "@/modules/previdenciario/lib/export/prelaudo-docx";
-import { downloadPrelaudoPdf } from "@/modules/previdenciario/lib/export/prelaudo-pdf";
+import { saveAs } from "file-saver";
+import {
+  downloadPrelaudoDocx,
+  generatePrelaudoDocx,
+} from "@/modules/previdenciario/lib/export/prelaudo-docx";
+import {
+  downloadPrelaudoPdf,
+  generatePrelaudoPdf,
+} from "@/modules/previdenciario/lib/export/prelaudo-pdf";
+
 
 interface ProfileOption {
   id: string;
