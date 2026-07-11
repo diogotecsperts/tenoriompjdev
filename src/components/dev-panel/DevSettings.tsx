@@ -2134,8 +2134,8 @@ export function DevSettings() {
                             <SelectItem key={modelId} value={modelId}>
                               <div className="flex items-center gap-2">
                                 <span>{details?.displayName || modelId}</span>
-                                {modelId.includes("3-") && (
-                                  <Badge variant="outline" className="text-[10px] px-1 py-0">3.0</Badge>
+                                {(modelId.includes("3-") || modelId.includes("3.")) && (
+                                  <Badge variant="outline" className="text-[10px] px-1 py-0">3.x</Badge>
                                 )}
                                 {modelId.includes("pro") && (
                                   <Badge variant="secondary" className="text-[10px] px-1 py-0">Pro</Badge>
