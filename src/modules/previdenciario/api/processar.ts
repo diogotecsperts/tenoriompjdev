@@ -218,6 +218,7 @@ async function pollPreProcessarJob(
         status.provider || start.provider,
         status.model || start.model,
         status.technicalDetail,
+        start.jobId,
       );
     }
 
@@ -233,6 +234,7 @@ async function pollPreProcessarJob(
     start.provider,
     start.model,
     `jobId=${start.jobId}`,
+    start.jobId,
   );
 }
 
