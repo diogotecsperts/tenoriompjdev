@@ -1,57 +1,61 @@
+# Ajustes de clareza no DevPanel + limpeza de "Providers Permitidos"
 
-# Unificar configuração de OCR e sincronizar modelos Gemini
+## Respostas rápidas às suas dúvidas
 
-## Objetivo
-Acabar com a redundância entre "Extração de PDF (OCR)" e "Provedor de OCR (todos os módulos)". Passa a existir **um único bloco** que vale para todos os módulos, inclusive Trabalhista em Passagem Única. E qualquer dropdown de modelo Gemini passa a usar a lista dinâmica atualizada via botão "Atualizar Modelos".
+**1. Posso deixar MiniMax M3 no Provider Inventory e Gemini 3 Flash em OCR?**
+Sim, sem conflito. São camadas independentes:
+- **Provider Inventory** = provedor/modelo usado para **gerar o laudo** (preenchimento dos campos, análise técnica).
+- **OCR (Estratégia de Importação)** = provedor/modelo usado para **ler o PDF** e transformar em texto.
+Você pode ter Gemini fazendo o OCR e MiniMax gerando o laudo, ou qualquer combinação.
 
-## O que muda para o usuário
+**2. Os textos do "Modo de Importação" e da "Fase 1/Fase 2" estão desatualizados** — vou reescrever (ver abaixo).
 
-- No DevPanel some a seção **"Extração de PDF (OCR)"**.
-- O bloco **"Provedor de OCR (todos os módulos)"** vira o único lugar para escolher provider + modelo de OCR. Fica bem visível dentro de "Estratégia de Importação" (com título mais claro tipo **"OCR — Provedor único para todos os módulos"**).
-- A escolha feita ali passa a valer para:
-  - Previdenciário (já valia)
-  - Impugnação (já valia)
-  - Trabalhista em Duas Fases (já valia)
-  - **Trabalhista em Passagem Única (novo — antes usava o campo separado)**
-- Lista dinâmica de modelos Gemini (botão "Atualizar Modelos") passa a alimentar **todos** os dropdowns de modelo Gemini, incluindo o do Provedor de OCR.
+**3. "Providers Permitidos" está quebrado.** Investiguei: a chave `allowed_ai_providers` é salva em `system_config`, mas **não é lida por nenhuma edge function nem pelo Provider Inventory**. Ou seja, marcar/desmarcar ali não bloqueia nada — é código morto. Como você mesmo disse que prefere remover se não tiver função, **vou removê-lo**. Gate real por provider já existe implicitamente (se o secret do provider não estiver configurado, ele não aparece funcional).
 
-## Detalhes técnicos
+---
 
-### 1. UI (`src/components/dev-panel/DevSettings.tsx`)
-- Remover o Card "Extração de PDF (OCR)" (linhas ~1982–2395), incluindo os helpers exclusivos (`pdfProviderHasCustomInput`, `getPdfProvider`, `getPdfProviderModels`, painéis Mistral OCR/Gemini específicos daquele bloco).
-- No bloco "Provedor de OCR" (linha ~2453):
-  - Renomear título para deixar claro que é o único e vale para tudo.
-  - Trocar o `<Select>` de modelo Gemini (que hoje usa lista estática) para consumir `dynamicGeminiModels` quando disponível (mesmo padrão da linha 2145), com fallback para a lista estática.
-  - Adicionar botão pequeno "Atualizar modelos" ao lado (reaproveitando a função existente `fetchAvailableGeminiModels`).
+## Mudanças de UI (arquivo único: `src/components/dev-panel/DevSettings.tsx`)
 
-### 2. Backend (`supabase/functions/processar-autos/index.ts`)
-Fluxo single-pass hoje lê `pdf_ai_provider`/`pdf_ai_model` (linha ~2398–2405). Trocar para ler `phase1_ocr_provider` + o modelo correspondente:
-- Se provider = `gemini` → usar `phase1_gemini_model`.
-- Se provider = `mistral` → usar `mistral-ocr-latest` (já é o único suportado).
-- Se provider = `minimax` → usar `MiniMax-M3` (respeitando a regra de rasterização client-side já existente; se não puder, cai no fallback do router).
-- Manter fallback silencioso: se `phase1_ocr_provider` estiver vazio → `gemini` + `gemini-2.5-flash`.
+### A. Reescrever descrição do toggle "Modo de Importação"
 
-Não mexer em `ocr-router.ts` — já está correto e continua sendo a fonte única para os módulos OCR-only.
+Substituir o texto atual por algo direto:
 
-### 3. `getPdfAIConfig` (`supabase/functions/_shared/ai-config.ts` linha ~796)
-Se ainda houver consumidor dessa função, redirecioná-la para ler `phase1_ocr_provider`/`phase1_gemini_model` em vez de `pdf_ai_provider`/`pdf_ai_model`. Se não houver mais consumidor após a mudança do processar-autos, remover a função.
+> **Passagem Única** — Um único provedor faz OCR + preenchimento do laudo na mesma chamada. Mais rápido, porém limitado a PDFs pequenos (~20 MB) e exige um provedor multimodal robusto.
+>
+> **Duas Fases (Recomendado)** — Etapa 1: Gemini lê o PDF (suporta arquivos grandes, até 2 GB, e páginas escaneadas). Etapa 2: o provedor definido no **Provider Inventory** recebe só o texto e preenche o laudo. Mais barato e estável.
+>
+> ⚠️ Este toggle afeta **apenas o Trabalhista**. Previdenciário e Impugnação sempre usam Duas Fases.
 
-### 4. DevAIStatus (`src/components/dev-panel/DevAIStatus.tsx`)
-Trocar leitura de `pdf_ai_provider`/`pdf_ai_model` por `phase1_ocr_provider`/`phase1_gemini_model` no card que mostra o status do OCR.
+### B. Reescrever bloco explicativo "Fase 1 / Fase 2"
 
-### 5. ImportarAutosDialog (`src/components/tools/ImportarAutosDialog.tsx` linha ~299–325)
-Simplificar: sempre usar `phase1_ocr_provider`/`phase1_gemini_model` (elimina o branch `single-pass vs two_phase` para escolha de OCR).
+Substituir por:
 
-### 6. Chaves órfãs no `system_config`
-Manter as linhas antigas (`pdf_ai_provider`, `pdf_ai_model`, `gemini_pdf_model`, `pdf_fallback_*`) na tabela — não removo dados. Só param de ser lidas/escritas. Se o usuário quiser limpar depois, faço em ação separada.
+> **Fase 1 — OCR:** o provedor configurado em "OCR — Provedor único para todos os módulos" lê o PDF e devolve o texto (inclusive de páginas escaneadas). Gemini é o único que suporta PDFs muito grandes via Google Files API (até 2 GB).
+>
+> **Fase 2 — Preenchimento:** o provedor/modelo definido no **Provider Inventory** recebe apenas o texto extraído e preenche cada campo do laudo. Como não precisa "ver" o PDF, pode ser um modelo mais barato (ex.: MiniMax M3, DeepSeek).
+>
+> **Resumo visual:** `PDF → [OCR provider] → texto → [Provider Inventory] → laudo`
+
+### C. Remover card "Providers Permitidos"
+
+- Remover o Card completo (aprox. linhas 2419–2450).
+- Remover do `DEFAULT_CONFIG` a chave `allowed_ai_providers` (linha 232).
+- Remover do type/interface a propriedade `allowed_ai_providers` (linha 55).
+- Remover do carregamento inicial (linha 655) e do payload de save (linhas 850–853).
+- Remover a função `toggleProvider` (linha 1117) se não for usada em outro lugar.
+- **Não** apagar a coluna no banco — só deixar de ler/escrever, pra não perder histórico. Chave órfã em `system_config` fica inerte.
+
+---
 
 ## Fora de escopo
-- Não mexo em prompts, na lógica de OCR em si, em `ocr-router.ts`, no MiniMax client, nem no toggle single-pass vs two_phase.
-- Não altero secrets nem chaves de API.
-- Não altero nada de UI dos módulos (Prev, Impugnação, Trabalhista) — só o DevPanel.
 
-## Como validar depois
-1. DevPanel: existe **um** bloco de OCR, com lista Gemini atualizada.
-2. Trocar OCR para Gemini + rodar importação Trabalhista single-pass → logs do `processar-autos` mostram `provider=gemini` e modelo escolhido.
-3. Rodar importação Prev/Impugnação → `[ocr-router] provider=gemini` no log (comportamento anterior mantido).
-4. Trocar OCR para MiniMax → Trabalhista single-pass e Prev usam o mesmo provider.
+- Não mexer no Provider Inventory nem no bloco de OCR unificado (já foram tratados na rodada anterior).
+- Não mexer em edge functions — nada consome `allowed_ai_providers`, então a remoção é puramente de UI.
+- Não mexer em prompts, MiniMax, ou lógica de importação.
+
+## Validação
+
+1. Abrir DevPanel → confirmar que os dois blocos de texto (Modo de Importação + Fase 1/2) mostram a nova redação.
+2. Confirmar que o card "Providers Permitidos" sumiu.
+3. Salvar configurações → não deve dar erro de tipo nem 400 do Supabase.
+4. Abrir importação (Trabalhista) → confirmar que troca de Passagem Única ↔ Duas Fases continua funcionando.
