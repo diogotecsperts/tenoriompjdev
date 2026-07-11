@@ -12,7 +12,6 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getOcrRouterConfig, runOcrWithConfiguredProvider } from "../_shared/ocr-router.ts";
-import { isMinimaxClientRasterizeError } from "../_shared/minimax-client.ts";
 import { getAIConfig, callAI, classifyAIProviderError } from "../_shared/ai-config.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
 import { classifyMistralError, isMistralError } from "./_mistral-errors.ts";
