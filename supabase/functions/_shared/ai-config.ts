@@ -547,7 +547,7 @@ export async function callAI(
   config: AIConfig, 
   systemPrompt: string, 
   userPrompt: string,
-  options?: { userId?: string; promptType?: string; maxOutputTokens?: number; jsonMode?: boolean }
+  options?: { userId?: string; promptType?: string; maxOutputTokens?: number; jsonMode?: boolean; requestTimeoutMs?: number }
 ): Promise<{ text: string; provider: string; model: string; usedFallback: boolean }> {
   console.log(`[AI Call] Provider: ${config.provider}, Model: ${config.model}${options?.maxOutputTokens ? `, maxOutputTokens: ${options.maxOutputTokens}` : ''}${options?.jsonMode ? ', jsonMode: true' : ''}`);
   const startTime = Date.now();
@@ -557,7 +557,7 @@ export async function callAI(
   }
 
   try {
-    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode });
+    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: options?.requestTimeoutMs });
     const latencyMs = Date.now() - startTime;
 
     // Log successful call
@@ -575,7 +575,8 @@ export async function callAI(
 
     return { ...result, usedFallback: false };
   } catch (primaryError) {
-    console.error(`[AI Call] Primary provider ${config.provider} failed:`, primaryError);
+    const classifiedPrimary = classifyAIProviderError(primaryError, config.provider, config.model, 'ai_generation');
+    console.error(`[AI Call] Primary provider ${config.provider} failed:`, classifiedPrimary);
     const primaryLatency = Date.now() - startTime;
 
     // Log primary failure
@@ -587,7 +588,7 @@ export async function callAI(
         promptType: options.promptType,
         latencyMs: primaryLatency,
         success: false,
-        errorMessage: primaryError instanceof Error ? primaryError.message : 'Unknown error',
+        errorMessage: `${classifiedPrimary.code}: ${classifiedPrimary.technicalDetail}`,
         usedFallback: false
       });
     }
@@ -606,7 +607,7 @@ export async function callAI(
           displayModel: config.fallback.displayModel
         };
 
-        const result = await callProvider(fallbackConfig, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode });
+        const result = await callProvider(fallbackConfig, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: Math.min(options?.requestTimeoutMs || 60_000, 60_000) });
         const fallbackLatency = Date.now() - fallbackStartTime;
 
         // Log successful fallback
@@ -625,7 +626,8 @@ export async function callAI(
         console.log(`[AI Fallback] Success with ${result.provider}/${result.model}`);
         return { ...result, usedFallback: true };
       } catch (fallbackError) {
-        console.error(`[AI Fallback] Fallback also failed:`, fallbackError);
+        const classifiedFallback = classifyAIProviderError(fallbackError, config.fallback.provider, config.fallback.model, 'ai_generation');
+        console.error(`[AI Fallback] Fallback also failed:`, classifiedFallback);
         const fallbackLatency = Date.now() - fallbackStartTime;
 
         // Log fallback failure
@@ -637,16 +639,16 @@ export async function callAI(
             promptType: options.promptType,
             latencyMs: fallbackLatency,
             success: false,
-            errorMessage: fallbackError instanceof Error ? fallbackError.message : 'Unknown error',
+          errorMessage: `${classifiedFallback.code}: ${classifiedFallback.technicalDetail}`,
             usedFallback: true
           });
         }
 
-        throw fallbackError;
+        throw classifiedFallback;
       }
     }
 
-    throw primaryError;
+    throw classifiedPrimary;
   }
 }
 
@@ -655,7 +657,7 @@ async function callProvider(
   systemPrompt: string, 
   userPrompt: string,
   maxOutputTokens?: number,
-  options?: { jsonMode?: boolean }
+  options?: { jsonMode?: boolean; requestTimeoutMs?: number }
 ): Promise<{ text: string; provider: string; model: string }> {
   switch (config.provider) {
     case 'lovable':
@@ -676,7 +678,7 @@ async function callProvider(
   }
 }
 
-async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean }) {
+async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number }) {
   const body: any = {
     model: config.model,
     messages: [
@@ -703,7 +705,7 @@ async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt:
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-  });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
 
   if (!response.ok) {
     const error = await response.text();
@@ -718,7 +720,7 @@ async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt:
   };
 }
 
-async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean }) {
+async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number }) {
   const url = `${config.endpoint}/${config.model}:generateContent?key=${config.apiKey}`;
   
   const generationConfig: any = {
@@ -753,7 +755,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
       generationConfig,
       safetySettings,
     })
-  });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
 
   if (!response.ok) {
     const error = await response.text();
@@ -777,7 +779,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
   };
 }
 
-async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean }) {
+async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number }) {
   const isDeepSeek = config.provider === 'deepseek';
   const isDeepSeekReasoner = isDeepSeek && config.model.includes('reasoner');
   const isMinimax = config.provider === 'minimax';
@@ -828,7 +830,7 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-  });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
 
   if (!response.ok) {
     const error = await response.text();
@@ -850,7 +852,7 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
   };
 }
 
-async function callClaude(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number) {
+async function callClaude(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { requestTimeoutMs?: number }) {
   const response = await fetchWithRetry(config.endpoint, {
     method: 'POST',
     headers: {
@@ -866,7 +868,7 @@ async function callClaude(config: AIConfig, systemPrompt: string, userPrompt: st
         { role: 'user', content: userPrompt }
       ],
     }),
-  });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
 
   if (!response.ok) {
     const error = await response.text();
