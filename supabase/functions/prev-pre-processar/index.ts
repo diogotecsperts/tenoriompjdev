@@ -13,7 +13,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { runOcrWithConfiguredProvider } from "../_shared/ocr-router.ts";
 import { isMinimaxClientRasterizeError } from "../_shared/minimax-client.ts";
-import { getAIConfig, callAI } from "../_shared/ai-config.ts";
+import { getAIConfig, callAI, classifyAIProviderError } from "../_shared/ai-config.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
 import { classifyMistralError, isMistralError } from "./_mistral-errors.ts";
 import { notifyPdfErrorFireAndForget } from "../_shared/notify-pdf-error.ts";
@@ -156,13 +156,60 @@ const SYSTEM_PROMPT =
 /**
  * Reduz texto OCR preservando cabeça e cauda (quesitos costumam ficar no fim).
  */
-function trimOcrPreservingTail(text: string, maxChars = 180_000): string {
+function trimOcrPreservingTail(text: string, maxChars = 120_000): string {
   if (text.length <= maxChars) return text;
   const headSize = Math.floor(maxChars * 0.66);
   const tailSize = maxChars - headSize;
   const head = text.slice(0, headSize);
   const tail = text.slice(-tailSize);
   return `${head}\n\n[...trecho omitido por limite de contexto...]\n\n${tail}`;
+}
+
+function classifyProcessingError(
+  err: unknown,
+  fallback?: { provider?: string; model?: string; stage?: string },
+) {
+  const msg = err instanceof Error ? err.message : String(err || "Erro desconhecido");
+  const classified = classifyAIProviderError(
+    err,
+    fallback?.provider || "backend",
+    fallback?.model || "processamento",
+    fallback?.stage || "processamento",
+  );
+
+  if (/Gemini OCR timeout|pdf-visual-extractor|OCR timeout|generateContent.*timeout/i.test(msg)) {
+    return {
+      error:
+        "Tempo excedido no OCR Gemini. O PDF demorou demais para a leitura visual síncrona; tente um PDF menor/dividido ou use outro OCR no DevPanel para este documento.",
+      code: "provider_timeout",
+      stage: "ocr",
+      provider: "gemini",
+      model: fallback?.model || null,
+      upstreamStatus: null,
+      technicalDetail: msg.slice(0, 1200),
+      httpStatus: 504,
+    };
+  }
+
+  const httpStatus =
+    classified.code === "quota_exceeded" ? 402 :
+    classified.code === "invalid_key" ? 401 :
+    classified.code === "rate_limited" ? 429 :
+    classified.code === "invalid_request" ? 400 :
+    classified.code === "provider_timeout" ? 504 :
+    classified.code === "provider_unavailable" ? 503 :
+    classified.code === "response_truncated" ? 502 : 500;
+
+  return {
+    error: classified.message,
+    code: classified.code,
+    stage: classified.stage,
+    provider: classified.provider,
+    model: classified.model,
+    upstreamStatus: classified.upstreamStatus,
+    technicalDetail: classified.technicalDetail,
+    httpStatus,
+  };
 }
 
 /**
