@@ -1390,12 +1390,97 @@ export function PrevUsagePanel() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 text-xs">
+                      {(() => {
+                        const sel = selectedByPauta[pt.id];
+                        const selCount = sel?.size ?? 0;
+                        if (selCount === 0) return null;
+                        const selectedPericias = ps.filter((p) => sel!.has(p.id));
+                        const hasOrig = selectedPericias.some((p) => !!p.pdf_path);
+                        const hasProc = selectedPericias.some((p) => p.pdf_processado);
+                        const isBusy =
+                          batchProgress?.pautaId === pt.id;
+                        const label = isBusy
+                          ? `Empacotando ${batchProgress!.done}/${batchProgress!.total}…`
+                          : `Baixar ${selCount} selecionada${selCount > 1 ? "s" : ""}`;
+                        return (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                size="sm"
+                                variant="default"
+                                disabled={isBusy}
+                                onClick={(e) => e.stopPropagation()}
+                                className="h-7 text-xs"
+                              >
+                                {isBusy ? (
+                                  <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                ) : (
+                                  <Download className="h-3 w-3 mr-1" />
+                                )}
+                                {label}
+                                <ChevronDown className="h-3 w-3 ml-1 opacity-70" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent
+                              align="end"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <DropdownMenuLabel className="text-xs">
+                                Baixar {selCount} arquivo(s)
+                              </DropdownMenuLabel>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                disabled={!hasOrig || isBusy}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void runBatchDownload(pt, selectedPericias, "orig");
+                                }}
+                              >
+                                <Download className="h-3.5 w-3.5 mr-2" />
+                                PDF original
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={!hasProc || isBusy}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void runBatchDownload(pt, selectedPericias, "docx");
+                                }}
+                              >
+                                <FileDown className="h-3.5 w-3.5 mr-2" />
+                                DOCX processado
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={!hasProc || isBusy}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void runBatchDownload(pt, selectedPericias, "pdf");
+                                }}
+                              >
+                                <FileDown className="h-3.5 w-3.5 mr-2" />
+                                PDF processado
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                disabled={isBusy}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  clearPautaSelection(pt.id);
+                                }}
+                              >
+                                <X className="h-3.5 w-3.5 mr-2" />
+                                Limpar seleção
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        );
+                      })()}
                       <Badge variant="outline">{psAll.length} perícias</Badge>
                       <Badge variant="outline">{pdfsCount} PDFs</Badge>
                       <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200">
                         {procCount} proc.
                       </Badge>
                     </div>
+
                   </div>
                 </AccordionTrigger>
                 <AccordionContent>
