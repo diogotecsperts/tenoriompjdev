@@ -19,6 +19,13 @@ import {
   Pencil,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   getPauta,
   listPericias,
@@ -26,10 +33,11 @@ import {
   updatePericia,
   uploadPericiaPdf,
 } from "../api/pautas";
-import { preProcessarPericia } from "../api/processar";
+import { preProcessarPericia, PreProcessarError } from "../api/processar";
 import type { MinimaxOcrProgress } from "@/lib/minimax-ocr-client";
 import { NovaPericiaDialog } from "../components/NovaPericiaDialog";
 import { EditarPautaDialog } from "../components/EditarPautaDialog";
+import { UploadLotePdfsDialog } from "../components/UploadLotePdfsDialog";
 import { PERICIA_STATUS_COLOR, PERICIA_STATUS_LABEL } from "../types";
 import type { PrevPauta, PrevPericia } from "../types";
 import { useAuth } from "@/contexts/AuthContext";
