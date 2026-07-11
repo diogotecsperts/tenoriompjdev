@@ -2000,10 +2000,12 @@ export function DevSettings() {
             )}
           </div>
           <CardDescription>
-            Afeta apenas o pipeline de importação do módulo <strong>Trabalhista</strong>
-            (economia de ~60% em custos no modo Duas Fases). Previdenciário e Impugnação
-            sempre usam o Provedor de OCR abaixo, independente desta escolha.
+            <strong>Provedor de OCR</strong> abaixo vale para <strong>todos os módulos</strong>
+            (Previdenciário, Impugnação e Trabalhista). O toggle "Modo de Importação" afeta
+            apenas o Trabalhista: em Duas Fases, o OCR extrai o texto e um provider mais
+            barato preenche os campos (economia de ~60%).
           </CardDescription>
+
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Import Strategy Mode */}
