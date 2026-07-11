@@ -1,82 +1,58 @@
 ## Diagnóstico
 
-Dois problemas separados, mesma raiz arquitetural.
+O erro do print continua genérico porque a chamada ao backend está voltando como **504 timeout** depois de ~150s. Nesse caso, o frontend recebe apenas `Edge Function returned a non-2xx status code`, sem o JSON detalhado da função.
 
-### Problema 1 — Transições lentas / tela branca entre páginas
+Pelos logs, o fluxo foi:
 
-Em `src/App.tsx`, cada rota protegida é declarada assim:
+1. OCR Gemini funcionou corretamente via Files API.
+2. O PDF tinha 113 páginas e gerou 143.360 caracteres de OCR.
+3. A próxima etapa chamou o modelo principal MiniMax M3 com `maxOutputTokens: 32000` em JSON mode.
+4. A função ficou presa/longa nessa chamada e a plataforma encerrou a requisição antes de a função conseguir montar uma resposta amigável.
 
-```tsx
-<Route path="/dashboard" element={<ProtectedWithLayout><Dashboard/></ProtectedWithLayout>} />
-<Route path="/historico"  element={<ProtectedWithLayout><Historico/></ProtectedWithLayout>} />
-...
-```
+Então o problema atual não parece ser mais OOM no OCR. O gargalo está na **etapa de extração estruturada com IA**, principalmente em documentos grandes usando MiniMax M3.
 
-`ProtectedWithLayout` é um componente inline diferente por rota. Ao mudar de `/dashboard` para `/historico` o React vê elementos distintos e **desmonta e remonta o `AppLayout` inteiro a cada navegação**. Consequências, todas medidas nas linhas de código atuais:
+## Plano de correção pontual
 
-- `AppLayout` roda `useEffect(checkDevRole)` → chama `supabase.rpc("is_developer")` **a cada navegação** (`src/components/layout/AppLayout.tsx:57-65`).
-- `usePresenceHeartbeat` reinicializa (`src/hooks/usePresenceHeartbeat.ts`): dispara `checkAndNotifyLogin` (SELECT em `user_presence`), depois um `upsert` em `user_presence`, e um `supabase.auth.getSession()` extra — tudo antes do próximo frame útil.
-- O `<ImportarAutosDialog/>` é remontado (código pesado, imports grandes) mesmo quando o usuário nunca abre o diálogo.
-- Todo o estado local do sidebar (`collapsed`, `mobileOpen`, `isDeveloper`) é perdido.
+1. **Criar classificação padronizada de erro de IA**
+   - Detectar nos erros de provider: timeout/504, quota/saldo/402/429, chave inválida/401/403, payload/modelo inválido/400, resposta truncada e indisponibilidade 5xx.
+   - Retornar sempre JSON com `error`, `code`, `stage`, `provider`, `model`, `upstreamStatus` e `technicalDetail` quando houver.
+   - Não expor chaves nem dados sensíveis.
 
-Efeito visível: cada troca de rota fica presa em "loading/tela branca" até o RPC + o upsert de presence responderem. Sob rede instável, isso pode passar de 1-2s.
+2. **Corrigir o 504 que impede mensagem detalhada**
+   - Reduzir o risco de timeout da etapa principal em `prev-pre-processar`:
+     - aplicar limite de tempo interno por chamada de IA, menor que o timeout da plataforma;
+     - se estourar, acionar fallback configurado antes de a função morrer;
+     - se fallback também falhar/estourar, retornar erro detalhado controlado.
+   - Isso evita cair no erro genérico do cliente.
 
-### Problema 2 — Toast esporádico "Erro ao carregar perfil"
+3. **Ajustar o tamanho da extração previdenciária para documentos grandes**
+   - Para PDFs grandes, reduzir de forma mais agressiva o OCR enviado à extração estruturada, preservando início e fim do processo.
+   - Manter a regra de não inventar dados e não alterar dados já salvos.
+   - Objetivo: evitar timeout em MiniMax M3 sem afetar OCR nem outros módulos.
 
-Em `src/contexts/AuthContext.tsx` (`loadUserData`, linhas 116-146):
+4. **Melhorar o frontend do toast**
+   - Trocar `Erro IA` por mensagens específicas:
+     - `Tempo excedido na IA`
+     - `Saldo/cota insuficiente`
+     - `Credencial da IA inválida`
+     - `Modelo indisponível`
+     - `Resposta incompleta da IA`
+   - Mostrar detalhes úteis: etapa (`OCR` ou `extração`), provider/modelo e status upstream quando disponível.
 
-- A consulta usa `.single()` na tabela `profiles`. Em qualquer transiente (JWT ainda sendo hidratado no cliente, RLS retornando 401 momentâneo, falha de rede) o Supabase devolve um erro **cujo `code` não é `PGRST301` nem `42501`** (pode ser `PGRST116`, `PGRST000`, string vazia, ou apenas um `AuthApiError`).
-- O bloco `isTransientError` só reconhece dois códigos específicos, então em qualquer outro erro cai adiante em `if (!profileResult.data)` e entra no ramo **"conta sem perfil válido → signOut()"**. Como você viu depois de reload deu certo, isso confirma transiente, não perfil ausente.
-- Quando reproduzido no evento `INITIAL_SESSION` (RLS ainda sem `auth.uid()`), gera exatamente o comportamento relatado: toast de erro seguido de sucesso ao recarregar.
+5. **Preservar auditoria para DevPanel**
+   - Garantir que falhas de provider/fallback sejam registradas em `ai_usage_logs` quando possível.
+   - Assim o DevPanel consegue mostrar se falhou no app, no provider, por quota, por timeout ou por credencial.
 
-## Correção — cirúrgica, sem tocar em lógica de negócios
+## Arquivos previstos
 
-### 1. Route layout único (fim das remontagens)
-
-Refatorar `src/App.tsx` para usar rota de layout com `<Outlet/>`:
-
-```tsx
-<Route element={<ProtectedRoute><AppLayout><Outlet/></AppLayout></ProtectedRoute>}>
-  <Route path="/dashboard"   element={<Dashboard/>}/>
-  <Route path="/historico"   element={<Historico/>}/>
-  <Route path="/laudo/new"   element={<LaudoEditor/>}/>
-  <Route path="/laudo/:id"   element={<LaudoEditor/>}/>
-  <Route path="/impugnacao"  element={<Impugnacao/>}/>
-  <Route path="/financeiro"  element={<Financeiro/>}/>
-  <Route path="/configuracoes" element={<Configuracoes/>}/>
-  <Route path="/profile"       element={<Configuracoes/>}/>
-</Route>
-```
-
-Remove o wrapper `ProtectedWithLayout`. Rotas fora do layout (`/`, `/hub`, `/impersonate`, `/previdenciario/*`, `/dev-panel`, `*`) ficam como estão. Nenhuma mudança em Dashboard, LaudoEditor, LaudoContext, etc.
-
-**Ganho direto:** o `AppLayout` monta uma vez por sessão → `usePresenceHeartbeat`, `is_developer` RPC, `ImportarAutosDialog` param de re-inicializar em toda navegação. As transições ficam instantâneas.
-
-### 2. Tornar `AuthContext.loadUserData` robusto a transientes
-
-Duas mudanças pequenas em `src/contexts/AuthContext.tsx`, apenas dentro da função `loadUserData`:
-
-- Trocar `.single()` por `.maybeSingle()` — separa "sem linha" de "erro real".
-- Ampliar o conceito de transiente: **qualquer `profileResult.error` sem `profileResult.data` é tratado como transiente** (log + toast informativo, mantém sessão, não desloga). O ramo de "conta sem perfil válido → signOut" só dispara quando `error === null && data === null` (o único caso em que temos certeza de que a linha realmente não existe). Isso elimina o falso "conta inválida" causado por hiccups de rede/JWT.
-- Manter o timeout de 10s como está.
-
-Sem mudança na interface pública do contexto, sem mudança em componentes consumidores.
-
-### 3. (Opcional, só se sobrar folga) Consolidar re-render do `AuthProvider`
-
-Não é necessário para o bug, mas se quisermos aproveitar, envolver o `value={{…}}` do `AuthContext.Provider` em `useMemo`. Deixo isso fora do escopo desta correção para manter o patch mínimo.
-
-## Escopo do patch
-
-Arquivos tocados: **2**.
-
-- `src/App.tsx` — refatoração de rotas para layout único com `<Outlet/>`; remove `ProtectedWithLayout`.
-- `src/contexts/AuthContext.tsx` — `.maybeSingle()` + reclassificação de erros transientes dentro de `loadUserData`.
-
-Nenhum arquivo de UI, de conteúdo do laudo, de OCR, de DevPanel, ou de edge function é alterado.
+- `supabase/functions/_shared/ai-config.ts`
+- `supabase/functions/prev-pre-processar/index.ts`
+- `src/modules/previdenciario/api/processar.ts`
+- `src/modules/previdenciario/pages/PautaDetalhe.tsx`
 
 ## Validação
 
-1. Build passa.
-2. Playwright: login → navegar Dashboard ↔ Histórico ↔ Configurações ↔ Impugnação em sequência e conferir que não há flash de "Carregando…" entre rotas e que `AppLayout` não remonta (contar chamadas a `is_developer` no console → deve aparecer 1× por sessão, não 1× por navegação).
-3. Simular erro transitório de perfil injetando um erro no `.maybeSingle()` via DevTools (ou temporariamente forçando um `throw`) e confirmar que o toast diz "problema de conexão" e a sessão permanece — não desloga.
+- Conferir logs da função para confirmar que o timeout vira erro JSON controlado.
+- Verificar que OCR Gemini continua usando Files API para PDFs grandes.
+- Testar o fluxo com MiniMax M3 como principal e Gemini como OCR/fallback configurado.
+- Confirmar que o usuário vê mensagem detalhada em vez de `Edge Function returned a non-2xx status code`.
