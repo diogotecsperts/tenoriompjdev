@@ -2013,18 +2013,18 @@ export function DevSettings() {
               ...config,
               import_strategy: value
             })}>
-              <SelectTrigger className="min-w-[20rem] w-auto h-auto py-2.5 [&>span]:line-clamp-none">
+              <SelectTrigger className="min-w-[20rem] w-auto h-auto py-2.5 [&>span]:line-clamp-none [&>span]:flex-1 [&>span]:flex [&>span]:flex-col [&>span]:items-center [&>span]:justify-center">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="min-w-[20rem]">
                 <SelectItem value="single_pass">
-                  <div className="flex flex-col">
+                  <div className="flex flex-col items-center">
                     <span>Passagem Única</span>
                     <span className="text-[10px] text-muted-foreground whitespace-nowrap">OCR + preenchimento num só request</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="two_phase">
-                  <div className="flex flex-col">
+                  <div className="flex flex-col items-center">
                     <span>Duas Fases (Recomendado)</span>
                     <span className="text-[10px] text-muted-foreground whitespace-nowrap">OCR + Provider Inventory</span>
                   </div>
