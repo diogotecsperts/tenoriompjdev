@@ -1534,9 +1534,21 @@ export function PrevUsagePanel() {
                       <TableBody>
                         {ps.map((p) => (
                           <TableRow key={p.id}>
+                            <TableCell>
+                              <Checkbox
+                                checked={
+                                  selectedByPauta[pt.id]?.has(p.id) ?? false
+                                }
+                                onCheckedChange={() =>
+                                  toggleSelect(pt.id, p.id)
+                                }
+                                aria-label={`Selecionar ${p.periciado_nome ?? p.id}`}
+                              />
+                            </TableCell>
                             <TableCell className="font-mono text-xs">
                               {p.ordem}
                             </TableCell>
+
                             <TableCell className="font-medium">
                               {p.periciado_nome ?? "—"}
                             </TableCell>
