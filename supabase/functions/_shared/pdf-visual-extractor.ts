@@ -99,6 +99,9 @@ async function callGeminiGenerateContentWithFile(
   prompt: string
 ): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:generateContent?key=${apiKey}`;
+  // Mantém a chamada abaixo do timeout de gateway (~150s). Sem isso o cliente
+  // recebe apenas "Edge Function returned a non-2xx status code", sem causa real.
+  const OCR_GENERATE_TIMEOUT_MS = 105_000;
   
   // Gerar variantes de URI HTTPS completas (nunca usar formato curto!)
   const uriVariants = getFileUriVariants(fileUri);
@@ -158,11 +161,14 @@ async function callGeminiGenerateContentWithFile(
     console.log(`[pdf-visual-extractor] Trying ${attempt.name} with model: ${apiModel}`);
     
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), OCR_GENERATE_TIMEOUT_MS);
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(attempt.payload)
-      });
+        body: JSON.stringify(attempt.payload),
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeoutId));
 
       const responseText = await response.text();
       
@@ -195,6 +201,11 @@ async function callGeminiGenerateContentWithFile(
       return { ok: false, error: `HTTP ${response.status}: ${responseText}` };
       
     } catch (fetchErr) {
+      if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {
+        const timeoutMsg = `Gemini OCR timeout after ${Math.round(OCR_GENERATE_TIMEOUT_MS / 1000)}s (model=${apiModel}, payload=${attempt.name}). Documento provavelmente grande/demorado demais para processamento síncrono.`;
+        console.error(`[pdf-visual-extractor] ${timeoutMsg}`);
+        return { ok: false, error: timeoutMsg };
+      }
       console.error(`[pdf-visual-extractor] ${attempt.name} fetch error:`, fetchErr);
       lastError = `${attempt.name}: ${fetchErr}`;
       // Network errors are retry-able
@@ -385,6 +396,8 @@ async function extractWithInlineBase64(
   console.log(`[pdf-visual-extractor] Calling Gemini API (inline base64) with model: ${apiModel} (original: ${model})`);
   
   // Usar maxOutputTokens seguro (65536 em vez de 1048576)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 105_000);
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -404,7 +417,13 @@ async function extractWithInlineBase64(
         temperature: 0.1,
         maxOutputTokens: 65536,
       }
-    })
+    }),
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeoutId)).catch((err) => {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error(`Gemini OCR timeout after 105s (model=${apiModel}). Documento provavelmente grande/demorado demais para processamento síncrono.`);
+    }
+    throw err;
   });
 
   if (!response.ok) {

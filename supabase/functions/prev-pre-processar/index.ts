@@ -13,7 +13,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { runOcrWithConfiguredProvider } from "../_shared/ocr-router.ts";
 import { isMinimaxClientRasterizeError } from "../_shared/minimax-client.ts";
-import { getAIConfig, callAI } from "../_shared/ai-config.ts";
+import { getAIConfig, callAI, classifyAIProviderError } from "../_shared/ai-config.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
 import { classifyMistralError, isMistralError } from "./_mistral-errors.ts";
 import { notifyPdfErrorFireAndForget } from "../_shared/notify-pdf-error.ts";
@@ -156,13 +156,60 @@ const SYSTEM_PROMPT =
 /**
  * Reduz texto OCR preservando cabeça e cauda (quesitos costumam ficar no fim).
  */
-function trimOcrPreservingTail(text: string, maxChars = 180_000): string {
+function trimOcrPreservingTail(text: string, maxChars = 120_000): string {
   if (text.length <= maxChars) return text;
   const headSize = Math.floor(maxChars * 0.66);
   const tailSize = maxChars - headSize;
   const head = text.slice(0, headSize);
   const tail = text.slice(-tailSize);
   return `${head}\n\n[...trecho omitido por limite de contexto...]\n\n${tail}`;
+}
+
+function classifyProcessingError(
+  err: unknown,
+  fallback?: { provider?: string; model?: string; stage?: string },
+) {
+  const msg = err instanceof Error ? err.message : String(err || "Erro desconhecido");
+  const classified = classifyAIProviderError(
+    err,
+    fallback?.provider || "backend",
+    fallback?.model || "processamento",
+    fallback?.stage || "processamento",
+  );
+
+  if (/Gemini OCR timeout|pdf-visual-extractor|OCR timeout|generateContent.*timeout/i.test(msg)) {
+    return {
+      error:
+        "Tempo excedido no OCR Gemini. O PDF demorou demais para a leitura visual síncrona; tente um PDF menor/dividido ou use outro OCR no DevPanel para este documento.",
+      code: "provider_timeout",
+      stage: "ocr",
+      provider: "gemini",
+      model: fallback?.model || null,
+      upstreamStatus: null,
+      technicalDetail: msg.slice(0, 1200),
+      httpStatus: 504,
+    };
+  }
+
+  const httpStatus =
+    classified.code === "quota_exceeded" ? 402 :
+    classified.code === "invalid_key" ? 401 :
+    classified.code === "rate_limited" ? 429 :
+    classified.code === "invalid_request" ? 400 :
+    classified.code === "provider_timeout" ? 504 :
+    classified.code === "provider_unavailable" ? 503 :
+    classified.code === "response_truncated" ? 502 : 500;
+
+  return {
+    error: classified.message,
+    code: classified.code,
+    stage: classified.stage,
+    provider: classified.provider,
+    model: classified.model,
+    upstreamStatus: classified.upstreamStatus,
+    technicalDetail: classified.technicalDetail,
+    httpStatus,
+  };
 }
 
 /**
@@ -485,6 +532,7 @@ async function gerarQueixaUnificada(args: {
     promptType: "prev_queixa_unificada",
     maxOutputTokens: 1200,
     jsonMode: false,
+    requestTimeoutMs: 20_000,
   });
 
   return sanitizeQueixa(resp?.text || "");
@@ -567,6 +615,7 @@ async function gerarResumoExames(args: {
     promptType: "prev_resumo_exames",
     maxOutputTokens: 4000,
     jsonMode: false,
+    requestTimeoutMs: 25_000,
   });
 
   return sanitizeResumo(resp?.text || "");
@@ -731,7 +780,29 @@ Deno.serve(async (req: Request) => {
 
     // 4) Extração estruturada via IA configurada no DevPanel
     const aiConfig = await getAIConfig();
-    const ocrText = trimOcrPreservingTail(ocr.text, 180_000);
+    const ocrText = trimOcrPreservingTail(ocr.text, 120_000);
+
+    const remainingAiBudgetMs = 140_000 - (Date.now() - t0) - 4_000;
+    if (remainingAiBudgetMs < 20_000) {
+      const detail =
+        `OCR concluído (${ocr.pageCount}p, ${ocr.text.length} chars via ${ocr.provider}/${ocr.model}), ` +
+        `mas consumiu tempo demais para a extração estruturada síncrona com segurança. ` +
+        `elapsed=${Date.now() - t0}ms remaining=${remainingAiBudgetMs}ms`;
+      console.error(`[prev-pre-processar] ${detail}`);
+      return new Response(
+        JSON.stringify({
+          error:
+            "Tempo excedido antes da extração estruturada. O OCR terminou, mas o PDF é grande/demorado demais para processar tudo em uma chamada síncrona.",
+          code: "provider_timeout",
+          stage: "ocr",
+          provider: ocr.provider,
+          model: ocr.model,
+          upstreamStatus: 504,
+          technicalDetail: detail,
+        }),
+        { status: 504, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     const userPrompt = await getPrompt(
       "prompt_prev_extracao_processo",
@@ -747,8 +818,9 @@ Deno.serve(async (req: Request) => {
     const aiResp = await callAI(aiConfig, SYSTEM_PROMPT, userPrompt, {
       userId,
       promptType: "prev_extracao_processo",
-      maxOutputTokens: 32000,
+      maxOutputTokens: 12000,
       jsonMode: true,
+      requestTimeoutMs: remainingAiBudgetMs,
     });
 
     if (looksTruncated(aiResp.text)) {
@@ -765,6 +837,12 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({
           error:
             "A IA devolveu JSON incompleto (provavelmente saída truncada). Tente novamente; se persistir, reduza o PDF ou avise o suporte.",
+          code: "response_truncated",
+          stage: "ai_generation",
+          provider: aiResp.provider,
+          model: aiResp.model,
+          upstreamStatus: 502,
+          technicalDetail: `Resposta não pôde ser convertida em JSON. Tamanho=${aiResp.text.length}. Início=${aiResp.text.slice(0, 300)}`,
         }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
@@ -938,9 +1016,21 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    console.error("[prev-pre-processar] FATAL:", msg);
-    return new Response(JSON.stringify({ error: msg, code: "unknown" }), {
-      status: 500,
+    const classified = classifyProcessingError(err);
+    console.error(
+      `[prev-pre-processar] FATAL code=${classified.code} stage=${classified.stage} provider=${classified.provider ?? "n/a"} model=${classified.model ?? "n/a"}:`,
+      classified.technicalDetail || msg,
+    );
+    return new Response(JSON.stringify({
+      error: classified.error,
+      code: classified.code,
+      stage: classified.stage,
+      provider: classified.provider,
+      model: classified.model,
+      upstreamStatus: classified.upstreamStatus,
+      technicalDetail: classified.technicalDetail,
+    }), {
+      status: classified.httpStatus,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

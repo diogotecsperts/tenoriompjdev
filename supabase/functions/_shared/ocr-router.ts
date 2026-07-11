@@ -127,6 +127,10 @@ export async function runOcrWithConfiguredProvider(
         console.warn(`${prefix} MiniMax requer rasterização client-side; sinalizando caller sem fallback pesado`);
         throw lastErr;
       }
+      if (/timeout|timed out|aborterror|gateway timeout|504/i.test(lastErr.message)) {
+        console.error(`${prefix} provider ${provider} excedeu o tempo seguro; interrompendo fallback para preservar resposta detalhada`);
+        throw lastErr;
+      }
       console.error(`${prefix} provider ${provider} falhou: ${lastErr.message.slice(0, 300)}`);
     }
   }

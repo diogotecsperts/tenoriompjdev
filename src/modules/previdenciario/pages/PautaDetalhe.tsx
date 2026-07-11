@@ -125,6 +125,16 @@ export default function PautaDetalhe() {
     return "Consolidando extração";
   };
 
+  const formatProcessarErrorDescription = (err: any) => {
+    const details = [
+      err?.stage ? `Etapa: ${err.stage === "ocr" ? "OCR" : "extração"}` : null,
+      err?.provider || err?.model ? `Provider/modelo: ${[err.provider, err.model].filter(Boolean).join("/")}` : null,
+      err?.upstreamStatus ? `Status: ${err.upstreamStatus}` : null,
+    ].filter(Boolean);
+    const base = err?.message || "Falha no pré-processamento.";
+    return details.length ? `${base}\n${details.join(" · ")}` : base;
+  };
+
   const handleProcessar = async (pericia: PrevPericia) => {
     if (!pericia.pdf_path) {
       toast({ variant: "destructive", title: "Sem PDF", description: "Anexe um PDF primeiro." });
@@ -146,19 +156,25 @@ export default function PautaDetalhe() {
     } catch (err: any) {
       const title =
         err?.code === "quota_exceeded"
-          ? "Cota da IA esgotada"
+          ? "Saldo/cota insuficiente"
           : err?.code === "invalid_key"
             ? "Credencial inválida"
             : err?.code === "rate_limited"
               ? "Muitas requisições"
-              : err?.code === "file_too_large"
-                ? "PDF muito grande"
-                : err?.code === "unsupported_file"
-                  ? "Arquivo não suportado"
-                  : err?.code === "provider_unavailable"
-                    ? "IA indisponível"
-                    : "Erro IA";
-      toast({ variant: "destructive", title, description: err.message });
+              : err?.code === "provider_timeout"
+                ? "Tempo excedido na IA"
+                : err?.code === "invalid_request"
+                  ? "Requisição inválida para IA"
+                  : err?.code === "response_truncated"
+                    ? "Resposta incompleta da IA"
+                    : err?.code === "file_too_large"
+                      ? "PDF muito grande"
+                      : err?.code === "unsupported_file"
+                        ? "Arquivo não suportado"
+                        : err?.code === "provider_unavailable"
+                          ? "IA indisponível"
+                          : "Erro no processamento";
+      toast({ variant: "destructive", title, description: formatProcessarErrorDescription(err) });
     } finally {
       setProcessandoIds((s) => {
         const n = new Set(s);

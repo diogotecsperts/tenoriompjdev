@@ -47,6 +47,107 @@ interface RetryConfig {
   retryableStatuses: number[];
 }
 
+type AIErrorCode =
+  | 'quota_exceeded'
+  | 'invalid_key'
+  | 'rate_limited'
+  | 'provider_timeout'
+  | 'invalid_request'
+  | 'response_truncated'
+  | 'provider_unavailable'
+  | 'unknown';
+
+export class AIProviderError extends Error {
+  code: AIErrorCode;
+  stage: string;
+  provider: string;
+  model: string;
+  upstreamStatus: number | null;
+  technicalDetail: string;
+
+  constructor(args: {
+    message: string;
+    code?: AIErrorCode;
+    stage?: string;
+    provider: string;
+    model: string;
+    upstreamStatus?: number | null;
+    technicalDetail?: string;
+  }) {
+    super(args.message);
+    this.name = 'AIProviderError';
+    this.code = args.code || 'unknown';
+    this.stage = args.stage || 'ai_generation';
+    this.provider = args.provider;
+    this.model = args.model;
+    this.upstreamStatus = args.upstreamStatus ?? null;
+    this.technicalDetail = args.technicalDetail || args.message;
+  }
+}
+
+function sanitizeErrorDetail(raw: string, max = 1200): string {
+  return raw
+    .replace(/key=AIza[\w-]+/gi, 'key=[redacted]')
+    .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer [redacted]')
+    .replace(/api[_-]?key["'\s:=]+[A-Za-z0-9._\-]+/gi, 'api_key=[redacted]')
+    .slice(0, max);
+}
+
+function extractStatus(message: string): number | null {
+  const match = message.match(/(?:HTTP\s+|status\D+|error\s*\()(\d{3})/i);
+  return match ? Number(match[1]) : null;
+}
+
+export function classifyAIProviderError(
+  error: unknown,
+  provider: string,
+  model: string,
+  stage = 'ai_generation',
+): AIProviderError {
+  if (error instanceof AIProviderError) return error;
+
+  const raw = error instanceof Error ? error.message : String(error || 'Erro desconhecido');
+  const detail = sanitizeErrorDetail(raw);
+  const status = extractStatus(detail);
+  const lower = detail.toLowerCase();
+
+  let code: AIErrorCode = 'unknown';
+  let message = `Falha no provider ${provider}/${model}.`;
+
+  if (status === 402 || /credit|billing|balance|saldo|insufficient[_\s-]?quota|quota exceeded|resource_exhausted/i.test(detail)) {
+    code = 'quota_exceeded';
+    message = `Saldo/cota insuficiente no provider ${provider}/${model}.`;
+  } else if (status === 429 || /rate limit|too many requests|requests per minute|rpm|tpm/i.test(detail)) {
+    code = 'rate_limited';
+    message = `Limite de requisições atingido no provider ${provider}/${model}.`;
+  } else if (status === 401 || status === 403 || /invalid api key|api key not valid|unauthorized|forbidden|authentication/i.test(detail)) {
+    code = 'invalid_key';
+    message = `Credencial inválida ou sem permissão para ${provider}/${model}.`;
+  } else if (status === 400 || /invalid request|invalid_argument|bad request|unsupported|not found|does not exist/i.test(detail)) {
+    code = 'invalid_request';
+    message = `Requisição inválida para ${provider}/${model}. Verifique modelo, parâmetros ou tamanho do contexto.`;
+  } else if (/timeout|timed out|aborterror|request timeout|gateway timeout|504/.test(lower)) {
+    code = 'provider_timeout';
+    message = `Tempo excedido no provider ${provider}/${model}.`;
+  } else if (/truncated|max_tokens|incomplete|json incompleto|unterminated/i.test(detail)) {
+    code = 'response_truncated';
+    message = `Resposta incompleta/truncada do provider ${provider}/${model}.`;
+  } else if ((status && status >= 500) || /unavailable|overloaded|temporarily|server error|bad gateway|service unavailable/i.test(detail)) {
+    code = 'provider_unavailable';
+    message = `Provider ${provider}/${model} indisponível no momento.`;
+  }
+
+  return new AIProviderError({
+    message,
+    code,
+    stage,
+    provider,
+    model,
+    upstreamStatus: status,
+    technicalDetail: detail,
+  });
+}
+
 const DEFAULT_RETRY_CONFIG: RetryConfig = {
   maxRetries: 3,
   baseDelayMs: 1000,
@@ -111,7 +212,7 @@ export function invalidateRetryConfigCache(): void {
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
-  configOverride?: Partial<RetryConfig>
+  configOverride?: Partial<RetryConfig> & { requestTimeoutMs?: number }
 ): Promise<Response> {
   // Load config from database (cached)
   const baseConfig = await getRetryConfig();
@@ -121,7 +222,16 @@ async function fetchWithRetry(
 
   for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
     try {
-      const response = await fetch(url, options);
+      const controller = configOverride?.requestTimeoutMs ? new AbortController() : null;
+      const timeoutId = controller
+        ? setTimeout(() => controller.abort(), configOverride!.requestTimeoutMs)
+        : null;
+      const response = await fetch(url, {
+        ...options,
+        signal: controller?.signal || options.signal,
+      }).finally(() => {
+        if (timeoutId) clearTimeout(timeoutId);
+      });
 
       // Success - return immediately
       if (response.ok) {
@@ -145,6 +255,10 @@ async function fetchWithRetry(
       return response;
     } catch (networkError) {
       lastError = networkError instanceof Error ? networkError : new Error(String(networkError));
+
+      if (networkError instanceof DOMException && networkError.name === 'AbortError') {
+        throw new Error(`Request timeout after ${configOverride?.requestTimeoutMs ?? 0}ms`);
+      }
       
       // Network errors can also be retried
       if (attempt < config.maxRetries) {
@@ -433,7 +547,7 @@ export async function callAI(
   config: AIConfig, 
   systemPrompt: string, 
   userPrompt: string,
-  options?: { userId?: string; promptType?: string; maxOutputTokens?: number; jsonMode?: boolean }
+  options?: { userId?: string; promptType?: string; maxOutputTokens?: number; jsonMode?: boolean; requestTimeoutMs?: number }
 ): Promise<{ text: string; provider: string; model: string; usedFallback: boolean }> {
   console.log(`[AI Call] Provider: ${config.provider}, Model: ${config.model}${options?.maxOutputTokens ? `, maxOutputTokens: ${options.maxOutputTokens}` : ''}${options?.jsonMode ? ', jsonMode: true' : ''}`);
   const startTime = Date.now();
@@ -442,8 +556,13 @@ export async function callAI(
     throw new Error(`API key not configured for provider: ${config.provider}`);
   }
 
+  const totalBudgetMs = options?.requestTimeoutMs;
+  const primaryTimeoutMs = totalBudgetMs && config.fallback?.apiKey
+    ? Math.max(15_000, Math.floor(totalBudgetMs * 0.55))
+    : totalBudgetMs;
+
   try {
-    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode });
+    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: primaryTimeoutMs });
     const latencyMs = Date.now() - startTime;
 
     // Log successful call
@@ -461,7 +580,8 @@ export async function callAI(
 
     return { ...result, usedFallback: false };
   } catch (primaryError) {
-    console.error(`[AI Call] Primary provider ${config.provider} failed:`, primaryError);
+    const classifiedPrimary = classifyAIProviderError(primaryError, config.provider, config.model, 'ai_generation');
+    console.error(`[AI Call] Primary provider ${config.provider} failed:`, classifiedPrimary);
     const primaryLatency = Date.now() - startTime;
 
     // Log primary failure
@@ -473,7 +593,7 @@ export async function callAI(
         promptType: options.promptType,
         latencyMs: primaryLatency,
         success: false,
-        errorMessage: primaryError instanceof Error ? primaryError.message : 'Unknown error',
+        errorMessage: `${classifiedPrimary.code}: ${classifiedPrimary.technicalDetail}`,
         usedFallback: false
       });
     }
@@ -482,6 +602,14 @@ export async function callAI(
     if (config.fallback && config.fallback.apiKey) {
       console.log(`[AI Fallback] Trying fallback: ${config.fallback.provider}/${config.fallback.model}`);
       const fallbackStartTime = Date.now();
+      const fallbackBudgetMs = totalBudgetMs
+        ? totalBudgetMs - (fallbackStartTime - startTime) - 2_000
+        : 60_000;
+
+      if (fallbackBudgetMs < 10_000) {
+        console.warn(`[AI Fallback] Skipping fallback: insufficient time budget (${fallbackBudgetMs}ms)`);
+        throw classifiedPrimary;
+      }
 
       try {
         const fallbackConfig: AIConfig = {
@@ -492,7 +620,7 @@ export async function callAI(
           displayModel: config.fallback.displayModel
         };
 
-        const result = await callProvider(fallbackConfig, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode });
+        const result = await callProvider(fallbackConfig, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: Math.min(fallbackBudgetMs, 60_000) });
         const fallbackLatency = Date.now() - fallbackStartTime;
 
         // Log successful fallback
@@ -511,7 +639,8 @@ export async function callAI(
         console.log(`[AI Fallback] Success with ${result.provider}/${result.model}`);
         return { ...result, usedFallback: true };
       } catch (fallbackError) {
-        console.error(`[AI Fallback] Fallback also failed:`, fallbackError);
+        const classifiedFallback = classifyAIProviderError(fallbackError, config.fallback.provider, config.fallback.model, 'ai_generation');
+        console.error(`[AI Fallback] Fallback also failed:`, classifiedFallback);
         const fallbackLatency = Date.now() - fallbackStartTime;
 
         // Log fallback failure
@@ -523,16 +652,16 @@ export async function callAI(
             promptType: options.promptType,
             latencyMs: fallbackLatency,
             success: false,
-            errorMessage: fallbackError instanceof Error ? fallbackError.message : 'Unknown error',
+          errorMessage: `${classifiedFallback.code}: ${classifiedFallback.technicalDetail}`,
             usedFallback: true
           });
         }
 
-        throw fallbackError;
+        throw classifiedFallback;
       }
     }
 
-    throw primaryError;
+    throw classifiedPrimary;
   }
 }
 
@@ -541,7 +670,7 @@ async function callProvider(
   systemPrompt: string, 
   userPrompt: string,
   maxOutputTokens?: number,
-  options?: { jsonMode?: boolean }
+  options?: { jsonMode?: boolean; requestTimeoutMs?: number }
 ): Promise<{ text: string; provider: string; model: string }> {
   switch (config.provider) {
     case 'lovable':
@@ -555,14 +684,14 @@ async function callProvider(
     case 'minimax':
       return await callOpenAICompatible(config, systemPrompt, userPrompt, maxOutputTokens, options);
     case 'claude':
-      return await callClaude(config, systemPrompt, userPrompt, maxOutputTokens);
+      return await callClaude(config, systemPrompt, userPrompt, maxOutputTokens, options);
     default:
       console.warn(`[AI Call] Unknown provider ${config.provider}, falling back to Lovable`);
       return await callLovableAI(config, systemPrompt, userPrompt, maxOutputTokens, options);
   }
 }
 
-async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean }) {
+async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number }) {
   const body: any = {
     model: config.model,
     messages: [
@@ -589,7 +718,7 @@ async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt:
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-  });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
 
   if (!response.ok) {
     const error = await response.text();
@@ -604,7 +733,7 @@ async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt:
   };
 }
 
-async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean }) {
+async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number }) {
   const url = `${config.endpoint}/${config.model}:generateContent?key=${config.apiKey}`;
   
   const generationConfig: any = {
@@ -639,7 +768,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
       generationConfig,
       safetySettings,
     })
-  });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
 
   if (!response.ok) {
     const error = await response.text();
@@ -663,7 +792,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
   };
 }
 
-async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean }) {
+async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number }) {
   const isDeepSeek = config.provider === 'deepseek';
   const isDeepSeekReasoner = isDeepSeek && config.model.includes('reasoner');
   const isMinimax = config.provider === 'minimax';
@@ -714,7 +843,7 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-  });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
 
   if (!response.ok) {
     const error = await response.text();
@@ -736,7 +865,7 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
   };
 }
 
-async function callClaude(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number) {
+async function callClaude(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { requestTimeoutMs?: number }) {
   const response = await fetchWithRetry(config.endpoint, {
     method: 'POST',
     headers: {
@@ -752,7 +881,7 @@ async function callClaude(config: AIConfig, systemPrompt: string, userPrompt: st
         { role: 'user', content: userPrompt }
       ],
     }),
-  });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
 
   if (!response.ok) {
     const error = await response.text();
