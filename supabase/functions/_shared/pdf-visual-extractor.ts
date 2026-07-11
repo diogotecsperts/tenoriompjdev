@@ -281,7 +281,6 @@ async function callGeminiInteractionsWithFile(
       response_mime_type: 'application/json',
     },
     background: true,
-    store: false,
   };
 
   console.log(`[pdf-visual-extractor] Creating Gemini background interaction with model: ${apiModel}`);
