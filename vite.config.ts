@@ -16,6 +16,26 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Agrupa vendors estáveis em chunks separados e altamente cacheáveis.
+        // Libs pesadas (jspdf, docx, pdf-lib, html2canvas, recharts, jszip,
+        // pdfjs-dist) intencionalmente NÃO são listadas aqui — devem seguir
+        // as rotas lazy que as usam, para não voltarem ao chunk inicial.
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("react-router")) return "vendor-react";
+          if (id.match(/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/)) {
+            return "vendor-react";
+          }
+          if (id.includes("@supabase")) return "vendor-supabase";
+          if (id.includes("@radix-ui")) return "vendor-radix";
+          if (id.includes("@tanstack")) return "vendor-query";
+        },
+      },
+    },
+  },
   test: {
     globals: true,
     environment: "jsdom",

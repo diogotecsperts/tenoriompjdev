@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/integrations/supabase/client";
 
 /**
  * Rota /impersonate
@@ -64,9 +65,9 @@ export default function Impersonate() {
           JSON.stringify(impersonationMeta)
         );
 
-        // Import dinâmico para garantir que o client.ts já foi avaliado
-        // com o flag ativo (sessionStorage no lugar de localStorage).
-        const { supabase } = await import("@/integrations/supabase/client");
+        // Neste ponto o reload já ocorreu com o flag ativo, portanto o
+        // client.ts foi avaliado usando sessionStorage (isolamento por aba).
+
 
         const { data, error } = await supabase.auth.verifyOtp({
           type: "magiclink",

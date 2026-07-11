@@ -8,7 +8,9 @@
  * Usa pdf-lib para preservar integridade (imagens, fontes, referências)
  */
 
-import { PDFDocument } from 'pdf-lib';
+// pdf-lib é importado dinamicamente dentro das funções abaixo para
+// permitir code-splitting real (não entra no chunk inicial).
+type PDFDocumentType = import('pdf-lib').PDFDocument;
 
 export interface ClientSplitResult {
   parts: Blob[];
@@ -55,8 +57,9 @@ export async function splitPDFClientSide(
   onProgress?.(5, 'Carregando PDF no navegador...');
   
   // Carregar o PDF na memória do browser
+  const { PDFDocument } = await import('pdf-lib');
   const arrayBuffer = await file.arrayBuffer();
-  const pdfDoc = await PDFDocument.load(arrayBuffer, {
+  const pdfDoc: PDFDocumentType = await PDFDocument.load(arrayBuffer, {
     ignoreEncryption: true // Tenta ignorar criptografia se houver
   });
   const totalPages = pdfDoc.getPageCount();
@@ -90,7 +93,7 @@ export async function splitPDFClientSide(
     console.log(`[pdf-splitter] Creating part ${partNumber}: pages ${startPage + 1}-${endPage}`);
     
     // Criar novo documento com essas páginas
-    const newPdf = await PDFDocument.create();
+    const newPdf: PDFDocumentType = await PDFDocument.create();
     const pageIndices = Array.from({ length: pageCount }, (_, i) => startPage + i);
     
     // copyPages preserva todas as referências internas (imagens, fontes, etc.)
