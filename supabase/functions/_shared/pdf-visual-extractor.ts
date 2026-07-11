@@ -462,14 +462,19 @@ async function extractWithFilesAPIBytes(
     const apiModel = resolveGeminiModelName(model);
     console.log(`[pdf-visual-extractor] Calling Gemini Files API with model: ${apiModel} (original: ${model})`);
 
-    // Usar helper resiliente
-    const result = await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
+    const result = shouldUseGeminiInteractionsAPI(apiModel)
+      ? await callGeminiInteractionsWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT)
+      : await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
     
     if (!result.ok) {
       throw new Error(`Gemini Vision (Files API Bytes) error: ${result.error}`);
     }
 
-    return parseExtractionResult(result.text, model, 'gemini-files-api');
+    return parseExtractionResult(
+      result.text,
+      model,
+      shouldUseGeminiInteractionsAPI(apiModel) ? 'gemini-interactions-files-api' : 'gemini-files-api'
+    );
   } finally {
     // Clean up uploaded file
     try {
@@ -503,14 +508,19 @@ async function extractWithFilesAPIStream(
     const apiModel = resolveGeminiModelName(model);
     console.log(`[pdf-visual-extractor] Calling Gemini generateContent with model: ${apiModel}, fileUri: ${fileUri}`);
 
-    // Usar helper resiliente
-    const result = await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
+    const result = shouldUseGeminiInteractionsAPI(apiModel)
+      ? await callGeminiInteractionsWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT)
+      : await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
     
     if (!result.ok) {
       throw new Error(`Gemini Vision (Streaming) error: ${result.error}`);
     }
 
-    return parseExtractionResult(result.text, model, 'gemini-streaming');
+    return parseExtractionResult(
+      result.text,
+      model,
+      shouldUseGeminiInteractionsAPI(apiModel) ? 'gemini-interactions-streaming' : 'gemini-streaming'
+    );
   } finally {
     // Clean up uploaded file
     try {
@@ -599,14 +609,19 @@ async function extractWithFilesAPI(
     const apiModel = resolveGeminiModelName(model);
     console.log(`[pdf-visual-extractor] Calling Gemini Files API with model: ${apiModel} (original: ${model})`);
     
-    // Usar helper resiliente
-    const result = await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
+    const result = shouldUseGeminiInteractionsAPI(apiModel)
+      ? await callGeminiInteractionsWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT)
+      : await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
     
     if (!result.ok) {
       throw new Error(`Gemini Vision (Files API) error: ${result.error}`);
     }
 
-    return parseExtractionResult(result.text, model, 'gemini-files-api');
+    return parseExtractionResult(
+      result.text,
+      model,
+      shouldUseGeminiInteractionsAPI(apiModel) ? 'gemini-interactions-files-api' : 'gemini-files-api'
+    );
   } finally {
     // Clean up uploaded file
     try {
