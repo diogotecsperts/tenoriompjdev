@@ -11,7 +11,7 @@
  * Isolado do módulo trabalhista. Não toca em `laudos` nem em `processos-pdf`.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { runOcrWithConfiguredProvider } from "../_shared/ocr-router.ts";
+import { getOcrRouterConfig, runOcrWithConfiguredProvider } from "../_shared/ocr-router.ts";
 import { isMinimaxClientRasterizeError } from "../_shared/minimax-client.ts";
 import { getAIConfig, callAI, classifyAIProviderError } from "../_shared/ai-config.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
