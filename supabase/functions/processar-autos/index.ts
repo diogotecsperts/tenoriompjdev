@@ -2391,21 +2391,30 @@ async function processarPDFBackground(
 
       timings.pdfExtraction.start = Date.now();
       
-      // Fetch PDF provider configuration for single-pass
+      // Fetch OCR provider from unified config (phase1_ocr_provider vale para
+      // TODOS os módulos, inclusive Trabalhista single-pass. Ver DevSettings.)
       const { data: pdfProviderConfig } = await supabaseAdmin
         .from('system_config')
         .select('id, value')
-        .in('id', ['pdf_ai_provider', 'pdf_fallback_provider']);
-      
+        .in('id', ['phase1_ocr_provider', 'pdf_fallback_provider']);
+
       const pdfProviderMap: Record<string, string> = {};
       pdfProviderConfig?.forEach((item: { id: string; value: unknown }) => {
         pdfProviderMap[item.id] = typeof item.value === 'string' ? item.value : String(item.value);
       });
-      
-      const pdfProvider = pdfProviderMap['pdf_ai_provider'] || 'gemini';
+
+      // Mapear valor do OCR unificado ('gemini' | 'mistral' | 'minimax') para o schema
+      // legado usado neste fluxo single-pass ('gemini' | 'mistral-ocr'). MiniMax não é
+      // suportado no single-pass da edge function (rasterização exige browser) → cai em Gemini.
+      const rawOcrProvider = (pdfProviderMap['phase1_ocr_provider'] || 'gemini').toLowerCase();
+      const pdfProvider = rawOcrProvider === 'mistral' ? 'mistral-ocr' : 'gemini';
       const pdfFallbackProvider = pdfProviderMap['pdf_fallback_provider'] || 'gemini';
-      
-      console.log(`[processar-autos] Single-pass config - Primary: ${pdfProvider}, Fallback: ${pdfFallbackProvider}`);
+
+      if (rawOcrProvider === 'minimax') {
+        console.warn('[processar-autos] MiniMax OCR não suportado em single-pass da edge function; usando Gemini streaming.');
+      }
+      console.log(`[processar-autos] Single-pass config - Primary: ${pdfProvider} (from phase1_ocr_provider=${rawOcrProvider}), Fallback: ${pdfFallbackProvider}`);
+
       
       // Check if Mistral OCR is configured as primary provider
       // NEW: Skip Mistral for large PDFs (>45MB) - converting stream to bytes would cause OOM
