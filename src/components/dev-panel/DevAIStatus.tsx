@@ -106,11 +106,12 @@ export function DevAIStatus() {
         .from('system_config')
         .select('id, value')
         .in('id', [
-          'default_ai_provider', 'default_ai_model', 
+          'default_ai_provider', 'default_ai_model',
           'fallback_ai_provider', 'fallback_ai_model',
-          'pdf_ai_provider', 'pdf_ai_model',
+          'phase1_ocr_provider', 'phase1_gemini_model',
           'pdf_fallback_provider', 'pdf_fallback_model'
         ]);
+
 
       if (configError) throw configError;
 
@@ -152,9 +153,10 @@ export function DevAIStatus() {
         status: fallbackHasKey ? 'ready' : 'error'
       });
 
-      // Parse PDF-specific config
-      const pdfProvider = configMap.pdf_ai_provider?.replace(/"/g, '') || 'openrouter';
-      const pdfModel = configMap.pdf_ai_model?.replace(/"/g, '') || 'google/gemini-2.5-flash';
+      // Parse PDF-specific config (unified: phase1_ocr_provider + phase1_gemini_model)
+      const pdfProvider = configMap.phase1_ocr_provider?.replace(/"/g, '') || 'gemini';
+      const pdfModel = configMap.phase1_gemini_model?.replace(/"/g, '') || 'gemini-2.5-flash';
+
       const pdfFallbackProvider = configMap.pdf_fallback_provider?.replace(/"/g, '') || 'lovable';
       const pdfFallbackModel = configMap.pdf_fallback_model?.replace(/"/g, '') || 'google/gemini-2.5-flash';
       
