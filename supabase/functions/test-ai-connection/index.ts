@@ -31,7 +31,7 @@ serve(async (req) => {
         ({ success, errorMessage } = await testLovableAI(model));
         break;
       case 'gemini':
-        ({ success, errorMessage } = await testGemini(apiKey!, model));
+        ({ success, errorMessage } = await testGemini(apiKey || Deno.env.get('GEMINI_API_KEY') || '', model));
         break;
       case 'openai':
         ({ success, errorMessage } = await testOpenAI(apiKey!, model));
