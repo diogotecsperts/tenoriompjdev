@@ -118,34 +118,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .from("profiles")
             .select("nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url")
             .eq("id", session.user.id)
-            .single(),
+            .maybeSingle(),
           supabase.rpc("is_admin"),
         ]);
 
         clearTimeout(timeoutId);
 
-        // Verificar se houve erro de rede/RLS vs perfil realmente inexistente
+        // Erro real (rede, RLS, JWT ainda hidratando, timeout, etc.):
+        // NUNCA deslogar por isso. Mantém sessão e avisa de forma amena.
+        // Só cai no ramo "perfil inexistente" quando error === null && data === null.
         if (profileResult.error) {
-          const errorCode = profileResult.error.code;
-          const isTransientError = errorCode === 'PGRST301' || errorCode === '42501' || 
-                                   profileResult.error.message?.includes('network') ||
-                                   profileResult.error.message?.includes('fetch');
-          
-          if (isTransientError) {
-            // Erro transitório - não deslogar, apenas avisar
-            console.warn("Erro transitório ao carregar perfil:", profileResult.error);
-            toast({
-              variant: "destructive",
-              title: "Erro ao carregar perfil",
-              description: "Problema de conexão. Tente recarregar a página.",
-            });
-            isLoadingUserDataRef.current = false;
-            setLoading(false);
-            return;
-          }
+          console.warn("Erro transitório ao carregar perfil:", profileResult.error);
+          toast({
+            variant: "destructive",
+            title: "Erro ao carregar perfil",
+            description: "Problema de conexão. Tente recarregar a página.",
+          });
+          isLoadingUserDataRef.current = false;
+          setLoading(false);
+          return;
         }
 
-        // Perfil realmente não existe (PGRST116 = no rows returned)
+        // Perfil realmente não existe (sem erro + sem linha)
         if (!profileResult.data) {
           console.error("Usuário autenticado sem perfil válido - fazendo logout");
           await supabase.auth.signOut();
