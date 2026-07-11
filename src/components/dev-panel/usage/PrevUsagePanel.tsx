@@ -732,8 +732,247 @@ export function PrevUsagePanel() {
   };
 
 
+  // -------- Batch selection helpers --------
+  const toggleSelect = (pautaId: string, periciaId: string) => {
+    setSelectedByPauta((prev) => {
+      const cur = new Set(prev[pautaId] ?? []);
+      if (cur.has(periciaId)) cur.delete(periciaId);
+      else cur.add(periciaId);
+      return { ...prev, [pautaId]: cur };
+    });
+  };
+  const setPautaSelection = (pautaId: string, ids: string[]) => {
+    setSelectedByPauta((prev) => ({ ...prev, [pautaId]: new Set(ids) }));
+  };
+  const clearPautaSelection = (pautaId: string) => {
+    setSelectedByPauta((prev) => {
+      if (!prev[pautaId]) return prev;
+      const next = { ...prev };
+      delete next[pautaId];
+      return next;
+    });
+  };
+
+  // Limpa seleção quando troca o usuário selecionado
+  useEffect(() => {
+    setSelectedByPauta({});
+    setBatchProgress(null);
+  }, [filters.userId]);
+
+  // Nome de arquivo seguro
+  const safeFilePart = (s: string | null | undefined, fallback = "documento") =>
+    (s || fallback).replace(/[^\p{L}\p{N}\s._-]/gu, "").trim() || fallback;
+
+  // Executa download em lote (1 arquivo → direto; 2+ → ZIP via dynamic import)
+  const runBatchDownload = async (
+    pauta: Pauta,
+    pericias: Pericia[],
+    kind: BatchKind,
+  ) => {
+    // Filtra apenas os elegíveis para o tipo escolhido
+    const eligible = pericias.filter((p) =>
+      kind === "orig" ? !!p.pdf_path : p.pdf_processado,
+    );
+    if (eligible.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Nada para baixar",
+        description:
+          kind === "orig"
+            ? "Nenhuma das selecionadas tem PDF original."
+            : "Nenhuma das selecionadas está processada.",
+      });
+      return;
+    }
+
+    // Aviso para lotes muito grandes (soma de tamanhos de PDFs originais)
+    if (kind === "orig") {
+      const totalBytes = eligible.reduce(
+        (acc, p) => acc + (p.pdf_size_bytes ?? 0),
+        0,
+      );
+      if (totalBytes > 300 * 1024 * 1024) {
+        const mb = Math.round(totalBytes / (1024 * 1024));
+        const ok = window.confirm(
+          `Selecionou ${eligible.length} arquivos (~${mb} MB no total). ` +
+            `Downloads muito grandes podem consumir bastante memória do navegador. Continuar?`,
+        );
+        if (!ok) return;
+      }
+    }
+
+    setBatchProgress({
+      pautaId: pauta.id,
+      kind,
+      done: 0,
+      total: eligible.length,
+    });
+
+    // Contexto compartilhado (profile + pauta) para pré-laudos
+    let sharedProfile: any = null;
+    let sharedPauta: any = null;
+    if (kind !== "orig" && eligible.length > 0) {
+      const firstUserId = (
+        await (supabase.from as any)("prev_pericias")
+          .select("user_id")
+          .eq("id", eligible[0].id)
+          .maybeSingle()
+      )?.data?.user_id;
+      const [{ data: prof }, { data: pt }] = await Promise.all([
+        (supabase.from as any)("profiles")
+          .select("nome, crm, uf_crm, especialidade")
+          .eq("id", firstUserId)
+          .maybeSingle(),
+        (supabase.from as any)("prev_pautas")
+          .select("data, local, cidade, uf")
+          .eq("id", pauta.id)
+          .maybeSingle(),
+      ]);
+      sharedProfile = prof;
+      sharedPauta = pt;
+    }
+
+    const buildMeta = (p: Pericia, prelaudoData: any) => {
+      const localStr = sharedPauta
+        ? [sharedPauta.local, sharedPauta.cidade, sharedPauta.uf]
+            .filter(Boolean)
+            .join(" — ")
+        : "";
+      return {
+        periciado:
+          p.periciado_nome || prelaudoData?.identificacao?.nome || "",
+        dataPericia:
+          prelaudoData?.identificacao?.data_pericia ||
+          sharedPauta?.data ||
+          new Date().toISOString().slice(0, 10),
+        local: localStr,
+        numeroProcesso: prelaudoData?.identificacao?.numero_processo || "",
+        peritoNome: sharedProfile?.nome || "",
+        peritoCRM: sharedProfile?.crm
+          ? `${sharedProfile.crm}${sharedProfile.uf_crm ? "/" + sharedProfile.uf_crm : ""}`
+          : "",
+      };
+    };
+
+    const fetchOne = async (
+      p: Pericia,
+    ): Promise<{ name: string; blob: Blob }> => {
+      const nameBase = safeFilePart(p.periciado_nome);
+      if (kind === "orig") {
+        const { data, error } = await supabase.functions.invoke(
+          "dev-download-pdf",
+          { body: { file_path: p.pdf_path!, bucket: "prev-pdfs" } },
+        );
+        if (error) throw error;
+        const url = (data as any)?.url;
+        if (!url) throw new Error("URL não retornada");
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        return { name: `${nameBase}.pdf`, blob };
+      }
+      // pré-laudo docx/pdf
+      const { data: per, error: perErr } = await (supabase.from as any)(
+        "prev_pericias",
+      )
+        .select("prelaudo_data")
+        .eq("id", p.id)
+        .maybeSingle();
+      if (perErr) throw perErr;
+      const prelaudoData = per?.prelaudo_data ?? {};
+      const meta = buildMeta(p, prelaudoData);
+      if (kind === "docx") {
+        const blob = await generatePrelaudoDocx(prelaudoData, meta);
+        return { name: `${nameBase}.docx`, blob };
+      }
+      const doc = await generatePrelaudoPdf(prelaudoData, meta);
+      const blob: Blob = doc.output("blob");
+      return { name: `${nameBase}.pdf`, blob };
+    };
+
+    const errors: string[] = [];
+    try {
+      // Caso trivial: 1 arquivo → download direto (sem ZIP)
+      if (eligible.length === 1) {
+        try {
+          const { name, blob } = await fetchOne(eligible[0]);
+          saveAs(blob, name);
+          setBatchProgress((prev) =>
+            prev ? { ...prev, done: 1 } : prev,
+          );
+        } catch (err: any) {
+          throw err;
+        }
+      } else {
+        // ZIP client-side via JSZip (dynamic import)
+        const JSZip = (await import("jszip")).default;
+        const zip = new JSZip();
+        const usedNames = new Set<string>();
+        for (let i = 0; i < eligible.length; i++) {
+          const p = eligible[i];
+          try {
+            let { name, blob } = await fetchOne(p);
+            // Sufixo para evitar colisão
+            if (usedNames.has(name)) {
+              const dot = name.lastIndexOf(".");
+              const base = dot > 0 ? name.slice(0, dot) : name;
+              const ext = dot > 0 ? name.slice(dot) : "";
+              name = `${base}-${p.ordem}${ext}`;
+            }
+            usedNames.add(name);
+            zip.file(name, blob);
+          } catch (err: any) {
+            errors.push(
+              `#${p.ordem} ${p.periciado_nome ?? "sem nome"}: ${err?.message ?? String(err)}`,
+            );
+          }
+          setBatchProgress((prev) =>
+            prev ? { ...prev, done: i + 1 } : prev,
+          );
+        }
+        if (errors.length > 0) {
+          zip.file("_erros.txt", errors.join("\n"));
+        }
+        if (
+          Object.keys((zip as any).files ?? {}).filter((k) => k !== "_erros.txt")
+            .length === 0
+        ) {
+          throw new Error("Nenhum arquivo pôde ser adicionado ao ZIP.");
+        }
+        const zipBlob = await zip.generateAsync({
+          type: "blob",
+          compression: "STORE",
+        });
+        const kindLabel =
+          kind === "orig" ? "originais" : kind === "docx" ? "docx" : "pdf";
+        const zipName = `pericias-${pauta.data}-${safeFilePart(
+          pauta.local,
+          "pauta",
+        )}-${kindLabel}.zip`;
+        saveAs(zipBlob, zipName);
+      }
+
+      toast({
+        title: "Download concluído",
+        description:
+          errors.length > 0
+            ? `${eligible.length - errors.length}/${eligible.length} arquivos (verifique _erros.txt)`
+            : `${eligible.length} arquivo(s)`,
+      });
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Erro no download em lote",
+        description: err?.message ?? String(err),
+      });
+    } finally {
+      setBatchProgress(null);
+    }
+  };
+
   const clearFilters = () =>
     setFilters({ ...DEFAULT_FILTERS, userId: filters.userId });
+
 
   return (
     <div className="space-y-4">
