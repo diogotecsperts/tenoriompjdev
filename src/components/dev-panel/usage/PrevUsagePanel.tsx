@@ -155,6 +155,20 @@ export function PrevUsagePanel() {
   const metaAbortRef = useRef(false);
   const [metaConcurrency, setMetaConcurrency] = useState<1 | 2>(1);
 
+  // ---- Batch download (checkbox selection per pauta) ----
+  type BatchKind = "orig" | "docx" | "pdf";
+  const [selectedByPauta, setSelectedByPauta] = useState<
+    Record<string, Set<string>>
+  >({});
+  const [batchProgress, setBatchProgress] = useState<{
+    pautaId: string;
+    kind: BatchKind;
+    done: number;
+    total: number;
+  } | null>(null);
+
+
+
 
 
   // Load profiles + persisted filters
