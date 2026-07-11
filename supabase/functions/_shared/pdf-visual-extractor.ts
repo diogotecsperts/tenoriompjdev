@@ -245,7 +245,19 @@ export async function extractVisualContent(
   }
 
   console.log(`[pdf-visual-extractor] Starting extraction with model: ${model}, useFilesAPI: ${options.useFilesAPI}, inputType: ${isStream ? 'stream' : isBytes ? 'bytes' : 'base64'}, approxSizeMB: ${(approxSizeBytes / (1024 * 1024)).toFixed(2)}`);
-  
+
+  // Auto-escolha da Files API quando o caller não decidiu:
+  // acima de ~4MB, a codificação base64 inline + JSON.stringify facilmente
+  // estoura o limite de memória da Edge Function (150MB). Só faz sentido
+  // inline abaixo desse patamar.
+  const AUTO_FILES_API_THRESHOLD = 4 * 1024 * 1024;
+  const shouldUseFilesAPI =
+    options.useFilesAPI === true ||
+    (options.useFilesAPI === undefined && approxSizeBytes > AUTO_FILES_API_THRESHOLD);
+  if (options.useFilesAPI === undefined && shouldUseFilesAPI) {
+    console.log(`[pdf-visual-extractor] Auto-selecting Files API (size ${(approxSizeBytes / (1024 * 1024)).toFixed(2)}MB > ${(AUTO_FILES_API_THRESHOLD / (1024 * 1024)).toFixed(0)}MB threshold) to avoid OOM`);
+  }
+
   const startTime = Date.now();
   let result: ExtractedContent;
 
@@ -253,13 +265,13 @@ export async function extractVisualContent(
     // STREAMING MODE: For large files (67MB+), stream directly to Files API
     console.log('[pdf-visual-extractor] Using STREAMING mode for large PDF...');
     result = await extractWithFilesAPIStream(pdfInput as StreamInput, model, apiKey);
-  } else if (options.useFilesAPI) {
-    // Para PDFs > 50MB, usar Files API
+  } else if (shouldUseFilesAPI) {
+    // PDFs > 4MB (auto) ou quando o caller pediu explicitamente: usar Files API
     result = isBytes
       ? await extractWithFilesAPIBytes(pdfInput as Uint8Array, model, apiKey)
       : await extractWithFilesAPI(pdfInput as string, model, apiKey);
   } else {
-    // Para PDFs menores, usar inline base64
+    // Para PDFs pequenos (< 4MB), usar inline base64
     const base64 = isBytes
       ? encode(
           (pdfInput as Uint8Array).buffer.slice(
