@@ -134,14 +134,43 @@ export default function PautaDetalhe() {
     return "Consolidando extração";
   };
 
+  const suggestionForCode = (code?: string): string | null => {
+    switch (code) {
+      case "provider_timeout":
+      case "response_truncated":
+        return "Sugestão: tente novamente — o backend acionará o fallback automático.";
+      case "file_too_large":
+        return "Sugestão: PDF acima do limite — divida o arquivo manualmente e refaça o upload.";
+      case "quota_exceeded":
+        return "Sugestão: verifique a cota/saldo do provider no DevPanel.";
+      case "invalid_key":
+        return "Sugestão: revise a credencial do provider no DevPanel.";
+      case "rate_limited":
+        return "Sugestão: aguarde alguns segundos e tente novamente.";
+      case "provider_unavailable":
+        return "Sugestão: provider fora do ar — tente novamente em instantes.";
+      default:
+        return null;
+    }
+  };
+
   const formatProcessarErrorDescription = (err: any) => {
     const details = [
       err?.stage ? `Etapa: ${err.stage === "ocr" ? "OCR" : "extração"}` : null,
       err?.provider || err?.model ? `Provider/modelo: ${[err.provider, err.model].filter(Boolean).join("/")}` : null,
       err?.upstreamStatus ? `Status: ${err.upstreamStatus}` : null,
+      err?.jobId ? `Job: ${String(err.jobId).slice(0, 8)}` : null,
     ].filter(Boolean);
     const base = err?.message || "Falha no pré-processamento.";
-    return details.length ? `${base}\n${details.join(" · ")}` : base;
+    const sug = suggestionForCode(err?.code);
+    const parts = [base];
+    if (details.length) parts.push(details.join(" · "));
+    if (sug) parts.push(sug);
+    if (err?.jobId) {
+      // log completo no console para copiar
+      console.warn("[prev-pre-processar] jobId=", err.jobId, err);
+    }
+    return parts.join("\n");
   };
 
   const handleProcessar = async (pericia: PrevPericia) => {
