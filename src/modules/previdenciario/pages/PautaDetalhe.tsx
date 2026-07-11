@@ -351,24 +351,36 @@ export default function PautaDetalhe() {
 
           <div className="flex items-center gap-2">
             {pendentes.length > 0 && (
-              <Button
-                variant="outline"
-                onClick={() => void handleProcessarLote()}
-                disabled={processandoLote}
-              >
-                {processandoLote ? (
-                  <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                ) : (
-                  <Sparkles className="h-4 w-4 mr-1.5" />
-                )}
-                Processar pendentes ({pendentes.length})
-                {processandoLote && (
-                  <span className="ml-2 text-[11px] font-normal opacity-80 tabular-nums">
-                    {loteProgresso.done}/{loteProgresso.total} · {progress}%
-                  </span>
-                )}
-              </Button>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      onClick={() => void handleProcessarLote()}
+                      disabled={processandoLote}
+                    >
+                      {processandoLote ? (
+                        <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4 mr-1.5" />
+                      )}
+                      Processar pendentes ({pendentes.length})
+                      {processandoLote && (
+                        <span className="ml-2 text-[11px] font-normal opacity-80 tabular-nums">
+                          {loteProgresso.done}/{loteProgresso.total} · {progress}%
+                        </span>
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    Processa {pendentes.length} PDF(s) pendente(s), um por vez, na ordem da lista.
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
+            <Button variant="outline" onClick={() => setLoteUploadOpen(true)}>
+              <Upload className="h-4 w-4 mr-1.5" /> Upload em lote
+            </Button>
             <Button onClick={() => setNovaOpen(true)}>
               <Plus className="h-4 w-4 mr-1.5" /> Nova perícia
             </Button>
