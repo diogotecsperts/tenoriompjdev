@@ -11,6 +11,33 @@ export interface PreProcessarResult {
   durationMs: number;
 }
 
+interface AsyncPreProcessarStart {
+  ok: true;
+  async: true;
+  jobId: string;
+  periciaId: string;
+  status: string;
+  stage: string;
+  progress: number;
+  provider?: string;
+  model?: string;
+}
+
+interface PrevProcessingStatus {
+  ok: true;
+  jobId: string;
+  periciaId: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  stage: string;
+  progress: number;
+  provider?: string | null;
+  model?: string | null;
+  errorCode?: PreProcessarErrorCode;
+  errorMessage?: string;
+  technicalDetail?: string;
+  result?: Partial<PreProcessarResult> & Record<string, unknown>;
+}
+
 export type PreProcessarErrorCode =
   | "quota_exceeded"
   | "invalid_key"
@@ -55,6 +82,10 @@ type ClientRasterizeSignal = Record<string, unknown> & {
   pdfPath?: string;
   bucket?: string;
 };
+
+function isAsyncStart(value: unknown): value is AsyncPreProcessarStart {
+  return !!value && typeof value === "object" && (value as Record<string, unknown>).async === true && typeof (value as Record<string, unknown>).jobId === "string";
+}
 
 function isClientRasterizeSignal(value: unknown): value is ClientRasterizeSignal {
   return !!value && typeof value === "object" && (value as Record<string, unknown>).needsClientRasterize === true;
@@ -122,13 +153,93 @@ function classifyInvokeError(error: unknown, body: Record<string, unknown> | nul
   );
 }
 
+const STAGE_LABELS: Record<string, string> = {
+  queued: "Na fila",
+  download: "Baixando PDF",
+  ocr_processing: "OCR Gemini em execução",
+  ocr_completed: "OCR concluído",
+  ai_extraction: "Extraindo dados",
+  ai_refinement: "Refinando campos",
+  saving: "Salvando resultado",
+  completed: "Concluído",
+  failed: "Falhou",
+};
+
+async function checkStatus(jobId: string): Promise<PrevProcessingStatus> {
+  const { data, error } = await supabase.functions.invoke("check-prev-processing-status", {
+    body: { jobId },
+  });
+  if (error) {
+    const body = await readErrorBody(error);
+    throw classifyInvokeError(error, body);
+  }
+  const d = data as PrevProcessingStatus | Record<string, unknown> | null;
+  if (!d?.ok) {
+    throw new PreProcessarError(String((d as any)?.error || "Falha ao consultar status."));
+  }
+  return d as PrevProcessingStatus;
+}
+
+async function pollPreProcessarJob(
+  start: AsyncPreProcessarStart,
+  onProgress?: (message: string) => void,
+): Promise<PreProcessarResult> {
+  const startedAt = Date.now();
+  const maxWaitMs = 12 * 60_000;
+  let delayMs = 2500;
+
+  while (Date.now() - startedAt < maxWaitMs) {
+    const status = await checkStatus(start.jobId);
+    const label = STAGE_LABELS[status.stage] || status.stage || status.status;
+    onProgress?.(`${label}${typeof status.progress === "number" ? ` · ${status.progress}%` : ""}`);
+
+    if (status.status === "completed") {
+      const result = status.result || {};
+      return {
+        ok: true,
+        periciaId: status.periciaId,
+        pages: Number(result.pages || 0),
+        documentosCriados: Number(result.documentosCriados || 0),
+        provider: String(result.provider || status.provider || start.provider || "backend"),
+        model: String(result.model || status.model || start.model || "processamento"),
+        durationMs: Number(result.durationMs || Date.now() - startedAt),
+      };
+    }
+
+    if (status.status === "failed") {
+      throw new PreProcessarError(
+        status.errorMessage || "Falha no processamento assíncrono.",
+        status.errorCode || "unknown",
+        status.stage,
+        null,
+        status.provider || start.provider,
+        status.model || start.model,
+        status.technicalDetail,
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    delayMs = Math.min(7000, delayMs + 500);
+  }
+
+  throw new PreProcessarError(
+    "O processamento continua em segundo plano há mais tempo que o esperado. Aguarde alguns instantes e atualize a pauta.",
+    "provider_timeout",
+    "ocr_processing",
+    null,
+    start.provider,
+    start.model,
+    `jobId=${start.jobId}`,
+  );
+}
+
 /**
  * Dispara o pré-processamento IA de uma perícia previdenciária.
  * Reusa exatamente a infra de IA configurada no DevPanel (provider/fallback/retry).
  */
 export async function preProcessarPericia(
   periciaId: string,
-  opts: { onMinimaxProgress?: (p: MinimaxOcrProgress) => void } = {},
+  opts: { onMinimaxProgress?: (p: MinimaxOcrProgress) => void; onJobProgress?: (message: string) => void } = {},
 ): Promise<PreProcessarResult> {
   // 1ª tentativa: envia só o periciaId. Se o DevPanel estiver com MiniMax como
   // provider de OCR, a edge function sinaliza needsClientRasterize e rodamos o
@@ -169,6 +280,11 @@ export async function preProcessarPericia(
     return unwrap(second.data, second.error);
   }
 
+  if (isAsyncStart(first.data)) {
+    opts.onJobProgress?.("Processamento em segundo plano iniciado");
+    return pollPreProcessarJob(first.data, opts.onJobProgress);
+  }
+
   return unwrap(first.data, first.error);
 }
 
@@ -184,6 +300,9 @@ async function unwrap(
     throw classifyInvokeError(error, null);
   }
   const d = data as Record<string, unknown> | null;
+  if (isAsyncStart(d)) {
+    return pollPreProcessarJob(d);
+  }
   if (d?.error) {
     throw new PreProcessarError(
       String(d.error),
