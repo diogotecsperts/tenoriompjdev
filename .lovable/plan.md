@@ -1,61 +1,82 @@
-# Ajustes de clareza no DevPanel + limpeza de "Providers Permitidos"
+## Diagnóstico
 
-## Respostas rápidas às suas dúvidas
+Dois problemas separados, mesma raiz arquitetural.
 
-**1. Posso deixar MiniMax M3 no Provider Inventory e Gemini 3 Flash em OCR?**
-Sim, sem conflito. São camadas independentes:
-- **Provider Inventory** = provedor/modelo usado para **gerar o laudo** (preenchimento dos campos, análise técnica).
-- **OCR (Estratégia de Importação)** = provedor/modelo usado para **ler o PDF** e transformar em texto.
-Você pode ter Gemini fazendo o OCR e MiniMax gerando o laudo, ou qualquer combinação.
+### Problema 1 — Transições lentas / tela branca entre páginas
 
-**2. Os textos do "Modo de Importação" e da "Fase 1/Fase 2" estão desatualizados** — vou reescrever (ver abaixo).
+Em `src/App.tsx`, cada rota protegida é declarada assim:
 
-**3. "Providers Permitidos" está quebrado.** Investiguei: a chave `allowed_ai_providers` é salva em `system_config`, mas **não é lida por nenhuma edge function nem pelo Provider Inventory**. Ou seja, marcar/desmarcar ali não bloqueia nada — é código morto. Como você mesmo disse que prefere remover se não tiver função, **vou removê-lo**. Gate real por provider já existe implicitamente (se o secret do provider não estiver configurado, ele não aparece funcional).
+```tsx
+<Route path="/dashboard" element={<ProtectedWithLayout><Dashboard/></ProtectedWithLayout>} />
+<Route path="/historico"  element={<ProtectedWithLayout><Historico/></ProtectedWithLayout>} />
+...
+```
 
----
+`ProtectedWithLayout` é um componente inline diferente por rota. Ao mudar de `/dashboard` para `/historico` o React vê elementos distintos e **desmonta e remonta o `AppLayout` inteiro a cada navegação**. Consequências, todas medidas nas linhas de código atuais:
 
-## Mudanças de UI (arquivo único: `src/components/dev-panel/DevSettings.tsx`)
+- `AppLayout` roda `useEffect(checkDevRole)` → chama `supabase.rpc("is_developer")` **a cada navegação** (`src/components/layout/AppLayout.tsx:57-65`).
+- `usePresenceHeartbeat` reinicializa (`src/hooks/usePresenceHeartbeat.ts`): dispara `checkAndNotifyLogin` (SELECT em `user_presence`), depois um `upsert` em `user_presence`, e um `supabase.auth.getSession()` extra — tudo antes do próximo frame útil.
+- O `<ImportarAutosDialog/>` é remontado (código pesado, imports grandes) mesmo quando o usuário nunca abre o diálogo.
+- Todo o estado local do sidebar (`collapsed`, `mobileOpen`, `isDeveloper`) é perdido.
 
-### A. Reescrever descrição do toggle "Modo de Importação"
+Efeito visível: cada troca de rota fica presa em "loading/tela branca" até o RPC + o upsert de presence responderem. Sob rede instável, isso pode passar de 1-2s.
 
-Substituir o texto atual por algo direto:
+### Problema 2 — Toast esporádico "Erro ao carregar perfil"
 
-> **Passagem Única** — Um único provedor faz OCR + preenchimento do laudo na mesma chamada. Mais rápido, porém limitado a PDFs pequenos (~20 MB) e exige um provedor multimodal robusto.
->
-> **Duas Fases (Recomendado)** — Etapa 1: Gemini lê o PDF (suporta arquivos grandes, até 2 GB, e páginas escaneadas). Etapa 2: o provedor definido no **Provider Inventory** recebe só o texto e preenche o laudo. Mais barato e estável.
->
-> ⚠️ Este toggle afeta **apenas o Trabalhista**. Previdenciário e Impugnação sempre usam Duas Fases.
+Em `src/contexts/AuthContext.tsx` (`loadUserData`, linhas 116-146):
 
-### B. Reescrever bloco explicativo "Fase 1 / Fase 2"
+- A consulta usa `.single()` na tabela `profiles`. Em qualquer transiente (JWT ainda sendo hidratado no cliente, RLS retornando 401 momentâneo, falha de rede) o Supabase devolve um erro **cujo `code` não é `PGRST301` nem `42501`** (pode ser `PGRST116`, `PGRST000`, string vazia, ou apenas um `AuthApiError`).
+- O bloco `isTransientError` só reconhece dois códigos específicos, então em qualquer outro erro cai adiante em `if (!profileResult.data)` e entra no ramo **"conta sem perfil válido → signOut()"**. Como você viu depois de reload deu certo, isso confirma transiente, não perfil ausente.
+- Quando reproduzido no evento `INITIAL_SESSION` (RLS ainda sem `auth.uid()`), gera exatamente o comportamento relatado: toast de erro seguido de sucesso ao recarregar.
 
-Substituir por:
+## Correção — cirúrgica, sem tocar em lógica de negócios
 
-> **Fase 1 — OCR:** o provedor configurado em "OCR — Provedor único para todos os módulos" lê o PDF e devolve o texto (inclusive de páginas escaneadas). Gemini é o único que suporta PDFs muito grandes via Google Files API (até 2 GB).
->
-> **Fase 2 — Preenchimento:** o provedor/modelo definido no **Provider Inventory** recebe apenas o texto extraído e preenche cada campo do laudo. Como não precisa "ver" o PDF, pode ser um modelo mais barato (ex.: MiniMax M3, DeepSeek).
->
-> **Resumo visual:** `PDF → [OCR provider] → texto → [Provider Inventory] → laudo`
+### 1. Route layout único (fim das remontagens)
 
-### C. Remover card "Providers Permitidos"
+Refatorar `src/App.tsx` para usar rota de layout com `<Outlet/>`:
 
-- Remover o Card completo (aprox. linhas 2419–2450).
-- Remover do `DEFAULT_CONFIG` a chave `allowed_ai_providers` (linha 232).
-- Remover do type/interface a propriedade `allowed_ai_providers` (linha 55).
-- Remover do carregamento inicial (linha 655) e do payload de save (linhas 850–853).
-- Remover a função `toggleProvider` (linha 1117) se não for usada em outro lugar.
-- **Não** apagar a coluna no banco — só deixar de ler/escrever, pra não perder histórico. Chave órfã em `system_config` fica inerte.
+```tsx
+<Route element={<ProtectedRoute><AppLayout><Outlet/></AppLayout></ProtectedRoute>}>
+  <Route path="/dashboard"   element={<Dashboard/>}/>
+  <Route path="/historico"   element={<Historico/>}/>
+  <Route path="/laudo/new"   element={<LaudoEditor/>}/>
+  <Route path="/laudo/:id"   element={<LaudoEditor/>}/>
+  <Route path="/impugnacao"  element={<Impugnacao/>}/>
+  <Route path="/financeiro"  element={<Financeiro/>}/>
+  <Route path="/configuracoes" element={<Configuracoes/>}/>
+  <Route path="/profile"       element={<Configuracoes/>}/>
+</Route>
+```
 
----
+Remove o wrapper `ProtectedWithLayout`. Rotas fora do layout (`/`, `/hub`, `/impersonate`, `/previdenciario/*`, `/dev-panel`, `*`) ficam como estão. Nenhuma mudança em Dashboard, LaudoEditor, LaudoContext, etc.
 
-## Fora de escopo
+**Ganho direto:** o `AppLayout` monta uma vez por sessão → `usePresenceHeartbeat`, `is_developer` RPC, `ImportarAutosDialog` param de re-inicializar em toda navegação. As transições ficam instantâneas.
 
-- Não mexer no Provider Inventory nem no bloco de OCR unificado (já foram tratados na rodada anterior).
-- Não mexer em edge functions — nada consome `allowed_ai_providers`, então a remoção é puramente de UI.
-- Não mexer em prompts, MiniMax, ou lógica de importação.
+### 2. Tornar `AuthContext.loadUserData` robusto a transientes
+
+Duas mudanças pequenas em `src/contexts/AuthContext.tsx`, apenas dentro da função `loadUserData`:
+
+- Trocar `.single()` por `.maybeSingle()` — separa "sem linha" de "erro real".
+- Ampliar o conceito de transiente: **qualquer `profileResult.error` sem `profileResult.data` é tratado como transiente** (log + toast informativo, mantém sessão, não desloga). O ramo de "conta sem perfil válido → signOut" só dispara quando `error === null && data === null` (o único caso em que temos certeza de que a linha realmente não existe). Isso elimina o falso "conta inválida" causado por hiccups de rede/JWT.
+- Manter o timeout de 10s como está.
+
+Sem mudança na interface pública do contexto, sem mudança em componentes consumidores.
+
+### 3. (Opcional, só se sobrar folga) Consolidar re-render do `AuthProvider`
+
+Não é necessário para o bug, mas se quisermos aproveitar, envolver o `value={{…}}` do `AuthContext.Provider` em `useMemo`. Deixo isso fora do escopo desta correção para manter o patch mínimo.
+
+## Escopo do patch
+
+Arquivos tocados: **2**.
+
+- `src/App.tsx` — refatoração de rotas para layout único com `<Outlet/>`; remove `ProtectedWithLayout`.
+- `src/contexts/AuthContext.tsx` — `.maybeSingle()` + reclassificação de erros transientes dentro de `loadUserData`.
+
+Nenhum arquivo de UI, de conteúdo do laudo, de OCR, de DevPanel, ou de edge function é alterado.
 
 ## Validação
 
-1. Abrir DevPanel → confirmar que os dois blocos de texto (Modo de Importação + Fase 1/2) mostram a nova redação.
-2. Confirmar que o card "Providers Permitidos" sumiu.
-3. Salvar configurações → não deve dar erro de tipo nem 400 do Supabase.
-4. Abrir importação (Trabalhista) → confirmar que troca de Passagem Única ↔ Duas Fases continua funcionando.
+1. Build passa.
+2. Playwright: login → navegar Dashboard ↔ Histórico ↔ Configurações ↔ Impugnação em sequência e conferir que não há flash de "Carregando…" entre rotas e que `AppLayout` não remonta (contar chamadas a `is_developer` no console → deve aparecer 1× por sessão, não 1× por navegação).
+3. Simular erro transitório de perfil injetando um erro no `.maybeSingle()` via DevTools (ou temporariamente forçando um `throw`) e confirmar que o toast diz "problema de conexão" e a sessão permanece — não desloga.
