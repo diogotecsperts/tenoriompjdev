@@ -215,7 +215,17 @@ export default function PautaDetalhe() {
                         : err?.code === "provider_unavailable"
                           ? "IA indisponível"
                           : "Erro no processamento";
-      toast({ variant: "destructive", title, description: formatProcessarErrorDescription(err) });
+      const retryable = err?.code !== "file_too_large" && err?.code !== "unsupported_file" && err?.code !== "invalid_key";
+      toast({
+        variant: "destructive",
+        title,
+        description: formatProcessarErrorDescription(err),
+        action: retryable ? (
+          <ToastAction altText="Tentar novamente" onClick={() => void handleProcessar(pericia)}>
+            Tentar novamente
+          </ToastAction>
+        ) : undefined,
+      });
     } finally {
       setProcessandoIds((s) => {
         const n = new Set(s);
