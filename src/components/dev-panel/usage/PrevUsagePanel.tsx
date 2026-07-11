@@ -1492,7 +1492,36 @@ export function PrevUsagePanel() {
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead className="w-10">
+                            {(() => {
+                              const sel = selectedByPauta[pt.id];
+                              const visibleIds = ps.map((p) => p.id);
+                              const allChecked =
+                                visibleIds.length > 0 &&
+                                visibleIds.every((id) => sel?.has(id));
+                              const someChecked =
+                                !allChecked &&
+                                visibleIds.some((id) => sel?.has(id));
+                              return (
+                                <Checkbox
+                                  checked={
+                                    allChecked
+                                      ? true
+                                      : someChecked
+                                        ? "indeterminate"
+                                        : false
+                                  }
+                                  onCheckedChange={(v) => {
+                                    if (v) setPautaSelection(pt.id, visibleIds);
+                                    else clearPautaSelection(pt.id);
+                                  }}
+                                  aria-label="Selecionar todas"
+                                />
+                              );
+                            })()}
+                          </TableHead>
                           <TableHead className="w-12">#</TableHead>
+
                           <TableHead>Periciado</TableHead>
                           <TableHead>Processo</TableHead>
                           <TableHead>Status</TableHead>
