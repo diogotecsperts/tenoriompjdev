@@ -1,286 +1,141 @@
-## Diagnóstico confirmado
 
-O erro do print é real e recorrente nos logs:
+# Plano — Melhorias seguras no Previdenciário
 
-- `prev-pre-processar` baixou um PDF de **8,08 MB**.
-- O upload para Gemini Files API terminou rápido.
-- A chamada seguinte ficou presa em `generateContent` por **105s** com `gemini-3.1-flash-lite` e foi abortada pelo nosso timeout interno.
-- A UI recebeu `504` e exibiu: “Tempo excedido no OCR Gemini”.
+Escopo: **exclusivamente o módulo Previdenciário**. Nenhuma alteração em IAs, edge functions de OCR, prompts, provider inventory, ou fluxo de outros módulos (Trabalhista, Impugnação, Laudo). Zero risco arquitetural.
 
-Importante: você está correto. **`gemini-3.1-flash-lite` e `gemini-3.5-flash` existem**. A documentação atual do Google confirma:
+---
 
-- `gemini-3.1-flash-lite`: suporta **Text, Image, Video, Audio e PDF**, saída Text, janela 1M/64k, modelo barato para alto volume.
-- `gemini-3.5-flash`: suporta **Text, Image, Video, Audio e PDF**, saída Text, janela 1M/64k.
-- A própria documentação recomenda a **Interactions API** como API atual para modelos novos; `generateContent` é tratado como legado, embora ainda suportado.
-- Para tarefas longas, a documentação do Google recomenda `background: true`, porque requisições HTTP síncronas podem fechar por timeout antes do modelo terminar.
+## 1. Triagem das sugestões do Lovable
 
-## Causa provável
+| Sugestão | Veredito | Motivo |
+|---|---|---|
+| Logs/métricas detalhadas de OCR/Files API | **Descartar** | Já temos `ai_usage_logs`, `backend_logs`, `error_logs` + painéis Dev (DevAIUsageLogs, DevBackendLogs, DevErrorLogs, DevAIEfficiency, DevRetryStats). Redundante. |
+| Testes de integração OCR | **Descartar** | Requer mocks caros de Gemini/Mistral/MiniMax e altera pipeline crítica. Alto risco de falso positivo/negativo travando build. Não é "altamente seguro". |
+| Toast acionável com tamanho/provider/passo | **Parcial — Aceitar (item A)** | Já classificamos `code`, `stage`, `provider`, `model`. Falta só um bloco pequeno já-existente + sugestão de próxima ação. Pura UI. |
+| Retry automático alternando estratégia | **Descartar** | O backend já faz cascading retry (`gemini-payload-cascading-retry-strategy`) e fallback entre providers via `ocr-router` / `ai-config`. Adicionar retry no frontend duplicaria custo e cota. |
+| Painel de erros por etapa | **Descartar** | `DevBackendLogs` + `DevErrorLogs` + `prev_processing_jobs.technical_detail/stage/error_code` já cobrem. |
+| requestId/correlation ID no toast + log | **Aceitar (item B)** | Baixíssimo risco. Já temos `jobId` no fluxo assíncrono; basta exibi-lo no toast de erro e no console (copiar). |
+| Botão "Tentar novamente" | **Aceitar (item C)** | Trivial — reusa `handleProcessar`. Só UI. |
+| Relatório de depuração em PDF | **Descartar** | Custo alto; dev já tem acesso completo via DevPanel. |
+| Overlay de status progressivo | **Descartar** | Já existe `processandoDetalhes[p.id]` mostrando stage em tempo real linha a linha, mais `useFakeProgress`. Redundante. |
 
-Não é saldo nem chave, porque não aparece 401/403/429/402. Também não é “modelo inexistente”, porque a chamada não retorna 400; ela fica aguardando até nosso abort de 105s.
+---
 
-A causa é arquitetural:
+## 2. Correções pedidas
 
-- O app tenta fazer OCR visual de PDF dentro de uma chamada síncrona de Edge Function.
-- O OCR Gemini atual usa `generateContent` legado + Files API e espera a resposta completa antes de retornar.
-- Para PDFs escaneados/visuais, mesmo com apenas 8 MB, a leitura pode passar de 105s dependendo do número de páginas, imagens, compressão e carga do provider.
-- Esse tipo de job não deveria depender de uma única requisição HTTP síncrona.
+### A) Toast/erro mais acionáveis + Retry (itens A, B, C acima)
 
-## Objetivo da correção
+Arquivo: `src/modules/previdenciario/pages/PautaDetalhe.tsx`
 
-Manter os modelos econômicos (`gemini-3.1-flash-lite`, `gemini-3.1-flash-lite-preview`, `gemini-3.5-flash`) e fazer o pipeline usar a forma correta:
+- Adicionar `jobId` (quando presente na `PreProcessarError`) e uma linha "Sugestão:" no `description` conforme o `code`:
+  - `provider_timeout` / `response_truncated` → "Tente novamente; o backend usará o fallback automático."
+  - `file_too_large` → "PDF acima do limite — tente dividir manualmente."
+  - `quota_exceeded` → "Verifique cota do provider no DevPanel."
+- Persistir a última perícia falhada em state (`lastFailedId`) e mostrar um botão "Tentar novamente" no toast (via `action` do sonner/useToast) que chama `handleProcessar(pericia)` novamente.
+- Propagar `jobId` em `PreProcessarError`:
+  - `src/modules/previdenciario/api/processar.ts` — adicionar campo `jobId?: string` na classe e preencher a partir de `AsyncPreProcessarStart.jobId` durante o polling.
 
-1. **Gemini moderno via Interactions API** para modelos Gemini 3.x.
-2. **Execução assíncrona/background** quando o OCR do PDF puder demorar.
-3. **Polling de status** no frontend, em vez de travar a tela esperando uma Edge Function única.
-4. Erros objetivos: quota, chave, modelo, timeout real, falha provider, JSON truncado.
+**Impacto**: só frontend `PautaDetalhe.tsx` + tipagem de erro em `processar.ts`. Nada de backend.
 
-## Plano de implementação
+---
 
-### 1. Atualizar o extrator Gemini para distinguir API por modelo
+### B) Explicação/consistência do "Processar" vs "Processar pendentes"
 
-Arquivo principal: `supabase/functions/_shared/pdf-visual-extractor.ts`
+Diagnóstico do código atual (`PautaDetalhe.tsx` linhas 138-238):
 
-Criar roteamento interno:
+- **Processar (por perícia)**: chama `preProcessarPericia(id)`, que hoje devolve `async: true` + `jobId` — o backend roda em background e o frontend faz polling via `check-prev-processing-status`.
+- **Processar pendentes**: itera `pendentes[]` em `for` **sequencial** (`await` dentro do loop). Uma por vez. Espera a anterior concluir antes de disparar a próxima.
 
-- Modelos Gemini 3.x e 3.5:
-  - `gemini-3.1-flash-lite`
-  - `gemini-3.1-flash-lite-preview`
-  - `gemini-3.5-flash`
-  - `gemini-3-flash-preview`
-  - `gemini-3-pro-preview`
-  - `gemini-3.1-pro-preview`
-  
-  Usar **Interactions API**:
+**Ambos usam exatamente o mesmo pipeline** (`preProcessarPericia`). A única diferença é serialização.
 
-  ```text
-  POST https://generativelanguage.googleapis.com/v1beta/interactions
-  x-goog-api-key: GEMINI_API_KEY
-  Api-Revision: 2026-05-20
-  ```
+Ação: **apenas documentar em UI** — adicionar tooltip no botão "Processar pendentes" explicando "Processa uma por vez, na ordem da lista. N pendentes." Nenhuma mudança de comportamento.
 
-- Modelos 2.5/2.0/1.5:
-  - manter `generateContent`, porque já funciona e é compatível com o fluxo atual.
+---
 
-### 2. Implementar `interactions.create` com arquivo PDF
+### C) DevPanel → Controle de uso → persistência de tamanho/páginas
 
-Após upload na Files API, chamar:
+Arquivo: `src/components/dev-panel/usage/PrevUsagePanel.tsx` (linha 469-484 `persistMeta`)
 
-```json
-{
-  "model": "gemini-3.1-flash-lite",
-  "input": [
-    { "type": "document", "uri": "<fileUri>", "mime_type": "application/pdf" },
-    { "type": "text", "text": "<EXTRACTION_PROMPT>" }
-  ],
-  "system_instruction": "Você é um sistema de OCR especializado...",
-  "generation_config": {
-    "temperature": 0.1,
-    "max_output_tokens": 65536,
-    "response_mime_type": "application/json"
-  },
-  "background": true,
-  "store": false
-}
-```
+**Causa raiz do sumiço**: o `persistMeta` faz `supabase.from("prev_pericias").update(...)` diretamente pelo cliente. Como o dev está autenticado com sua própria sessão e os registros pertencem a outro usuário, a **RLS bloqueia o UPDATE silenciosamente** (o try/catch engole o erro). Isso viola a regra de memória `dev-access-isolation`: dev nunca deve escrever em tabelas de domínio via RLS.
 
-Observação técnica: se o formato exato aceito pela REST API vier com `mimeType` em vez de `mime_type` para algum endpoint, será validado no teste real e ajustado. O ponto central é: para Gemini 3.x, não insistir em `contents[].parts[].fileData` do fluxo legado quando ele está demorando no OCR.
+Correção segura (padrão já usado por `dev-list-prev-usage`, `dev-download-pdf`, `dev-get-pericia-data`):
 
-### 3. Criar helper de polling Gemini
+1. **Nova edge function** `supabase/functions/dev-save-pericia-pdf-meta/index.ts`
+   - Autenticação via `Authorization` header
+   - Verificação `is_developer()`
+   - Cliente service-role faz o `update` em `prev_pericias` (só colunas `pdf_size_bytes` e `pdf_pages`)
+   - Payload: `{ periciaId, sizeBytes, pages }`
+   - Retorno: `{ ok: true }`
+   - `verify_jwt = true` em `supabase/config.toml`
 
-No mesmo shared file ou em novo helper `_shared/gemini-interactions.ts`:
+2. **Ajustar `PrevUsagePanel.tsx`**:
+   - `persistMeta` passa a chamar `supabase.functions.invoke("dev-save-pericia-pdf-meta", { body })`
+   - Também remover o `update` client-side em linha 366-368 (invalida cache ao trocar PDF) — mover para a mesma edge function ou simplesmente deixar o backfill sob demanda.
 
-- `createGeminiBackgroundInteraction(...)`
-- `pollGeminiInteraction(...)`
-- `extractInteractionOutputText(...)`
-- `classifyGeminiInteractionError(...)`
+**Sem migração de banco** — colunas já existem. Sem mudança em RLS. Sem impacto em outros módulos.
 
-Polling:
+---
+
+### D) Upload de PDFs em lote dentro da pauta
+
+Objetivo: cliente sobe N PDFs de uma vez; cada arquivo vira uma **nova perícia com PDF anexado** e status `aguardando`, **sem processar**.
+
+Arquivos:
+
+1. **Novo componente** `src/modules/previdenciario/components/UploadLotePdfsDialog.tsx`
+   - Input `<input type="file" accept="application/pdf" multiple />` + área drag-and-drop
+   - Lista dos arquivos escolhidos com nome/tamanho e botão remover
+   - Validações client-side por arquivo:
+     - MIME `application/pdf`
+     - Tamanho ≤ 150 MB (limite prático do storage/OCR)
+   - Botão "Enviar N arquivos" com progresso `feito/total` e barra por arquivo
+   - Cada arquivo:
+     1. Cria uma nova perícia via `createPericia({ pauta_id, ordem: proximaOrdem+i })` (API já existente em `pautas.ts`).
+     2. `uploadPericiaPdf(user.id, pericia.id, file)` (já existente).
+     3. `updatePericia(pericia.id, { pdf_path, pdf_processado: false, periciado_nome: nome_sugerido })`.
+   - Nome sugerido do periciado = nome do arquivo sem extensão, truncado (pode ser editado depois).
+   - Sequencial (uma perícia por vez) para não estourar o upload do storage nem criar buracos de `ordem`. Um erro isolado não trava o restante — coleta lista de falhas e mostra no fim.
+   - Cancelável (flag `abortRef.current`).
+
+2. **`PautaDetalhe.tsx`**:
+   - Novo botão "Upload em lote" ao lado de "Nova perícia" que abre o dialog.
+   - `onDone` → `reload()`.
+
+3. **`pautas.ts`**: se `createPericia` não existir com essa assinatura, adicionar helper thin em cima do que já tem — sem tocar em schema.
+
+**Nenhuma mudança no backend, RLS, OCR ou storage bucket.** Apenas encadeia chamadas já existentes.
+
+---
+
+## 3. O que NÃO será feito
+
+- Não alterar `pdf-visual-extractor.ts`, `ocr-router.ts`, `ai-config.ts`, `prev-pre-processar/index.ts`, `check-prev-processing-status/index.ts`.
+- Não alterar `DevSettings.tsx`, prompts, `prompt-manager`, ou lista de modelos.
+- Não criar tabelas nem migrations.
+- Não mexer em Trabalhista, Impugnação, Laudo, dashboards, ou auth.
+
+---
+
+## 4. Detalhes técnicos
 
 ```text
-GET https://generativelanguage.googleapis.com/v1beta/interactions/{id}
-headers:
-  x-goog-api-key: GEMINI_API_KEY
-  Api-Revision: 2026-05-20
+Arquivos criados:
+  supabase/functions/dev-save-pericia-pdf-meta/index.ts
+  src/modules/previdenciario/components/UploadLotePdfsDialog.tsx
+
+Arquivos editados:
+  supabase/config.toml                                      (bloco da nova função)
+  src/modules/previdenciario/api/processar.ts               (jobId em PreProcessarError)
+  src/modules/previdenciario/pages/PautaDetalhe.tsx         (toast+retry, tooltip, botão upload lote)
+  src/components/dev-panel/usage/PrevUsagePanel.tsx         (persistMeta via edge function)
+  src/modules/previdenciario/api/pautas.ts                  (helper createPericia se necessário)
 ```
 
-Estados tratados:
+Ordem de execução após aprovação:
 
-- `completed`: extrair texto de `steps[].content[].text`.
-- `failed`: retornar erro com corpo real do provider.
-- `cancelled`: erro controlado.
-- `in_progress`: continuar polling.
-- timeout do nosso polling: retornar mensagem clara com `interactionId` para auditoria.
+1. Edge function + config.toml (deploy).
+2. Ajuste `PrevUsagePanel.persistMeta` → validar que ao clicar "carregar tamanho/páginas" e sair, os badges permanecem.
+3. `processar.ts` + `PautaDetalhe.tsx` toast/retry/tooltip.
+4. Dialog de upload em lote + botão na pauta.
 
-### 4. Resolver o limite da Edge Function: tornar o fluxo previdenciário assíncrono
-
-Hoje `prev-pre-processar` tenta fazer OCR + extração estruturada + subpassadas em uma única chamada. Isso é o que causa 504.
-
-A correção robusta é transformar o pré-processamento previdenciário em job:
-
-- Na primeira chamada, criar/atualizar status da própria `prev_pericias` ou uma tabela nova simples de jobs.
-- Retornar imediatamente:
-
-```json
-{
-  "ok": true,
-  "async": true,
-  "jobId": "...",
-  "status": "processing"
-}
-```
-
-- Rodar o processamento em background com `EdgeRuntime.waitUntil(...)`.
-- O frontend faz polling até `pdf_processado=true` ou erro salvo.
-
-Como `prev_pericias` hoje não tem campos de erro/progresso, há duas opções:
-
-#### Opção recomendada: tabela nova `prev_processing_jobs`
-
-Campos de domínio:
-
-- `pericia_id`
-- `user_id`
-- `status`: `queued | processing | completed | failed`
-- `stage`: `download | ocr_upload | ocr_processing | ai_extraction | saving`
-- `progress`
-- `provider`
-- `model`
-- `error_code`
-- `error_message`
-- `technical_detail`
-- `result`
-
-Com RLS por usuário e grants corretos.
-
-#### Opção alternativa: adicionar campos em `prev_pericias`
-
-Campos:
-
-- `processing_status`
-- `processing_stage`
-- `processing_progress`
-- `processing_error`
-- `processing_detail`
-
-É mais simples, mas mistura estado transitório com dados da perícia. Prefiro tabela separada.
-
-### 5. Criar função de status/polling
-
-Nova Edge Function ou extensão segura da atual:
-
-- `check-prev-processing-status`
-
-Ela retorna:
-
-```json
-{
-  "status": "processing",
-  "stage": "ocr_processing",
-  "progress": 45,
-  "provider": "gemini",
-  "model": "gemini-3.1-flash-lite"
-}
-```
-
-Ou, ao finalizar:
-
-```json
-{
-  "status": "completed",
-  "periciaId": "...",
-  "pdfProcessado": true,
-  "pages": 12,
-  "documentosCriados": 8
-}
-```
-
-Ou erro:
-
-```json
-{
-  "status": "failed",
-  "code": "provider_timeout|quota_exceeded|invalid_key|invalid_request|provider_unavailable",
-  "message": "...",
-  "technicalDetail": "..."
-}
-```
-
-### 6. Adaptar frontend previdenciário
-
-Arquivos principais:
-
-- `src/modules/previdenciario/api/processar.ts`
-- `src/modules/previdenciario/pages/PautaDetalhe.tsx`
-
-Mudanças:
-
-- `preProcessarPericia` passa a aceitar resposta síncrona ou assíncrona.
-- Se receber `async: true`, iniciar polling.
-- Mostrar etapa real no botão/status:
-  - Enviando PDF
-  - OCR Gemini: upload
-  - OCR Gemini: leitura visual
-  - Extraindo dados
-  - Salvando resultado
-- Se falhar, mostrar mensagem detalhada, sem esconder atrás de “Edge Function returned non-2xx”.
-
-### 7. Manter Flash-Lite e custo baixo no DevPanel
-
-Não remover os modelos baratos.
-
-No DevPanel:
-
-- Manter `gemini-3.1-flash-lite`.
-- Manter `gemini-3.1-flash-lite-preview`.
-- Manter `gemini-3.5-flash`.
-- Ajustar descrição desses modelos como “Gemini moderno / Interactions API / econômico”.
-- Para OCR, sugerir `gemini-3.1-flash-lite` como opção econômica padrão, mas com processamento assíncrono.
-
-### 8. Melhorar classificação de erros
-
-Atualizar a classificação para diferenciar:
-
-- `quota_exceeded`: saldo/cota/billing/rate quota.
-- `invalid_key`: chave inválida/sem permissão.
-- `invalid_request`: modelo/parâmetros inválidos.
-- `provider_timeout`: nosso polling excedeu limite, mas com `interactionId` salvo.
-- `provider_unavailable`: 5xx/overloaded.
-- `response_truncated`: JSON incompleto.
-
-O toast não deve mais dizer apenas “Tempo excedido na IA”; deve dizer algo como:
-
-```text
-OCR Gemini ainda não concluiu dentro do tempo esperado.
-Modelo: gemini-3.1-flash-lite
-PDF: 8,08 MB
-Status: processamento em background
-Acompanhe o status; não é necessário reenviar o PDF.
-```
-
-Ou, em falha real:
-
-```text
-Falha no Gemini OCR: cota excedida no provider.
-Modelo: gemini-3.1-flash-lite
-Status upstream: 429
-Detalhe: ...
-```
-
-## Validação obrigatória após implementar
-
-1. Testar chamada mínima do Gemini Interactions API com `gemini-3.1-flash-lite`.
-2. Testar upload Files API + Interactions API com PDF pequeno.
-3. Testar o mesmo PDF de ~8 MB que está falhando.
-4. Confirmar que a UI não recebe 504.
-5. Confirmar que o job progride por polling.
-6. Confirmar que `prev_extracao`, `pdf_processado` e `prev_documentos` são salvos como antes.
-7. Confirmar que MiniMax M3 como modelo principal + Gemini OCR continua funcionando.
-8. Confirmar que os modelos 2.5 continuam funcionando pelo fluxo antigo.
-
-## Resultado esperado
-
-- Flash-Lite permanece disponível para testar economia.
-- PDFs demorados deixam de quebrar por timeout síncrono.
-- O usuário acompanha status real.
-- O app diferencia claramente se o problema é app, provider, quota, chave, modelo, ou demora real do OCR.
-- O fluxo previdenciário fica mais robusto sem mexer nos dados já salvos.
+Validação: `tsgo`, abrir `/dev-panel` (controle de uso), carregar metas, trocar de aba e voltar; abrir uma pauta, upload em lote 3 PDFs pequenos, conferir 3 perícias criadas com PDF anexado e status `aguardando` (não processadas).
