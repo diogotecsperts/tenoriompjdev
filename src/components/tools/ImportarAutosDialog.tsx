@@ -296,35 +296,25 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         const { data: configData } = await supabase
           .from('system_config')
           .select('id, value')
-          .in('id', ['default_ai_provider', 'default_ai_model', 'max_pdf_size_mb', 'phase1_ocr_provider', 'phase1_gemini_model', 'import_strategy', 'pdf_ai_provider', 'pdf_ai_model']);
+          .in('id', ['default_ai_provider', 'default_ai_model', 'max_pdf_size_mb', 'phase1_ocr_provider', 'phase1_gemini_model']);
 
         if (configData && configData.length > 0) {
           const config: Record<string, any> = {};
           configData.forEach(item => {
             config[item.id] = item.value;
           });
-          
+
           const provider = config.default_ai_provider || 'lovable';
           const model = config.default_ai_model || 'google/gemini-2.5-flash';
           const maxSize = config.max_pdf_size_mb;
-          
+
           setAiConfig({ provider, model });
-          
-          // OCR config - based on import strategy (GLOBAL for all users)
-          const importStrategy = config.import_strategy || 'single_pass';
-          let ocrProvider: string;
-          let ocrModel: string;
-          
-          if (importStrategy === 'two_phase') {
-            // Two-phase mode: use phase1_ocr_provider
-            ocrProvider = config.phase1_ocr_provider || 'gemini';
-            ocrModel = config.phase1_gemini_model || 'gemini-2.0-flash';
-          } else {
-            // Single-pass mode: use pdf_ai_provider
-            ocrProvider = config.pdf_ai_provider || 'gemini';
-            ocrModel = config.pdf_ai_model || 'gemini-2.0-flash';
-          }
+
+          // OCR unificado: mesma config para single-pass e two-phase (todos os módulos)
+          const ocrProvider = config.phase1_ocr_provider || 'gemini';
+          const ocrModel = config.phase1_gemini_model || 'gemini-2.5-flash';
           setOcrConfig({ provider: ocrProvider, model: ocrModel });
+
           
           // Set max PDF size if configured (handle both string and number values)
           if (maxSize !== undefined && maxSize !== null) {
