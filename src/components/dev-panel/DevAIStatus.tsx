@@ -106,11 +106,12 @@ export function DevAIStatus() {
         .from('system_config')
         .select('id, value')
         .in('id', [
-          'default_ai_provider', 'default_ai_model', 
+          'default_ai_provider', 'default_ai_model',
           'fallback_ai_provider', 'fallback_ai_model',
-          'pdf_ai_provider', 'pdf_ai_model',
+          'phase1_ocr_provider', 'phase1_gemini_model',
           'pdf_fallback_provider', 'pdf_fallback_model'
         ]);
+
 
       if (configError) throw configError;
 
