@@ -1014,9 +1014,21 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    console.error("[prev-pre-processar] FATAL:", msg);
-    return new Response(JSON.stringify({ error: msg, code: "unknown" }), {
-      status: 500,
+    const classified = classifyProcessingError(err);
+    console.error(
+      `[prev-pre-processar] FATAL code=${classified.code} stage=${classified.stage} provider=${classified.provider ?? "n/a"} model=${classified.model ?? "n/a"}:`,
+      classified.technicalDetail || msg,
+    );
+    return new Response(JSON.stringify({
+      error: classified.error,
+      code: classified.code,
+      stage: classified.stage,
+      provider: classified.provider,
+      model: classified.model,
+      upstreamStatus: classified.upstreamStatus,
+      technicalDetail: classified.technicalDetail,
+    }), {
+      status: classified.httpStatus,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
