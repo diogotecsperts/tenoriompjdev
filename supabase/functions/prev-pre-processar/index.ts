@@ -11,8 +11,7 @@
  * Isolado do módulo trabalhista. Não toca em `laudos` nem em `processos-pdf`.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { runOcrWithConfiguredProvider } from "../_shared/ocr-router.ts";
-import { isMinimaxClientRasterizeError } from "../_shared/minimax-client.ts";
+import { getOcrRouterConfig, runOcrWithConfiguredProvider } from "../_shared/ocr-router.ts";
 import { getAIConfig, callAI, classifyAIProviderError } from "../_shared/ai-config.ts";
 import { getPrompt } from "../_shared/prompt-manager.ts";
 import { classifyMistralError, isMistralError } from "./_mistral-errors.ts";
@@ -621,6 +620,277 @@ async function gerarResumoExames(args: {
   return sanitizeResumo(resp?.text || "");
 }
 
+type PrevPericiaRow = {
+  id: string;
+  user_id: string;
+  pdf_path: string | null;
+  pauta_id: string;
+  periciado_nome?: string | null;
+};
+
+type OcrResult = { text: string; pageCount: number; provider: string; model: string };
+
+async function updateJob(
+  admin: any,
+  jobId: string | undefined,
+  patch: Record<string, unknown>,
+) {
+  if (!jobId) return;
+  const { error } = await admin.from("prev_processing_jobs").update(patch).eq("id", jobId);
+  if (error) console.error("[prev-pre-processar] update job failed:", error);
+}
+
+async function finalizeFailedJob(
+  admin: any,
+  jobId: string,
+  err: unknown,
+  fallback?: { provider?: string; model?: string; stage?: string },
+) {
+  const classified = classifyProcessingError(err, fallback);
+  await updateJob(admin, jobId, {
+    status: "failed",
+    progress: 100,
+    stage: classified.stage || fallback?.stage || "failed",
+    provider: classified.provider || fallback?.provider || null,
+    model: classified.model || fallback?.model || null,
+    error_code: classified.code,
+    error_message: classified.error,
+    technical_detail: classified.technicalDetail,
+    completed_at: new Date().toISOString(),
+  });
+  console.error(
+    `[prev-pre-processar] job ${jobId} failed code=${classified.code} stage=${classified.stage}:`,
+    classified.technicalDetail,
+  );
+}
+
+async function processStructuredExtraction(args: {
+  admin: any;
+  userId: string;
+  pericia: PrevPericiaRow;
+  ocr: OcrResult;
+  startedAt: number;
+  jobId?: string;
+}): Promise<{
+  periciaId: string;
+  pages: number;
+  documentosCriados: number;
+  provider: string;
+  model: string;
+  durationMs: number;
+}> {
+  const { admin, userId, pericia, ocr, startedAt, jobId } = args;
+
+  await updateJob(admin, jobId, {
+    status: "processing",
+    stage: "ai_extraction",
+    progress: 65,
+    provider: ocr.provider,
+    model: ocr.model,
+  });
+
+  const aiConfig = await getAIConfig();
+  const ocrText = trimOcrPreservingTail(ocr.text, 120_000);
+  const remainingAiBudgetMs = jobId
+    ? 120_000
+    : 140_000 - (Date.now() - startedAt) - 4_000;
+
+  if (remainingAiBudgetMs < 20_000) {
+    const detail =
+      `OCR concluído (${ocr.pageCount}p, ${ocr.text.length} chars via ${ocr.provider}/${ocr.model}), ` +
+      `mas consumiu tempo demais para a extração estruturada síncrona com segurança. ` +
+      `elapsed=${Date.now() - startedAt}ms remaining=${remainingAiBudgetMs}ms`;
+    throw new Error(detail);
+  }
+
+  const userPrompt = await getPrompt(
+    "prompt_prev_extracao_processo",
+    DEFAULT_EXTRACTION_PROMPT,
+    { ocrText },
+    {
+      description: "PREV: Extração estruturada do PDF do processo (pré-processamento)",
+      cardId: "previdenciario",
+      sectionId: "pre-processamento",
+    },
+  );
+
+  const aiResp = await callAI(aiConfig, SYSTEM_PROMPT, userPrompt, {
+    userId,
+    promptType: "prev_extracao_processo",
+    maxOutputTokens: 12000,
+    jsonMode: true,
+    requestTimeoutMs: remainingAiBudgetMs,
+  });
+
+  if (looksTruncated(aiResp.text)) {
+    console.warn(
+      `[prev-pre-processar] AI output looks truncated (len=${aiResp.text.length}); attempting repair.`,
+    );
+  }
+
+  const parsed = parseAIJson(aiResp.text);
+  if (!parsed) {
+    throw new Error(
+      `response_truncated: Resposta não pôde ser convertida em JSON. Tamanho=${aiResp.text.length}. Início=${aiResp.text.slice(0, 300)}`,
+    );
+  }
+
+  const COMORB_KEYS = [
+    "has","dm2","dislipidemia","hipotireoidismo","ansiedade","depressao",
+    "fibromialgia","obesidade","cardiopatia","dpoc","irc","ar",
+  ] as const;
+  const toBool = (v: unknown): boolean => {
+    if (typeof v === "boolean") return v;
+    if (typeof v === "number") return v !== 0;
+    if (typeof v === "string") {
+      const s = v.trim().toLowerCase();
+      return ["true","1","sim","yes","y","x","marcado","positivo"].includes(s);
+    }
+    return false;
+  };
+  if (parsed && typeof parsed === "object") {
+    let mu = parsed.medicacoes_uso;
+    if (Array.isArray(mu)) mu = mu.filter(Boolean).join(", ");
+    if (typeof mu !== "string") mu = "";
+    mu = mu.replace(/[*_`#>]/g, "").replace(/\bIA\b/g, "").replace(/\s+/g, " ").trim();
+    parsed.medicacoes_uso = mu;
+
+    if (!parsed.identificacao || typeof parsed.identificacao !== "object") {
+      parsed.identificacao = {};
+    }
+    const escolaridade = inferEscolaridadeFromParsed(parsed, ocrText);
+    if (escolaridade) parsed.identificacao.escolaridade = escolaridade;
+
+    const src = (parsed.comorbidades_fixas && typeof parsed.comorbidades_fixas === "object")
+      ? parsed.comorbidades_fixas as Record<string, unknown>
+      : {};
+    const normalized: Record<string, boolean> = {};
+    for (const k of COMORB_KEYS) normalized[k] = toBool(src[k]);
+    parsed.comorbidades_fixas = normalized;
+  }
+
+  await updateJob(admin, jobId, { stage: "ai_refinement", progress: 78 });
+
+  let queixaUnificada = "";
+  try {
+    queixaUnificada = await gerarQueixaUnificada({ aiConfig, userId, ocrText, extracao: parsed });
+    if (queixaUnificada) parsed.queixa_principal = queixaUnificada;
+  } catch (e) {
+    console.warn("[prev-pre-processar] queixa unificada falhou (não-fatal):", e);
+  }
+
+  let resumoExames = "";
+  try {
+    resumoExames = await gerarResumoExames({ aiConfig, userId, ocrText });
+    if (resumoExames) parsed.resumo_exames = resumoExames;
+  } catch (e) {
+    console.warn("[prev-pre-processar] resumo de exames falhou (não-fatal):", e);
+  }
+
+  await updateJob(admin, jobId, { stage: "saving", progress: 90 });
+
+  const extracao = {
+    ...parsed,
+    _meta: {
+      ocr_pages: ocr.pageCount,
+      ocr_chars: ocr.text.length,
+      ai_provider: aiResp.provider,
+      ai_model: aiResp.model,
+      used_fallback: aiResp.usedFallback,
+      queixa_unificada_ok: !!queixaUnificada,
+      resumo_exames_ok: !!resumoExames,
+      extracted_at: new Date().toISOString(),
+    },
+  };
+
+  const periciado_nome =
+    parsed?.identificacao?.nome && typeof parsed.identificacao.nome === "string"
+      ? parsed.identificacao.nome
+      : null;
+
+  const updatePatch: Record<string, unknown> = { prev_extracao: extracao, pdf_processado: true };
+  if (periciado_nome) updatePatch.periciado_nome = periciado_nome;
+
+  const { error: updErr } = await admin.from("prev_pericias").update(updatePatch).eq("id", pericia.id);
+  if (updErr) throw new Error(`Falha ao salvar perícia: ${updErr.message}`);
+
+  await admin.from("prev_documentos").delete().eq("pericia_id", pericia.id);
+  const docs = Array.isArray(parsed?.documentos) ? parsed.documentos : [];
+  if (docs.length > 0) {
+    const rows = docs.slice(0, 100).map((d: any, i: number) => ({
+      pericia_id: pericia.id,
+      user_id: userId,
+      tipo: ["laudo", "exame", "receita", "pedido", "outro"].includes(d?.tipo) ? d.tipo : "outro",
+      data: typeof d?.data === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.data) ? d.data : null,
+      resumo: typeof d?.resumo === "string" ? d.resumo.slice(0, 600) : null,
+      trecho_original: null,
+      ordem: i,
+    }));
+    const { error: docErr } = await admin.from("prev_documentos").insert(rows);
+    if (docErr) throw new Error(`Falha ao salvar documentos: ${docErr.message}`);
+  }
+
+  const durationMs = Date.now() - startedAt;
+  const result = {
+    periciaId: pericia.id,
+    pages: ocr.pageCount,
+    documentosCriados: docs.length,
+    provider: aiResp.provider,
+    model: aiResp.model,
+    durationMs,
+  };
+
+  await updateJob(admin, jobId, {
+    status: "completed",
+    stage: "completed",
+    progress: 100,
+    provider: aiResp.provider,
+    model: aiResp.model,
+    result,
+    completed_at: new Date().toISOString(),
+  });
+
+  return result;
+}
+
+async function runPreProcessJob(args: {
+  admin: any;
+  jobId: string;
+  userId: string;
+  pericia: PrevPericiaRow;
+}) {
+  const { admin, jobId, userId, pericia } = args;
+  const startedAt = Date.now();
+
+  try {
+    await updateJob(admin, jobId, { status: "processing", stage: "download", progress: 5 });
+    if (!pericia.pdf_path) throw new Error("Esta perícia não tem PDF anexado");
+
+    const { data: blob, error: dlErr } = await admin.storage.from("prev-pdfs").download(pericia.pdf_path);
+    if (dlErr || !blob) throw new Error(`Falha ao baixar PDF: ${dlErr?.message ?? "vazio"}`);
+
+    const pdfBytes = new Uint8Array(await blob.arrayBuffer());
+    const sizeMB = (pdfBytes.byteLength / 1024 / 1024).toFixed(2);
+    console.log(`[prev-pre-processar] job ${jobId} PDF ${sizeMB}MB`);
+    if (pdfBytes.byteLength > 50_000_000) throw new Error(`PDF muito grande: ${sizeMB}MB (limite 50MB).`);
+
+    await updateJob(admin, jobId, { stage: "ocr_processing", progress: 18 });
+    const ocr = await runOcrWithConfiguredProvider(pdfBytes, { logPrefix: `[prev-pre-processar job ${jobId}]` });
+    await updateJob(admin, jobId, {
+      stage: "ocr_completed",
+      progress: 60,
+      provider: ocr.provider,
+      model: ocr.model,
+      result: { ocr_pages: ocr.pageCount, ocr_chars: ocr.text.length },
+    });
+
+    await processStructuredExtraction({ admin, userId, pericia, ocr, startedAt, jobId });
+    console.log(`[prev-pre-processar] job ${jobId} completed in ${Date.now() - startedAt}ms`);
+  } catch (err) {
+    await finalizeFailedJob(admin, jobId, err);
+  }
+}
+
 
 
 
@@ -711,275 +981,76 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // 2+3) OCR — se o frontend já rodou o pipeline client-side (MiniMax), usamos o texto pronto.
-    //        Caso contrário, baixamos o PDF e rodamos o provider configurado no DevPanel.
-    let ocr: { text: string; pageCount: number; provider: string; model: string };
-
     if (body.preExtractedText && body.preExtractedText.trim().length > 0) {
       console.log(
         `[prev-pre-processar] usando texto pré-extraído pelo frontend ` +
         `(${body.preExtractedText.length} chars, provider=${body.preExtractedProvider}/${body.preExtractedModel})`,
       );
-      ocr = {
+      const ocr = {
         text: body.preExtractedText,
         pageCount: body.preExtractedPageCount || 0,
         provider: body.preExtractedProvider || "minimax-ocr-client",
         model: body.preExtractedModel || "MiniMax-M3",
       };
-    } else {
-      console.log(`[prev-pre-processar] downloading ${pericia.pdf_path}`);
-      const { data: blob, error: dlErr } = await admin.storage
-        .from("prev-pdfs")
-        .download(pericia.pdf_path);
-      if (dlErr || !blob) {
-        return new Response(JSON.stringify({ error: `Falha ao baixar PDF: ${dlErr?.message ?? "vazio"}` }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      const pdfBytes = new Uint8Array(await blob.arrayBuffer());
-      const sizeMB = (pdfBytes.byteLength / 1024 / 1024).toFixed(2);
-      console.log(`[prev-pre-processar] PDF ${sizeMB}MB`);
-
-      if (pdfBytes.byteLength > 50_000_000) {
-        return new Response(
-          JSON.stringify({ error: `PDF muito grande: ${sizeMB}MB (limite 50MB).` }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-
-      try {
-        ocr = await runOcrWithConfiguredProvider(pdfBytes, {
-          logPrefix: "[prev-pre-processar]",
-        });
-      } catch (e) {
-        if (isMinimaxClientRasterizeError(e)) {
-          // Sinaliza ao frontend que ele precisa rodar o pipeline client-side
-          // (rasterização + chamadas ao endpoint minimax-ocr-chunk) e re-invocar
-          // esta função passando `preExtractedText`.
-          return new Response(
-            JSON.stringify({
-              ok: false,
-              needsClientRasterize: true,
-              mode: "minimax-client-rasterize",
-              chunkEndpoint: "minimax-ocr-chunk",
-              pdfPath: pericia.pdf_path,
-              bucket: "prev-pdfs",
-              message:
-                "Provider MiniMax selecionado. Rode a rasterização no navegador e re-invoque com preExtractedText.",
-            }),
-            { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-          );
-        }
-        throw e;
-      }
-      console.log(
-        `[prev-pre-processar] OCR: ${ocr.pageCount}p, ${ocr.text.length} chars via ${ocr.provider}/${ocr.model}`,
-      );
-    }
-
-    // 4) Extração estruturada via IA configurada no DevPanel
-    const aiConfig = await getAIConfig();
-    const ocrText = trimOcrPreservingTail(ocr.text, 120_000);
-
-    const remainingAiBudgetMs = 140_000 - (Date.now() - t0) - 4_000;
-    if (remainingAiBudgetMs < 20_000) {
-      const detail =
-        `OCR concluído (${ocr.pageCount}p, ${ocr.text.length} chars via ${ocr.provider}/${ocr.model}), ` +
-        `mas consumiu tempo demais para a extração estruturada síncrona com segurança. ` +
-        `elapsed=${Date.now() - t0}ms remaining=${remainingAiBudgetMs}ms`;
-      console.error(`[prev-pre-processar] ${detail}`);
-      return new Response(
-        JSON.stringify({
-          error:
-            "Tempo excedido antes da extração estruturada. O OCR terminou, mas o PDF é grande/demorado demais para processar tudo em uma chamada síncrona.",
-          code: "provider_timeout",
-          stage: "ocr",
-          provider: ocr.provider,
-          model: ocr.model,
-          upstreamStatus: 504,
-          technicalDetail: detail,
-        }),
-        { status: 504, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    const userPrompt = await getPrompt(
-      "prompt_prev_extracao_processo",
-      DEFAULT_EXTRACTION_PROMPT,
-      { ocrText },
-      {
-        description: "PREV: Extração estruturada do PDF do processo (pré-processamento)",
-        cardId: "previdenciario",
-        sectionId: "pre-processamento",
-      },
-    );
-
-    const aiResp = await callAI(aiConfig, SYSTEM_PROMPT, userPrompt, {
-      userId,
-      promptType: "prev_extracao_processo",
-      maxOutputTokens: 12000,
-      jsonMode: true,
-      requestTimeoutMs: remainingAiBudgetMs,
-    });
-
-    if (looksTruncated(aiResp.text)) {
-      console.warn(
-        `[prev-pre-processar] AI output looks truncated (len=${aiResp.text.length}); attempting repair.`,
-      );
-    }
-
-    const parsed = parseAIJson(aiResp.text);
-    if (!parsed) {
-      console.error("[prev-pre-processar] JSON parse failed. Raw head:", aiResp.text.slice(0, 400));
-      console.error("[prev-pre-processar] Raw tail:", aiResp.text.slice(-400));
-      return new Response(
-        JSON.stringify({
-          error:
-            "A IA devolveu JSON incompleto (provavelmente saída truncada). Tente novamente; se persistir, reduza o PDF ou avise o suporte.",
-          code: "response_truncated",
-          stage: "ai_generation",
-          provider: aiResp.provider,
-          model: aiResp.model,
-          upstreamStatus: 502,
-          technicalDetail: `Resposta não pôde ser convertida em JSON. Tamanho=${aiResp.text.length}. Início=${aiResp.text.slice(0, 300)}`,
-        }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    // 4b) Normalização defensiva (medicacoes_uso + comorbidades_fixas)
-    const COMORB_KEYS = [
-      "has","dm2","dislipidemia","hipotireoidismo","ansiedade","depressao",
-      "fibromialgia","obesidade","cardiopatia","dpoc","irc","ar",
-    ] as const;
-    const toBool = (v: unknown): boolean => {
-      if (typeof v === "boolean") return v;
-      if (typeof v === "number") return v !== 0;
-      if (typeof v === "string") {
-        const s = v.trim().toLowerCase();
-        return ["true","1","sim","yes","y","x","marcado","positivo"].includes(s);
-      }
-      return false;
-    };
-    if (parsed && typeof parsed === "object") {
-      // medicacoes_uso: garantir string limpa, sem markdown e sem "IA"
-      let mu = parsed.medicacoes_uso;
-      if (Array.isArray(mu)) mu = mu.filter(Boolean).join(", ");
-      if (typeof mu !== "string") mu = "";
-      mu = mu.replace(/[*_`#>]/g, "").replace(/\bIA\b/g, "").replace(/\s+/g, " ").trim();
-      parsed.medicacoes_uso = mu;
-
-      // escolaridade: normalizar sinônimos e tentar fallback em textos já extraídos.
-      if (!parsed.identificacao || typeof parsed.identificacao !== "object") {
-        parsed.identificacao = {};
-      }
-      const escolaridade = inferEscolaridadeFromParsed(parsed, ocrText);
-      if (escolaridade) parsed.identificacao.escolaridade = escolaridade;
-
-      // comorbidades_fixas: objeto com as 12 chaves booleanas
-      const src = (parsed.comorbidades_fixas && typeof parsed.comorbidades_fixas === "object")
-        ? parsed.comorbidades_fixas as Record<string, unknown>
-        : {};
-      const normalized: Record<string, boolean> = {};
-      for (const k of COMORB_KEYS) normalized[k] = toBool(src[k]);
-      parsed.comorbidades_fixas = normalized;
-    }
-
-
-
-    // 5) Unificação da Queixa Principal (segunda passada IA, não-fatal)
-    let queixaUnificada = "";
-    try {
-      queixaUnificada = await gerarQueixaUnificada({
-        aiConfig,
-        userId,
-        ocrText,
-        extracao: parsed,
+      const result = await processStructuredExtraction({ admin, userId, pericia, ocr, startedAt: t0 });
+      console.log(`[prev-pre-processar] done in ${result.durationMs}ms`);
+      return new Response(JSON.stringify({ ok: true, ...result }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
-      if (queixaUnificada) {
-        parsed.queixa_principal = queixaUnificada;
-      }
-    } catch (e) {
-      console.warn("[prev-pre-processar] queixa unificada falhou (não-fatal):", e);
     }
 
-    // 5b) Resumo de Exames Complementares (terceira passada IA, não-fatal)
-    let resumoExames = "";
-    try {
-      resumoExames = await gerarResumoExames({ aiConfig, userId, ocrText });
-      if (resumoExames) {
-        parsed.resumo_exames = resumoExames;
-      }
-    } catch (e) {
-      console.warn("[prev-pre-processar] resumo de exames falhou (não-fatal):", e);
+    const ocrConfig = await getOcrRouterConfig();
+    if (ocrConfig.provider === "minimax") {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          needsClientRasterize: true,
+          mode: "minimax-client-rasterize",
+          chunkEndpoint: "minimax-ocr-chunk",
+          pdfPath: pericia.pdf_path,
+          bucket: "prev-pdfs",
+          message:
+            "Provider MiniMax selecionado. Rode a rasterização no navegador e re-invoque com preExtractedText.",
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
-    // 6) Persistência: prev_extracao + status + documentos
-    const extracao = {
-      ...parsed,
-      _meta: {
-        ocr_pages: ocr.pageCount,
-        ocr_chars: ocr.text.length,
-        ai_provider: aiResp.provider,
-        ai_model: aiResp.model,
-        used_fallback: aiResp.usedFallback,
-        queixa_unificada_ok: !!queixaUnificada,
-        resumo_exames_ok: !!resumoExames,
-        extracted_at: new Date().toISOString(),
-      },
-    };
-
-
-
-    const periciado_nome =
-      parsed?.identificacao?.nome && typeof parsed.identificacao.nome === "string"
-        ? parsed.identificacao.nome
-        : null;
-
-    const updatePatch: Record<string, unknown> = {
-      prev_extracao: extracao,
-      pdf_processado: true,
-    };
-    if (periciado_nome) updatePatch.periciado_nome = periciado_nome;
-
-    const { error: updErr } = await admin
-      .from("prev_pericias")
-      .update(updatePatch)
-      .eq("id", pericia.id);
-    if (updErr) {
-      console.error("[prev-pre-processar] update pericia failed:", updErr);
-    }
-
-    // documentos: limpa e regrava
-    await admin.from("prev_documentos").delete().eq("pericia_id", pericia.id);
-    const docs = Array.isArray(parsed?.documentos) ? parsed.documentos : [];
-    if (docs.length > 0) {
-      const rows = docs.slice(0, 100).map((d: any, i: number) => ({
+    const { data: job, error: jobErr } = await admin
+      .from("prev_processing_jobs")
+      .insert({
         pericia_id: pericia.id,
         user_id: userId,
-        tipo: ["laudo", "exame", "receita", "pedido", "outro"].includes(d?.tipo) ? d.tipo : "outro",
-        data: typeof d?.data === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.data) ? d.data : null,
-        resumo: typeof d?.resumo === "string" ? d.resumo.slice(0, 600) : null,
-        trecho_original: null,
-        ordem: i,
-      }));
-      const { error: docErr } = await admin.from("prev_documentos").insert(rows);
-      if (docErr) console.error("[prev-pre-processar] insert documentos failed:", docErr);
+        status: "queued",
+        stage: "queued",
+        progress: 0,
+        provider: ocrConfig.provider,
+        model: ocrConfig.provider === "gemini" ? ocrConfig.geminiModel : null,
+      })
+      .select("id")
+      .single();
+
+    if (jobErr || !job?.id) {
+      throw new Error(`Falha ao criar job de processamento: ${jobErr?.message ?? "sem id"}`);
     }
 
-    const durationMs = Date.now() - t0;
-    console.log(`[prev-pre-processar] done in ${durationMs}ms`);
+    const jobPromise = runPreProcessJob({ admin, jobId: job.id, userId, pericia });
+    const waitUntil = (globalThis as any).EdgeRuntime?.waitUntil?.bind((globalThis as any).EdgeRuntime);
+    if (waitUntil) waitUntil(jobPromise);
+    else jobPromise.catch((e) => console.error("[prev-pre-processar] background job failed:", e));
 
     return new Response(
       JSON.stringify({
         ok: true,
+        async: true,
+        jobId: job.id,
         periciaId: pericia.id,
-        pages: ocr.pageCount,
-        documentosCriados: docs.length,
-        provider: aiResp.provider,
-        model: aiResp.model,
-        durationMs,
+        status: "queued",
+        stage: "queued",
+        progress: 0,
+        provider: ocrConfig.provider,
+        model: ocrConfig.provider === "gemini" ? ocrConfig.geminiModel : null,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

@@ -912,6 +912,68 @@ export type Database = {
           },
         ]
       }
+      prev_processing_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error_code: string | null
+          error_message: string | null
+          id: string
+          model: string | null
+          pericia_id: string
+          progress: number
+          provider: string | null
+          result: Json
+          stage: string
+          status: string
+          technical_detail: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          model?: string | null
+          pericia_id: string
+          progress?: number
+          provider?: string | null
+          result?: Json
+          stage?: string
+          status?: string
+          technical_detail?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          id?: string
+          model?: string | null
+          pericia_id?: string
+          progress?: number
+          provider?: string | null
+          result?: Json
+          stage?: string
+          status?: string
+          technical_detail?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prev_processing_jobs_pericia_id_fkey"
+            columns: ["pericia_id"]
+            isOneToOne: false
+            referencedRelation: "prev_pericias"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null

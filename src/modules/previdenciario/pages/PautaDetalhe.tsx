@@ -147,6 +147,9 @@ export default function PautaDetalhe() {
         onMinimaxProgress: (p) => {
           setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: formatMinimaxProgress(p) }));
         },
+        onJobProgress: (message) => {
+          setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: message }));
+        },
       });
       toast({
         title: "Processado com IA",
@@ -197,10 +200,15 @@ export default function PautaDetalhe() {
     let fail = 0;
     for (let i = 0; i < pendentes.length; i++) {
       const p = pendentes[i];
+      setProcessandoIds((s) => new Set(s).add(p.id));
+      setProcessandoDetalhes((s) => ({ ...s, [p.id]: "Preparando PDF" }));
       try {
         await preProcessarPericia(p.id, {
           onMinimaxProgress: (progress) => {
             setProcessandoDetalhes((s) => ({ ...s, [p.id]: formatMinimaxProgress(progress) }));
+          },
+          onJobProgress: (message) => {
+            setProcessandoDetalhes((s) => ({ ...s, [p.id]: message }));
           },
         });
         ok++;
@@ -211,6 +219,11 @@ export default function PautaDetalhe() {
       setProcessandoDetalhes((s) => {
         const { [p.id]: _removed, ...rest } = s;
         return rest;
+      });
+      setProcessandoIds((s) => {
+        const n = new Set(s);
+        n.delete(p.id);
+        return n;
       });
       setLoteProgresso({ done: i + 1, total: pendentes.length });
     }

@@ -31,7 +31,7 @@ serve(async (req) => {
         ({ success, errorMessage } = await testLovableAI(model));
         break;
       case 'gemini':
-        ({ success, errorMessage } = await testGemini(apiKey!, model));
+        ({ success, errorMessage } = await testGemini(apiKey || Deno.env.get('GEMINI_API_KEY') || '', model));
         break;
       case 'openai':
         ({ success, errorMessage } = await testOpenAI(apiKey!, model));
@@ -144,6 +144,10 @@ function isImageModel(modelId: string): boolean {
          modelId.includes('native-audio');
 }
 
+function shouldUseGeminiInteractionsAPI(modelId: string): boolean {
+  return /^gemini-3(?:\.|-|$)/.test(modelId) || modelId === 'gemini-3.5-flash';
+}
+
 // Detecta se é modelo flash 2.5+ (suporta thinkingConfig)
 function isFlash25Model(modelId: string): boolean {
   return modelId.includes('2.5-flash') || modelId.includes('2.0-flash');
@@ -180,6 +184,31 @@ async function testGemini(apiKey: string, model: string): Promise<{ success: boo
         console.error(`[test-ai-connection] Image model not accessible: ${errorMessage}`);
         return { success: false, errorMessage };
       }
+    }
+
+    if (shouldUseGeminiInteractionsAPI(modelName)) {
+      const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+        method: 'POST',
+        headers: {
+          'x-goog-api-key': apiKey,
+          'Content-Type': 'application/json',
+          'Api-Revision': '2026-05-20',
+        },
+        body: JSON.stringify({
+          model: modelName,
+          input: 'Respond with exactly one word: OK',
+          generation_config: { max_output_tokens: 128, temperature: 0.1 },
+          store: false,
+        }),
+      });
+
+      const text = await response.text();
+      if (!response.ok) {
+        return { success: false, errorMessage: formatGeminiError(`HTTP ${response.status}: ${text}`) };
+      }
+      const data = JSON.parse(text);
+      const output = data.output_text || data.outputs?.map((o: any) => o?.text || '').join('') || data.steps?.flatMap((s: any) => s?.content || []).map((c: any) => c?.text || '').join('') || '';
+      return { success: /OK/i.test(output) || !!data.id, errorMessage: null };
     }
     
     // Standard text model test

@@ -78,12 +78,12 @@ interface TestResult {
 
 const GEMINI_SAFE_DEFAULT_MODEL = "gemini-2.5-flash";
 const GEMINI_FLASH_PRIORITY = [
-  "gemini-2.5-flash",
-  "gemini-3-flash-preview",
-  "gemini-3.5-flash",
   "gemini-3.1-flash-lite",
   "gemini-3.1-flash-lite-preview",
   "gemini-2.5-flash-lite",
+  "gemini-3.5-flash",
+  "gemini-3-flash-preview",
+  "gemini-2.5-flash",
   "gemini-2.5-flash-8b",
   "gemini-2.0-flash",
   "gemini-2.0-flash-lite",
@@ -148,7 +148,7 @@ const AI_PROVIDERS: ProviderInfo[] = [{
 }, {
   id: "gemini",
   name: "Google Gemini",
-  description: "Modelos Gemini via Google AI Studio. Use 'Atualizar Modelos' para ver modelos disponíveis.",
+  description: "Modelos Gemini via Google AI Studio. Gemini 3.x/3.5 usa Interactions API com processamento em background para OCR longo.",
   models: sortGeminiModelsSafely([
     // Flash — FREE TIER (recomendados como padrão)
     "gemini-2.5-flash",
@@ -2046,8 +2046,8 @@ export function DevSettings() {
               Previdenciário, Impugnação e Trabalhista (em Passagem Única faz OCR + preenchimento
               num só request; em Duas Fases faz apenas o OCR). Mistral tem precisão elite (~94.9%)
               em tabelas/escaneados. <strong>MiniMax M3</strong> rasteriza no navegador (pdfjs) +
-              chunks de 10 páginas com 3 paralelismos e backoff em rate limit — ideal para PDFs
-              grandes (100+ páginas) sem estourar CPU da edge function.
+              chunks de 10 páginas com 3 paralelismos e backoff em rate limit. Gemini 3.1 Flash-Lite
+              é suportado por Interactions API com processamento em segundo plano para PDFs demorados.
             </p>
 
 
@@ -2127,15 +2127,15 @@ export function DevSettings() {
                               const details = geminiModelDetails[modelId];
                               return details?.supportsPdf !== false;
                             })
-                          : ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3.5-flash", "gemini-2.5-pro", "gemini-3-pro-preview"]
+                          : ["gemini-3.1-flash-lite", "gemini-3.1-flash-lite-preview", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-3-pro-preview"]
                         ).map(modelId => {
                           const details = geminiModelDetails[modelId];
                           return (
                             <SelectItem key={modelId} value={modelId}>
                               <div className="flex items-center gap-2">
                                 <span>{details?.displayName || modelId}</span>
-                                {modelId.includes("3-") && (
-                                  <Badge variant="outline" className="text-[10px] px-1 py-0">3.0</Badge>
+                                {(modelId.includes("3-") || modelId.includes("3.")) && (
+                                  <Badge variant="outline" className="text-[10px] px-1 py-0">3.x</Badge>
                                 )}
                                 {modelId.includes("pro") && (
                                   <Badge variant="secondary" className="text-[10px] px-1 py-0">Pro</Badge>
@@ -2168,7 +2168,7 @@ export function DevSettings() {
                     )}
                     
                     <p className="text-xs text-muted-foreground">
-                      💡 Modelos 3.0 têm melhor OCR para documentos escaneados. Flash é mais rápido, Pro é mais preciso.
+                      💡 Flash-Lite é a opção econômica para alto volume; Gemini 3.x/3.5 roda com processamento em segundo plano quando o OCR demora.
                     </p>
                   </div>
                 )}
