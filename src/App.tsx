@@ -33,11 +33,14 @@ import Impersonate from "./pages/Impersonate";
 
 const queryClient = new QueryClient();
 
-// Wrapper component that applies AppLayout to protected routes
-function ProtectedWithLayout({ children }: { children: React.ReactNode }) {
+// Layout route: monta AppLayout uma vez e usa <Outlet/> para as filhas.
+// Isso evita a remontagem do sidebar/heartbeat/is_developer a cada navegação.
+function ProtectedLayout() {
   return (
     <ProtectedRoute>
-      <AppLayout>{children}</AppLayout>
+      <AppLayout>
+        <Outlet />
+      </AppLayout>
     </ProtectedRoute>
   );
 }
@@ -91,70 +94,19 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/dashboard"
-        element={
-          <ProtectedWithLayout>
-            <Dashboard />
-          </ProtectedWithLayout>
-        }
-      />
-      <Route
-        path="/laudo/new"
-        element={
-          <ProtectedWithLayout>
-            <LaudoEditor />
-          </ProtectedWithLayout>
-        }
-      />
-      <Route
-        path="/laudo/:id"
-        element={
-          <ProtectedWithLayout>
-            <LaudoEditor />
-          </ProtectedWithLayout>
-        }
-      />
-      <Route
-        path="/historico"
-        element={
-          <ProtectedWithLayout>
-            <Historico />
-          </ProtectedWithLayout>
-        }
-      />
-      <Route
-        path="/impugnacao"
-        element={
-          <ProtectedWithLayout>
-            <Impugnacao />
-          </ProtectedWithLayout>
-        }
-      />
-      <Route
-        path="/financeiro"
-        element={
-          <ProtectedWithLayout>
-            <Financeiro />
-          </ProtectedWithLayout>
-        }
-      />
-      <Route
-        path="/configuracoes"
-        element={
-          <ProtectedWithLayout>
-            <Configuracoes />
-          </ProtectedWithLayout>
-        }
-      />
-      <Route
-        path="/profile"
-        element={
-          <ProtectedWithLayout>
-            <Configuracoes />
-          </ProtectedWithLayout>
-        }
-      />
+
+      {/* Grupo com AppLayout persistente entre rotas */}
+      <Route element={<ProtectedLayout />}>
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/laudo/new" element={<LaudoEditor />} />
+        <Route path="/laudo/:id" element={<LaudoEditor />} />
+        <Route path="/historico" element={<Historico />} />
+        <Route path="/impugnacao" element={<Impugnacao />} />
+        <Route path="/financeiro" element={<Financeiro />} />
+        <Route path="/configuracoes" element={<Configuracoes />} />
+        <Route path="/profile" element={<Configuracoes />} />
+      </Route>
+
       <Route
         path="/dev-panel"
         element={
