@@ -22,7 +22,9 @@ export default function FinalizarCadastro() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const ranRef = useRef(false);
+
 
   useEffect(() => {
     if (ranRef.current) return;
