@@ -87,8 +87,22 @@ Deno.serve(async (req) => {
 
   if (!actionLink) return json({ error: "Não conseguimos gerar o link de acesso.", hint: "Tente novamente. Se persistir, verifique os logs da função." }, 500);
 
-  // Enviar email via Resend usando o domínio verificado.
-  const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+  // Garantir que o usuário recém-criado (ou pré-existente) tenha as linhas de
+  // domínio populadas ANTES de disparar o email. Sem isso, o AuthContext
+  // desloga o usuário na finalização por falta de perfil.
+  if (userId) {
+    const bootstrap = await ensureUserBootstrap(admin, userId, email, fullName);
+    if (!bootstrap.ok) {
+      console.error("ensureUserBootstrap failed", bootstrap);
+      return json({
+        error: "Não foi possível criar o perfil do novo usuário.",
+        hint: bootstrap.hint,
+        raw: bootstrap.raw ?? null,
+      }, 500);
+    }
+  }
+
+
   if (!RESEND_API_KEY) {
     console.error("RESEND_API_KEY missing");
     return json({
