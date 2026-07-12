@@ -31,9 +31,12 @@ const Financeiro = lazy(() => import("./pages/Financeiro"));
 const DevPanel = lazy(() => import("./pages/DevPanel"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Impersonate = lazy(() => import("./pages/Impersonate"));
+const SolicitarCadastro = lazy(() => import("./pages/SolicitarCadastro"));
+const FinalizarCadastro = lazy(() => import("./pages/FinalizarCadastro"));
 const PautaList = lazy(() => import("./modules/previdenciario/pages/PautaList"));
 const PautaDetalhe = lazy(() => import("./modules/previdenciario/pages/PautaDetalhe"));
 const PrelaudoEditor = lazy(() => import("./modules/previdenciario/pages/PrelaudoEditor"));
+
 
 const queryClient = new QueryClient();
 
@@ -62,6 +65,8 @@ function AppRoutes() {
     <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/" element={<Login />} />
+        <Route path="/solicitar-cadastro" element={<SolicitarCadastro />} />
+        <Route path="/finalizar-cadastro" element={<FinalizarCadastro />} />
         <Route path="/impersonate" element={<Impersonate />} />
         <Route
           path="/hub"

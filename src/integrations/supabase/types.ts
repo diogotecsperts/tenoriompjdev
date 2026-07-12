@@ -1019,6 +1019,54 @@ export type Database = {
         }
         Relationships: []
       }
+      signup_requests: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          informacoes_adicionais: string
+          invite_sent_at: string | null
+          invite_user_id: string | null
+          login_desejado: string | null
+          medico_vinculado: string
+          nome_completo: string
+          review_notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          informacoes_adicionais: string
+          invite_sent_at?: string | null
+          invite_user_id?: string | null
+          login_desejado?: string | null
+          medico_vinculado: string
+          nome_completo: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          informacoes_adicionais?: string
+          invite_sent_at?: string | null
+          invite_user_id?: string | null
+          login_desejado?: string | null
+          medico_vinculado?: string
+          nome_completo?: string
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
       system_config: {
         Row: {
           description: string | null

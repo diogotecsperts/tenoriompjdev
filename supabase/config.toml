@@ -56,6 +56,22 @@ verify_jwt = false
 [functions.dev-impersonate-user]
 verify_jwt = true
 
+[functions.signup-request-create]
+verify_jwt = false
+
+[functions.signup-request-list]
+verify_jwt = true
+
+[functions.signup-request-approve]
+verify_jwt = true
+
+[functions.signup-request-reject]
+verify_jwt = true
+
+[functions.signup-request-cancel]
+verify_jwt = true
+
+
 
 
 

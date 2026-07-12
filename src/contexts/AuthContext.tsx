@@ -230,48 +230,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signup = async (email: string, password: string, fullName: string): Promise<boolean> => {
-    try {
-      const redirectUrl = `${window.location.origin}/dashboard`;
-      
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            full_name: fullName
-          },
-          emailRedirectTo: redirectUrl
-        }
-      });
-
-      if (error) {
-        toast({
-          variant: "destructive",
-          title: "Erro no cadastro",
-          description: error.message
-        });
-        return false;
-      }
-
-      if (data.user) {
-        toast({
-          title: "Cadastro realizado!",
-          description: "Você já pode fazer login no sistema."
-        });
-        return true;
-      }
-
-      return false;
-    } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Erro",
-        description: "Ocorreu um erro ao cadastrar. Tente novamente."
-      });
-      return false;
-    }
+  const signup = async (_email: string, _password: string, _fullName: string): Promise<boolean> => {
+    // Cadastro público está desabilitado. Novos usuários passam pelo fluxo
+    // de solicitação → aprovação em /solicitar-cadastro.
+    toast({
+      variant: "destructive",
+      title: "Cadastro por solicitação",
+      description: "O cadastro é feito por solicitação. Acesse /solicitar-cadastro.",
+    });
+    return false;
   };
+
 
   const refreshProfile = async () => {
     if (user) {
