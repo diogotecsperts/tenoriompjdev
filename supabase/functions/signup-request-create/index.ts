@@ -49,18 +49,48 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Rate limit: nenhuma solicitação do mesmo email nas últimas 24h
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count: recentCount } = await supabase
+    const { data: latestReq, error: latestErr } = await supabase
       .from("signup_requests")
-      .select("id", { count: "exact", head: true })
+      .select("id, status, created_at")
       .ilike("email", email)
-      .gte("created_at", since);
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    // Resposta genérica (não revelamos se já existe / se está bloqueado)
-    if ((recentCount ?? 0) > 0) {
+    if (latestErr) {
+      console.error("signup-request-create latest lookup failed", latestErr);
       return new Response(
-        JSON.stringify({ ok: true }),
+        JSON.stringify({ error: "Não foi possível verificar solicitações anteriores." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const activeStatuses = new Set(["pending", "approved", "awaiting_finalization"]);
+    if (latestReq && activeStatuses.has(String(latestReq.status))) {
+      console.log("signup-request-create duplicate active request", {
+        request_id: latestReq.id,
+        status: latestReq.status,
+      });
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          created: false,
+          reason: "existing_active_request",
+          status: latestReq.status,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    if (latestReq && String(latestReq.status) === "completed") {
+      console.log("signup-request-create existing completed account", { request_id: latestReq.id });
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          created: false,
+          reason: "existing_completed_account",
+          status: latestReq.status,
+        }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -78,12 +108,24 @@ Deno.serve(async (req) => {
       .single();
 
     if (insErr) {
-      // Unique index em pendentes → resposta genérica
+      console.error("signup-request-create insert failed", insErr);
+      if ((insErr as any).code === "23505") {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            created: false,
+            reason: "existing_active_request",
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
       return new Response(
-        JSON.stringify({ ok: true }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({ error: "Não foi possível registrar a solicitação." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
+
+    console.log("signup-request-create created", { request_id: inserted.id });
 
     // Notificar admin via Resend (best-effort, não bloqueia resposta)
     try {
@@ -125,7 +167,7 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ ok: true }),
+      JSON.stringify({ ok: true, created: true, request_id: inserted.id }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
