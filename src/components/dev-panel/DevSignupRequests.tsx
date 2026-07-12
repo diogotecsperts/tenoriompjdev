@@ -17,6 +17,14 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "@/hooks/use-toast";
 
+type Status =
+  | "pending"
+  | "approved"
+  | "awaiting_finalization"
+  | "completed"
+  | "rejected"
+  | "cancelled";
+
 interface SignupRequest {
   id: string;
   nome_completo: string;
@@ -24,27 +32,32 @@ interface SignupRequest {
   email: string;
   medico_vinculado: string;
   informacoes_adicionais: string;
-  status: "pending" | "approved" | "rejected" | "cancelled";
+  status: Status;
   created_at: string;
   reviewed_at: string | null;
   invite_sent_at: string | null;
+  finalized_at: string | null;
   review_notes: string | null;
 }
 
-type FilterStatus = "all" | "pending" | "approved" | "rejected" | "cancelled";
+type FilterStatus = "all" | Status;
 
-const statusStyles: Record<SignupRequest["status"], string> = {
+const statusStyles: Record<Status, string> = {
   pending: "bg-amber-100 text-amber-800 border-amber-200",
-  approved: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  approved: "bg-blue-100 text-blue-800 border-blue-200",
+  awaiting_finalization: "bg-blue-100 text-blue-800 border-blue-200",
+  completed: "bg-emerald-100 text-emerald-800 border-emerald-200",
   rejected: "bg-red-100 text-red-800 border-red-200",
   cancelled: "bg-slate-100 text-slate-700 border-slate-200",
 };
 
-const statusLabel: Record<SignupRequest["status"], string> = {
+const statusLabel: Record<Status, string> = {
   pending: "Pendente",
-  approved: "Aprovado",
-  rejected: "Rejeitado",
-  cancelled: "Cancelado",
+  approved: "Aguardando finalização",
+  awaiting_finalization: "Aguardando finalização",
+  completed: "Cadastro finalizado",
+  rejected: "Rejeitada",
+  cancelled: "Cancelada",
 };
 
 export function DevSignupRequests() {
