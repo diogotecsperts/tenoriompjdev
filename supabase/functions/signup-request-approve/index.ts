@@ -102,8 +102,10 @@ Deno.serve(async (req) => {
     }
   }
 
-
+  // Enviar email via Resend usando o domínio verificado.
+  const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
   if (!RESEND_API_KEY) {
+
     console.error("RESEND_API_KEY missing");
     return json({
       error: "Serviço de email não configurado.",
