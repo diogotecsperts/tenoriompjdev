@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
 
   const email = String(reqRow.email).toLowerCase();
   const fullName = String(reqRow.nome_completo);
-  const redirectTo = `${redirectOrigin}/finalizar-cadastro`;
+  const redirectTo = `${PROD_ORIGIN}/finalizar-cadastro`;
 
   // 1) Tentar generateLink type=invite (cria auth user + devolve hashed_token).
   // 2) Se o email já existir, fallback para type=recovery.
