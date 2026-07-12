@@ -45,11 +45,16 @@ Deno.serve(async (req) => {
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
-    const { data: callerData, error: callerErr } = await userClient.auth.getUser();
-    if (callerErr || !callerData.user) {
-      return json({ error: "invalid_token" }, 401);
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claimsData, error: claimsErr } = await userClient.auth.getClaims(token);
+    let callerId = claimsData?.claims?.sub;
+    if (claimsErr || !callerId) {
+      const { data: callerData, error: callerErr } = await userClient.auth.getUser();
+      if (callerErr || !callerData.user) {
+        return json({ error: "invalid_token" }, 401);
+      }
+      callerId = callerData.user.id;
     }
-    const callerId = callerData.user.id;
 
     // 2. Verifica se chamador é developer
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
