@@ -93,6 +93,8 @@ export default function DevPanel() {
         return <DevDashboard />;
       case "users":
         return <DevUsersList />;
+      case "signup-requests":
+        return <DevSignupRequests />;
       case "user-modules":
         return <DevUserModules />;
       case "usage-control":
