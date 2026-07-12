@@ -134,13 +134,14 @@ export function DevSignupRequests() {
         </div>
         <div className="flex items-center gap-3">
           <Select value={filter} onValueChange={(v) => setFilter(v as FilterStatus)}>
-            <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-[220px]"><SelectValue /></SelectTrigger>
             <SelectContent>
+              <SelectItem value="all">Todas</SelectItem>
               <SelectItem value="pending">Pendentes</SelectItem>
-              <SelectItem value="approved">Aprovadas</SelectItem>
+              <SelectItem value="awaiting_finalization">Aguardando finalização</SelectItem>
+              <SelectItem value="completed">Cadastro finalizado</SelectItem>
               <SelectItem value="rejected">Rejeitadas</SelectItem>
               <SelectItem value="cancelled">Canceladas</SelectItem>
-              <SelectItem value="all">Todas</SelectItem>
             </SelectContent>
           </Select>
           <Button variant="outline" size="icon" onClick={fetchRows} disabled={loading}>
