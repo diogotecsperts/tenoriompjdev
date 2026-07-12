@@ -48,12 +48,22 @@ export default function FinalizarCadastro() {
       const type = (query.get("type") ?? hash.get("type") ?? "invite") as
         | "invite" | "signup" | "recovery" | "magiclink" | "email_change";
 
+      const captureEmail = async () => {
+        try {
+          const { data } = await supabase.auth.getSession();
+          if (data.session?.user?.email) setSessionEmail(data.session.user.email);
+        } catch { /* ignore */ }
+      };
+
       // Caso 1: token_hash presente → verifyOtp
       if (tokenHash) {
         const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
-        // Limpar URL para não ficar reutilizável em refresh
         window.history.replaceState({}, "", window.location.pathname);
-        if (error) return finish("error", "Link inválido ou já utilizado. Solicite um novo cadastro.");
+        if (error) {
+          console.warn("[finalizar-cadastro] verifyOtp falhou", { type, hasTokenHash: true, code: (error as any).code, msg: error.message });
+          return finish("error", "Link inválido ou já utilizado (cada link é de uso único). Solicite um novo cadastro.");
+        }
+        await captureEmail();
         return finish("ready");
       }
 
@@ -66,16 +76,25 @@ export default function FinalizarCadastro() {
           refresh_token: refreshToken,
         });
         window.history.replaceState({}, "", window.location.pathname);
-        if (error) return finish("error", "Link inválido ou expirado.");
+        if (error) {
+          console.warn("[finalizar-cadastro] setSession falhou", { msg: error.message });
+          return finish("error", "Link expirado ou já utilizado. Solicite um novo cadastro.");
+        }
+        await captureEmail();
         return finish("ready");
       }
 
       // Caso 3: sessão já ativa (raro, mas seguro)
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) return finish("ready");
+      if (session) {
+        if (session.user?.email) setSessionEmail(session.user.email);
+        return finish("ready");
+      }
 
-      finish("error", "Link inválido. Faça uma nova solicitação de cadastro.");
+      console.warn("[finalizar-cadastro] sem token_hash, sem fragmento e sem sessão");
+      finish("error", "Link inválido ou já utilizado. Faça uma nova solicitação de cadastro.");
     };
+
 
     timeoutId = window.setTimeout(() => {
       finish("error", "Não conseguimos validar o link a tempo. Peça um novo cadastro.");
