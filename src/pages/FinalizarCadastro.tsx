@@ -117,12 +117,40 @@ export default function FinalizarCadastro() {
       return;
     }
     setStatus("saving");
-    const { error } = await supabase.auth.updateUser({ password });
-    if (error) {
-      setStatus("ready");
-      toast({ variant: "destructive", title: "Erro ao definir senha", description: error.message });
+
+    // Pré-checagem: sessão ainda ativa? Se não, o link já foi consumido/expirou
+    // ou o AuthContext deslogou. Traduz para mensagem clara em vez de "Auth session missing!".
+    const { data: sessionCheck } = await supabase.auth.getSession();
+    if (!sessionCheck.session) {
+      console.warn("[finalizar-cadastro] sessão ausente antes do updateUser", { sessionEmail });
+      setStatus("error");
+      setErrorMsg(
+        "Sua sessão expirou. Cada link de acesso é de uso único — solicite um novo cadastro para receber outro link.",
+      );
       return;
     }
+
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) {
+      const raw = error.message ?? "";
+      const isSessionMissing = /session\s*missing/i.test(raw) || (error as any).name === "AuthSessionMissingError";
+      if (isSessionMissing) {
+        console.warn("[finalizar-cadastro] updateUser sem sessão", { raw, sessionEmail });
+        setStatus("error");
+        setErrorMsg(
+          "Sua sessão expirou durante a finalização. Solicite um novo cadastro para receber outro link.",
+        );
+        return;
+      }
+      setStatus("ready");
+      toast({
+        variant: "destructive",
+        title: "Erro ao definir senha",
+        description: raw || "Tente novamente em alguns instantes.",
+      });
+      return;
+    }
+
     // Marca a solicitação como completed antes do signOut (precisamos da sessão)
     try {
       await supabase.functions.invoke("signup-request-finalize");
