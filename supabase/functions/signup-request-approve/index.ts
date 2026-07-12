@@ -29,10 +29,9 @@ Deno.serve(async (req) => {
   const { data: isDev } = await userClient.rpc("is_developer");
   if (!isDev || !reviewerId) return json({ error: "Forbidden" }, 403);
 
-  let body: { request_id?: string; redirect_origin?: string };
+  let body: { request_id?: string };
   try { body = await req.json(); } catch { return json({ error: "Invalid body" }, 400); }
   const requestId = String(body.request_id ?? "").trim();
-  const redirectOrigin = String(body.redirect_origin ?? "https://brunobetav2.tecsperts.com").replace(/\/$/, "");
   if (!requestId) return json({ error: "request_id obrigatório" }, 400);
 
   const admin = createClient(
