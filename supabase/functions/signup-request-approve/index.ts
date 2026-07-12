@@ -199,6 +199,14 @@ Deno.serve(async (req) => {
   }
 });
 
+async function tokenFingerprint(token: string): Promise<string> {
+  const buf = new TextEncoder().encode(token);
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hex.slice(0, 8);
+}
+
+
 function escapeHtml(s: string) {
   return s
     .replace(/&/g, "&amp;")
