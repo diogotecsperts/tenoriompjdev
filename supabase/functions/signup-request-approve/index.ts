@@ -49,10 +49,14 @@ Deno.serve(async (req) => {
   const fullName = String(reqRow.nome_completo);
   const redirectTo = `${redirectOrigin}/finalizar-cadastro`;
 
-  // 1) Tentar generateLink type=invite (cria auth user + devolve action_link one-shot).
+  // 1) Tentar generateLink type=invite (cria auth user + devolve hashed_token).
   // 2) Se o email já existir, fallback para type=recovery.
+  // Construímos o link DIRETO para a rota da app com token_hash + type,
+  // evitando o redirect intermediário do provedor de auth que quebrava params.
   let actionLink: string | null = null;
   let userId: string | null = null;
+  let linkType: "invite" | "recovery" = "invite";
+  let hashedToken: string | null = null;
 
   const inviteRes = await admin.auth.admin.generateLink({
     type: "invite",
@@ -63,29 +67,33 @@ Deno.serve(async (req) => {
     },
   });
 
-  if (!inviteRes.error && inviteRes.data?.properties?.action_link) {
-    actionLink = inviteRes.data.properties.action_link;
+  if (!inviteRes.error && inviteRes.data?.properties?.hashed_token) {
+    hashedToken = inviteRes.data.properties.hashed_token;
     userId = inviteRes.data.user?.id ?? null;
+    linkType = "invite";
   } else if (inviteRes.error && (inviteRes.error as any).code === "email_exists") {
     const recRes = await admin.auth.admin.generateLink({
       type: "recovery",
       email,
       options: { redirectTo },
     });
-    if (recRes.error || !recRes.data?.properties?.action_link) {
+    if (recRes.error || !recRes.data?.properties?.hashed_token) {
       console.error("recovery generateLink failed", recRes.error);
       const t = translateGenerateLinkError(recRes.error);
       return json({ error: t.error, hint: t.hint, raw: recRes.error?.message ?? null }, 500);
     }
-    actionLink = recRes.data.properties.action_link;
+    hashedToken = recRes.data.properties.hashed_token;
     userId = recRes.data.user?.id ?? null;
+    linkType = "recovery";
   } else {
     console.error("invite generateLink failed", inviteRes.error);
     const t = translateGenerateLinkError(inviteRes.error);
     return json({ error: t.error, hint: t.hint, raw: inviteRes.error?.message ?? null }, 500);
   }
 
-  if (!actionLink) return json({ error: "Não conseguimos gerar o link de acesso.", hint: "Tente novamente. Se persistir, verifique os logs da função." }, 500);
+  if (!hashedToken) return json({ error: "Não conseguimos gerar o link de acesso.", hint: "Tente novamente. Se persistir, verifique os logs da função." }, 500);
+
+  actionLink = `${redirectTo}?token_hash=${encodeURIComponent(hashedToken)}&type=${linkType}`;
 
   // Garantir que o usuário recém-criado (ou pré-existente) tenha as linhas de
   // domínio populadas ANTES de disparar o email. Sem isso, o AuthContext
