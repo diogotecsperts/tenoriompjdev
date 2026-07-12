@@ -40,47 +40,51 @@ Deno.serve(async (req) => {
     .eq("id", requestId)
     .maybeSingle();
   if (fetchErr || !reqRow) return json({ error: "Solicitação não encontrada" }, 404);
-  if (reqRow.status !== "pending") return json({ error: `Solicitação já ${reqRow.status}` }, 400);
+  if (reqRow.status !== "pending") return json({ error: `Solicitação já está como ${reqRow.status}` }, 400);
 
   const email = String(reqRow.email).toLowerCase();
   const fullName = String(reqRow.nome_completo);
-
-  // 1. Criar (ou reaproveitar) auth user
-  let userId: string | null = null;
-  const { data: created, error: createErr } = await admin.auth.admin.createUser({
-    email,
-    email_confirm: true,
-    user_metadata: { full_name: fullName },
-  });
-  if (createErr) {
-    // Se já existe, buscar id (limitação: getUserByEmail não existe; listar por email via filtro)
-    const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
-    const existing = list?.users?.find((u) => u.email?.toLowerCase() === email);
-    if (existing) {
-      userId = existing.id;
-    } else {
-      console.error("createUser failed", createErr);
-      return json({ error: `Falha ao criar usuário: ${createErr.message}` }, 500);
-    }
-  } else {
-    userId = created.user?.id ?? null;
-  }
-  if (!userId) return json({ error: "Sem user id" }, 500);
-
-  // 2. Gerar link de invite (one-shot)
   const redirectTo = `${redirectOrigin}/finalizar-cadastro`;
-  const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+
+  // Estratégia:
+  //  1) Tentar generateLink type=invite (cria o auth user + email_confirmed + devolve action_link one-shot).
+  //  2) Se o email já existir (retentativa após bug antigo), fallback para type=recovery.
+  let actionLink: string | null = null;
+  let userId: string | null = null;
+
+  const inviteRes = await admin.auth.admin.generateLink({
     type: "invite",
     email,
-    options: { redirectTo },
+    options: {
+      data: { full_name: fullName },
+      redirectTo,
+    },
   });
-  if (linkErr || !linkData?.properties?.action_link) {
-    console.error("generateLink failed", linkErr);
-    return json({ error: `Falha ao gerar link: ${linkErr?.message ?? "unknown"}` }, 500);
-  }
-  const actionLink = linkData.properties.action_link;
 
-  // 3. Enviar email via Resend
+  if (!inviteRes.error && inviteRes.data?.properties?.action_link) {
+    actionLink = inviteRes.data.properties.action_link;
+    userId = inviteRes.data.user?.id ?? null;
+  } else if (inviteRes.error && (inviteRes.error as any).code === "email_exists") {
+    // Fallback: usuário já existe, gerar link de recovery (também one-shot)
+    const recRes = await admin.auth.admin.generateLink({
+      type: "recovery",
+      email,
+      options: { redirectTo },
+    });
+    if (recRes.error || !recRes.data?.properties?.action_link) {
+      console.error("recovery generateLink failed", recRes.error);
+      return json({ error: `Falha ao gerar link de recuperação: ${recRes.error?.message ?? "unknown"}` }, 500);
+    }
+    actionLink = recRes.data.properties.action_link;
+    userId = recRes.data.user?.id ?? null;
+  } else {
+    console.error("invite generateLink failed", inviteRes.error);
+    return json({ error: `Falha ao gerar link: ${inviteRes.error?.message ?? "unknown"}` }, 500);
+  }
+
+  if (!actionLink) return json({ error: "Sem action_link" }, 500);
+
+  // Enviar email via Resend
   const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
   if (RESEND_API_KEY) {
     const html = `
@@ -108,22 +112,29 @@ Deno.serve(async (req) => {
           html,
         }),
       });
-      if (!rs.ok) console.error("resend send failed", await rs.text());
+      if (!rs.ok) {
+        const errText = await rs.text();
+        console.error("resend send failed", errText);
+        return json({ error: `Falha ao enviar email: ${errText}` }, 500);
+      }
     } catch (e) {
       console.error("resend send exception", e);
+      return json({ error: `Falha ao enviar email: ${(e as Error).message}` }, 500);
     }
+  } else {
+    console.error("RESEND_API_KEY missing");
+    return json({ error: "RESEND_API_KEY não configurado no servidor" }, 500);
   }
 
-  // 4. Atualizar solicitação
+  // Atualizar solicitação: agora awaiting_finalization
   await admin.from("signup_requests").update({
-    status: "approved",
+    status: "awaiting_finalization",
     reviewed_at: new Date().toISOString(),
     reviewed_by: reviewerId,
     invite_sent_at: new Date().toISOString(),
     invite_user_id: userId,
   }).eq("id", requestId);
 
-  // 5. Audit log
   await admin.from("access_logs").insert({
     user_id: reviewerId,
     event_type: "signup_request_approved",

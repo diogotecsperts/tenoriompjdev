@@ -16,6 +16,15 @@ import { RefreshCw, Check, X, Trash2, Mail, User, Stethoscope, FileText } from "
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "@/hooks/use-toast";
+import { FunctionsHttpError } from "@supabase/supabase-js";
+
+type Status =
+  | "pending"
+  | "approved"
+  | "awaiting_finalization"
+  | "completed"
+  | "rejected"
+  | "cancelled";
 
 interface SignupRequest {
   id: string;
@@ -24,27 +33,32 @@ interface SignupRequest {
   email: string;
   medico_vinculado: string;
   informacoes_adicionais: string;
-  status: "pending" | "approved" | "rejected" | "cancelled";
+  status: Status;
   created_at: string;
   reviewed_at: string | null;
   invite_sent_at: string | null;
+  finalized_at: string | null;
   review_notes: string | null;
 }
 
-type FilterStatus = "all" | "pending" | "approved" | "rejected" | "cancelled";
+type FilterStatus = "all" | Status;
 
-const statusStyles: Record<SignupRequest["status"], string> = {
+const statusStyles: Record<Status, string> = {
   pending: "bg-amber-100 text-amber-800 border-amber-200",
-  approved: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  approved: "bg-blue-100 text-blue-800 border-blue-200",
+  awaiting_finalization: "bg-blue-100 text-blue-800 border-blue-200",
+  completed: "bg-emerald-100 text-emerald-800 border-emerald-200",
   rejected: "bg-red-100 text-red-800 border-red-200",
   cancelled: "bg-slate-100 text-slate-700 border-slate-200",
 };
 
-const statusLabel: Record<SignupRequest["status"], string> = {
+const statusLabel: Record<Status, string> = {
   pending: "Pendente",
-  approved: "Aprovado",
-  rejected: "Rejeitado",
-  cancelled: "Cancelado",
+  approved: "Aguardando finalização",
+  awaiting_finalization: "Aguardando finalização",
+  completed: "Cadastro finalizado",
+  rejected: "Rejeitada",
+  cancelled: "Cancelada",
 };
 
 export function DevSignupRequests() {
@@ -74,17 +88,31 @@ export function DevSignupRequests() {
     if (action === "approve") body.redirect_origin = window.location.origin;
     const { data, error } = await supabase.functions.invoke(fnName, { body });
     setBusyId(null);
-    if (error || (data as any)?.error) {
-      toast({
-        variant: "destructive",
-        title: "Falhou",
-        description: (data as any)?.error ?? "Erro ao processar solicitação.",
-      });
+
+    let errorDescription: string | null = null;
+    if (error) {
+      if (error instanceof FunctionsHttpError) {
+        try {
+          const parsed = await error.context.clone().json();
+          errorDescription = parsed?.error ?? JSON.stringify(parsed);
+        } catch {
+          try { errorDescription = await error.context.clone().text(); } catch { /* noop */ }
+        }
+      }
+      errorDescription = errorDescription ?? error.message;
+      console.error(`[${fnName}] failed`, error, errorDescription);
+    } else if ((data as any)?.error) {
+      errorDescription = (data as any).error;
+      console.error(`[${fnName}] error in body`, data);
+    }
+
+    if (errorDescription) {
+      toast({ variant: "destructive", title: "Falhou", description: errorDescription });
       return;
     }
     toast({
       title:
-        action === "approve" ? "Aprovado" : action === "reject" ? "Rejeitado" : "Cancelado",
+        action === "approve" ? "Aprovada" : action === "reject" ? "Rejeitada" : "Cancelada",
       description:
         action === "approve"
           ? "Email com link de finalização enviado ao solicitante."
@@ -93,7 +121,13 @@ export function DevSignupRequests() {
     await fetchRows();
   };
 
-  const filtered = filter === "all" ? rows : rows.filter((r) => r.status === filter);
+  const filtered = filter === "all"
+    ? rows
+    : rows.filter((r) =>
+        filter === "awaiting_finalization"
+          ? r.status === "awaiting_finalization" || r.status === "approved"
+          : r.status === filter,
+      );
 
   return (
     <div className="space-y-6">
@@ -106,13 +140,14 @@ export function DevSignupRequests() {
         </div>
         <div className="flex items-center gap-3">
           <Select value={filter} onValueChange={(v) => setFilter(v as FilterStatus)}>
-            <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-[220px]"><SelectValue /></SelectTrigger>
             <SelectContent>
+              <SelectItem value="all">Todas</SelectItem>
               <SelectItem value="pending">Pendentes</SelectItem>
-              <SelectItem value="approved">Aprovadas</SelectItem>
+              <SelectItem value="awaiting_finalization">Aguardando finalização</SelectItem>
+              <SelectItem value="completed">Cadastro finalizado</SelectItem>
               <SelectItem value="rejected">Rejeitadas</SelectItem>
               <SelectItem value="cancelled">Canceladas</SelectItem>
-              <SelectItem value="all">Todas</SelectItem>
             </SelectContent>
           </Select>
           <Button variant="outline" size="icon" onClick={fetchRows} disabled={loading}>
@@ -193,7 +228,7 @@ export function DevSignupRequests() {
                       </Button>
                     </>
                   )}
-                  {r.status !== "cancelled" && r.status !== "rejected" && (
+                  {(r.status === "pending" || r.status === "approved" || r.status === "awaiting_finalization") && (
                     <Button
                       size="sm"
                       variant="ghost"

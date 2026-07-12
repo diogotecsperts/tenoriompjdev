@@ -90,6 +90,12 @@ export default function FinalizarCadastro() {
       toast({ variant: "destructive", title: "Erro ao definir senha", description: error.message });
       return;
     }
+    // Marca a solicitação como completed (best-effort; ainda temos sessão)
+    try {
+      await supabase.functions.invoke("signup-request-finalize");
+    } catch (e) {
+      console.error("finalize call failed", e);
+    }
     await supabase.auth.signOut();
     setStatus("done");
     toast({ title: "Cadastro finalizado!", description: "Faça login com seu email e a senha que você definiu." });
