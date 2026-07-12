@@ -932,7 +932,7 @@ Deno.serve(async (req: Request) => {
     });
     const { data: userData, error: userErr } = await supabaseUser.auth.getUser();
     if (userErr || !userData?.user) {
-      return new Response(JSON.stringify({ error: "Sessão inválida" }), {
+      return new Response(JSON.stringify({ error: "Sessão inválida", code: "session_expired" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
