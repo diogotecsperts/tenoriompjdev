@@ -8,6 +8,8 @@ const corsHeaders = {
 };
 
 const APPROVAL_FROM = "Tenório MPJ <acesso@mpjpericias.tecsperts.com>";
+// Domínio de produção FIXO: nunca usar origin do cliente (poderia vazar preview).
+const PROD_ORIGIN = "https://brunobetav2.tecsperts.com";
 
 /**
  * Endpoint público de auto-serviço para o usuário reenviar o próprio link de
