@@ -29,10 +29,10 @@ verify_jwt = false
 verify_jwt = true
 
 [functions.dev-list-pdfs]
-verify_jwt = true
+verify_jwt = false
 
 [functions.dev-download-pdf]
-verify_jwt = true
+verify_jwt = false
 
 [functions.gerar-justificativa-medica]
 verify_jwt = true
@@ -42,19 +42,19 @@ verify_jwt = true
 wall_clock_limit = 300
 
 [functions.dev-list-prev-usage]
-verify_jwt = true
+verify_jwt = false
 
 [functions.dev-save-pericia-pdf-meta]
-verify_jwt = true
+verify_jwt = false
 
 [functions.dev-get-pericia-data]
-verify_jwt = true
+verify_jwt = false
 
 [functions.send-tracking-email]
 verify_jwt = false
 
 [functions.dev-impersonate-user]
-verify_jwt = true
+verify_jwt = false
 
 [functions.signup-request-create]
 verify_jwt = false
