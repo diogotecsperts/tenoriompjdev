@@ -121,7 +121,13 @@ export function DevSignupRequests() {
     await fetchRows();
   };
 
-  const filtered = filter === "all" ? rows : rows.filter((r) => r.status === filter);
+  const filtered = filter === "all"
+    ? rows
+    : rows.filter((r) =>
+        filter === "awaiting_finalization"
+          ? r.status === "awaiting_finalization" || r.status === "approved"
+          : r.status === filter,
+      );
 
   return (
     <div className="space-y-6">
