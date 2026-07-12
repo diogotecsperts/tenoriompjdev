@@ -1,38 +1,16 @@
-Diagnóstico atual:
+## Objetivo
+Liberar o email `diogotecinove@gmail.com` para uma nova solicitação de cadastro pelo fluxo público, cancelando a solicitação atual travada em `awaiting_finalization`.
 
-- O backend está saudável e a tabela de solicitações só tem a solicitação antiga, ainda em `Aguardando finalização`.
-- A função pública de solicitação não está registrando erro, mas hoje ela tem um bloqueio silencioso: se o mesmo email já fez solicitação nas últimas 24h, ela responde como sucesso e não cria nada novo. Por isso o usuário vê “enviado”, mas nada aparece no DevPanel.
-- A demora/tela branca no login está concentrada no `AuthContext`: o login autentica, depois fica preso em uma tela única de “Carregando...” enquanto busca perfil, papel e checa solicitação pendente. Esse fluxo ainda tem risco de corrida e bloqueio perceptível.
+## Ações
 
-Plano de correção:
+1. **Cancelar a solicitação atual** no banco:
+   - Registro alvo: `id = 72b96fb1-ec39-47c7-868b-6b033cc83f68` (email `diogotecinove@gmail.com`, Ruane Teste Silva).
+   - Atualizar `status` → `cancelled` e `review_notes` → "Cancelado a pedido do dev para reiniciar teste do fluxo público".
+   - Não mexer no usuário criado em `auth.users` pelo convite (ele fica órfão inofensivo; se você preferir, posso remover também — me diga).
 
-1. Corrigir o fluxo de solicitação invisível
-   - Ajustar `signup-request-create` para não retornar sucesso silencioso quando houver solicitação recente.
-   - Se já existir solicitação ativa para o mesmo email, retornar uma resposta controlada com mensagem clara para a tela pública, sem criar duplicidade.
-   - Se a solicitação anterior estiver cancelada/rejeitada ou for um teste antigo, permitir uma nova solicitação conforme regra segura.
-   - Registrar logs objetivos da decisão: criada, duplicada ativa, bloqueada por rate-limit, erro real.
+2. **Confirmar liberação**: rodar `SELECT` para garantir que não há mais nenhum registro ativo (`pending` / `approved` / `awaiting_finalization`) para esse email.
 
-2. Melhorar a tela pública de solicitação
-   - Em `SolicitarCadastro.tsx`, mostrar mensagem diferente para:
-     - solicitação criada;
-     - solicitação já existente aguardando análise/finalização;
-     - erro real.
-   - Isso evita falso positivo de “enviado” quando nada novo entrou no DevPanel.
+3. **Instruções para você**: após o cancelamento, entrar em `/solicitar-cadastro` com o mesmo email `diogotecinove@gmail.com` e refazer a solicitação do zero — deve aparecer normalmente no DevPanel em `pending`.
 
-3. Corrigir a lentidão/tela branca no login
-   - Refatorar o carregamento inicial do `AuthContext` para um fluxo determinístico:
-     - restaurar sessão;
-     - carregar perfil e permissões em paralelo;
-     - finalizar loading sempre, inclusive em erro/timeout;
-     - não fazer logout por falha transitória de leitura.
-   - Remover esperas desnecessárias do caminho crítico do login, especialmente checagens que podem rodar depois ou em paralelo.
-   - Manter uma tela de loading, mas com timeout curto e fallback visível, para nunca parecer tela branca travada.
-
-4. Validar ponta a ponta
-   - Criar uma nova solicitação com email de teste novo e confirmar que aparece em `Solicitações de cadastro`.
-   - Testar tentativa repetida com o mesmo email e confirmar que a mensagem é clara.
-   - Fazer login com usuário válido e medir se sai do loading para `/hub` ou `/dev-panel` sem travar.
-   - Aprovar a solicitação e confirmar que o link gerado continua usando apenas `brunobetav2.tecsperts.com`, nunca domínio Lovable.
-
-5. Deploy necessário
-   - Depois das alterações, publicar/deployar as funções alteradas do backend para que o formulário público passe a usar a correção imediatamente.
+## Observação
+Nenhuma alteração de código nesta etapa — apenas operação de dados. Se durante o novo teste algo falhar, aí sim voltamos para ajustes.
