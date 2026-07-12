@@ -9,6 +9,9 @@ const corsHeaders = {
 
 // Remetente do domínio já verificado no Resend (mesmo domínio usado em send-tracking-email).
 const APPROVAL_FROM = "Tenório MPJ <acesso@mpjpericias.tecsperts.com>";
+// Domínio de produção FIXO: o link enviado por email nunca pode apontar para
+// o preview/staging. Ignoramos qualquer origin vindo do cliente.
+const PROD_ORIGIN = "https://brunobetav2.tecsperts.com";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -26,10 +29,9 @@ Deno.serve(async (req) => {
   const { data: isDev } = await userClient.rpc("is_developer");
   if (!isDev || !reviewerId) return json({ error: "Forbidden" }, 403);
 
-  let body: { request_id?: string; redirect_origin?: string };
+  let body: { request_id?: string };
   try { body = await req.json(); } catch { return json({ error: "Invalid body" }, 400); }
   const requestId = String(body.request_id ?? "").trim();
-  const redirectOrigin = String(body.redirect_origin ?? "https://brunobetav2.tecsperts.com").replace(/\/$/, "");
   if (!requestId) return json({ error: "request_id obrigatório" }, 400);
 
   const admin = createClient(
@@ -47,7 +49,7 @@ Deno.serve(async (req) => {
 
   const email = String(reqRow.email).toLowerCase();
   const fullName = String(reqRow.nome_completo);
-  const redirectTo = `${redirectOrigin}/finalizar-cadastro`;
+  const redirectTo = `${PROD_ORIGIN}/finalizar-cadastro`;
 
   // 1) Tentar generateLink type=invite (cria auth user + devolve hashed_token).
   // 2) Se o email já existir, fallback para type=recovery.

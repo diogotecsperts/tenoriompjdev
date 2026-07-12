@@ -1,38 +1,42 @@
-## Objetivo
-Confirmar que o fluxo de aprovação → link de finalização → definição de senha → login funciona sem deslogar o usuário e sem deixar solicitações presas.
+## Diagnóstico
 
-## Passos
+Confirmado: **não é bug do provedor de email, é configuração**.
 
-1. **Limpeza preventiva**
-   - Verificar se ainda existem resíduos da tentativa anterior (`diogotecinove@gmail.com`, `MED003`).
-   - Remover usuário, perfil, solicitação e registros relacionados se ainda existirem, para partir de estado limpo.
+No `DevSignupRequests.tsx` o frontend envia `redirect_origin: window.location.origin` para a edge function `signup-request-approve`. Como você clicou em "Aprovar" com o DevPanel aberto **dentro do preview do Lovable**, o `window.location.origin` era `https://ba54c079-...lovableproject.com`, e a função montou o link com essa base:
 
-2. **Nova solicitação e aprovação**
-   - Criar uma nova solicitação de cadastro para `diogotecinove@gmail.com`.
-   - Aprovar via DevPanel/edge function `signup-request-approve`.
-   - Confirmar em `access_logs` o evento `signup_link_generated` com fingerprint do token.
+```
+https://ba54c079-...lovableproject.com/finalizar-cadastro?token_hash=...&type=invite
+```
 
-3. **Captura do link**
-   - Recuperar o link de finalização gerado (via logs de email ou banco, sem expor o token completo).
+A edge function já tem um fallback correto (`https://brunobetav2.tecsperts.com`), mas ele só é usado se o frontend não mandar `redirect_origin`. Como o frontend sempre manda, o fallback nunca entra em cena. Isso viola a regra máxima: **o nome "lovable" não pode aparecer para o cliente**.
 
-4. **Teste no navegador**
-   - Abrir o link de finalização em nova sessão.
-   - Verificar que a tela `Finalizar Cadastro` carrega sem a mensagem "Sua sessão expirou".
-   - Definir uma senha e confirmar.
-   - Validar que o usuário é redirecionado corretamente após salvar a senha.
+## Correção
 
-5. **Verificação pós-finalização**
-   - Confirmar que `signup_requests` ficou com status `completed` e `finalized_at` preenchido.
-   - Verificar que o perfil (`MED003` ou próximo ID disponível), `user_roles` e `user_modules` foram criados.
+Ignorar `redirect_origin` vindo do cliente e sempre usar o domínio de produção do projeto no link do email. Assim, independente de onde o dev clique em "Aprovar" (preview do Lovable, published URL, custom domain), o email sai sempre com `https://brunobetav2.tecsperts.com/finalizar-cadastro?...`.
 
-6. **Teste de login**
-   - Fazer login com o novo usuário usando email/senha definida.
-   - Confirmar acesso ao dashboard sem erros.
+### Passos
 
-7. **Teste do botão "Reenviar link"**
-   - Simular uma nova solicitação aprovada e abrir o link.
-   - Forçar uma situação de sessão inválida/expirada na tela `Finalizar Cadastro`.
-   - Clicar em "Reenviar link" e confirmar que uma nova solicitação/link é gerado com sucesso.
+1. **`supabase/functions/signup-request-approve/index.ts`**
+   - Remover a leitura de `body.redirect_origin`.
+   - Definir `const PROD_ORIGIN = "https://brunobetav2.tecsperts.com"` no topo do arquivo (constante ao lado de `APPROVAL_FROM`, para ficar fácil de atualizar caso o domínio mude).
+   - Usar `PROD_ORIGIN` para montar `redirectTo` e `actionLink`.
 
-## Resultado esperado
-Fluxo completo sem bloqueios: aprovação gera link válido, link permite definir senha, conta é ativada e login funciona normalmente. O botão de reenvio funciona como fallback seguro.
+2. **`supabase/functions/signup-request-resend/index.ts`**
+   - Aplicar o mesmo tratamento (mesma regra: o link enviado ao cliente sempre precisa apontar para o domínio de produção, nunca para o preview).
+
+3. **`src/components/dev-panel/DevSignupRequests.tsx`**
+   - Remover o `body.redirect_origin = window.location.origin` que hoje é enviado no `runAction` para `approve` (e para `resend`, se houver). O cliente não decide mais o domínio do link — quem decide é o backend.
+
+4. **Deploy** das duas edge functions alteradas.
+
+5. **Validação**
+   - Cancelar/limpar a solicitação de teste `diogotecinove@gmail.com` que ficou com link do preview.
+   - Criar nova solicitação, aprovar novamente pelo DevPanel (mesmo estando dentro do preview do Lovable).
+   - Confirmar via logs da função que o link gerado começa com `https://brunobetav2.tecsperts.com/finalizar-cadastro?...`.
+   - Confirmar que o email recebido pelo destinatário não contém nenhuma referência a `lovableproject.com` nem a `lovable.app`.
+
+## Observações
+
+- Nada muda no fluxo de aprovação em si — apenas o domínio do link fica fixo em produção.
+- Se um dia o projeto passar a ter mais de um domínio custom, basta trocar a constante `PROD_ORIGIN` (ou movê-la para uma env var). Fora do escopo agora.
+- Não mexo em templates de email de auth, RLS ou lógica de bootstrap do usuário.
