@@ -1,35 +1,52 @@
-## Diagnóstico preciso
+## Diagnóstico
 
-- O backend está saudável e a função `dev-list-prev-usage` já responde **200** quando chamada com uma sessão dev válida; os dados do usuário selecionado continuam existindo e carregam normalmente.
-- O erro atual não é perda dos dados do Controle de Uso. É uma cascata de autenticação/sessão:
-  - havia chamadas usando token antigo/invalidado, retornando `401 {"error":"Invalid token"}`;
-  - depois do logout/login, a tela caiu no estado `Perfil não carregou` porque o `AuthContext` trata falha transitória de perfil como bloqueio visual da sessão;
-  - o `Controle de Uso` faz uma chamada manual via `fetch` com `getSession().access_token`, em vez de usar o cliente autenticado padrão. Isso é mais frágil quando a sessão acabou de trocar/recuperar.
-- Confirmei no banco que seu usuário dev `diogomixcds@gmail.com` tem perfil e roles `{user, developer}`. O usuário de teste `diogotecinove@gmail.com` também está íntegro e a solicitação mais recente está `completed`.
+**Dados do Bruno (MED001) — íntegros e intactos:**
+- `auth.users`: id `e48a06e4-43c7-4fa8-a467-80780b60cc77`
+- `profiles`: `MED001`, nome "BRUNO VICTOR TENÓRIO CAVALCANTI PADILHA", email `brunomed@gmail.com`
+- `user_roles`: apenas `user` (não é dev/admin, então é impersonável — passa nas validações da edge function)
+- Login do Bruno segue funcional pelas correções anteriores no `AuthContext` (nada foi tocado no perfil dele).
 
-## Plano de correção
+**Causa real do "não abriu aba nem fez nada":**
 
-1. **Blindar o carregamento de perfil no login**
-   - No `AuthContext`, antes de travar em `profile = null`, tentar recuperar/validar sessão com `getUser()` e refazer a leitura do perfil uma vez.
-   - Separar claramente:
-     - sessão inválida de verdade → limpar sessão;
-     - perfil inexistente de verdade → bloquear como conta inválida;
-     - falha transitória de rede/backend/RLS → manter carregando/permitir retry sem deixar o usuário preso em “Perfil não carregou”.
+O clique em "Entrar como este usuário" chama `handleImpersonate`, que executa:
+1. `await supabase.auth.getSession()`
+2. `await fetch(.../dev-impersonate-user)` (a edge function agora faz validação interna de token + `getUserById` + `generateLink` + audit log — leva centenas de ms)
+3. Só **depois** chama `window.open(url, "_blank", "noopener")`
 
-2. **Remover fragilidade do Controle de Uso**
-   - Trocar a chamada manual `fetch(.../functions/v1/dev-list-prev-usage)` por `supabase.functions.invoke("dev-list-prev-usage", { body/query })` ou por um helper autenticado que force `getUser()` antes de enviar.
-   - Evitar enviar `Bearer undefined` ou token recém-invalidado.
-   - Melhorar o erro exibido: se for 401, orientar recarregar sessão e não derrubar/blankar a página.
+Todos os navegadores modernos (Chrome/Edge/Safari/Firefox) bloqueiam `window.open` chamado após `await` porque não é mais considerado gesto direto do usuário. `window.open` retorna `null` silenciosamente, e o código atual **não verifica o retorno** — por isso nenhum erro, nenhum toast, nenhuma aba. Antes das mudanças recentes a edge function respondia mais rápido e em algumas máquinas o Chrome ainda permitia; agora com a validação extra estourou o limite.
 
-3. **Padronizar autenticação das funções `dev-*`**
-   - Atualizar `dev-list-prev-usage` e funções irmãs (`dev-list-pdfs`, `dev-download-pdf`, `dev-save-pericia-pdf-meta`, `dev-get-pericia-data`, `dev-impersonate-user`) para validar token com o padrão atual (`getClaims`/validação robusta) e checar role developer via backend, preservando isolamento de dados.
-   - Manter `verify_jwt = false` nessas funções, porque a validação fica dentro da função e evita o problema de gateway com signing keys.
+Confirmação indireta: nenhum request de `dev-impersonate-user` nos logs de rede desta sessão — se tivesse falhado no fetch, apareceria o toast de erro. Sem toast + sem aba = popup bloqueado antes do fetch retornar não é o caso; o comportamento clássico de popup pós-await é justamente esse silêncio.
 
-4. **Preservar dados e acesso dev**
-   - Não mexer nos dados de perícias, pautas, PDFs, usuários ou roles.
-   - Apenas estabilizar a sessão e o caminho de autenticação para que o DevPanel volte a carregar as mesmas informações já existentes.
+## O que corrigir
 
-5. **Validação depois da correção**
-   - Testar `dev-list-prev-usage` autenticado como dev: deve retornar 200 com pautas/perícias.
-   - Testar sem autenticação: deve retornar 401 controlado pela função.
-   - Verificar que seu perfil dev carrega e que o Controle de Uso abre sem runtime error/blank screen.
+**Único arquivo tocado:** `src/components/dev-panel/DevUsersList.tsx`, função `handleImpersonate`.
+
+Padrão canônico "abrir cedo, navegar depois":
+
+1. **Abrir a nova aba imediatamente** no início do handler, ainda dentro do gesto do usuário, com `about:blank`:
+   ```ts
+   const newTab = window.open("about:blank", "_blank", "noopener");
+   ```
+2. Se `newTab` for `null` → popup bloqueado pelo navegador. Mostrar toast destrutivo explicando "Permita popups para este site" e abortar (não deixar silencioso como está hoje).
+3. Fazer `getSession` + `fetch` normalmente.
+4. Em caso de sucesso, atribuir a URL final: `newTab.location.href = url;`
+5. Em caso de erro no fetch/edge function, fechar a aba: `newTab.close();` e mostrar o toast de erro (mantém o comportamento atual de erro visível).
+
+Mantém `noopener` (isolamento de `sessionStorage` para a nova aba continua garantido — o `AuthContext` já usa detecção por hash `#token=` na rota `/impersonate` para escopar a sessão só àquela aba).
+
+## Fora do escopo (não mexer)
+
+- Edge function `dev-impersonate-user`: já validada, retorna 200 com token válido. Sem alteração.
+- `AuthContext`, `Impersonate.tsx`, `ImpersonationBanner`: sem alteração.
+- Dados do Bruno e roles: sem alteração.
+- Nenhum outro fluxo de `dev-*` é afetado.
+
+## Validação
+
+Após o fix, testar via Playwright:
+1. Logar como dev, ir para `/dev-panel` → aba Usuários.
+2. Clicar em "Entrar como este usuário" no card do Bruno (MED001).
+3. Confirmar no diálogo.
+4. Verificar que uma nova aba abre imediatamente e navega para `/impersonate#token=...`.
+5. Verificar que a aba do dev permanece na sessão do dev.
+6. Verificar `access_logs` que registrou `impersonation_started` com `target_user_id_code=MED001`.

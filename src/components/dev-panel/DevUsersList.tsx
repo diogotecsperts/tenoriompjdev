@@ -333,6 +333,20 @@ export function DevUsersList() {
 
   const handleImpersonate = async () => {
     if (!userToImpersonate) return;
+
+    // Abrir a nova aba IMEDIATAMENTE, ainda dentro do gesto do usuário.
+    // Se abrirmos depois de awaits (getSession/fetch), o navegador bloqueia como popup.
+    const newTab = window.open("about:blank", "_blank", "noopener");
+    if (!newTab) {
+      toast({
+        variant: "destructive",
+        title: "Popup bloqueado",
+        description:
+          "Seu navegador bloqueou a nova aba. Permita popups para este site e tente novamente.",
+      });
+      return;
+    }
+
     setImpersonating(true);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -354,8 +368,6 @@ export function DevUsersList() {
         throw new Error(result.error || "Falha ao gerar sessão de impersonation");
       }
 
-      // Abre nova aba com o hash contendo token + metadados de auditoria.
-      // Não enviamos email ao verifyOtp porque token_hash aceita só token_hash + type.
       const hash = new URLSearchParams({
         token: result.token_hash,
         dev_auth_user_id: result.dev_auth_user_id ?? "",
@@ -365,8 +377,15 @@ export function DevUsersList() {
         at: result.impersonated_at ?? "",
       }).toString();
       const url = `${window.location.origin}/impersonate#${hash}`;
-      // noopener garante sessionStorage isolado na nova aba
-      window.open(url, "_blank", "noopener");
+
+      // Navega a aba já aberta para a URL final
+      try {
+        newTab.location.href = url;
+      } catch {
+        // Fallback improvável: caso o browser bloqueie a atribuição
+        newTab.close();
+        window.open(url, "_blank", "noopener");
+      }
 
       toast({
         title: "Sessão aberta",
@@ -375,6 +394,8 @@ export function DevUsersList() {
       setImpersonateDialogOpen(false);
       setUserToImpersonate(null);
     } catch (err) {
+      // Fecha a aba placeholder para não deixar about:blank órfão
+      try { newTab.close(); } catch { /* noop */ }
       toast({
         variant: "destructive",
         title: "Erro",
@@ -384,6 +405,7 @@ export function DevUsersList() {
       setImpersonating(false);
     }
   };
+
 
   const getRoleBadgeVariant = (role: string): "default" | "secondary" | "outline" | "destructive" => {
     switch (role) {
