@@ -88,17 +88,31 @@ export function DevSignupRequests() {
     if (action === "approve") body.redirect_origin = window.location.origin;
     const { data, error } = await supabase.functions.invoke(fnName, { body });
     setBusyId(null);
-    if (error || (data as any)?.error) {
-      toast({
-        variant: "destructive",
-        title: "Falhou",
-        description: (data as any)?.error ?? "Erro ao processar solicitação.",
-      });
+
+    let errorDescription: string | null = null;
+    if (error) {
+      if (error instanceof FunctionsHttpError) {
+        try {
+          const parsed = await error.context.clone().json();
+          errorDescription = parsed?.error ?? JSON.stringify(parsed);
+        } catch {
+          try { errorDescription = await error.context.clone().text(); } catch { /* noop */ }
+        }
+      }
+      errorDescription = errorDescription ?? error.message;
+      console.error(`[${fnName}] failed`, error, errorDescription);
+    } else if ((data as any)?.error) {
+      errorDescription = (data as any).error;
+      console.error(`[${fnName}] error in body`, data);
+    }
+
+    if (errorDescription) {
+      toast({ variant: "destructive", title: "Falhou", description: errorDescription });
       return;
     }
     toast({
       title:
-        action === "approve" ? "Aprovado" : action === "reject" ? "Rejeitado" : "Cancelado",
+        action === "approve" ? "Aprovada" : action === "reject" ? "Rejeitada" : "Cancelada",
       description:
         action === "approve"
           ? "Email com link de finalização enviado ao solicitante."
