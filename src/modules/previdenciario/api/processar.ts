@@ -310,7 +310,8 @@ export async function preProcessarPericia(
       throw new PreProcessarError(`Falha ao baixar PDF do storage: ${dlErr?.message ?? "vazio"}`);
     }
     const ocr = await runMinimaxClientOcr(blob, { onProgress: opts.onMinimaxProgress });
-    // 2ª tentativa: reenvio com texto pré-extraído
+    // 2ª tentativa: reenvio com texto pré-extraído (garante JWT fresco após OCR longo)
+    await ensureFreshSession();
     const second = await supabase.functions.invoke("prev-pre-processar", {
       body: {
         periciaId,
