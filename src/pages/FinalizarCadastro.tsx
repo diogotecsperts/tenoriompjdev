@@ -1,17 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { Stethoscope, Lock, Eye, EyeOff } from "lucide-react";
+import { Stethoscope, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
 /**
- * Página pública que consome o token de convite (`token_hash`) vindo no
- * link enviado por email quando o dev aprova a solicitação. Após verify,
- * o convidado define a senha e é deslogado para logar normalmente.
+ * Página pública que consome o link enviado por email quando o dev aprova a
+ * solicitação. Valida o link (token_hash via verifyOtp OU access/refresh no hash
+ * via setSession), depois o usuário define a senha, chamamos a edge function
+ * que marca a solicitação como completed, e finalmente signOut para forçar
+ * login normal com a senha recém-criada.
  */
 export default function FinalizarCadastro() {
   const navigate = useNavigate();
@@ -20,11 +22,24 @@ export default function FinalizarCadastro() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const ranRef = useRef(false);
 
   useEffect(() => {
+    if (ranRef.current) return;
+    ranRef.current = true;
+
+    let timeoutId: number | undefined;
+    let done = false;
+
+    const finish = (next: "ready" | "error", msg?: string) => {
+      if (done) return;
+      done = true;
+      if (timeoutId) window.clearTimeout(timeoutId);
+      if (next === "error") setErrorMsg(msg ?? "Link inválido.");
+      setStatus(next);
+    };
+
     const run = async () => {
-      // Supabase gera links com hash: #access_token=...&type=invite
-      // ou query: ?token_hash=...&type=invite (dependendo do PKCE).
       const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
       const query = new URLSearchParams(window.location.search);
       const tokenHash = query.get("token_hash") ?? hash.get("token_hash");
@@ -34,16 +49,13 @@ export default function FinalizarCadastro() {
       // Caso 1: token_hash presente → verifyOtp
       if (tokenHash) {
         const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
-        if (error) {
-          setStatus("error");
-          setErrorMsg("Link inválido ou já utilizado. Solicite um novo cadastro.");
-          return;
-        }
-        setStatus("ready");
-        return;
+        // Limpar URL para não ficar reutilizável em refresh
+        window.history.replaceState({}, "", window.location.pathname);
+        if (error) return finish("error", "Link inválido ou já utilizado. Solicite um novo cadastro.");
+        return finish("ready");
       }
 
-      // Caso 2: já veio como fragmento de sessão (access_token no hash)
+      // Caso 2: fragmento de sessão (access_token/refresh_token no hash)
       const accessToken = hash.get("access_token");
       const refreshToken = hash.get("refresh_token");
       if (accessToken && refreshToken) {
@@ -51,26 +63,26 @@ export default function FinalizarCadastro() {
           access_token: accessToken,
           refresh_token: refreshToken,
         });
-        if (error) {
-          setStatus("error");
-          setErrorMsg("Link inválido ou expirado.");
-          return;
-        }
-        setStatus("ready");
-        return;
+        window.history.replaceState({}, "", window.location.pathname);
+        if (error) return finish("error", "Link inválido ou expirado.");
+        return finish("ready");
       }
 
       // Caso 3: sessão já ativa (raro, mas seguro)
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        setStatus("ready");
-        return;
-      }
+      if (session) return finish("ready");
 
-      setStatus("error");
-      setErrorMsg("Link inválido. Faça uma nova solicitação de cadastro.");
+      finish("error", "Link inválido. Faça uma nova solicitação de cadastro.");
     };
-    run();
+
+    timeoutId = window.setTimeout(() => {
+      finish("error", "Não conseguimos validar o link a tempo. Peça um novo cadastro.");
+    }, 8000);
+
+    run().catch((e) => {
+      console.error("finalizar-cadastro validation error", e);
+      finish("error", "Não conseguimos validar o link. Peça um novo cadastro.");
+    });
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -90,11 +102,11 @@ export default function FinalizarCadastro() {
       toast({ variant: "destructive", title: "Erro ao definir senha", description: error.message });
       return;
     }
-    // Marca a solicitação como completed (best-effort; ainda temos sessão)
+    // Marca a solicitação como completed antes do signOut (precisamos da sessão)
     try {
       await supabase.functions.invoke("signup-request-finalize");
-    } catch (e) {
-      console.error("finalize call failed", e);
+    } catch (err) {
+      console.error("finalize call failed", err);
     }
     await supabase.auth.signOut();
     setStatus("done");
@@ -110,14 +122,19 @@ export default function FinalizarCadastro() {
             <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary mb-3">
               <Stethoscope className="h-7 w-7 text-primary-foreground" />
             </div>
-            <h1 className="text-2xl font-bold text-foreground">Finalizar cadastro</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Defina uma senha para acessar o Tenório MPJ.
-            </p>
+            <h1 className="text-2xl font-bold text-foreground">Finalizando cadastro</h1>
+            {(status === "ready" || status === "saving") && (
+              <p className="text-sm text-muted-foreground mt-1">
+                Defina uma senha para acessar o Tenório MPJ.
+              </p>
+            )}
           </div>
 
           {status === "verifying" && (
-            <p className="text-center text-muted-foreground">Validando seu link...</p>
+            <div className="flex flex-col items-center gap-3 py-4">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">Validando seu link...</p>
+            </div>
           )}
 
           {status === "error" && (
