@@ -25,16 +25,15 @@ const PROD_ORIGIN = "https://brunobetav2.tecsperts.com";
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  let body: { email?: string; redirect_origin?: string };
+  let body: { email?: string };
   try { body = await req.json(); } catch {
     return json({ ok: true });
   }
   const email = String(body.email ?? "").trim().toLowerCase();
-  const redirectOrigin = String(body.redirect_origin ?? "https://brunobetav2.tecsperts.com").replace(/\/$/, "");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 255) {
     return json({ ok: true }); // resposta genérica
   }
-  const redirectTo = `${redirectOrigin}/finalizar-cadastro`;
+  const redirectTo = `${PROD_ORIGIN}/finalizar-cadastro`;
 
   const admin = createClient(
     Deno.env.get("SUPABASE_URL")!,
