@@ -12,7 +12,7 @@ import { toast } from "@/hooks/use-toast";
 export default function SolicitarCadastro() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState<null | "created" | "existing" | "completed">(null);
   const [form, setForm] = useState({
     nome_completo: "",
     login_desejado: "",
@@ -46,17 +46,22 @@ export default function SolicitarCadastro() {
     }
 
     setLoading(true);
-    const { error } = await supabase.functions.invoke("signup-request-create", { body: form });
+    const { data, error } = await supabase.functions.invoke("signup-request-create", { body: form });
     setLoading(false);
-    if (error) {
+    const response = data as { error?: string; created?: boolean; reason?: string } | null;
+    if (error || response?.error) {
       toast({
         variant: "destructive",
         title: "Erro ao enviar",
-        description: "Tente novamente em alguns instantes.",
+        description: response?.error ?? "Tente novamente em alguns instantes.",
       });
       return;
     }
-    setSubmitted(true);
+    if (response?.created === false) {
+      setSubmitted(response.reason === "existing_completed_account" ? "completed" : "existing");
+      return;
+    }
+    setSubmitted("created");
   };
 
   if (submitted) {
@@ -65,9 +70,15 @@ export default function SolicitarCadastro() {
         <Card className="max-w-md w-full">
           <CardContent className="p-8 text-center space-y-4">
             <CheckCircle2 className="mx-auto h-14 w-14 text-primary" />
-            <h1 className="text-2xl font-bold text-foreground">Solicitação enviada</h1>
+            <h1 className="text-2xl font-bold text-foreground">
+              {submitted === "created" && "Solicitação enviada"}
+              {submitted === "existing" && "Solicitação já registrada"}
+              {submitted === "completed" && "Cadastro já existe"}
+            </h1>
             <p className="text-muted-foreground">
-              Aguarde liberação e email com link para finalizar cadastro.
+              {submitted === "created" && "Aguarde liberação e email com link para finalizar cadastro."}
+              {submitted === "existing" && "Já existe uma solicitação ativa para este email. Acompanhe o email enviado ou aguarde a análise."}
+              {submitted === "completed" && "Este email já concluiu o cadastro. Use a tela de login para acessar o sistema."}
             </p>
             <Button className="w-full" onClick={() => navigate("/")}>
               Voltar para o login

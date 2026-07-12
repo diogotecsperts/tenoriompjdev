@@ -22,7 +22,7 @@ export default function Login() {
   const devClickCountRef = useRef(0);
   const devClickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { login, isAuthenticated, profile, loading } = useAuth();
+  const { login, logout, isAuthenticated, profile, loading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -73,13 +73,35 @@ export default function Login() {
 
 
   // Mantém uma única tela de loading durante autenticação + carregamento do perfil + transição de rota
-  if (loading || isNavigating || (isAuthenticated && !profile)) {
+  if (loading || isNavigating) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-center">
           <Stethoscope className="mx-auto mb-4 h-12 w-12 animate-pulse text-primary" />
           <p className="text-muted-foreground">Carregando...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (isAuthenticated && !profile) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-6">
+        <Card className="w-full max-w-md">
+          <CardContent className="p-8 text-center space-y-4">
+            <Stethoscope className="mx-auto h-12 w-12 text-primary" />
+            <div className="space-y-2">
+              <h1 className="text-xl font-semibold text-foreground">Perfil não carregou</h1>
+              <p className="text-sm text-muted-foreground">
+                Recarregue a página. Se continuar, saia e entre novamente.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button variant="outline" onClick={() => window.location.reload()}>Recarregar</Button>
+              <Button onClick={() => logout()}>Sair</Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }

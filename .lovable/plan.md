@@ -1,42 +1,38 @@
-## Diagnóstico
+Diagnóstico atual:
 
-Confirmado: **não é bug do provedor de email, é configuração**.
+- O backend está saudável e a tabela de solicitações só tem a solicitação antiga, ainda em `Aguardando finalização`.
+- A função pública de solicitação não está registrando erro, mas hoje ela tem um bloqueio silencioso: se o mesmo email já fez solicitação nas últimas 24h, ela responde como sucesso e não cria nada novo. Por isso o usuário vê “enviado”, mas nada aparece no DevPanel.
+- A demora/tela branca no login está concentrada no `AuthContext`: o login autentica, depois fica preso em uma tela única de “Carregando...” enquanto busca perfil, papel e checa solicitação pendente. Esse fluxo ainda tem risco de corrida e bloqueio perceptível.
 
-No `DevSignupRequests.tsx` o frontend envia `redirect_origin: window.location.origin` para a edge function `signup-request-approve`. Como você clicou em "Aprovar" com o DevPanel aberto **dentro do preview do Lovable**, o `window.location.origin` era `https://ba54c079-...lovableproject.com`, e a função montou o link com essa base:
+Plano de correção:
 
-```
-https://ba54c079-...lovableproject.com/finalizar-cadastro?token_hash=...&type=invite
-```
+1. Corrigir o fluxo de solicitação invisível
+   - Ajustar `signup-request-create` para não retornar sucesso silencioso quando houver solicitação recente.
+   - Se já existir solicitação ativa para o mesmo email, retornar uma resposta controlada com mensagem clara para a tela pública, sem criar duplicidade.
+   - Se a solicitação anterior estiver cancelada/rejeitada ou for um teste antigo, permitir uma nova solicitação conforme regra segura.
+   - Registrar logs objetivos da decisão: criada, duplicada ativa, bloqueada por rate-limit, erro real.
 
-A edge function já tem um fallback correto (`https://brunobetav2.tecsperts.com`), mas ele só é usado se o frontend não mandar `redirect_origin`. Como o frontend sempre manda, o fallback nunca entra em cena. Isso viola a regra máxima: **o nome "lovable" não pode aparecer para o cliente**.
+2. Melhorar a tela pública de solicitação
+   - Em `SolicitarCadastro.tsx`, mostrar mensagem diferente para:
+     - solicitação criada;
+     - solicitação já existente aguardando análise/finalização;
+     - erro real.
+   - Isso evita falso positivo de “enviado” quando nada novo entrou no DevPanel.
 
-## Correção
+3. Corrigir a lentidão/tela branca no login
+   - Refatorar o carregamento inicial do `AuthContext` para um fluxo determinístico:
+     - restaurar sessão;
+     - carregar perfil e permissões em paralelo;
+     - finalizar loading sempre, inclusive em erro/timeout;
+     - não fazer logout por falha transitória de leitura.
+   - Remover esperas desnecessárias do caminho crítico do login, especialmente checagens que podem rodar depois ou em paralelo.
+   - Manter uma tela de loading, mas com timeout curto e fallback visível, para nunca parecer tela branca travada.
 
-Ignorar `redirect_origin` vindo do cliente e sempre usar o domínio de produção do projeto no link do email. Assim, independente de onde o dev clique em "Aprovar" (preview do Lovable, published URL, custom domain), o email sai sempre com `https://brunobetav2.tecsperts.com/finalizar-cadastro?...`.
+4. Validar ponta a ponta
+   - Criar uma nova solicitação com email de teste novo e confirmar que aparece em `Solicitações de cadastro`.
+   - Testar tentativa repetida com o mesmo email e confirmar que a mensagem é clara.
+   - Fazer login com usuário válido e medir se sai do loading para `/hub` ou `/dev-panel` sem travar.
+   - Aprovar a solicitação e confirmar que o link gerado continua usando apenas `brunobetav2.tecsperts.com`, nunca domínio Lovable.
 
-### Passos
-
-1. **`supabase/functions/signup-request-approve/index.ts`**
-   - Remover a leitura de `body.redirect_origin`.
-   - Definir `const PROD_ORIGIN = "https://brunobetav2.tecsperts.com"` no topo do arquivo (constante ao lado de `APPROVAL_FROM`, para ficar fácil de atualizar caso o domínio mude).
-   - Usar `PROD_ORIGIN` para montar `redirectTo` e `actionLink`.
-
-2. **`supabase/functions/signup-request-resend/index.ts`**
-   - Aplicar o mesmo tratamento (mesma regra: o link enviado ao cliente sempre precisa apontar para o domínio de produção, nunca para o preview).
-
-3. **`src/components/dev-panel/DevSignupRequests.tsx`**
-   - Remover o `body.redirect_origin = window.location.origin` que hoje é enviado no `runAction` para `approve` (e para `resend`, se houver). O cliente não decide mais o domínio do link — quem decide é o backend.
-
-4. **Deploy** das duas edge functions alteradas.
-
-5. **Validação**
-   - Cancelar/limpar a solicitação de teste `diogotecinove@gmail.com` que ficou com link do preview.
-   - Criar nova solicitação, aprovar novamente pelo DevPanel (mesmo estando dentro do preview do Lovable).
-   - Confirmar via logs da função que o link gerado começa com `https://brunobetav2.tecsperts.com/finalizar-cadastro?...`.
-   - Confirmar que o email recebido pelo destinatário não contém nenhuma referência a `lovableproject.com` nem a `lovable.app`.
-
-## Observações
-
-- Nada muda no fluxo de aprovação em si — apenas o domínio do link fica fixo em produção.
-- Se um dia o projeto passar a ter mais de um domínio custom, basta trocar a constante `PROD_ORIGIN` (ou movê-la para uma env var). Fora do escopo agora.
-- Não mexo em templates de email de auth, RLS ou lógica de bootstrap do usuário.
+5. Deploy necessário
+   - Depois das alterações, publicar/deployar as funções alteradas do backend para que o formulário público passe a usar a correção imediatamente.

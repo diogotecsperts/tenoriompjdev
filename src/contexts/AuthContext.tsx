@@ -59,8 +59,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const impersonationLogInsertedRef = useRef<string | null>(null);
 
   useEffect(() => {
-    // Timeout de segurança para evitar loading infinito (10 segundos)
-    const PROFILE_LOAD_TIMEOUT = 10000;
+    // Timeout de segurança para evitar loading infinito
+    const PROFILE_LOAD_TIMEOUT = 7000;
 
     // Função centralizada para carregar dados do usuário
     const loadUserData = async (session: Session) => {
@@ -104,11 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.error("Timeout ao carregar perfil - forçando fim do loading");
           isLoadingUserDataRef.current = false;
           setLoading(false);
-          toast({
-            variant: "destructive",
-            title: "Erro ao carregar perfil",
-            description: "Tempo esgotado. Tente recarregar a página.",
-          });
+          setProfile(null);
         }
       }, PROFILE_LOAD_TIMEOUT);
 
@@ -134,6 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             title: "Erro ao carregar perfil",
             description: "Problema de conexão. Tente recarregar a página.",
           });
+          setProfile(null);
           isLoadingUserDataRef.current = false;
           setLoading(false);
           return;
@@ -225,6 +222,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           title: "Erro ao carregar perfil",
           description: "Não foi possível carregar seus dados. Tente recarregar.",
         });
+        setProfile(null);
       } finally {
         isLoadingUserDataRef.current = false;
         setLoading(false);
