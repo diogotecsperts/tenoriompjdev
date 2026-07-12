@@ -163,7 +163,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Gate de segurança: se o usuário tem uma signup_request ainda não
         // finalizada (invite/recovery consumido mas senha nunca definida via
         // /finalizar-cadastro), NÃO deixamos entrar no app.
-        if (!meta.impersonated_by) {
+        const currentPath = typeof window !== "undefined" ? window.location.pathname : "";
+        const isFinalizingCadastro = currentPath.startsWith("/finalizar-cadastro");
+        if (!meta.impersonated_by && !isFinalizingCadastro) {
           const { data: pendingReq } = await supabase
             .from("signup_requests")
             .select("id, status, finalized_at")
