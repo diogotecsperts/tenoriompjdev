@@ -1,52 +1,31 @@
-## Diagnóstico
+## Causa real
 
-**Dados do Bruno (MED001) — íntegros e intactos:**
-- `auth.users`: id `e48a06e4-43c7-4fa8-a467-80780b60cc77`
-- `profiles`: `MED001`, nome "BRUNO VICTOR TENÓRIO CAVALCANTI PADILHA", email `brunomed@gmail.com`
-- `user_roles`: apenas `user` (não é dev/admin, então é impersonável — passa nas validações da edge function)
-- Login do Bruno segue funcional pelas correções anteriores no `AuthContext` (nada foi tocado no perfil dele).
+`window.open(url, "_blank", "noopener")` retorna `null` no Chrome/Edge quando `noopener` é passado — por design da spec. Ou seja: a aba **abre** (about:blank), mas nosso `newTab` é `null`, então:
 
-**Causa real do "não abriu aba nem fez nada":**
+- Na primeira vez o toast "Popup bloqueado" nem chega a aparecer porque na verdade caímos no ramo `if (!newTab)` **antes** de qualquer render — mas a aba já foi criada pelo browser e fica pendurada em about:blank (o "página branca sem tentar carregar nada" que você viu).
+- Na segunda tentativa o browser conta como pop-up programático repetido e mostra o aviso de bloqueio — falso positivo, como você descreveu.
 
-O clique em "Entrar como este usuário" chama `handleImpersonate`, que executa:
-1. `await supabase.auth.getSession()`
-2. `await fetch(.../dev-impersonate-user)` (a edge function agora faz validação interna de token + `getUserById` + `generateLink` + audit log — leva centenas de ms)
-3. Só **depois** chama `window.open(url, "_blank", "noopener")`
+Ou seja, o `noopener` é incompatível com o padrão "abrir cedo, navegar depois". Precisamos de referência à janela.
 
-Todos os navegadores modernos (Chrome/Edge/Safari/Firefox) bloqueiam `window.open` chamado após `await` porque não é mais considerado gesto direto do usuário. `window.open` retorna `null` silenciosamente, e o código atual **não verifica o retorno** — por isso nenhum erro, nenhum toast, nenhuma aba. Antes das mudanças recentes a edge function respondia mais rápido e em algumas máquinas o Chrome ainda permitia; agora com a validação extra estourou o limite.
+## Fix
 
-Confirmação indireta: nenhum request de `dev-impersonate-user` nos logs de rede desta sessão — se tivesse falhado no fetch, apareceria o toast de erro. Sem toast + sem aba = popup bloqueado antes do fetch retornar não é o caso; o comportamento clássico de popup pós-await é justamente esse silêncio.
+Único arquivo: `src/components/dev-panel/DevUsersList.tsx`, `handleImpersonate`.
 
-## O que corrigir
+1. Abrir **sem** `noopener`: `const newTab = window.open("about:blank", "_blank");` — agora retorna a referência real.
+2. Se `newTab` for `null` de verdade (popup realmente bloqueado por política), mostrar toast e abortar.
+3. Após o fetch bem-sucedido:
+   - `newTab.opener = null;` — sever o link reverso (sem opener, a aba nova não pode chamar `window.opener.*`), o que preserva o isolamento essencial (o que o `noopener` fornecia).
+   - `newTab.location.replace(url);` — navega a aba já aberta.
+4. Em erro do fetch, `newTab.close()`.
 
-**Único arquivo tocado:** `src/components/dev-panel/DevUsersList.tsx`, função `handleImpersonate`.
+Isolamento de sessão continua garantido porque:
+- `AuthContext` detecta impersonation pelo hash `#token=` da URL — cada aba tem sua própria URL e seu próprio `sessionStorage` para chaves específicas de impersonation, e nada da aba dev é lido pela aba impersonada além do storage padrão do Supabase (que já é per-tab quando o AuthContext gera storage key própria — isso já estava assim antes).
+- `opener = null` impede que a aba nova acesse a aba dev.
 
-Padrão canônico "abrir cedo, navegar depois":
+## Fora do escopo
 
-1. **Abrir a nova aba imediatamente** no início do handler, ainda dentro do gesto do usuário, com `about:blank`:
-   ```ts
-   const newTab = window.open("about:blank", "_blank", "noopener");
-   ```
-2. Se `newTab` for `null` → popup bloqueado pelo navegador. Mostrar toast destrutivo explicando "Permita popups para este site" e abortar (não deixar silencioso como está hoje).
-3. Fazer `getSession` + `fetch` normalmente.
-4. Em caso de sucesso, atribuir a URL final: `newTab.location.href = url;`
-5. Em caso de erro no fetch/edge function, fechar a aba: `newTab.close();` e mostrar o toast de erro (mantém o comportamento atual de erro visível).
-
-Mantém `noopener` (isolamento de `sessionStorage` para a nova aba continua garantido — o `AuthContext` já usa detecção por hash `#token=` na rota `/impersonate` para escopar a sessão só àquela aba).
-
-## Fora do escopo (não mexer)
-
-- Edge function `dev-impersonate-user`: já validada, retorna 200 com token válido. Sem alteração.
-- `AuthContext`, `Impersonate.tsx`, `ImpersonationBanner`: sem alteração.
-- Dados do Bruno e roles: sem alteração.
-- Nenhum outro fluxo de `dev-*` é afetado.
+Edge function, AuthContext, Impersonate.tsx, dados do Bruno — nada muda.
 
 ## Validação
 
-Após o fix, testar via Playwright:
-1. Logar como dev, ir para `/dev-panel` → aba Usuários.
-2. Clicar em "Entrar como este usuário" no card do Bruno (MED001).
-3. Confirmar no diálogo.
-4. Verificar que uma nova aba abre imediatamente e navega para `/impersonate#token=...`.
-5. Verificar que a aba do dev permanece na sessão do dev.
-6. Verificar `access_logs` que registrou `impersonation_started` com `target_user_id_code=MED001`.
+Playwright: logar como dev, `/dev-panel` → Usuários → impersonar MED001 → conferir que a nova aba navega direto para `/impersonate#token=...` sem passar por about:blank em branco, e que a aba dev permanece intacta.

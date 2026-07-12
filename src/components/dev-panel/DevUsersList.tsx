@@ -335,8 +335,9 @@ export function DevUsersList() {
     if (!userToImpersonate) return;
 
     // Abrir a nova aba IMEDIATAMENTE, ainda dentro do gesto do usuário.
-    // Se abrirmos depois de awaits (getSession/fetch), o navegador bloqueia como popup.
-    const newTab = window.open("about:blank", "_blank", "noopener");
+    // NÃO passar "noopener" aqui: com noopener o Chrome retorna null e ficamos
+    // sem referência para navegar a aba depois do fetch (a aba fica em about:blank).
+    const newTab = window.open("about:blank", "_blank");
     if (!newTab) {
       toast({
         variant: "destructive",
@@ -346,6 +347,7 @@ export function DevUsersList() {
       });
       return;
     }
+
 
     setImpersonating(true);
     try {
@@ -378,14 +380,17 @@ export function DevUsersList() {
       }).toString();
       const url = `${window.location.origin}/impersonate#${hash}`;
 
+      // Sever o vínculo com a aba dev antes de navegar (equivalente a noopener)
+      try { (newTab as Window).opener = null; } catch { /* noop */ }
+
       // Navega a aba já aberta para a URL final
       try {
-        newTab.location.href = url;
+        newTab.location.replace(url);
       } catch {
-        // Fallback improvável: caso o browser bloqueie a atribuição
         newTab.close();
-        window.open(url, "_blank", "noopener");
+        window.open(url, "_blank");
       }
+
 
       toast({
         title: "Sessão aberta",
