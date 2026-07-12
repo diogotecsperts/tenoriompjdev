@@ -133,8 +133,14 @@ function classifyInvokeError(error: unknown, body: Record<string, unknown> | nul
   const lower = rawMessage.toLowerCase();
 
   let code = (body?.code as PreProcessarErrorCode) || "unknown";
+  const rawErrorField = typeof body?.error === "string" ? body.error : "";
+  const isAuthFailureBody =
+    rawErrorField === "Sessão inválida" ||
+    rawErrorField === "Não autenticado" ||
+    /sess[aã]o inv[aá]lida|n[aã]o autenticad|jwt|invalid token/i.test(rawErrorField);
   if (code === "unknown") {
-    if (status === 504 || /timeout|timed out|edge function returned a non-2xx/i.test(lower)) code = "provider_timeout";
+    if (status === 401 && isAuthFailureBody) code = "session_expired";
+    else if (status === 504 || /timeout|timed out|edge function returned a non-2xx/i.test(lower)) code = "provider_timeout";
     else if (status === 402 || /quota|saldo|credit|billing|insufficient/i.test(lower)) code = "quota_exceeded";
     else if (status === 429 || /rate limit|too many/i.test(lower)) code = "rate_limited";
     else if (status === 401 || status === 403 || /unauthorized|forbidden|api key|credencial/i.test(lower)) code = "invalid_key";
@@ -142,9 +148,12 @@ function classifyInvokeError(error: unknown, body: Record<string, unknown> | nul
     else if (status && status >= 500) code = "provider_unavailable";
   }
 
-  const fallbackMessage = code === "provider_timeout"
-    ? "Tempo excedido no processamento da IA. O backend encerrou a chamada antes de receber uma resposta completa do provider."
-    : rawMessage;
+  const fallbackMessage =
+    code === "session_expired"
+      ? "Sua sessão expirou. Saia e entre novamente para continuar."
+      : code === "provider_timeout"
+        ? "Tempo excedido no processamento da IA. O backend encerrou a chamada antes de receber uma resposta completa do provider."
+        : rawMessage;
 
   return new PreProcessarError(
     rawMessage.includes("Edge Function returned") ? fallbackMessage : rawMessage,
