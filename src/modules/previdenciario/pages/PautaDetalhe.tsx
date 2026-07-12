@@ -193,10 +193,15 @@ export default function PautaDetalhe() {
         title: "Processado com IA",
         description: `${r.pages} págs · ${r.documentosCriados} doc(s) · ${r.provider}/${r.model}`,
       });
+      setPericias((prev) =>
+        prev.map((x) => (x.id === pericia.id ? { ...x, pdf_processado: true } : x)),
+      );
       void reload();
     } catch (err: any) {
       const title =
-        err?.code === "quota_exceeded"
+        err?.code === "session_expired"
+          ? "Sessão expirada"
+          : err?.code === "quota_exceeded"
           ? "Saldo/cota insuficiente"
           : err?.code === "invalid_key"
             ? "Credencial inválida"
@@ -215,7 +220,11 @@ export default function PautaDetalhe() {
                         : err?.code === "provider_unavailable"
                           ? "IA indisponível"
                           : "Erro no processamento";
-      const retryable = err?.code !== "file_too_large" && err?.code !== "unsupported_file" && err?.code !== "invalid_key";
+      const retryable =
+        err?.code !== "file_too_large" &&
+        err?.code !== "unsupported_file" &&
+        err?.code !== "invalid_key" &&
+        err?.code !== "session_expired";
       toast({
         variant: "destructive",
         title,
@@ -246,6 +255,7 @@ export default function PautaDetalhe() {
     setLoteProgresso({ done: 0, total: pendentes.length });
     let ok = 0;
     let fail = 0;
+    let sessionExpired = false;
     for (let i = 0; i < pendentes.length; i++) {
       const p = pendentes[i];
       setProcessandoIds((s) => new Set(s).add(p.id));
@@ -260,9 +270,35 @@ export default function PautaDetalhe() {
           },
         });
         ok++;
+        // Atualiza o status desta perícia imediatamente para dar feedback visual
+        setPericias((prev) =>
+          prev.map((x) => (x.id === p.id ? { ...x, pdf_processado: true } : x)),
+        );
+        // Reconcilia com o DB em background (traz periciado_nome/prev_extracao atualizados)
+        void reload();
       } catch (err: any) {
         console.error("[lote] falha em", p.id, err);
         fail++;
+        if (err?.code === "session_expired") {
+          sessionExpired = true;
+          toast({
+            variant: "destructive",
+            title: "Sessão expirada",
+            description:
+              "Sua sessão expirou. Saia e entre novamente para continuar o processamento em lote.",
+          });
+          setProcessandoDetalhes((s) => {
+            const { [p.id]: _removed, ...rest } = s;
+            return rest;
+          });
+          setProcessandoIds((s) => {
+            const n = new Set(s);
+            n.delete(p.id);
+            return n;
+          });
+          setLoteProgresso({ done: i + 1, total: pendentes.length });
+          break;
+        }
       }
       setProcessandoDetalhes((s) => {
         const { [p.id]: _removed, ...rest } = s;
@@ -277,11 +313,13 @@ export default function PautaDetalhe() {
     }
     setProcessandoLote(false);
     finish();
-    toast({
-      title: "Lote concluído",
-      description: `${ok} processada(s)${fail ? ` · ${fail} falha(s)` : ""}.`,
-      variant: fail ? "destructive" : "default",
-    });
+    if (!sessionExpired) {
+      toast({
+        title: "Lote concluído",
+        description: `${ok} processada(s)${fail ? ` · ${fail} falha(s)` : ""}.`,
+        variant: fail ? "destructive" : "default",
+      });
+    }
     void reload();
   };
 
