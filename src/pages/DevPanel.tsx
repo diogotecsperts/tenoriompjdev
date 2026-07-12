@@ -44,9 +44,10 @@ import { DevOriginalFiles } from "@/components/dev-panel/DevOriginalFiles";
 import { DevUserModules } from "@/components/dev-panel/DevUserModules";
 import { DevUsageControl } from "@/components/dev-panel/DevUsageControl";
 import { DevEmailTracking } from "@/components/dev-panel/DevEmailTracking";
+import { DevSignupRequests } from "@/components/dev-panel/DevSignupRequests";
 
 
-type DevTab = "dashboard" | "users" | "user-modules" | "usage-control" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "email-tracking" | "settings";
+type DevTab = "dashboard" | "users" | "signup-requests" | "user-modules" | "usage-control" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "email-tracking" | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -57,6 +58,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "users", label: "Usuários", icon: Users },
+  { id: "signup-requests", label: "Solicitações de Cadastro", icon: UserPlus },
   { id: "user-modules", label: "Módulos por Usuário", icon: LayoutDashboard },
   { id: "usage-control", label: "Controle de Uso", icon: BarChart3 },
   { id: "email-tracking", label: "Rastreamento via Email", icon: Mail },
