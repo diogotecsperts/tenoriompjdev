@@ -91,8 +91,14 @@ export default function FinalizarCadastro() {
         return finish("ready");
       }
 
-      console.warn("[finalizar-cadastro] sem token_hash, sem fragmento e sem sessão");
-      finish("error", "Link inválido ou já utilizado. Faça uma nova solicitação de cadastro.");
+      console.warn("[finalizar-cadastro] sem token_hash, sem fragmento e sem sessão", {
+        search: window.location.search,
+        hash: window.location.hash,
+      });
+      finish(
+        "error",
+        "Não recebemos o código de acesso na URL. Isso costuma acontecer quando o link do email foi truncado ou aberto por um pré-visualizador. Abra o link direto no navegador ou solicite um novo cadastro.",
+      );
     };
 
 
