@@ -254,3 +254,84 @@ function translateGenerateLinkError(err: any): { error: string; hint: string } {
     hint: err?.message ?? "Consulte os logs para o detalhe original.",
   };
 }
+
+async function ensureUserBootstrap(
+  admin: any,
+  userId: string,
+  email: string,
+  fullName: string,
+): Promise<{ ok: true } | { ok: false; hint: string; raw?: string }> {
+  try {
+    // 1) profiles — idempotente por id. Só gera MED{NNN} se ainda não existir.
+    const { data: existingProfile } = await admin
+      .from("profiles")
+      .select("id, user_id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (!existingProfile) {
+      // Próximo MED{NNN}
+      const { data: rows, error: maxErr } = await admin
+        .from("profiles")
+        .select("user_id")
+        .like("user_id", "MED%");
+      if (maxErr) {
+        return { ok: false, hint: "Falha ao calcular o próximo ID interno (MED).", raw: maxErr.message };
+      }
+      let maxN = 0;
+      for (const r of rows ?? []) {
+        const n = parseInt(String(r.user_id ?? "").slice(3), 10);
+        if (!Number.isNaN(n) && n > maxN) maxN = n;
+      }
+      const nextId = "MED" + String(maxN + 1).padStart(3, "0");
+      const { error: insErr } = await admin.from("profiles").insert({
+        id: userId,
+        nome: fullName || email,
+        email,
+        user_id: nextId,
+      });
+      // 23505 = unique_violation (race): tolerar
+      if (insErr && (insErr as any).code !== "23505") {
+        return { ok: false, hint: "Falha ao criar perfil do usuário.", raw: insErr.message };
+      }
+    }
+
+    // 2) user_roles: 'user' (sempre) + 'developer' (email específico)
+    const rolesToInsert: Array<{ user_id: string; role: string }> = [
+      { user_id: userId, role: "user" },
+    ];
+    if (email.toLowerCase() === "diogomixcds@gmail.com") {
+      rolesToInsert.push({ user_id: userId, role: "developer" });
+    }
+    for (const row of rolesToInsert) {
+      const { error } = await admin.from("user_roles").insert(row);
+      if (error && (error as any).code !== "23505") {
+        return { ok: false, hint: `Falha ao atribuir role '${row.role}'.`, raw: error.message };
+      }
+    }
+
+    // 3) user_settings
+    {
+      const { error } = await admin.from("user_settings").insert({ user_id: userId });
+      if (error && (error as any).code !== "23505") {
+        return { ok: false, hint: "Falha ao criar preferências do usuário.", raw: error.message };
+      }
+    }
+
+    // 4) user_modules: trabalhista habilitado por padrão
+    {
+      const { error } = await admin.from("user_modules").insert({
+        user_id: userId,
+        module: "trabalhista",
+        enabled: true,
+      });
+      if (error && (error as any).code !== "23505") {
+        return { ok: false, hint: "Falha ao habilitar módulo padrão (trabalhista).", raw: error.message };
+      }
+    }
+
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, hint: "Erro inesperado ao preparar o usuário.", raw: (e as Error).message };
+  }
+}
