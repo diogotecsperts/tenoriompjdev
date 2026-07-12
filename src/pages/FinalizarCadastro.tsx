@@ -165,7 +165,7 @@ export default function FinalizarCadastro() {
     setResending(true);
     try {
       const { error } = await supabase.functions.invoke("signup-request-resend", {
-        body: { email, redirect_origin: window.location.origin },
+        body: { email },
       });
       if (error) throw error;
       toast({
