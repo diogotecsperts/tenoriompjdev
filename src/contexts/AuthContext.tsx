@@ -159,6 +159,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         const profileData = profileResult.data;
+
+        // Gate de segurança: se o usuário tem uma signup_request ainda não
+        // finalizada (invite/recovery consumido mas senha nunca definida via
+        // /finalizar-cadastro), NÃO deixamos entrar no app.
+        if (!meta.impersonated_by) {
+          const { data: pendingReq } = await supabase
+            .from("signup_requests")
+            .select("id, status, finalized_at")
+            .eq("invite_user_id", session.user.id)
+            .in("status", ["approved", "awaiting_finalization"])
+            .is("finalized_at", null)
+            .maybeSingle();
+          if (pendingReq) {
+            await supabase.auth.signOut();
+            toast({
+              variant: "destructive",
+              title: "Cadastro não finalizado",
+              description:
+                "Conclua seu cadastro pelo link enviado no email antes de acessar o sistema.",
+            });
+            setSession(null);
+            setUser(null);
+            setProfile(null);
+            setUserRole(null);
+            loadedUserIdRef.current = null;
+            isLoadingUserDataRef.current = false;
+            setLoading(false);
+            return;
+          }
+        }
+
         // Sincronizar email se houver diferença entre Auth e profiles
         if (!meta.impersonated_by && session.user.email && profileData.email !== session.user.email) {
           // Atualizar no banco em background (não bloquear)

@@ -1,93 +1,90 @@
-# Correção do fluxo de aprovação de cadastros
 
-## Diagnóstico do bug (por que "Aprovar" não fazia nada)
+# Correção do fluxo Finalizar Cadastro + limpeza segura do teste Ruane
 
-Nos logs da edge function `signup-request-approve` aparece o erro real:
+## Status atual (verificado no banco antes de mexer em qualquer coisa)
 
-```
-generateLink failed AuthApiError: A user with this email address has already been registered
-status: 422, code: "email_exists"
-```
+- Nada foi alterado no turno interrompido — nenhum código, migração ou delete rodou.
+- Seu usuário dev `diogomixcds@gmail.com` (MED002, Diogo Silva) **não vai ser tocado**. Fica intacto com todos os 75 laudos, 12 pautas, 18 perícias etc.
+- O usuário de teste é `diogotecinove@gmail.com` = `MED003 / Ruane Silva` (id `c6235453-ef3f-45c1-b79c-55524b451d92`). Tem zero laudos/pautas/perícias/financeiro/impugnações — é seguro apagar.
+- Existe também a linha `signup_requests` id `2af7c84e-2080-403c-9260-8f4e951b2429` em `awaiting_finalization` referente a essa Ruane.
 
-Sequência atual da função:
+## Diagnóstico dos dois bugs reais
 
-1. `admin.auth.admin.createUser({ email, email_confirm: true })` → cria o usuário.
-2. `admin.auth.admin.generateLink({ type: 'invite', email })` → **falha** porque `type: 'invite'` só funciona para email que ainda **não** existe em `auth.users`. Como acabamos de criar o usuário no passo 1, o passo 2 sempre estoura `email_exists` (422).
-3. A função retorna 500, o frontend não mostra erro claro (ou o toast some), a solicitação permanece `pending`, nenhum email é disparado.
+### Bug 1 — "Validando seu link..." trava e Ruane entrou no painel sem definir senha
 
-Ou seja: não é problema de Resend nem de RLS, é a combinação `createUser` + `generateLink(invite)` que é incompatível.
+Como o Supabase gera link do tipo `invite`/`recovery`, o fluxo é:
 
-## Correção do approve
+1. Ao clicar no link, o servidor Supabase faz `GET /verify` e responde **303** redirecionando para `…/finalizar-cadastro#access_token=…&refresh_token=…`.
+2. A página chama `supabase.auth.setSession({access_token, refresh_token})`. **Isso cria uma sessão real e persistente** no localStorage antes de a senha ser definida.
+3. O `handle_new_user` já criou o profile MED003 na hora em que `generateLink({type:'invite'})` gerou o `auth.users`. Ou seja, no instante em que o admin apertou "Aprovar", o usuário virou uma conta funcional. O link só serviu para logar.
+4. Se algo trava no rendering do FinalizarCadastro (ex.: `onAuthStateChange` do AuthContext tenta hidratar profile e a página fica em `verifying`), o usuário sai da aba, e como a sessão persiste, ao abrir a raiz do site **entra direto no painel sem senha**. Foi exatamente o que você viu.
 
-Trocar a estratégia de geração de link:
+Isso é uma falha de segurança: o link do email dá acesso mesmo sem trocar a senha.
 
-- **Não** pré-criar o usuário no passo 1.
-- Chamar `admin.auth.admin.generateLink({ type: 'invite', email, options: { data: { full_name }, redirectTo: '<origem>/finalizar-cadastro' } })` diretamente — o próprio `generateLink('invite')` cria o `auth.users` já com email confirmado E devolve o `action_link` de uso único.
-- Se o email já existir em `auth.users` (retentativa de aprovação, ou usuário criado numa tentativa anterior antes do fix), fazer fallback para `type: 'recovery'` no mesmo email, que também emite um link one-shot compatível com o `/finalizar-cadastro` (a página já usa `verifyOtp` genérico + `updateUser({ password })`, então serve para os dois tipos).
-- Guardar o `invite_user_id` a partir do `linkData.user.id` retornado por `generateLink`.
-- Continuar mandando o email via Resend com o `action_link`, como já está.
+### Bug 2 — UX ruim da tela
 
-Nenhum outro passo (audit log, update de `signup_requests`, CORS, `is_developer()`) muda.
+Título errado ("Finalizar cadastro" em vez de "Finalizando cadastro") e o subtítulo "Defina uma senha para acessar o Tenório MPJ" aparece antes de o link ser validado, dando falsa impressão de campo pronto.
 
-## Novos status e visão do DevPanel
+## Correções
 
-Hoje só temos `pending / approved / rejected / cancelled`. Passa a ser:
+### 1) Gate de acesso: sem senha finalizada, sem entrar no app
 
-| status                    | quando                                              | mostra no painel |
-| ------------------------- | --------------------------------------------------- | ---------------- |
-| `pending`                 | solicitação recém-criada                            | sim              |
-| `awaiting_finalization`   | admin aprovou e email foi enviado, aguardando senha | sim              |
-| `completed`               | usuário definiu a senha e finalizou o cadastro      | sim              |
-| `rejected`                | admin recusou                                       | sim              |
-| `cancelled`               | admin cancelou/descartou                            | sim              |
+No `AuthContext.loadUserData`, logo após carregar o profile, consultar `signup_requests` pelo `invite_user_id = auth.uid()`:
 
-Migração adiciona os dois novos valores permitidos ao CHECK/enum de `status` (mantendo os antigos para não invalidar linhas existentes; `approved` legado é tratado como sinônimo visual de `awaiting_finalization` na lista, para não perder histórico).
+- Se existir uma linha com `status IN ('approved','awaiting_finalization')` **e** `finalized_at IS NULL`, forçar `signOut` imediatamente e mostrar toast: "Você precisa concluir seu cadastro pelo link enviado no email antes de acessar o sistema." Redirecionar para `/`.
+- Se `status = 'completed'` ou não houver linha, segue o fluxo normal.
 
-Nenhuma solicitação sai da tela — só muda de coluna/badge. O componente `DevSignupRequests.tsx` passa a:
+Regra RLS: adicionar em `signup_requests` uma policy `SELECT` para `authenticated` restrita a `invite_user_id = auth.uid()`, para que o próprio usuário consiga se auto-checar (a policy atual só permite leitura via service-role).
 
-- Exibir todos os status com badges coloridos distintos (`awaiting_finalization` = âmbar "Aguardando finalização", `completed` = verde "Cadastro finalizado", `pending` = azul, `rejected`/`cancelled` = cinza/vermelho).
-- Botões de ação (Aprovar / Rejeitar / Cancelar) só aparecem quando `status === 'pending'`. Nos demais status, mostra a data do último evento (`reviewed_at`, `invite_sent_at`, `finalized_at`).
-- Filtro por status no topo (chips), com "Todos" como padrão.
+Assim, mesmo se o link do email criar sessão persistente, o app impede o acesso enquanto `finalized_at` não estiver preenchido. O único caminho que preenche `finalized_at` é a edge function `signup-request-finalize`, que só é chamada após `updateUser({ password })` bem-sucedido em `/finalizar-cadastro`.
 
-## Marcar como finalizado ao definir a senha
+### 2) Robustez de `FinalizarCadastro.tsx`
 
-Novo campo `finalized_at timestamptz` na tabela `signup_requests`.
+- Renomear título para **"Finalizando cadastro"**.
+- Mover o subtítulo "Defina uma senha para acessar o Tenório MPJ." para dentro do bloco `status === 'ready' | 'saving'`, junto do formulário. Nos estados `verifying` e `error`, o subtítulo some.
+- Estado `verifying`: mostrar apenas o spinner + texto "Validando seu link..." (mensagem única e centralizada, sem outras instruções).
+- Suportar os três formatos que o Supabase pode entregar: `token_hash` em query/hash (chama `verifyOtp`), fragmento `access_token+refresh_token` no hash (chama `setSession`), ou fallback com sessão já ativa. Isso já existe, mas vou adicionar timeout de 8s: se ainda estiver em `verifying`, cair em `error` com "Não conseguimos validar o link. Peça um novo cadastro."
+- Após o `updateUser({ password })` de sucesso, chamar `signup-request-finalize` e **só depois** fazer `signOut`. Se o `signup-request-finalize` falhar, ainda assim faz `signOut` e mostra toast pedindo para tentar login manualmente (a senha já foi salva).
+- Limpar o hash da URL após consumir os tokens (`window.history.replaceState`), para o link não ficar reutilizável ao dar refresh.
 
-Nova edge function **`signup-request-finalize`** (`verify_jwt=true`):
+### 3) Melhoria defensiva no `signup-request-approve`
 
-- Recebe a sessão do usuário recém-autenticado (que acabou de definir a senha em `/finalizar-cadastro`).
-- Extrai `sub` (user id) do JWT via `getClaims`.
-- Localiza a linha `signup_requests` com `invite_user_id = sub` e `status IN ('approved','awaiting_finalization')`.
-- Atualiza `status = 'completed'`, `finalized_at = now()`.
-- Grava `access_logs` com `event_type='signup_request_finalized'`.
+Continuar usando `generateLink({type:'invite'})` como está (o link é one-shot no Supabase), mas garantir que o `redirect_origin` recebido do frontend seja usado quando presente — hoje já é, apenas confirmar. Sem mudança de comportamento se você aprovar pelo painel publicado.
 
-Fluxo no frontend em `src/pages/FinalizarCadastro.tsx`: logo após `supabase.auth.updateUser({ password })` bem-sucedido e **antes** do `signOut`, chamar `supabase.functions.invoke('signup-request-finalize')`. Se falhar (não deveria, mas por segurança), apenas loga — o usuário já tem senha e consegue entrar; o status ficaria como `awaiting_finalization` visualmente e um botão "Marcar como finalizado" opcional no DevPanel pode ser adicionado depois se quiser (não incluso neste plano para manter escopo).
+## Limpeza do teste Ruane / diogotecinove@gmail.com
 
-## Melhor tratamento de erro no botão Aprovar
+Via `insert` tool (SQL de UPDATE/DELETE), na ordem correta para não violar FKs:
 
-No `DevSignupRequests.tsx`, quando `functions.invoke('signup-request-approve')` retorna erro, hoje o toast pode não mostrar a causa real. Passa a:
+1. `DELETE FROM public.access_logs WHERE user_id = 'c6235453-…'` (logs do MED003, se houver — a tabela pertence a ele).
+2. `DELETE FROM public.user_presence WHERE user_id = 'c6235453-…'`.
+3. `DELETE FROM public.user_modules WHERE user_id = 'c6235453-…'`.
+4. `DELETE FROM public.user_settings WHERE user_id = 'c6235453-…'`.
+5. `DELETE FROM public.user_roles WHERE user_id = 'c6235453-…'`.
+6. `DELETE FROM public.profiles WHERE id = 'c6235453-…'`.
+7. `DELETE FROM public.signup_requests WHERE id = '2af7c84e-…'` (a solicitação de teste sai do painel, e não fica "órfã" apontando para um user_id inexistente).
+8. `DELETE FROM auth.users WHERE id = 'c6235453-…'` — remove o usuário do Supabase Auth para que o email `diogotecinove@gmail.com` possa ser reaprovado do zero sem cair no fallback de `recovery`.
 
-- Ler `error.context.text()` (padrão FunctionsHttpError) e exibir no toast a mensagem retornada pela edge function, para nunca mais "confirmar e não acontecer nada" silenciosamente.
-- Adicionar `console.error` completo para depuração.
+Seu usuário dev `diogomixcds@gmail.com` **não é tocado** — todos os DELETEs filtram exclusivamente pelo id `c6235453-ef3f-45c1-b79c-55524b451d92`.
 
-## Arquivos afetados
+Nenhuma solicitação `pending` sua sai do painel — só a `2af7c84e-…` (a de teste) é apagada.
 
-- `supabase/functions/signup-request-approve/index.ts` — trocar lógica de link (invite direto + fallback recovery), remover pré-createUser.
-- `supabase/functions/signup-request-finalize/index.ts` — **novo**, marca `completed`.
-- `supabase/config.toml` — registrar `verify_jwt=true` para a nova função.
-- `supabase/migrations/*.sql` — nova migração: adicionar valores `awaiting_finalization` e `completed` ao check/enum de `status`, adicionar coluna `finalized_at`.
-- `src/components/dev-panel/DevSignupRequests.tsx` — novos badges, filtros, condicional dos botões, melhor toast de erro.
-- `src/pages/FinalizarCadastro.tsx` — chamar `signup-request-finalize` após `updateUser`.
-- `src/integrations/supabase/types.ts` — refletir novo campo `finalized_at` e novos status (regenerado automaticamente pela migração).
+## Verificação pós-implementação
+
+1. Refazer solicitação usando `diogotecinove@gmail.com` na página pública → chega email para você aprovar.
+2. Aprovar → email chega no endereço solicitante, linha vira `awaiting_finalization`.
+3. Se o solicitante tentar ir direto para o painel/qualquer rota (sem ter setado senha), o app faz signOut na hora e mostra o aviso.
+4. Solicitante abre o link do email → tela "Finalizando cadastro" com "Validando seu link..." → em <2s aparece o formulário de senha (agora com o subtítulo). Define senha → chamada `signup-request-finalize` → `signOut` → login normal.
+5. Painel do dev: linha agora aparece como "Cadastro finalizado".
+6. Refresh na URL do link já usado ou segundo clique → mostra estado de `error` com mensagem clara e botão de nova solicitação.
 
 ## Fora do escopo
 
-Nada é tocado em: laudos, pautas, perícias, impugnação, financeiro, OCR, IA, prompts, exports, DevPanel além da aba Solicitações, RLS de tabelas de domínio, presença, tracking de email, bundle/Vite, roteamento, Auth config (`disable_signup` continua `true`).
+Não são alterados: laudos, pautas, perícias, impugnação, financeiro, OCR, IA, prompts, exports, RLS de tabelas de domínio, presença, tracking de email, `disable_signup` (segue `true`), demais abas do DevPanel.
 
-## Verificação após implementar
+## Arquivos afetados
 
-1. Aprovar uma solicitação `pending` → toast de sucesso, linha muda para `awaiting_finalization` no painel, email chega no solicitante.
-2. Solicitante abre link, define senha em `/finalizar-cadastro` → linha muda para `completed` no painel; segundo clique no mesmo link falha (token consumido).
-3. Aprovar solicitação cujo email já exista em `auth.users` → fallback `recovery` gera link, sem 422.
-4. Rejeitar/Cancelar → status atualizado, sem enviar email, sem criar auth user.
-5. Toast passa a mostrar o motivo real quando qualquer edge function falha.
+- `src/contexts/AuthContext.tsx` — gate `finalized_at` após loadUserData.
+- `src/pages/FinalizarCadastro.tsx` — título/subtítulo, timeout, ordem finalize→signOut, replaceState do hash.
+- `supabase/migrations/*.sql` — policy `SELECT` em `signup_requests` para `authenticated` filtrada por `invite_user_id = auth.uid()`.
+- **Sem alterações** em `signup-request-approve`, `signup-request-finalize`, `signup-request-list`, `signup-request-create`, `signup-request-reject`, `signup-request-cancel`, `config.toml`.
+- Limpeza via `insert` tool (DELETEs dirigidos ao id do MED003) — sem nova migração de schema.
