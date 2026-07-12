@@ -226,25 +226,23 @@ export function PrevUsagePanel() {
     setPautas([]);
     setPericias([]);
     try {
-      const session = (await supabase.auth.getSession()).data.session;
-      const res = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/dev-list-prev-usage?user_id=${userId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${session?.access_token}`,
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          },
-        },
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user) {
+        throw new Error("Sessão expirada. Recarregue a página e entre novamente se necessário.");
+      }
+
+      const { data, error } = await supabase.functions.invoke(
+        `dev-list-prev-usage?user_id=${encodeURIComponent(userId)}`,
+        { method: "GET" },
       );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      if (error) throw error;
       setPautas(data.pautas ?? []);
       setPericias(data.pericias ?? []);
     } catch (err: any) {
       toast({
         variant: "destructive",
         title: "Erro ao carregar uso",
-        description: err.message,
+        description: err?.message ?? "Falha ao carregar dados do usuário.",
       });
     } finally {
       setLoadingUsage(false);

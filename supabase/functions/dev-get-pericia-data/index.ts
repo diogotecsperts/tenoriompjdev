@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -6,41 +6,57 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+async function requireDeveloper(req: Request) {
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return { error: "Missing auth", status: 401 } as const;
+  }
+
+  const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: authHeader } },
+  });
+  const token = authHeader.replace("Bearer ", "");
+  let userId: string | undefined;
+  let email: string | undefined;
+  const { data: claimsData, error: claimsError } = await userClient.auth.getClaims(token);
+  userId = claimsData?.claims?.sub;
+  email = claimsData?.claims?.email as string | undefined;
+  if (claimsError || !userId) {
+    const { data: userData, error: userError } = await userClient.auth.getUser();
+    if (userError || !userData.user) {
+      return { error: "Invalid token", status: 401 } as const;
+    }
+    userId = userData.user.id;
+    email = userData.user.email ?? undefined;
+  }
+
+  const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const { data: roles, error: roleError } = await admin
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId);
+  if (roleError) throw roleError;
+  if (!(roles ?? []).some((r: any) => r.role === "developer")) {
+    return { error: "Forbidden", status: 403 } as const;
+  }
+
+  return { userId, email, admin } as const;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-    const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing auth" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const {
-      data: { user },
-      error: userError,
-    } = await userClient.auth.getUser();
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const { data: isDev } = await userClient.rpc("is_developer");
-    if (!isDev) {
-      return new Response(JSON.stringify({ error: "Forbidden" }), {
-        status: 403,
+    const auth = await requireDeveloper(req);
+    if ("error" in auth) {
+      return new Response(JSON.stringify({ error: auth.error }), {
+        status: auth.status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -54,7 +70,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    const { admin, email, userId } = auth;
     const { data: pericia, error } = await admin
       .from("prev_pericias")
       .select(
@@ -87,8 +103,8 @@ Deno.serve(async (req) => {
     await admin.from("backend_logs").insert({
       function_name: "dev-get-pericia-data",
       level: "info",
-      message: `Developer ${user.email} baixou dados da perícia ${periciaId}`,
-      metadata: { pericia_id: periciaId, developer_id: user.id },
+      message: `Developer ${email ?? userId} baixou dados da perícia ${periciaId}`,
+      metadata: { pericia_id: periciaId, developer_id: userId },
     });
 
     return new Response(
