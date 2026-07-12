@@ -16,6 +16,7 @@ import { RefreshCw, Check, X, Trash2, Mail, User, Stethoscope, FileText } from "
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "@/hooks/use-toast";
+import { FunctionsHttpError } from "@supabase/supabase-js";
 
 type Status =
   | "pending"
