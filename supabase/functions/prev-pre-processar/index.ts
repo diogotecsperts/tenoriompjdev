@@ -908,7 +908,7 @@ Deno.serve(async (req: Request) => {
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Não autenticado" }), {
+      return new Response(JSON.stringify({ error: "Não autenticado", code: "session_expired" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
