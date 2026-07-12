@@ -7,13 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Stethoscope, Lock, Mail, User, Eye, EyeOff, Settings } from "lucide-react";
+import { Stethoscope, Lock, Mail, Eye, EyeOff, Settings, UserPlus } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [fullName, setFullName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -23,7 +22,7 @@ export default function Login() {
   const devClickCountRef = useRef(0);
   const devClickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { login, signup, isAuthenticated, profile, loading } = useAuth();
+  const { login, isAuthenticated, profile, loading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -70,25 +69,8 @@ export default function Login() {
     setIsLoading(false);
   };
 
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!fullName || fullName.trim().length < 3) {
-      toast({
-        variant: "destructive",
-        title: "Nome inválido",
-        description: "Por favor, insira seu nome completo.",
-      });
-      return;
-    }
-    setIsLoading(true);
-    const success = await signup(email, password, fullName);
-    setIsLoading(false);
-    if (success) {
-      setEmail("");
-      setPassword("");
-      setFullName("");
-    }
-  };
+
+
 
   // Mantém uma única tela de loading durante autenticação + carregamento do perfil + transição de rota
   if (loading || isNavigating || (isAuthenticated && !profile)) {
@@ -211,36 +193,25 @@ export default function Login() {
                 </TabsContent>
                 
                 <TabsContent value="signup" className="space-y-4">
-                  <form onSubmit={handleSignup} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-name">Nome Completo</Label>
-                      <div className="relative">
-                        <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input id="signup-name" type="text" name="name-field" placeholder="Dr. Nome Completo" value={fullName} onChange={e => setFullName(e.target.value)} onFocus={() => setEmailReadOnly(false)} className="pl-10 h-11" autoComplete="new-password" readOnly={emailReadOnly} required />
-                      </div>
+                  <div className="text-center space-y-4 py-4">
+                    <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+                      <UserPlus className="h-7 w-7 text-primary" />
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-email">E-mail</Label>
-                      <div className="relative">
-                        <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input id="signup-email" type="email" name="email-field" placeholder="seu@email.com" value={email} onChange={e => setEmail(e.target.value)} onFocus={() => setEmailReadOnly(false)} className="pl-10 h-11" autoComplete="new-password" readOnly={emailReadOnly} required />
-                      </div>
+                    <div className="space-y-1">
+                      <h3 className="text-lg font-semibold text-foreground">Solicitar novo cadastro</h3>
+                      <p className="text-sm text-muted-foreground">
+                        O cadastro no Tenório MPJ é feito por solicitação. Preencha um breve formulário
+                        e você receberá um email com o link para finalizar após aprovação.
+                      </p>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="signup-password">Senha</Label>
-                      <div className="relative">
-                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input id="signup-password" type={showPassword ? "text" : "password"} name="password-field" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} onFocus={() => setPasswordReadOnly(false)} className="pl-10 pr-10 h-11" autoComplete="new-password" readOnly={passwordReadOnly} required minLength={6} />
-                        <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
-                      </div>
-                      <p className="text-xs text-muted-foreground">Mínimo de 6 caracteres</p>
-                    </div>
-                    <Button type="submit" className="w-full h-11" disabled={isLoading}>
-                      {isLoading ? "Criando conta..." : "Criar Conta"}
+                    <Button
+                      type="button"
+                      className="w-full h-11"
+                      onClick={() => navigate("/solicitar-cadastro")}
+                    >
+                      Solicitar novo cadastro
                     </Button>
-                  </form>
+                  </div>
                 </TabsContent>
               </Tabs>
             </CardContent>

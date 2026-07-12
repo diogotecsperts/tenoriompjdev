@@ -19,7 +19,8 @@ import {
   History,
   FileArchive,
   BarChart3,
-  Mail
+  Mail,
+  UserPlus
 } from "lucide-react";
 
 import { useNavigate } from "react-router-dom";
