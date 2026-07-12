@@ -196,7 +196,9 @@ export default function PautaDetalhe() {
       void reload();
     } catch (err: any) {
       const title =
-        err?.code === "quota_exceeded"
+        err?.code === "session_expired"
+          ? "Sessão expirada"
+          : err?.code === "quota_exceeded"
           ? "Saldo/cota insuficiente"
           : err?.code === "invalid_key"
             ? "Credencial inválida"
@@ -215,7 +217,11 @@ export default function PautaDetalhe() {
                         : err?.code === "provider_unavailable"
                           ? "IA indisponível"
                           : "Erro no processamento";
-      const retryable = err?.code !== "file_too_large" && err?.code !== "unsupported_file" && err?.code !== "invalid_key";
+      const retryable =
+        err?.code !== "file_too_large" &&
+        err?.code !== "unsupported_file" &&
+        err?.code !== "invalid_key" &&
+        err?.code !== "session_expired";
       toast({
         variant: "destructive",
         title,
