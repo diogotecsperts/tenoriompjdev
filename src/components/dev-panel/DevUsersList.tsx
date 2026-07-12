@@ -380,14 +380,17 @@ export function DevUsersList() {
       }).toString();
       const url = `${window.location.origin}/impersonate#${hash}`;
 
+      // Sever o vínculo com a aba dev antes de navegar (equivalente a noopener)
+      try { (newTab as Window).opener = null; } catch { /* noop */ }
+
       // Navega a aba já aberta para a URL final
       try {
-        newTab.location.href = url;
+        newTab.location.replace(url);
       } catch {
-        // Fallback improvável: caso o browser bloqueie a atribuição
         newTab.close();
-        window.open(url, "_blank", "noopener");
+        window.open(url, "_blank");
       }
+
 
       toast({
         title: "Sessão aberta",
