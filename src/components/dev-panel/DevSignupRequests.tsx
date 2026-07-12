@@ -85,7 +85,6 @@ export function DevSignupRequests() {
     setBusyId(id);
     const fnName = `signup-request-${action}`;
     const body: Record<string, unknown> = { request_id: id };
-    if (action === "approve") body.redirect_origin = window.location.origin;
     const { data, error } = await supabase.functions.invoke(fnName, { body });
     setBusyId(null);
 
