@@ -189,11 +189,17 @@ export default function FinalizarCadastro() {
           {status === "error" && (
             <div className="space-y-4">
               <p className="text-center text-destructive">{errorMsg}</p>
+              {sessionEmail && (
+                <p className="text-center text-xs text-muted-foreground">
+                  Email da tentativa: <span className="font-medium">{sessionEmail}</span>
+                </p>
+              )}
               <Button className="w-full" variant="outline" onClick={() => navigate("/solicitar-cadastro")}>
                 Solicitar novo cadastro
               </Button>
             </div>
           )}
+
 
           {(status === "ready" || status === "saving") && (
             <form className="space-y-4" onSubmit={handleSubmit}>
