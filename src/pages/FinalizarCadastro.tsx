@@ -22,7 +22,9 @@ export default function FinalizarCadastro() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const ranRef = useRef(false);
+
 
   useEffect(() => {
     if (ranRef.current) return;
@@ -46,12 +48,22 @@ export default function FinalizarCadastro() {
       const type = (query.get("type") ?? hash.get("type") ?? "invite") as
         | "invite" | "signup" | "recovery" | "magiclink" | "email_change";
 
+      const captureEmail = async () => {
+        try {
+          const { data } = await supabase.auth.getSession();
+          if (data.session?.user?.email) setSessionEmail(data.session.user.email);
+        } catch { /* ignore */ }
+      };
+
       // Caso 1: token_hash presente → verifyOtp
       if (tokenHash) {
         const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
-        // Limpar URL para não ficar reutilizável em refresh
         window.history.replaceState({}, "", window.location.pathname);
-        if (error) return finish("error", "Link inválido ou já utilizado. Solicite um novo cadastro.");
+        if (error) {
+          console.warn("[finalizar-cadastro] verifyOtp falhou", { type, hasTokenHash: true, code: (error as any).code, msg: error.message });
+          return finish("error", "Link inválido ou já utilizado (cada link é de uso único). Solicite um novo cadastro.");
+        }
+        await captureEmail();
         return finish("ready");
       }
 
@@ -64,16 +76,25 @@ export default function FinalizarCadastro() {
           refresh_token: refreshToken,
         });
         window.history.replaceState({}, "", window.location.pathname);
-        if (error) return finish("error", "Link inválido ou expirado.");
+        if (error) {
+          console.warn("[finalizar-cadastro] setSession falhou", { msg: error.message });
+          return finish("error", "Link expirado ou já utilizado. Solicite um novo cadastro.");
+        }
+        await captureEmail();
         return finish("ready");
       }
 
       // Caso 3: sessão já ativa (raro, mas seguro)
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) return finish("ready");
+      if (session) {
+        if (session.user?.email) setSessionEmail(session.user.email);
+        return finish("ready");
+      }
 
-      finish("error", "Link inválido. Faça uma nova solicitação de cadastro.");
+      console.warn("[finalizar-cadastro] sem token_hash, sem fragmento e sem sessão");
+      finish("error", "Link inválido ou já utilizado. Faça uma nova solicitação de cadastro.");
     };
+
 
     timeoutId = window.setTimeout(() => {
       finish("error", "Não conseguimos validar o link a tempo. Peça um novo cadastro.");
@@ -96,12 +117,40 @@ export default function FinalizarCadastro() {
       return;
     }
     setStatus("saving");
-    const { error } = await supabase.auth.updateUser({ password });
-    if (error) {
-      setStatus("ready");
-      toast({ variant: "destructive", title: "Erro ao definir senha", description: error.message });
+
+    // Pré-checagem: sessão ainda ativa? Se não, o link já foi consumido/expirou
+    // ou o AuthContext deslogou. Traduz para mensagem clara em vez de "Auth session missing!".
+    const { data: sessionCheck } = await supabase.auth.getSession();
+    if (!sessionCheck.session) {
+      console.warn("[finalizar-cadastro] sessão ausente antes do updateUser", { sessionEmail });
+      setStatus("error");
+      setErrorMsg(
+        "Sua sessão expirou. Cada link de acesso é de uso único — solicite um novo cadastro para receber outro link.",
+      );
       return;
     }
+
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) {
+      const raw = error.message ?? "";
+      const isSessionMissing = /session\s*missing/i.test(raw) || (error as any).name === "AuthSessionMissingError";
+      if (isSessionMissing) {
+        console.warn("[finalizar-cadastro] updateUser sem sessão", { raw, sessionEmail });
+        setStatus("error");
+        setErrorMsg(
+          "Sua sessão expirou durante a finalização. Solicite um novo cadastro para receber outro link.",
+        );
+        return;
+      }
+      setStatus("ready");
+      toast({
+        variant: "destructive",
+        title: "Erro ao definir senha",
+        description: raw || "Tente novamente em alguns instantes.",
+      });
+      return;
+    }
+
     // Marca a solicitação como completed antes do signOut (precisamos da sessão)
     try {
       await supabase.functions.invoke("signup-request-finalize");
@@ -140,11 +189,17 @@ export default function FinalizarCadastro() {
           {status === "error" && (
             <div className="space-y-4">
               <p className="text-center text-destructive">{errorMsg}</p>
+              {sessionEmail && (
+                <p className="text-center text-xs text-muted-foreground">
+                  Email da tentativa: <span className="font-medium">{sessionEmail}</span>
+                </p>
+              )}
               <Button className="w-full" variant="outline" onClick={() => navigate("/solicitar-cadastro")}>
                 Solicitar novo cadastro
               </Button>
             </div>
           )}
+
 
           {(status === "ready" || status === "saving") && (
             <form className="space-y-4" onSubmit={handleSubmit}>

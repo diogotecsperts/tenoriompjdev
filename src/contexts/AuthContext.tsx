@@ -141,7 +141,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Perfil realmente não existe (sem erro + sem linha)
         if (!profileResult.data) {
-          console.error("Usuário autenticado sem perfil válido - fazendo logout");
+          const pathNow = typeof window !== "undefined" ? window.location.pathname : "";
+          console.warn("[auth-gate] profile ausente", {
+            userId: session.user.id,
+            pathname: pathNow,
+          });
           await supabase.auth.signOut();
           toast({
             variant: "destructive",
@@ -165,6 +169,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // /finalizar-cadastro), NÃO deixamos entrar no app.
         const currentPath = typeof window !== "undefined" ? window.location.pathname : "";
         const isFinalizingCadastro = currentPath.startsWith("/finalizar-cadastro");
+        if (isFinalizingCadastro) {
+          console.info("[auth-gate] bypass em /finalizar-cadastro", {
+            userId: session.user.id,
+          });
+        }
         if (!meta.impersonated_by && !isFinalizingCadastro) {
           const { data: pendingReq } = await supabase
             .from("signup_requests")
@@ -174,6 +183,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .is("finalized_at", null)
             .maybeSingle();
           if (pendingReq) {
+            console.warn("[auth-gate] signup_request pendente — signOut", {
+              userId: session.user.id,
+              pathname: currentPath,
+              requestId: pendingReq.id,
+              status: pendingReq.status,
+            });
             await supabase.auth.signOut();
             toast({
               variant: "destructive",
@@ -191,6 +206,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
         }
+
 
         // Sincronizar email se houver diferença entre Auth e profiles
         if (!meta.impersonated_by && session.user.email && profileData.email !== session.user.email) {
