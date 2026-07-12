@@ -228,7 +228,7 @@ export function DevSignupRequests() {
                       </Button>
                     </>
                   )}
-                  {r.status !== "cancelled" && r.status !== "rejected" && (
+                  {(r.status === "pending" || r.status === "approved" || r.status === "awaiting_finalization") && (
                     <Button
                       size="sm"
                       variant="ghost"
