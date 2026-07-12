@@ -193,6 +193,9 @@ export default function PautaDetalhe() {
         title: "Processado com IA",
         description: `${r.pages} págs · ${r.documentosCriados} doc(s) · ${r.provider}/${r.model}`,
       });
+      setPericias((prev) =>
+        prev.map((x) => (x.id === pericia.id ? { ...x, pdf_processado: true } : x)),
+      );
       void reload();
     } catch (err: any) {
       const title =
