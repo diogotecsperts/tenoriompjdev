@@ -89,25 +89,33 @@ export function DevSignupRequests() {
     const { data, error } = await supabase.functions.invoke(fnName, { body });
     setBusyId(null);
 
+    let errorTitle = "Não foi possível concluir";
     let errorDescription: string | null = null;
+    if (action === "approve") errorTitle = "Não foi possível aprovar";
+    else if (action === "reject") errorTitle = "Não foi possível rejeitar";
+    else if (action === "cancel") errorTitle = "Não foi possível cancelar";
+
     if (error) {
+      let parsed: any = null;
       if (error instanceof FunctionsHttpError) {
-        try {
-          const parsed = await error.context.clone().json();
-          errorDescription = parsed?.error ?? JSON.stringify(parsed);
-        } catch {
+        try { parsed = await error.context.clone().json(); }
+        catch {
           try { errorDescription = await error.context.clone().text(); } catch { /* noop */ }
         }
       }
+      if (parsed) {
+        errorDescription = parsed.hint ?? parsed.error ?? JSON.stringify(parsed);
+      }
       errorDescription = errorDescription ?? error.message;
-      console.error(`[${fnName}] failed`, error, errorDescription);
-    } else if ((data as any)?.error) {
-      errorDescription = (data as any).error;
+      console.error(`[${fnName}] failed`, error, parsed ?? errorDescription);
+    } else if ((data as any)?.error || (data as any)?.hint) {
+      const d = data as any;
+      errorDescription = d.hint ?? d.error;
       console.error(`[${fnName}] error in body`, data);
     }
 
     if (errorDescription) {
-      toast({ variant: "destructive", title: "Falhou", description: errorDescription });
+      toast({ variant: "destructive", title: errorTitle, description: errorDescription });
       return;
     }
     toast({

@@ -7,6 +7,9 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+// Remetente do domínio já verificado no Resend (mesmo domínio usado em send-tracking-email).
+const APPROVAL_FROM = "Tenório MPJ <acesso@mpjpericias.tecsperts.com>";
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -46,9 +49,8 @@ Deno.serve(async (req) => {
   const fullName = String(reqRow.nome_completo);
   const redirectTo = `${redirectOrigin}/finalizar-cadastro`;
 
-  // Estratégia:
-  //  1) Tentar generateLink type=invite (cria o auth user + email_confirmed + devolve action_link one-shot).
-  //  2) Se o email já existir (retentativa após bug antigo), fallback para type=recovery.
+  // 1) Tentar generateLink type=invite (cria auth user + devolve action_link one-shot).
+  // 2) Se o email já existir, fallback para type=recovery.
   let actionLink: string | null = null;
   let userId: string | null = null;
 
@@ -65,7 +67,6 @@ Deno.serve(async (req) => {
     actionLink = inviteRes.data.properties.action_link;
     userId = inviteRes.data.user?.id ?? null;
   } else if (inviteRes.error && (inviteRes.error as any).code === "email_exists") {
-    // Fallback: usuário já existe, gerar link de recovery (também one-shot)
     const recRes = await admin.auth.admin.generateLink({
       type: "recovery",
       email,
@@ -73,60 +74,69 @@ Deno.serve(async (req) => {
     });
     if (recRes.error || !recRes.data?.properties?.action_link) {
       console.error("recovery generateLink failed", recRes.error);
-      return json({ error: `Falha ao gerar link de recuperação: ${recRes.error?.message ?? "unknown"}` }, 500);
+      const t = translateGenerateLinkError(recRes.error);
+      return json({ error: t.error, hint: t.hint, raw: recRes.error?.message ?? null }, 500);
     }
     actionLink = recRes.data.properties.action_link;
     userId = recRes.data.user?.id ?? null;
   } else {
     console.error("invite generateLink failed", inviteRes.error);
-    return json({ error: `Falha ao gerar link: ${inviteRes.error?.message ?? "unknown"}` }, 500);
+    const t = translateGenerateLinkError(inviteRes.error);
+    return json({ error: t.error, hint: t.hint, raw: inviteRes.error?.message ?? null }, 500);
   }
 
-  if (!actionLink) return json({ error: "Sem action_link" }, 500);
+  if (!actionLink) return json({ error: "Não conseguimos gerar o link de acesso.", hint: "Tente novamente. Se persistir, verifique os logs da função." }, 500);
 
-  // Enviar email via Resend
+  // Enviar email via Resend usando o domínio verificado.
   const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-  if (RESEND_API_KEY) {
-    const html = `
-      <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #0f172a;">
-        <h2 style="color: #2A9D8F; margin: 0 0 16px;">Seu acesso foi liberado</h2>
-        <p style="margin: 0 0 12px;">Olá ${escapeHtml(fullName)},</p>
-        <p style="margin: 0 0 16px; line-height: 1.5;">Sua solicitação de cadastro no <strong>Tenório MPJ</strong> foi aprovada.
-        Para concluir, defina sua senha clicando no botão abaixo. O link é de uso único.</p>
-        <p style="margin: 24px 0;">
-          <a href="${actionLink}" style="background:#2A9D8F;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Definir minha senha</a>
-        </p>
-        <p style="margin:16px 0 0;color:#64748b;font-size:12px;">Se o botão não funcionar, copie e cole este endereço no navegador:<br/>${escapeHtml(actionLink)}</p>
-      </div>`;
-    try {
-      const rs = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${RESEND_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: "Tenório MPJ <onboarding@resend.dev>",
-          to: [email],
-          subject: "Seu acesso ao Tenório MPJ foi liberado",
-          html,
-        }),
-      });
-      if (!rs.ok) {
-        const errText = await rs.text();
-        console.error("resend send failed", errText);
-        return json({ error: `Falha ao enviar email: ${errText}` }, 500);
-      }
-    } catch (e) {
-      console.error("resend send exception", e);
-      return json({ error: `Falha ao enviar email: ${(e as Error).message}` }, 500);
-    }
-  } else {
+  if (!RESEND_API_KEY) {
     console.error("RESEND_API_KEY missing");
-    return json({ error: "RESEND_API_KEY não configurado no servidor" }, 500);
+    return json({
+      error: "Serviço de email não configurado.",
+      hint: "A chave RESEND_API_KEY não está definida nos segredos do backend.",
+    }, 500);
   }
 
-  // Atualizar solicitação: agora awaiting_finalization
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #0f172a;">
+      <h2 style="color: #2A9D8F; margin: 0 0 16px;">Seu acesso foi liberado</h2>
+      <p style="margin: 0 0 12px;">Olá ${escapeHtml(fullName)},</p>
+      <p style="margin: 0 0 16px; line-height: 1.5;">Sua solicitação de cadastro no <strong>Tenório MPJ</strong> foi aprovada.
+      Para concluir, defina sua senha clicando no botão abaixo. O link é de uso único.</p>
+      <p style="margin: 24px 0;">
+        <a href="${actionLink}" style="background:#2A9D8F;color:#fff;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:600;">Definir minha senha</a>
+      </p>
+      <p style="margin:16px 0 0;color:#64748b;font-size:12px;">Se o botão não funcionar, copie e cole este endereço no navegador:<br/>${escapeHtml(actionLink)}</p>
+    </div>`;
+
+  try {
+    const rs = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: APPROVAL_FROM,
+        to: [email],
+        subject: "Seu acesso ao Tenório MPJ foi liberado",
+        html,
+      }),
+    });
+    if (!rs.ok) {
+      const errText = await rs.text();
+      console.error("resend send failed", rs.status, errText);
+      const t = translateResendError(rs.status, errText);
+      return json({ error: t.error, hint: t.hint, raw: errText }, 500);
+    }
+  } catch (e) {
+    console.error("resend send exception", e);
+    return json({
+      error: "Não foi possível conectar ao serviço de email.",
+      hint: (e as Error).message,
+    }, 500);
+  }
+
   await admin.from("signup_requests").update({
     status: "awaiting_finalization",
     reviewed_at: new Date().toISOString(),
@@ -158,4 +168,73 @@ function escapeHtml(s: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function translateResendError(status: number, body: string): { error: string; hint: string } {
+  let parsed: any = null;
+  try { parsed = JSON.parse(body); } catch { /* body pode não ser JSON */ }
+  const name = String(parsed?.name ?? "").toLowerCase();
+  const message = String(parsed?.message ?? body ?? "").toLowerCase();
+
+  if (status === 401 || name === "invalid_api_key" || message.includes("api key")) {
+    return {
+      error: "Chave da API Resend inválida ou expirada.",
+      hint: "Atualize a chave RESEND_API_KEY nos segredos do backend.",
+    };
+  }
+  if (status === 403 && (name === "validation_error" || message.includes("testing emails") || message.includes("verify a domain"))) {
+    return {
+      error: "Resend em modo de teste — remetente não verificado.",
+      hint: "O remetente precisa usar um domínio verificado (ex.: mpjpericias.tecsperts.com). Verifique o domínio no painel do Resend.",
+    };
+  }
+  if (status === 403) {
+    return {
+      error: "Resend recusou o envio (403).",
+      hint: "Verifique se o domínio do remetente está ativo e verificado no painel do Resend.",
+    };
+  }
+  if (status === 422 && (name === "validation_error" || message.includes("from"))) {
+    return {
+      error: "Remetente inválido para o Resend.",
+      hint: "Confirme que o endereço em 'from' pertence a um domínio verificado.",
+    };
+  }
+  if (status === 429 || name.includes("rate_limit") || name.includes("over_quota") || message.includes("rate limit") || message.includes("quota")) {
+    return {
+      error: "Limite do Resend atingido.",
+      hint: "Aguarde alguns minutos e tente novamente, ou revise o plano do Resend.",
+    };
+  }
+  if (status >= 500) {
+    return {
+      error: "Resend está indisponível no momento.",
+      hint: "Tente novamente em alguns instantes.",
+    };
+  }
+  return {
+    error: `Falha ao enviar email (HTTP ${status}).`,
+    hint: parsed?.message ? String(parsed.message) : "Consulte os logs para o detalhe original.",
+  };
+}
+
+function translateGenerateLinkError(err: any): { error: string; hint: string } {
+  const code = String(err?.code ?? "").toLowerCase();
+  const msg = String(err?.message ?? "").toLowerCase();
+  if (code === "email_exists" || msg.includes("already registered") || msg.includes("already been registered")) {
+    return {
+      error: "Já existe uma conta com este email.",
+      hint: "Peça ao usuário para usar 'Esqueci minha senha' ou remova o cadastro antigo antes de reaprovar.",
+    };
+  }
+  if (msg.includes("rate limit")) {
+    return {
+      error: "Limite de envios do provedor de autenticação atingido.",
+      hint: "Aguarde alguns minutos e tente novamente.",
+    };
+  }
+  return {
+    error: "Não foi possível gerar o link de acesso.",
+    hint: err?.message ?? "Consulte os logs para o detalhe original.",
+  };
 }
