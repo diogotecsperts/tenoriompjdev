@@ -62,6 +62,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Timeout de segurança para evitar loading infinito
     const PROFILE_LOAD_TIMEOUT = 7000;
 
+    const readProfileAndRole = async (userId: string) => {
+      return await Promise.all([
+        supabase
+          .from("profiles")
+          .select("nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url")
+          .eq("id", userId)
+          .maybeSingle(),
+        supabase.rpc("is_admin"),
+      ]);
+    };
+
     // Função centralizada para carregar dados do usuário
     const loadUserData = async (session: Session) => {
       // Evitar chamadas duplicadas
@@ -109,14 +120,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }, PROFILE_LOAD_TIMEOUT);
 
       try {
-        const [profileResult, roleResult] = await Promise.all([
-          supabase
-            .from("profiles")
-            .select("nome, email, crm, especialidade, telefone, endereco, user_id, avatar_url")
-            .eq("id", session.user.id)
-            .maybeSingle(),
-          supabase.rpc("is_admin"),
-        ]);
+        let [profileResult, roleResult] = await readProfileAndRole(session.user.id);
+
+        if (profileResult.error) {
+          const { data: userCheck, error: userCheckError } = await supabase.auth.getUser();
+          if (userCheckError || !userCheck.user) {
+            await supabase.auth.signOut();
+            setSession(null);
+            setUser(null);
+            setProfile(null);
+            setUserRole(null);
+            loadedUserIdRef.current = null;
+            isLoadingUserDataRef.current = false;
+            setLoading(false);
+            return;
+          }
+          [profileResult, roleResult] = await readProfileAndRole(userCheck.user.id);
+        }
 
         clearTimeout(timeoutId);
 
@@ -128,7 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           toast({
             variant: "destructive",
             title: "Erro ao carregar perfil",
-            description: "Problema de conexão. Tente recarregar a página.",
+            description: "Sessão preservada. Recarregue a página para tentar novamente.",
           });
           setProfile(null);
           isLoadingUserDataRef.current = false;
