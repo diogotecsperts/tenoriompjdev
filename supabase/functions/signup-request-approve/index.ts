@@ -9,6 +9,9 @@ const corsHeaders = {
 
 // Remetente do domínio já verificado no Resend (mesmo domínio usado em send-tracking-email).
 const APPROVAL_FROM = "Tenório MPJ <acesso@mpjpericias.tecsperts.com>";
+// Domínio de produção FIXO: o link enviado por email nunca pode apontar para
+// o preview/staging. Ignoramos qualquer origin vindo do cliente.
+const PROD_ORIGIN = "https://brunobetav2.tecsperts.com";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
