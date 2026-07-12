@@ -5,16 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
-import { Stethoscope, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Stethoscope, Lock, Eye, EyeOff, Loader2, Mail, RefreshCw } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
-/**
- * Página pública que consome o link enviado por email quando o dev aprova a
- * solicitação. Valida o link (token_hash via verifyOtp OU access/refresh no hash
- * via setSession), depois o usuário define a senha, chamamos a edge function
- * que marca a solicitação como completed, e finalmente signOut para forçar
- * login normal com a senha recém-criada.
- */
 export default function FinalizarCadastro() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<"verifying" | "ready" | "saving" | "done" | "error">("verifying");
@@ -23,8 +16,9 @@ export default function FinalizarCadastro() {
   const [confirm, setConfirm] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
+  const [resendEmail, setResendEmail] = useState("");
+  const [resending, setResending] = useState(false);
   const ranRef = useRef(false);
-
 
   useEffect(() => {
     if (ranRef.current) return;
@@ -60,8 +54,8 @@ export default function FinalizarCadastro() {
         const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
         window.history.replaceState({}, "", window.location.pathname);
         if (error) {
-          console.warn("[finalizar-cadastro] verifyOtp falhou", { type, hasTokenHash: true, code: (error as any).code, msg: error.message });
-          return finish("error", "Link inválido ou já utilizado (cada link é de uso único). Solicite um novo cadastro.");
+          console.warn("[finalizar-cadastro] verifyOtp falhou", { type, code: (error as any).code, msg: error.message });
+          return finish("error", "Link inválido ou já utilizado (cada link é de uso único). Reenvie um novo link abaixo ou solicite um novo cadastro.");
         }
         await captureEmail();
         return finish("ready");
@@ -78,7 +72,7 @@ export default function FinalizarCadastro() {
         window.history.replaceState({}, "", window.location.pathname);
         if (error) {
           console.warn("[finalizar-cadastro] setSession falhou", { msg: error.message });
-          return finish("error", "Link expirado ou já utilizado. Solicite um novo cadastro.");
+          return finish("error", "Link expirado ou já utilizado. Reenvie um novo link abaixo ou solicite um novo cadastro.");
         }
         await captureEmail();
         return finish("ready");
@@ -91,24 +85,20 @@ export default function FinalizarCadastro() {
         return finish("ready");
       }
 
-      console.warn("[finalizar-cadastro] sem token_hash, sem fragmento e sem sessão", {
-        search: window.location.search,
-        hash: window.location.hash,
-      });
+      console.warn("[finalizar-cadastro] sem token_hash, sem fragmento e sem sessão");
       finish(
         "error",
-        "Não recebemos o código de acesso na URL. Isso costuma acontecer quando o link do email foi truncado ou aberto por um pré-visualizador. Abra o link direto no navegador ou solicite um novo cadastro.",
+        "Não recebemos o código de acesso na URL. Isso costuma acontecer quando o link do email foi truncado ou aberto por um pré-visualizador. Reenvie um novo link abaixo ou abra o link direto no navegador.",
       );
     };
 
-
     timeoutId = window.setTimeout(() => {
-      finish("error", "Não conseguimos validar o link a tempo. Peça um novo cadastro.");
+      finish("error", "Não conseguimos validar o link a tempo. Reenvie um novo link abaixo.");
     }, 8000);
 
     run().catch((e) => {
       console.error("finalizar-cadastro validation error", e);
-      finish("error", "Não conseguimos validar o link. Peça um novo cadastro.");
+      finish("error", "Não conseguimos validar o link. Reenvie um novo link abaixo.");
     });
   }, []);
 
@@ -124,18 +114,7 @@ export default function FinalizarCadastro() {
     }
     setStatus("saving");
 
-    // Pré-checagem: sessão ainda ativa? Se não, o link já foi consumido/expirou
-    // ou o AuthContext deslogou. Traduz para mensagem clara em vez de "Auth session missing!".
-    const { data: sessionCheck } = await supabase.auth.getSession();
-    if (!sessionCheck.session) {
-      console.warn("[finalizar-cadastro] sessão ausente antes do updateUser", { sessionEmail });
-      setStatus("error");
-      setErrorMsg(
-        "Sua sessão expirou. Cada link de acesso é de uso único — solicite um novo cadastro para receber outro link.",
-      );
-      return;
-    }
-
+    // Tenta direto — sem re-checar getSession antes, para não perder janela de sessão de link.
     const { error } = await supabase.auth.updateUser({ password });
     if (error) {
       const raw = error.message ?? "";
@@ -144,7 +123,7 @@ export default function FinalizarCadastro() {
         console.warn("[finalizar-cadastro] updateUser sem sessão", { raw, sessionEmail });
         setStatus("error");
         setErrorMsg(
-          "Sua sessão expirou durante a finalização. Solicite um novo cadastro para receber outro link.",
+          "Sua sessão expirou. Reenvie um novo link abaixo para continuar.",
         );
         return;
       }
@@ -159,7 +138,15 @@ export default function FinalizarCadastro() {
 
     // Marca a solicitação como completed antes do signOut (precisamos da sessão)
     try {
-      await supabase.functions.invoke("signup-request-finalize");
+      const { error: finErr } = await supabase.functions.invoke("signup-request-finalize");
+      if (finErr) {
+        console.error("finalize returned error", finErr);
+        toast({
+          variant: "destructive",
+          title: "Senha salva, mas houve um aviso",
+          description: "Não conseguimos marcar sua solicitação como concluída. Faça login normalmente; se algo travar, contate o suporte.",
+        });
+      }
     } catch (err) {
       console.error("finalize call failed", err);
     }
@@ -167,6 +154,34 @@ export default function FinalizarCadastro() {
     setStatus("done");
     toast({ title: "Cadastro finalizado!", description: "Faça login com seu email e a senha que você definiu." });
     setTimeout(() => navigate("/"), 1500);
+  };
+
+  const handleResend = async () => {
+    const email = (sessionEmail ?? resendEmail).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast({ variant: "destructive", title: "Email inválido", description: "Informe o email do cadastro." });
+      return;
+    }
+    setResending(true);
+    try {
+      const { error } = await supabase.functions.invoke("signup-request-resend", {
+        body: { email, redirect_origin: window.location.origin },
+      });
+      if (error) throw error;
+      toast({
+        title: "Se houver uma aprovação ativa, enviamos um novo link",
+        description: "Verifique sua caixa de entrada (e o spam) nos próximos minutos.",
+      });
+    } catch (e) {
+      console.error("resend failed", e);
+      toast({
+        variant: "destructive",
+        title: "Não foi possível reenviar agora",
+        description: "Aguarde alguns minutos e tente novamente.",
+      });
+    } finally {
+      setResending(false);
+    }
   };
 
   return (
@@ -195,11 +210,33 @@ export default function FinalizarCadastro() {
           {status === "error" && (
             <div className="space-y-4">
               <p className="text-center text-destructive">{errorMsg}</p>
-              {sessionEmail && (
+              {sessionEmail ? (
                 <p className="text-center text-xs text-muted-foreground">
                   Email da tentativa: <span className="font-medium">{sessionEmail}</span>
                 </p>
+              ) : (
+                <div className="space-y-2">
+                  <Label htmlFor="resend-email">Seu email</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="resend-email"
+                      type="email"
+                      className="pl-10 h-11"
+                      placeholder="voce@exemplo.com"
+                      value={resendEmail}
+                      onChange={(e) => setResendEmail(e.target.value)}
+                    />
+                  </div>
+                </div>
               )}
+              <Button className="w-full" onClick={handleResend} disabled={resending}>
+                {resending ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Reenviando...</>
+                ) : (
+                  <><RefreshCw className="mr-2 h-4 w-4" /> Reenviar link</>
+                )}
+              </Button>
               <Button className="w-full" variant="outline" onClick={() => navigate("/solicitar-cadastro")}>
                 Solicitar novo cadastro
               </Button>
