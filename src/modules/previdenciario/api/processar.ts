@@ -41,6 +41,7 @@ interface PrevProcessingStatus {
 export type PreProcessarErrorCode =
   | "quota_exceeded"
   | "invalid_key"
+  | "session_expired"
   | "rate_limited"
   | "provider_timeout"
   | "invalid_request"
