@@ -169,11 +169,25 @@ Deno.serve(async (req) => {
     invite_user_id: userId,
   }).eq("id", requestId);
 
+  const fingerprint = await tokenFingerprint(hashedToken);
+
   await admin.from("access_logs").insert({
     user_id: reviewerId,
     event_type: "signup_request_approved",
     metadata: { request_id: requestId, target_email: email, target_user_id: userId },
   });
+  await admin.from("access_logs").insert({
+    user_id: reviewerId,
+    event_type: "signup_link_generated",
+    metadata: {
+      request_id: requestId,
+      target_email: email,
+      target_user_id: userId,
+      link_type: linkType,
+      fingerprint,
+    },
+  });
+
 
   return json({ ok: true, user_id: userId });
 
@@ -184,6 +198,14 @@ Deno.serve(async (req) => {
     });
   }
 });
+
+async function tokenFingerprint(token: string): Promise<string> {
+  const buf = new TextEncoder().encode(token);
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hex.slice(0, 8);
+}
+
 
 function escapeHtml(s: string) {
   return s

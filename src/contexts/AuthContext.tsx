@@ -240,6 +240,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // Bypass total em /finalizar-cadastro: não carrega perfil nem aplica
+      // qualquer gate. A página cuida da sessão de uso único do link.
+      const pathNow = typeof window !== "undefined" ? window.location.pathname : "";
+      if (pathNow.startsWith("/finalizar-cadastro")) {
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+        return;
+      }
+
       setSession(session);
       setUser(session?.user ?? null);
 
@@ -258,9 +268,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
+
     // Check for existing session (carregamento inicial)
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       initialLoadDoneRef.current = true;
+
+      // Bypass total em /finalizar-cadastro: a página cuida da sessão de uso
+      // único do link e chama updateUser({ password }). Não carregamos perfil
+      // nem aplicamos gates aqui para não deslogar a sessão do link.
+      const pathNow = typeof window !== "undefined" ? window.location.pathname : "";
+      if (pathNow.startsWith("/finalizar-cadastro")) {
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+        return;
+      }
 
       setSession(session);
       setUser(session?.user ?? null);
@@ -275,6 +297,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
       }
     });
+
 
     return () => subscription.unsubscribe();
   }, []);

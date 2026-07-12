@@ -74,6 +74,10 @@ verify_jwt = true
 [functions.signup-request-finalize]
 verify_jwt = true
 
+[functions.signup-request-resend]
+verify_jwt = false
+
+
 
 
 
