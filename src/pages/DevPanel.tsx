@@ -48,6 +48,7 @@ import { DevUserModules } from "@/components/dev-panel/DevUserModules";
 import { DevUsageControl } from "@/components/dev-panel/DevUsageControl";
 import { DevEmailTracking } from "@/components/dev-panel/DevEmailTracking";
 import { DevSignupRequests } from "@/components/dev-panel/DevSignupRequests";
+import DevJobTimeline from "@/components/dev-panel/DevJobTimeline";
 
 type DevTab =
   | "dashboard"
