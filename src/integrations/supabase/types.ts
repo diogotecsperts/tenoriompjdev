@@ -510,6 +510,7 @@ export type Database = {
           historia_atual: string | null
           historico_ocupacional: string | null
           id: string
+          is_smoke_test: boolean
           laudos_medicos: string | null
           local_pericia: string | null
           metodologia_pericial: string | null
@@ -586,6 +587,7 @@ export type Database = {
           historia_atual?: string | null
           historico_ocupacional?: string | null
           id?: string
+          is_smoke_test?: boolean
           laudos_medicos?: string | null
           local_pericia?: string | null
           metodologia_pericial?: string | null
@@ -662,6 +664,7 @@ export type Database = {
           historia_atual?: string | null
           historico_ocupacional?: string | null
           id?: string
+          is_smoke_test?: boolean
           laudos_medicos?: string | null
           local_pericia?: string | null
           metodologia_pericial?: string | null

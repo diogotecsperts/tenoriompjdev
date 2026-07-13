@@ -1,0 +1,2 @@
+ALTER TABLE public.laudos ADD COLUMN IF NOT EXISTS is_smoke_test boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_laudos_is_smoke_test ON public.laudos (is_smoke_test) WHERE is_smoke_test = true;
