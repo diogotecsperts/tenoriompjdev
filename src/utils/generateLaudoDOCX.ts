@@ -491,7 +491,10 @@ const createNumberedList = (items: string[]): Paragraph[] => {
 
 // ========== FUNÇÃO PRINCIPAL ==========
 
-export const generateLaudoDOCX = async (laudo: LaudoData): Promise<void> => {
+export const generateLaudoDOCX = async (
+  laudo: LaudoData,
+  options?: { returnBlob?: boolean },
+): Promise<Blob | void> => {
   let sectionNumber = 1;
   const paragraphs: Paragraph[] = [];
   
