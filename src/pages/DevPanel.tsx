@@ -87,6 +87,7 @@ const navItems: NavItem[] = [
   { id: "email-tracking", label: "Rastreamento via Email", icon: Mail },
   { id: "logs", label: "AI Analytics", icon: FileText },
   { id: "backend-logs", label: "Servidor & Jobs", icon: Server },
+  { id: "job-timeline", label: "Job Timeline", icon: Activity },
   { id: "errors", label: "UI Reports", icon: AlertTriangle },
   { id: "ai-efficiency", label: "Eficiência de IAs", icon: Gauge },
   { id: "retries", label: "Retries & Rate Limits", icon: RefreshCw },
