@@ -43,16 +43,13 @@ interface GeminiModelInfo {
 interface SystemConfig {
   default_ai_provider: string;
   default_ai_model: string;
-  fallback_ai_provider: string;
-  fallback_ai_model: string;
   gemini_pdf_model: string;
-  pdf_ai_provider: string;
   pdf_ai_model: string;
   pdf_fallback_provider: string;
   pdf_fallback_model: string;
   maintenance_mode: boolean;
   max_pdf_size_mb: number;
-  
+
   retry_enabled: boolean;
   retry_max_attempts: number;
   retry_base_delay_ms: number;
@@ -63,6 +60,10 @@ interface SystemConfig {
   store_extracted_text: boolean;
   phase1_gemini_model: string;
   phase1_ocr_provider: string; // 'gemini' or 'mistral'
+  // Legacy (obsoletos, mantidos apenas para compatibilidade da UI até a limpeza do form)
+  fallback_ai_provider?: string;
+  fallback_ai_model?: string;
+  pdf_ai_provider?: string;
 }
 
 interface ApiKeys {
@@ -221,16 +222,13 @@ const AI_PROVIDERS: ProviderInfo[] = [{
 const DEFAULT_CONFIG: SystemConfig = {
   default_ai_provider: "lovable",
   default_ai_model: "google/gemini-2.5-flash",
-  fallback_ai_provider: "lovable",
-  fallback_ai_model: "google/gemini-2.5-flash",
   gemini_pdf_model: "gemini-2.5-flash",
-  pdf_ai_provider: "openrouter",
   pdf_ai_model: "google/gemini-2.5-flash",
   pdf_fallback_provider: "lovable",
   pdf_fallback_model: "google/gemini-2.5-flash",
   maintenance_mode: false,
   max_pdf_size_mb: 50,
-  
+
   retry_enabled: true,
   retry_max_attempts: 3,
   retry_base_delay_ms: 1000,
@@ -644,10 +642,7 @@ export function DevSettings() {
         setConfig({
           default_ai_provider: configMap.default_ai_provider || DEFAULT_CONFIG.default_ai_provider,
           default_ai_model: configMap.default_ai_model || DEFAULT_CONFIG.default_ai_model,
-          fallback_ai_provider: configMap.fallback_ai_provider || DEFAULT_CONFIG.fallback_ai_provider,
-          fallback_ai_model: configMap.fallback_ai_model || DEFAULT_CONFIG.fallback_ai_model,
           gemini_pdf_model: configMap.gemini_pdf_model || DEFAULT_CONFIG.gemini_pdf_model,
-          pdf_ai_provider: configMap.pdf_ai_provider || DEFAULT_CONFIG.pdf_ai_provider,
           pdf_ai_model: configMap.pdf_ai_model || DEFAULT_CONFIG.pdf_ai_model,
           pdf_fallback_provider: configMap.pdf_fallback_provider || DEFAULT_CONFIG.pdf_fallback_provider,
           pdf_fallback_model: configMap.pdf_fallback_model || DEFAULT_CONFIG.pdf_fallback_model,
@@ -822,17 +817,8 @@ export function DevSettings() {
         id: "default_ai_model",
         value: config.default_ai_model
       }, {
-        id: "fallback_ai_provider",
-        value: config.fallback_ai_provider
-      }, {
-        id: "fallback_ai_model",
-        value: config.fallback_ai_model
-      }, {
         id: "gemini_pdf_model",
         value: config.gemini_pdf_model
-      }, {
-        id: "pdf_ai_provider",
-        value: config.pdf_ai_provider
       }, {
         id: "pdf_ai_model",
         value: config.pdf_ai_model
@@ -1805,169 +1791,9 @@ export function DevSettings() {
           </CardContent>
         </Card>
 
-        {/* Fallback Model Selector */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Shield className="h-4 w-4" />
-              Fallback (Backup)
-            </CardTitle>
-            <CardDescription>
-              Provider e modelo usados quando o principal falha
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Provider Fallback</Label>
-                <Select value={config.fallback_ai_provider} onValueChange={value => {
-              const provider = AI_PROVIDERS.find(p => p.id === value);
-              setConfig({
-                ...config,
-                fallback_ai_provider: value,
-                fallback_ai_model: value === 'gemini' ? getSafeGeminiDefaultModel(null, provider?.models || []) : provider?.models[0] || ""
-              });
-            }}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AI_PROVIDERS.filter(p => !p.requiresKey || savedApiKeys[p.id]).map(provider => <SelectItem key={provider.id} value={provider.id}>
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full" style={{
-                      backgroundColor: provider.color
-                    }} />
-                          {provider.name}
-                        </div>
-                      </SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Modelo Fallback</Label>
-                {fallbackProviderHasCustomInput() ? (
-                  <div className="space-y-4">
-                    <div className="flex gap-2 items-center">
-                      <Input 
-                        value={config.fallback_ai_model} 
-                        onChange={e => setConfig({
-                          ...config,
-                          fallback_ai_model: e.target.value
-                        })} 
-                        placeholder={getFallbackProvider()?.modelPlaceholder} 
-                        className="flex-1"
-                      />
-                      <Button 
-                        variant="outline" 
-                        size="icon" 
-                        onClick={() => addFavoriteModel(config.fallback_ai_provider, config.fallback_ai_model)} 
-                        disabled={!config.fallback_ai_model.trim()} 
-                        title="Adicionar aos favoritos"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    
-                    {/* Favorite Models List for Fallback */}
-                    {favoriteModels[config.fallback_ai_provider]?.length > 0 && (
-                      <div className="space-y-2">
-                        <Label className="text-sm text-muted-foreground flex items-center gap-1">
-                          <Star className="h-3 w-3 text-yellow-500" />
-                          Meus modelos favoritos:
-                        </Label>
-                        <div className="flex flex-col gap-1">
-                          {favoriteModels[config.fallback_ai_provider].map(model => (
-                            <div 
-                              key={model} 
-                              className={cn(
-                                "flex items-center justify-between p-2 rounded-md border text-sm group cursor-pointer hover:bg-muted/50 transition-colors", 
-                                config.fallback_ai_model === model && "border-primary bg-primary/5"
-                              )} 
-                              onClick={() => setConfig({
-                                ...config,
-                                fallback_ai_model: model
-                              })}
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <Star className="h-3 w-3 text-yellow-500 shrink-0" />
-                                <span className="font-mono text-xs truncate">{model}</span>
-                              </div>
-                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  className="h-6 w-6" 
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    copyModelId(model);
-                                  }} 
-                                  title="Copiar identificador"
-                                >
-                                  {copiedModel === model ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-                                </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  className="h-6 w-6 text-destructive hover:text-destructive" 
-                                  onClick={e => {
-                                    e.stopPropagation();
-                                    removeFavoriteModel(config.fallback_ai_provider, model);
-                                  }} 
-                                  title="Remover dos favoritos"
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Popular suggestions for fallback */}
-                    <div className="space-y-2">
-                      <Label className="text-sm text-muted-foreground">Sugestões populares:</Label>
-                      <div className="flex flex-wrap gap-2">
-                        {getFallbackProviderModels().slice(0, 4).map(model => (
-                          <Button 
-                            key={model} 
-                            variant={config.fallback_ai_model === model ? "secondary" : "outline"} 
-                            size="sm" 
-                            className="text-xs h-7" 
-                            onClick={() => setConfig({
-                              ...config,
-                              fallback_ai_model: model
-                            })}
-                          >
-                            {model.length > 25 ? model.slice(0, 25) + "…" : model}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <Select value={config.fallback_ai_model} onValueChange={value => setConfig({
-                    ...config,
-                    fallback_ai_model: value
-                  })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {config.fallback_ai_provider === 'gemini'
-                        ? getFallbackProviderModels().map(model => renderGeminiModelOption(model))
-                        : getFallbackProviderModels().map(model => (
-                            <SelectItem key={model} value={model}>{model}</SelectItem>
-                          ))
-                      }
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Fallback cross-provider removido — apenas IA Principal + OCR. */}
       </div>
+
 
       <Separator />
 

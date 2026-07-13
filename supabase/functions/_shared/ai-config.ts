@@ -1,19 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 export interface AIConfig {
-  provider: string;       // 'lovable', 'gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter'
+  provider: string;       // 'lovable', 'gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'minimax'
   model: string;          // ex: 'gemini-2.5-pro', 'gpt-4o'
   apiKey: string | null;  // API key do provider (null se lovable)
   endpoint: string;       // URL do endpoint
   displayModel: string;   // Nome amigável para exibição
-  // Fallback configuration
-  fallback?: {
-    provider: string;
-    model: string;
-    apiKey: string | null;
-    endpoint: string;
-    displayModel: string;
-  };
 }
 
 // Mapeamento de providers para endpoints
@@ -361,11 +353,13 @@ export async function getAIConfig(forceRefresh = false): Promise<AIConfig> {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
-    // Buscar configurações do sistema incluindo fallback
+    // Fallback cross-provider foi removido por decisão do DevPanel:
+    // a IA principal é sempre o que estiver em default_ai_*. Falhas propagam
+    // como erro visível, sem retry silencioso em outro provider.
     const { data: configData, error: configError } = await supabase
       .from('system_config')
       .select('id, value')
-      .in('id', ['default_ai_provider', 'default_ai_model', 'fallback_ai_provider', 'fallback_ai_model']);
+      .in('id', ['default_ai_provider', 'default_ai_model']);
 
     if (configError) {
       console.error('[AI Config] Error fetching config:', configError);
@@ -379,11 +373,8 @@ export async function getAIConfig(forceRefresh = false): Promise<AIConfig> {
 
     const provider = configMap.default_ai_provider || 'lovable';
     let model = configMap.default_ai_model || DEFAULT_MODELS[provider] || 'google/gemini-2.5-flash';
-    
-    const fallbackProvider = configMap.fallback_ai_provider || 'lovable';
-    const fallbackModel = configMap.fallback_ai_model || 'google/gemini-2.5-flash';
 
-    console.log(`[AI Config] Provider: ${provider}, Model: ${model}, Fallback: ${fallbackProvider}/${fallbackModel}`);
+    console.log(`[AI Config] Provider: ${provider}, Model: ${model} (no cross-provider fallback)`);
 
     // Build primary config
     let primaryConfig: AIConfig;
@@ -444,73 +435,8 @@ export async function getAIConfig(forceRefresh = false): Promise<AIConfig> {
       }
     }
 
-    // Build fallback config
-    let fallbackConfig: AIConfig['fallback'] | undefined;
-    
-    if (fallbackProvider === 'lovable') {
-      const lovableKey = Deno.env.get('LOVABLE_API_KEY');
-      fallbackConfig = {
-        provider: 'lovable',
-        model: fallbackModel,
-        apiKey: lovableKey || null,
-        endpoint: PROVIDER_ENDPOINTS.lovable,
-        displayModel: fallbackModel.replace('google/', '')
-      };
-    } else if (fallbackProvider === 'minimax') {
-      const minimaxKey = Deno.env.get('MINIMAX_API_KEY');
-      if (minimaxKey) {
-        fallbackConfig = {
-          provider: 'minimax',
-          model: 'MiniMax-M3',
-          apiKey: minimaxKey,
-          endpoint: PROVIDER_ENDPOINTS.minimax,
-          displayModel: 'MiniMax-M3',
-        };
-      } else {
-        const lovableKey = Deno.env.get('LOVABLE_API_KEY');
-        fallbackConfig = {
-          provider: 'lovable',
-          model: 'google/gemini-2.5-flash',
-          apiKey: lovableKey || null,
-          endpoint: PROVIDER_ENDPOINTS.lovable,
-          displayModel: 'gemini-2.5-flash'
-        };
-      }
-    } else {
-      // Buscar API key do fallback provider
-      const { data: fallbackKeyData } = await supabase
-        .from('global_api_keys')
-        .select('api_key')
-        .eq('id', fallbackProvider)
-        .single();
+    // Fallback cross-provider foi removido — nada é atribuído a primaryConfig.fallback.
 
-      if (fallbackKeyData?.api_key) {
-        let adjustedFallbackModel = fallbackModel;
-        if (fallbackProvider === 'gemini' && fallbackModel.startsWith('google/')) {
-          adjustedFallbackModel = fallbackModel.replace('google/', '');
-        }
-        
-        fallbackConfig = {
-          provider: fallbackProvider,
-          model: adjustedFallbackModel,
-          apiKey: fallbackKeyData.api_key,
-          endpoint: PROVIDER_ENDPOINTS[fallbackProvider] || PROVIDER_ENDPOINTS.lovable,
-          displayModel: adjustedFallbackModel
-        };
-      } else {
-        // Fallback do fallback: Lovable AI
-        const lovableKey = Deno.env.get('LOVABLE_API_KEY');
-        fallbackConfig = {
-          provider: 'lovable',
-          model: 'google/gemini-2.5-flash',
-          apiKey: lovableKey || null,
-          endpoint: PROVIDER_ENDPOINTS.lovable,
-          displayModel: 'gemini-2.5-flash'
-        };
-      }
-    }
-
-    primaryConfig.fallback = fallbackConfig;
 
     // Store in cache
     configCache = { config: primaryConfig, timestamp: Date.now() };
@@ -532,13 +458,6 @@ function getDefaultConfig(): AIConfig {
     apiKey: lovableKey || null,
     endpoint: PROVIDER_ENDPOINTS.lovable,
     displayModel: 'gemini-2.5-flash',
-    fallback: {
-      provider: 'lovable',
-      model: 'google/gemini-2.5-flash',
-      apiKey: lovableKey || null,
-      endpoint: PROVIDER_ENDPOINTS.lovable,
-      displayModel: 'gemini-2.5-flash'
-    }
   };
 }
 
@@ -556,10 +475,7 @@ export async function callAI(
     throw new Error(`API key not configured for provider: ${config.provider}`);
   }
 
-  const totalBudgetMs = options?.requestTimeoutMs;
-  const primaryTimeoutMs = totalBudgetMs && config.fallback?.apiKey
-    ? Math.max(15_000, Math.floor(totalBudgetMs * 0.55))
-    : totalBudgetMs;
+  const primaryTimeoutMs = options?.requestTimeoutMs;
 
   try {
     const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: primaryTimeoutMs });
@@ -581,10 +497,10 @@ export async function callAI(
     return { ...result, usedFallback: false };
   } catch (primaryError) {
     const classifiedPrimary = classifyAIProviderError(primaryError, config.provider, config.model, 'ai_generation');
-    console.error(`[AI Call] Primary provider ${config.provider} failed:`, classifiedPrimary);
+    console.error(`[AI Call] Provider ${config.provider} failed (no cross-provider fallback):`, classifiedPrimary);
     const primaryLatency = Date.now() - startTime;
 
-    // Log primary failure
+    // Log failure
     if (options?.promptType) {
       await logAIUsage({
         userId: options.userId,
@@ -596,69 +512,6 @@ export async function callAI(
         errorMessage: `${classifiedPrimary.code}: ${classifiedPrimary.technicalDetail}`,
         usedFallback: false
       });
-    }
-
-    // Try fallback if available
-    if (config.fallback && config.fallback.apiKey) {
-      console.log(`[AI Fallback] Trying fallback: ${config.fallback.provider}/${config.fallback.model}`);
-      const fallbackStartTime = Date.now();
-      const fallbackBudgetMs = totalBudgetMs
-        ? totalBudgetMs - (fallbackStartTime - startTime) - 2_000
-        : 60_000;
-
-      if (fallbackBudgetMs < 10_000) {
-        console.warn(`[AI Fallback] Skipping fallback: insufficient time budget (${fallbackBudgetMs}ms)`);
-        throw classifiedPrimary;
-      }
-
-      try {
-        const fallbackConfig: AIConfig = {
-          provider: config.fallback.provider,
-          model: config.fallback.model,
-          apiKey: config.fallback.apiKey,
-          endpoint: config.fallback.endpoint,
-          displayModel: config.fallback.displayModel
-        };
-
-        const result = await callProvider(fallbackConfig, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: Math.min(fallbackBudgetMs, 60_000) });
-        const fallbackLatency = Date.now() - fallbackStartTime;
-
-        // Log successful fallback
-        if (options?.promptType) {
-          await logAIUsage({
-            userId: options.userId,
-            provider: result.provider,
-            model: result.model,
-            promptType: options.promptType,
-            latencyMs: fallbackLatency,
-            success: true,
-            usedFallback: true
-          });
-        }
-
-        console.log(`[AI Fallback] Success with ${result.provider}/${result.model}`);
-        return { ...result, usedFallback: true };
-      } catch (fallbackError) {
-        const classifiedFallback = classifyAIProviderError(fallbackError, config.fallback.provider, config.fallback.model, 'ai_generation');
-        console.error(`[AI Fallback] Fallback also failed:`, classifiedFallback);
-        const fallbackLatency = Date.now() - fallbackStartTime;
-
-        // Log fallback failure
-        if (options?.promptType) {
-          await logAIUsage({
-            userId: options.userId,
-            provider: config.fallback.provider,
-            model: config.fallback.model,
-            promptType: options.promptType,
-            latencyMs: fallbackLatency,
-            success: false,
-          errorMessage: `${classifiedFallback.code}: ${classifiedFallback.technicalDetail}`,
-            usedFallback: true
-          });
-        }
-
-        throw classifiedFallback;
-      }
     }
 
     throw classifiedPrimary;
