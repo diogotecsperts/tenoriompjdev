@@ -275,10 +275,11 @@ async function callGeminiInteractionsWithFile(
       { type: 'text', text: prompt },
     ],
     system_instruction: 'Você é um sistema de OCR especializado. Extraia texto de documentos PDF de forma fiel, completa e sem inventar dados.',
+    // Gemini 3.x (Interactions API) rejeita `response_mime_type` em
+    // `generation_config` — o prompt já instrui o retorno em JSON.
     generation_config: {
       temperature: 0.1,
       max_output_tokens: 65536,
-      response_mime_type: 'application/json',
     },
     background: true,
   };

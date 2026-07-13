@@ -148,15 +148,21 @@ function classifyInvokeError(error: unknown, body: Record<string, unknown> | nul
     else if (status && status >= 500) code = "provider_unavailable";
   }
 
+  const isGemini400 =
+    code === "invalid_request" &&
+    (/gemini|generation[_ ]?config|response[_ ]?mime|files api/i.test(rawMessage) || /gemini/i.test(String(body?.provider ?? "")));
+
   const fallbackMessage =
     code === "session_expired"
       ? "Sua sessão expirou. Saia e entre novamente para continuar."
       : code === "provider_timeout"
         ? "Tempo excedido no processamento da IA. O backend encerrou a chamada antes de receber uma resposta completa do provider."
-        : rawMessage;
+        : isGemini400
+          ? "O Gemini recusou a requisição (400). O modelo/parâmetro configurado no DevPanel pode não ser compatível. Verifique o modelo de OCR."
+          : rawMessage;
 
   return new PreProcessarError(
-    code === "session_expired" || rawMessage.includes("Edge Function returned") ? fallbackMessage : rawMessage,
+    code === "session_expired" || isGemini400 || rawMessage.includes("Edge Function returned") ? fallbackMessage : rawMessage,
     code,
     typeof body?.stage === "string" ? body.stage : undefined,
     status,

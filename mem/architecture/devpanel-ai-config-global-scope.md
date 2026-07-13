@@ -1,11 +1,11 @@
 ---
 name: DevPanel AI config global scope
-description: Config de IA (provider, modelo, OCR, fallback) do DevPanel vale para TODOS os módulos; providers permitidos e hardcodes autorizados.
+description: Config de IA (provider, modelo, OCR) do DevPanel vale para TODOS os módulos; sem fallback silencioso.
 type: architecture
 ---
 
 **Regra Core:** toda configuração de IA feita no DevPanel — provider padrão, modelo, provider de OCR,
-modelo de OCR, fallbacks, chaves — DEVE valer para todos os módulos do app (Trabalhista,
+modelo de OCR, chaves — DEVE valer para todos os módulos do app (Trabalhista,
 Previdenciário, Impugnação e futuros). É proibido hardcodar provider ou modelo de IA em edge
 function de módulo — sempre ler de `system_config` via os helpers existentes:
 - `getAIConfig()` para geração de texto (Fase 2, campos, quesitos, etc).
@@ -32,4 +32,14 @@ Prompts e lógica de negócio ficam fora dessa regra: não são afetados pela tr
 - Mistral OCR: `MISTRAL_API_KEY` (env).
 - Demais providers: `global_api_keys` (tabela).
 
-**Fallback do OCR router:** `escolhido → gemini → mistral → minimax`, pulando quem não tem chave.
+**Sem fallback silencioso no OCR (jul/2026):** `ocr-router.ts` **NÃO** faz mais cadeia
+automática `escolhido → gemini → mistral → minimax`. Roda EXCLUSIVAMENTE o provider
+configurado no DevPanel; se falhar, propaga o erro real ao caller. Fallback antigo gerou
+cobrança inesperada da Mistral quando o Gemini 3.x quebrou por incompatibilidade de
+`response_mime_type` em `generation_config` da Interactions API.
+
+**Gemini 3.x — restrição de body:** modelos `gemini-3.*` rodam pela Interactions API
+(`/v1beta/interactions`, background=true) e **NÃO** aceitam `response_mime_type` em
+`generation_config`. A instrução de retorno JSON deve estar apenas no prompt.
+Modelos `gemini-2.*` continuam aceitando `responseMimeType` no `generationConfig`
+do `generateContent`.

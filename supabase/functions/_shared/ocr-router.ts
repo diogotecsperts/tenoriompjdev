@@ -61,9 +61,16 @@ export async function getOcrRouterConfig(): Promise<OcrRouterConfig> {
 }
 
 /**
- * Executa OCR usando o provider configurado no DevPanel.
- * Se o provider escolhido estiver sem chave, faz fallback silencioso na ordem
- * declarada pelo próprio provider escolhido → gemini → mistral → minimax.
+ * Executa OCR usando **exclusivamente** o provider configurado no DevPanel.
+ *
+ * Sem cadeia de fallback silenciosa: se o provider escolhido falhar, o erro
+ * é propagado direto ao caller. Fallback silencioso pra Mistral gerou cobrança
+ * inesperada quando o Gemini 3.x quebrava (bug de `response_mime_type` no body
+ * da Files API — jul/2026). DevPanel agora é fonte única da verdade.
+ *
+ * MiniMax continua sinalizando `MINIMAX_CLIENT_RASTERIZE_ERROR` para o caller
+ * delegar ao pipeline client-side (`runMinimaxClientOcr`); isso não é fallback
+ * pago, é o fluxo canônico do MiniMax.
  */
 export async function runOcrWithConfiguredProvider(
   pdfBytes: Uint8Array,
@@ -79,60 +86,44 @@ export async function runOcrWithConfiguredProvider(
   const geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("LOVABLE_API_KEY");
   const minimaxKey = getMinimaxAPIKey();
 
-  const hasKey = (p: OcrProvider) =>
-    p === "mistral" ? !!mistralKey : p === "minimax" ? !!minimaxKey : !!geminiKey;
+  const missingKey =
+    (cfg.provider === "mistral" && !mistralKey) ||
+    (cfg.provider === "minimax" && !minimaxKey) ||
+    (cfg.provider === "gemini" && !geminiKey);
 
-  // Cadeia: escolhido → gemini → mistral → minimax (dedupe + só quem tem chave)
-  const chain: OcrProvider[] = [];
-  const push = (p: OcrProvider) => { if (!chain.includes(p) && hasKey(p)) chain.push(p); };
-  push(cfg.provider);
-  push("gemini");
-  push("mistral");
-  push("minimax");
-
-  if (chain.length === 0) {
-    throw new Error("Nenhum provider de OCR disponível (Gemini, Mistral e MiniMax sem chave)");
+  if (missingKey) {
+    throw new Error(
+      `Provider de OCR '${cfg.provider}' configurado no DevPanel está sem chave de API. ` +
+      `Configure a chave correspondente ou troque o provider no DevPanel.`,
+    );
   }
 
-  let lastErr: Error | null = null;
-  for (const provider of chain) {
-    if (provider !== cfg.provider) {
-      console.warn(`${prefix} fallback → ${provider} (motivo: ${lastErr?.message?.slice(0, 200) || "sem chave do provider anterior"})`);
+  try {
+    if (cfg.provider === "mistral") {
+      const r = await extractWithMistralOCR(pdfBytes, mistralKey!);
+      return { text: r.text, pageCount: r.pageCount, provider: r.provider, model: r.model };
     }
-    try {
-      if (provider === "mistral") {
-        const r = await extractWithMistralOCR(pdfBytes, mistralKey!);
-        return { text: r.text, pageCount: r.pageCount, provider: r.provider, model: r.model };
-      }
-      if (provider === "minimax") {
-        // MiniMax OCR não pode rodar dentro da edge function (rasterização WASM
-        // estoura o limite de CPU ~2s → WORKER_RESOURCE_LIMIT). O caller precisa
-        // detectar este erro e delegar ao frontend (src/lib/minimax-ocr-client.ts).
-        throw new Error(
-          `${MINIMAX_CLIENT_RASTERIZE_ERROR}: MiniMax OCR requer rasterização no navegador. ` +
-          `Frontend deve chamar 'minimax-ocr-chunk' endpoint diretamente.`,
-        );
-      }
-      // gemini visual
-      const r = await extractVisualContent(pdfBytes, { model: cfg.geminiModel });
-      return {
-        text: r.rawText,
-        pageCount: r.pageCount,
-        provider: r.provider || "gemini-visual",
-        model: r.model || cfg.geminiModel,
-      };
-    } catch (e) {
-      lastErr = e as Error;
-      if (lastErr.message.includes(MINIMAX_CLIENT_RASTERIZE_ERROR)) {
-        console.warn(`${prefix} MiniMax requer rasterização client-side; sinalizando caller sem fallback pesado`);
-        throw lastErr;
-      }
-      if (/timeout|timed out|aborterror|gateway timeout|504/i.test(lastErr.message)) {
-        console.error(`${prefix} provider ${provider} excedeu o tempo seguro; interrompendo fallback para preservar resposta detalhada`);
-        throw lastErr;
-      }
-      console.error(`${prefix} provider ${provider} falhou: ${lastErr.message.slice(0, 300)}`);
+    if (cfg.provider === "minimax") {
+      // MiniMax OCR não pode rodar dentro da edge function (rasterização WASM
+      // estoura o limite de CPU ~2s → WORKER_RESOURCE_LIMIT). O caller precisa
+      // detectar este erro e delegar ao frontend (src/lib/minimax-ocr-client.ts).
+      throw new Error(
+        `${MINIMAX_CLIENT_RASTERIZE_ERROR}: MiniMax OCR requer rasterização no navegador. ` +
+        `Frontend deve chamar 'minimax-ocr-chunk' endpoint diretamente.`,
+      );
     }
+    // gemini visual (default)
+    const r = await extractVisualContent(pdfBytes, { model: cfg.geminiModel });
+    return {
+      text: r.rawText,
+      pageCount: r.pageCount,
+      provider: r.provider || "gemini-visual",
+      model: r.model || cfg.geminiModel,
+    };
+  } catch (e) {
+    const err = e as Error;
+    console.error(`${prefix} provider ${cfg.provider} falhou (sem fallback): ${err.message.slice(0, 400)}`);
+    throw err;
   }
-  throw lastErr || new Error("Todos os providers de OCR falharam");
 }
+

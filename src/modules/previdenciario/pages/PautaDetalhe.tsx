@@ -145,6 +145,8 @@ export default function PautaDetalhe() {
         return "Sugestão: verifique a cota/saldo do provider no DevPanel.";
       case "invalid_key":
         return "Sugestão: revise a credencial do provider no DevPanel.";
+      case "invalid_request":
+        return "Sugestão: verifique o modelo de OCR selecionado no DevPanel — o provider recusou a requisição.";
       case "rate_limited":
         return "Sugestão: aguarde alguns segundos e tente novamente.";
       case "provider_unavailable":
