@@ -44,19 +44,28 @@ function resolveGeminiModelName(model: string): string {
   return resolved;
 }
 
-// DEPRECATED (2026-07): o payload atual de `callGeminiInteractionsWithFile`
-// (`type:'document'` + `uri` em `/v1beta/interactions`) é rejeitado pelo
-// Gemini com 400 invalid_argument. Enquanto o shape correto não é
-// revalidado, todo OCR via Files API usa `generateContent`.
+// Gemini 3.x deve ler PDFs via Interactions API. A rota generateContent +
+// file_data é legado para modelos 2.x e tem retornado 400 INVALID_ARGUMENT em
+// PDFs com modelos 3.x/3.5.
 function shouldUseGeminiInteractionsAPI(apiModel: string): boolean {
   return /^gemini-3(?:\.|-|$)/.test(apiModel) || apiModel === 'gemini-3.5-flash';
 }
+
+const GEMINI_STABLE_PDF_FALLBACK_MODEL = 'gemini-2.5-flash';
+
+type GeminiPdfFileResult =
+  | { ok: true; text: string; model: string; route: string; usedFallback: boolean; originalModel?: string }
+  | { ok: false; error: string; model: string; route: string; originalModel?: string };
 
 function sanitizeGeminiError(raw: string, max = 1600): string {
   return raw
     .replace(/key=AIza[\w-]+/gi, 'key=[redacted]')
     .replace(/x-goog-api-key["'\s:=]+[A-Za-z0-9._\-]+/gi, 'x-goog-api-key=[redacted]')
     .slice(0, max);
+}
+
+function isInvalidArgumentGeminiError(error: string): boolean {
+  return /\b400\b|INVALID_ARGUMENT|invalid argument|invalid_argument/i.test(error);
 }
 
 function extractTextFromInteraction(data: any): string {
