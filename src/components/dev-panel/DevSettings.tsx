@@ -2348,6 +2348,24 @@ export function DevSettings() {
               </SelectContent>
             </Select>
           </div>
+          <Separator />
+          <div className="space-y-2">
+            <Label>Concorrência de Rasterização (PDF grande)</Label>
+            <p className="text-sm text-muted-foreground">
+              Quantas partes do PDF são rasterizadas e enviadas ao provider em paralelo (MiniMax/Gemini client-side). Default 4. Aumente com cautela: cada onda consome rate-limit e memória do navegador.
+            </p>
+            <Select
+              value={String(config.minimax_render_concurrency ?? 4)}
+              onValueChange={value => setConfig({ ...config, minimax_render_concurrency: parseInt(value, 10) })}
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[1, 2, 3, 4, 5, 6, 8].map(n => <SelectItem key={n} value={String(n)}>{n} {n === 1 ? "(serial)" : "em paralelo"}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </CardContent>
       </Card>
 
