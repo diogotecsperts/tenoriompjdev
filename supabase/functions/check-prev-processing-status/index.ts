@@ -54,12 +54,43 @@ Deno.serve(async (req: Request) => {
 
     const { data: rows, error } = await query;
     if (error) throw error;
-    const job = rows?.[0];
+    let job = rows?.[0];
     if (!job) {
       return new Response(JSON.stringify({ error: "Job não encontrado" }), {
         status: 404,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+
+    // WATCHDOG: se um job ativo não atualiza `updated_at` há mais de 120s,
+    // o worker morreu silenciosamente (OOM ou wall-clock do edge runtime).
+    // Marcamos como failed para o cliente parar de esperar em silêncio.
+    const STAGNATION_MS = 120_000;
+    const isActive = job.status === "queued" || job.status === "processing";
+    const lastUpdate = new Date(job.updated_at).getTime();
+    const stagnantMs = Date.now() - lastUpdate;
+    if (isActive && stagnantMs > STAGNATION_MS) {
+      const zombieMsg =
+        "Worker de OCR encerrou sem responder (provável estouro de memória ou tempo em PDF grande). " +
+        "Tente novamente — se persistir, reduza o PDF ou divida manualmente.";
+      const zombieDetail = `job zombie: sem update há ${Math.round(stagnantMs / 1000)}s, stage=${job.stage}, provider=${job.provider}`;
+      const { data: updated } = await admin
+        .from("prev_processing_jobs")
+        .update({
+          status: "failed",
+          stage: "failed",
+          progress: 100,
+          error_code: "provider_timeout",
+          error_message: zombieMsg,
+          technical_detail: zombieDetail,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", job.id)
+        .eq("status", job.status) // guard contra corrida
+        .select("id, pericia_id, user_id, status, stage, progress, provider, model, error_code, error_message, technical_detail, result, created_at, updated_at, completed_at")
+        .maybeSingle();
+      if (updated) job = updated;
+      console.warn(`[check-prev-processing-status] ${zombieDetail} → marked as failed`);
     }
 
     return new Response(JSON.stringify({
