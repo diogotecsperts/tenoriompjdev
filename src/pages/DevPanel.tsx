@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { 
-  LayoutDashboard, 
-  Users, 
-  FileText, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Users,
+  FileText,
+  Settings,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -20,12 +20,14 @@ import {
   FileArchive,
   BarChart3,
   Mail,
-  UserPlus
+  UserPlus,
+  Menu,
 } from "lucide-react";
 
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { DevDashboard } from "@/components/dev-panel/DevDashboard";
 import { DevUsersList } from "@/components/dev-panel/DevUsersList";
@@ -46,8 +48,24 @@ import { DevUsageControl } from "@/components/dev-panel/DevUsageControl";
 import { DevEmailTracking } from "@/components/dev-panel/DevEmailTracking";
 import { DevSignupRequests } from "@/components/dev-panel/DevSignupRequests";
 
-
-type DevTab = "dashboard" | "users" | "signup-requests" | "user-modules" | "usage-control" | "logs" | "backend-logs" | "errors" | "ai" | "ai-efficiency" | "retries" | "pdf-costs" | "prompts" | "access-history" | "original-files" | "email-tracking" | "settings";
+type DevTab =
+  | "dashboard"
+  | "users"
+  | "signup-requests"
+  | "user-modules"
+  | "usage-control"
+  | "logs"
+  | "backend-logs"
+  | "errors"
+  | "ai"
+  | "ai-efficiency"
+  | "retries"
+  | "pdf-costs"
+  | "prompts"
+  | "access-history"
+  | "original-files"
+  | "email-tracking"
+  | "settings";
 
 interface NavItem {
   id: DevTab;
@@ -57,28 +75,28 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "settings", label: "Configurações / IA", icon: Settings },
+  { id: "ai", label: "Inteligência Artificial", icon: Cpu },
   { id: "users", label: "Usuários", icon: Users },
   { id: "signup-requests", label: "Solicitações de Cadastro", icon: UserPlus },
   { id: "user-modules", label: "Módulos por Usuário", icon: LayoutDashboard },
   { id: "usage-control", label: "Controle de Uso", icon: BarChart3 },
   { id: "email-tracking", label: "Rastreamento via Email", icon: Mail },
-
   { id: "logs", label: "AI Analytics", icon: FileText },
   { id: "backend-logs", label: "Servidor & Jobs", icon: Server },
   { id: "errors", label: "UI Reports", icon: AlertTriangle },
-  { id: "ai", label: "Inteligência Artificial", icon: Cpu },
   { id: "ai-efficiency", label: "Eficiência de IAs", icon: Gauge },
   { id: "retries", label: "Retries & Rate Limits", icon: RefreshCw },
   { id: "pdf-costs", label: "Custos PDF", icon: DollarSign },
   { id: "prompts", label: "DevPrompts", icon: MessageSquare },
   { id: "access-history", label: "Histórico de Acesso", icon: History },
   { id: "original-files", label: "Arquivos Originais", icon: FileArchive },
-  { id: "settings", label: "Configurações", icon: Settings },
 ];
 
 export default function DevPanel() {
   const [activeTab, setActiveTab] = useState<DevTab>("dashboard");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const { logout, profile } = useAuth();
   const navigate = useNavigate();
 
@@ -86,6 +104,8 @@ export default function DevPanel() {
     await logout();
     navigate("/");
   };
+
+  const activeLabel = navItems.find((n) => n.id === activeTab)?.label ?? "DevPanel";
 
   const renderContent = () => {
     switch (activeTab) {
@@ -99,7 +119,6 @@ export default function DevPanel() {
         return <DevUserModules />;
       case "usage-control":
         return <DevUsageControl />;
-
       case "logs":
         return <DevLogs />;
       case "backend-logs":
@@ -134,16 +153,75 @@ export default function DevPanel() {
     }
   };
 
+  const NavList = ({ onSelect }: { onSelect?: () => void }) => (
+    <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
+      {navItems.map((item) => (
+        <Button
+          key={item.id}
+          variant={activeTab === item.id ? "secondary" : "ghost"}
+          className={cn(
+            "w-full justify-start gap-3",
+            sidebarCollapsed && "justify-center px-2 lg:justify-center",
+          )}
+          onClick={() => {
+            setActiveTab(item.id);
+            onSelect?.();
+          }}
+        >
+          <item.icon className="h-5 w-5 flex-shrink-0" />
+          {(!sidebarCollapsed || onSelect) && <span className="text-left">{item.label}</span>}
+        </Button>
+      ))}
+    </nav>
+  );
+
+  const Footer = ({ onSelect }: { onSelect?: () => void }) => (
+    <div className="p-4 border-t border-border space-y-2">
+      {profile && (!sidebarCollapsed || onSelect) && (
+        <div className="text-sm text-muted-foreground truncate mb-2">
+          {profile.nome}
+        </div>
+      )}
+      <Button
+        variant="ghost"
+        className={cn(
+          "w-full justify-start gap-3",
+          sidebarCollapsed && !onSelect && "justify-center px-2",
+        )}
+        onClick={() => {
+          onSelect?.();
+          navigate("/hub");
+        }}
+      >
+        <Stethoscope className="h-5 w-5 flex-shrink-0" />
+        {(!sidebarCollapsed || onSelect) && <span>Hub de Módulos</span>}
+      </Button>
+      <Button
+        variant="ghost"
+        className={cn(
+          "w-full justify-start gap-3 text-destructive hover:text-destructive hover:bg-destructive/10",
+          sidebarCollapsed && !onSelect && "justify-center px-2",
+        )}
+        onClick={() => {
+          onSelect?.();
+          handleLogout();
+        }}
+      >
+        <LogOut className="h-5 w-5 flex-shrink-0" />
+        {(!sidebarCollapsed || onSelect) && <span>Sair</span>}
+      </Button>
+    </div>
+  );
+
   return (
     <div className="flex h-screen bg-background">
-      {/* Sidebar */}
+      {/* Sidebar desktop */}
       <aside
         className={cn(
-          "flex flex-col border-r border-border bg-card transition-all duration-300",
-          sidebarCollapsed ? "w-16" : "w-64"
+          "hidden lg:flex flex-col border-r border-border bg-card transition-all duration-300",
+          sidebarCollapsed ? "w-16" : "w-64",
         )}
       >
-        {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border">
           {!sidebarCollapsed && (
             <div className="flex items-center gap-2">
@@ -164,62 +242,45 @@ export default function DevPanel() {
             )}
           </Button>
         </div>
-
-        {/* Navigation */}
-        <nav className="flex-1 p-2 space-y-1">
-          {navItems.map((item) => (
-            <Button
-              key={item.id}
-              variant={activeTab === item.id ? "secondary" : "ghost"}
-              className={cn(
-                "w-full justify-start gap-3",
-                sidebarCollapsed && "justify-center px-2"
-              )}
-              onClick={() => setActiveTab(item.id)}
-            >
-              <item.icon className="h-5 w-5 flex-shrink-0" />
-              {!sidebarCollapsed && <span>{item.label}</span>}
-            </Button>
-          ))}
-        </nav>
-
-        {/* Footer */}
-        <div className="p-4 border-t border-border space-y-2">
-          {!sidebarCollapsed && profile && (
-            <div className="text-sm text-muted-foreground truncate mb-2">
-              {profile.nome}
-            </div>
-          )}
-          <Button
-            variant="ghost"
-            className={cn(
-              "w-full justify-start gap-3",
-              sidebarCollapsed && "justify-center px-2"
-            )}
-            onClick={() => navigate("/hub")}
-          >
-            <Stethoscope className="h-5 w-5 flex-shrink-0" />
-            {!sidebarCollapsed && <span>Hub de Módulos</span>}
-          </Button>
-          <Button
-            variant="ghost"
-            className={cn(
-              "w-full justify-start gap-3 text-destructive hover:text-destructive hover:bg-destructive/10",
-              sidebarCollapsed && "justify-center px-2"
-            )}
-            onClick={handleLogout}
-          >
-            <LogOut className="h-5 w-5 flex-shrink-0" />
-            {!sidebarCollapsed && <span>Sair</span>}
-          </Button>
-        </div>
+        <NavList />
+        <Footer />
       </aside>
 
-      {/* Main Content */}
+      {/* Main content */}
       <main className="flex-1 overflow-auto">
-        <div className="p-6">
-          {renderContent()}
+        {/* Topbar mobile */}
+        <div className="lg:hidden sticky top-0 z-20 flex items-center gap-2 border-b border-border bg-card/95 backdrop-blur px-3 py-2">
+          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-9 w-9">
+                <Menu className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="left" className="w-72 p-0 flex flex-col">
+              <div className="flex items-center gap-2 p-4 border-b border-border">
+                <Terminal className="h-6 w-6 text-primary" />
+                <span className="font-bold text-foreground">DevPanel</span>
+              </div>
+              <NavList onSelect={() => setMobileOpen(false)} />
+              <Footer onSelect={() => setMobileOpen(false)} />
+            </SheetContent>
+          </Sheet>
+          <Terminal className="h-5 w-5 text-primary" />
+          <span className="font-semibold text-sm truncate">{activeLabel}</span>
+          <div className="ml-auto flex items-center gap-1">
+            <Button
+              size="sm"
+              variant={activeTab === "settings" ? "secondary" : "ghost"}
+              className="h-8 px-2"
+              onClick={() => setActiveTab("settings")}
+              aria-label="Configurações / IA"
+            >
+              <Settings className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
+
+        <div className="p-3 sm:p-4 lg:p-6">{renderContent()}</div>
       </main>
     </div>
   );
