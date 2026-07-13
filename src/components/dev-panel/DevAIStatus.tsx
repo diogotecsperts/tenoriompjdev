@@ -294,8 +294,8 @@ export function DevAIStatus() {
       </CardHeader>
 
       <CardContent className="space-y-6">
-        {/* Primary and Fallback Configs */}
-        <div className="grid gap-4 md:grid-cols-2">
+        {/* Primary Config (fallback cross-provider removido) */}
+        <div className="grid gap-4">
           {/* Primary Config */}
           <Card className="border-2 border-primary/20">
             <CardHeader className="pb-2">
@@ -304,7 +304,7 @@ export function DevAIStatus() {
                   <Zap className="h-4 w-4 text-primary" />
                   IA Principal
                 </CardTitle>
-                {primaryConfig && getStatusBadge(primaryConfig.status, 
+                {primaryConfig && getStatusBadge(primaryConfig.status,
                   primaryConfig.status === 'active' ? 'ATIVO' : 'ERRO')}
               </div>
             </CardHeader>
@@ -339,66 +339,10 @@ export function DevAIStatus() {
               )}
             </CardContent>
           </Card>
-
-          {/* Fallback Config */}
-          <Card className="border-2 border-muted">
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Shield className="h-4 w-4 text-muted-foreground" />
-                  IA Fallback
-                </CardTitle>
-                {fallbackConfig && getStatusBadge(fallbackConfig.status,
-                  fallbackConfig.status === 'ready' ? 'PRONTO' : 'ERRO')}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {fallbackConfig && (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Provider:</span>
-                    <span className="font-medium">{PROVIDER_NAMES[fallbackConfig.provider] || fallbackConfig.provider}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Modelo:</span>
-                    <Badge variant="secondary">{fallbackConfig.model}</Badge>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">API Key:</span>
-                    <span className="text-sm">
-                      {fallbackConfig.provider === 'lovable' ? (
-                        <span className="text-muted-foreground">(não necessária)</span>
-                      ) : fallbackConfig.hasKey ? (
-                        <span className="text-green-600 flex items-center gap-1">
-                          <CheckCircle2 className="h-3 w-3" /> Configurada
-                        </span>
-                      ) : (
-                        <span className="text-destructive flex items-center gap-1">
-                          <XCircle className="h-3 w-3" /> Não configurada
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
         </div>
 
-        {/* Fallback Flow */}
-        <Card className="bg-muted/30">
-          <CardContent className="py-3">
-            <div className="flex items-center justify-center gap-3 text-sm">
-              <span className="font-medium">{PROVIDER_NAMES[primaryConfig?.provider || 'lovable']}</span>
-              <ArrowRight className="h-4 w-4 text-muted-foreground" />
-              <span className="text-muted-foreground">Se falhar</span>
-              <ArrowRight className="h-4 w-4 text-muted-foreground" />
-              <span className="font-medium">{PROVIDER_NAMES[fallbackConfig?.provider || 'lovable']}</span>
-            </div>
-          </CardContent>
-        </Card>
-
         <Separator />
+
 
         {/* Operations Table */}
         <div className="space-y-3">
