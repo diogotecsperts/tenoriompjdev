@@ -820,17 +820,8 @@ export function DevSettings() {
         id: "default_ai_model",
         value: config.default_ai_model
       }, {
-        id: "fallback_ai_provider",
-        value: config.fallback_ai_provider
-      }, {
-        id: "fallback_ai_model",
-        value: config.fallback_ai_model
-      }, {
         id: "gemini_pdf_model",
         value: config.gemini_pdf_model
-      }, {
-        id: "pdf_ai_provider",
-        value: config.pdf_ai_provider
       }, {
         id: "pdf_ai_model",
         value: config.pdf_ai_model
