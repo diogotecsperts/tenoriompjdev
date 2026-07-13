@@ -278,26 +278,17 @@ async function callGeminiInteractionsWithFile(
   const headers = {
     'x-goog-api-key': apiKey,
     'Content-Type': 'application/json',
-    'Api-Revision': '2026-05-20',
   };
 
   const payload = {
     model: apiModel,
     input: [
-      { type: 'document', uri: fileUri, mime_type: 'application/pdf' },
       { type: 'text', text: prompt },
+      { type: 'document', uri: fileUri, mime_type: 'application/pdf' },
     ],
-    system_instruction: 'Você é um sistema de OCR especializado. Extraia texto de documentos PDF de forma fiel, completa e sem inventar dados.',
-    // Gemini 3.x (Interactions API) rejeita `response_mime_type` em
-    // `generation_config` — o prompt já instrui o retorno em JSON.
-    generation_config: {
-      temperature: 0.1,
-      max_output_tokens: 65536,
-    },
-    background: true,
   };
 
-  console.log(`[pdf-visual-extractor] Creating Gemini background interaction with model: ${apiModel}`);
+  console.log(`[pdf-visual-extractor] Creating Gemini interaction with model=${apiModel}, uri=${fileUri}`);
   const createResponse = await fetch(createUrl, {
     method: 'POST',
     headers,
@@ -369,6 +360,71 @@ async function callGeminiInteractionsWithFile(
     ok: false,
     interactionId,
     error: `Gemini OCR still processing after background polling timeout (model=${apiModel}, interactionId=${interactionId}).`,
+  };
+}
+
+async function callGeminiPdfFileWithFallback(
+  apiKey: string,
+  requestedModel: string,
+  fileUri: string,
+  prompt: string,
+): Promise<GeminiPdfFileResult> {
+  const apiModel = resolveGeminiModelName(requestedModel);
+  const useInteractions = shouldUseGeminiInteractionsAPI(apiModel);
+  const route = useInteractions ? 'interactions' : 'generateContent';
+
+  console.log(
+    `[pdf-visual-extractor] OCR route=${route} requestedModel=${requestedModel} apiModel=${apiModel} fileUri=${fileUri}`,
+  );
+
+  const primary = useInteractions
+    ? await callGeminiInteractionsWithFile(apiKey, apiModel, fileUri, prompt)
+    : await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, prompt);
+
+  if (primary.ok) {
+    return { ok: true, text: primary.text, model: requestedModel, route, usedFallback: false };
+  }
+
+  const shouldFallback =
+    apiModel !== GEMINI_STABLE_PDF_FALLBACK_MODEL &&
+    isInvalidArgumentGeminiError(primary.error);
+
+  if (!shouldFallback) {
+    return { ok: false, error: `${route}/${apiModel}: ${primary.error}`, model: requestedModel, route };
+  }
+
+  console.warn(
+    `[pdf-visual-extractor] ${route}/${apiModel} rejected PDF with INVALID_ARGUMENT. ` +
+    `Retrying once with stable OCR fallback ${GEMINI_STABLE_PDF_FALLBACK_MODEL}.`,
+  );
+
+  const fallback = await callGeminiGenerateContentWithFile(
+    apiKey,
+    GEMINI_STABLE_PDF_FALLBACK_MODEL,
+    fileUri,
+    prompt,
+  );
+
+  if (fallback.ok) {
+    return {
+      ok: true,
+      text: fallback.text,
+      model: GEMINI_STABLE_PDF_FALLBACK_MODEL,
+      route: 'generateContent-fallback',
+      usedFallback: true,
+      originalModel: requestedModel,
+    };
+  }
+
+  return {
+    ok: false,
+    model: GEMINI_STABLE_PDF_FALLBACK_MODEL,
+    route: 'generateContent-fallback',
+    originalModel: requestedModel,
+    error:
+      `Modelo OCR configurado (${requestedModel}) recusou o PDF em ${route} com INVALID_ARGUMENT; ` +
+      `fallback técnico ${GEMINI_STABLE_PDF_FALLBACK_MODEL} também falhou. ` +
+      `Erro original: ${primary.error}. Erro fallback: ${fallback.error}`,
   };
 }
 
