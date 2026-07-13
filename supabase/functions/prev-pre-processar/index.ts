@@ -869,13 +869,27 @@ async function runPreProcessJob(args: {
     const { data: blob, error: dlErr } = await admin.storage.from("prev-pdfs").download(pericia.pdf_path);
     if (dlErr || !blob) throw new Error(`Falha ao baixar PDF: ${dlErr?.message ?? "vazio"}`);
 
-    const pdfBytes = new Uint8Array(await blob.arrayBuffer());
-    const sizeMB = (pdfBytes.byteLength / 1024 / 1024).toFixed(2);
+    const sizeBytes = blob.size;
+    const sizeMB = (sizeBytes / 1024 / 1024).toFixed(2);
     console.log(`[prev-pre-processar] job ${jobId} PDF ${sizeMB}MB`);
-    if (pdfBytes.byteLength > 150_000_000) throw new Error(`PDF acima de 150MB (${sizeMB}MB) — divida manualmente antes do upload.`);
+    if (sizeBytes > 150_000_000) throw new Error(`PDF acima de 150MB (${sizeMB}MB) — divida manualmente antes do upload.`);
 
     await updateJob(admin, jobId, { stage: "ocr_processing", progress: 18 });
-    const ocr = await runOcrWithConfiguredProvider(pdfBytes, { logPrefix: `[prev-pre-processar job ${jobId}]` });
+
+    // Para PDFs grandes (>30 MB), passa o blob direto (streaming ao Gemini
+    // Files API — evita materializar Uint8Array no worker e estourar 150 MB).
+    // Para PDFs pequenos, mantém o caminho tradicional com bytes.
+    const LARGE_PDF_THRESHOLD = 30_000_000;
+    const ocrInput = sizeBytes > LARGE_PDF_THRESHOLD
+      ? { blob: blob as Blob, size: sizeBytes }
+      : new Uint8Array(await blob.arrayBuffer());
+
+    const ocr = await runOcrWithConfiguredProvider(ocrInput, {
+      logPrefix: `[prev-pre-processar job ${jobId}]`,
+      onHeartbeat: async (stage, progress) => {
+        await updateJob(admin, jobId, { stage, progress });
+      },
+    });
     await updateJob(admin, jobId, {
       stage: "ocr_completed",
       progress: 60,
