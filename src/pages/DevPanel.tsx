@@ -61,6 +61,7 @@ type DevTab =
   | "logs"
   | "backend-logs"
   | "job-timeline"
+  | "smoke-test"
   | "errors"
   | "ai"
   | "ai-efficiency"
