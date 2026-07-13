@@ -13,8 +13,6 @@ import {
   AlertCircle,
   Cpu,
   Zap,
-  ArrowRight,
-  Shield,
   Database,
 } from "lucide-react";
 
