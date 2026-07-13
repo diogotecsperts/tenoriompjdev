@@ -95,35 +95,13 @@ export async function runMinimaxClientOcr(
     message: `Rasterizando ${pageCount} páginas @${maxSide}px`,
   });
 
-  // Rasteriza todas as páginas em JPEG data URLs.
-  // (Feito antes do envio para simplificar controle de memória; para PDFs muito
-  //  grandes, dá pra streamar chunk-a-chunk — evoluímos depois se necessário.)
-  const pageDataUrls: string[] = new Array(pageCount);
-  for (let i = 0; i < pageCount; i++) {
-    if (opts.signal?.aborted) throw new Error("Operação cancelada");
-    pageDataUrls[i] = await rasterizePage(doc, i + 1, maxSide, quality);
-    opts.onProgress?.({
-      phase: "rasterizing",
-      currentChunk: 0,
-      totalChunks,
-      currentPage: i + 1,
-      totalPages: pageCount,
-    });
-  }
-  try {
-    // deno-lint-ignore no-explicit-any
-    await (doc as any).destroy?.();
-  } catch { /* ignore */ }
-
-  // Monta chunks
-  const chunks: Array<{ index: number; start: number; end: number; images: string[] }> = [];
+  const chunks: Array<{ index: number; start: number; end: number }> = [];
   for (let i = 0; i < pageCount; i += chunkSize) {
     const end = Math.min(i + chunkSize, pageCount);
     chunks.push({
       index: chunks.length,
       start: i + 1,
       end,
-      images: pageDataUrls.slice(i, end),
     });
   }
 
@@ -133,55 +111,63 @@ export async function runMinimaxClientOcr(
     totalChunks: chunks.length,
     currentPage: 0,
     totalPages: pageCount,
-    message: `${chunks.length} chunks × paralelismo=${parallelism}`,
+    message: `${chunks.length} chunks em modo seguro`,
   });
 
-  // Executa chunks com paralelismo controlado, propagando resumo do vizinho anterior.
+  // Executa chunk-a-chunk para não manter todas as páginas rasterizadas em
+  // memória. Isso é essencial para PDFs grandes (50MB+) e também impede que
+  // várias chamadas caras sejam disparadas em paralelo antes do primeiro erro.
   const results: Array<{ text: string; summary: string } | { failed: true; range: string }> =
     new Array(chunks.length);
-  let nextIdx = 0;
   let completedCount = 0;
+  let rollingSummary = "";
 
-  const workers: Promise<void>[] = [];
-  for (let w = 0; w < Math.min(parallelism, chunks.length); w++) {
-    workers.push((async () => {
-      while (true) {
-        if (opts.signal?.aborted) throw new Error("Operação cancelada");
-        const myIdx = nextIdx++;
-        if (myIdx >= chunks.length) return;
-        const c = chunks[myIdx];
-        const prev = myIdx > 0 ? results[myIdx - 1] : null;
-        const prevSummary = prev && !("failed" in prev) ? prev.summary : "";
-        const isCheckpoint = myIdx > 0 && myIdx % CHECKPOINT_EVERY === 0;
+  for (const c of chunks) {
+    if (opts.signal?.aborted) throw new Error("Operação cancelada");
+    const images: string[] = [];
+    for (let pageNumber = c.start; pageNumber <= c.end; pageNumber++) {
+      if (opts.signal?.aborted) throw new Error("Operação cancelada");
+      images.push(await rasterizePage(doc, pageNumber, maxSide, quality));
+      opts.onProgress?.({
+        phase: "rasterizing",
+        currentChunk: c.index + 1,
+        totalChunks,
+        currentPage: pageNumber,
+        totalPages: pageCount,
+      });
+    }
 
-        try {
-          const r = await callChunkEndpoint(endpoint, {
-            images: c.images,
-            contextSummary: prevSummary,
-            chunkIndex: c.index,
-            pageStart: c.start,
-            pageEnd: c.end,
-            isCheckpoint,
-            model,
-          });
-          results[myIdx] = { text: r.text, summary: r.summary };
-        } catch (e) {
-          console.error(`[${provider}-ocr-client] chunk ${c.start}-${c.end} falhou:`, e);
-          results[myIdx] = { failed: true, range: `${c.start}-${c.end}` };
-        } finally {
-          completedCount++;
-          opts.onProgress?.({
-            phase: "extracting",
-            currentChunk: completedCount,
-            totalChunks: chunks.length,
-            currentPage: c.end,
-            totalPages: pageCount,
-          });
-        }
-      }
-    })());
+    const isCheckpoint = c.index > 0 && c.index % CHECKPOINT_EVERY === 0;
+    try {
+      const r = await callChunkEndpoint(endpoint, {
+        images,
+        contextSummary: rollingSummary,
+        chunkIndex: c.index,
+        pageStart: c.start,
+        pageEnd: c.end,
+        isCheckpoint,
+        model,
+      });
+      results[c.index] = { text: r.text, summary: r.summary };
+      rollingSummary = r.summary || rollingSummary;
+    } catch (e) {
+      console.error(`[${provider}-ocr-client] chunk ${c.start}-${c.end} falhou:`, e);
+      results[c.index] = { failed: true, range: `${c.start}-${c.end}` };
+    } finally {
+      completedCount++;
+      opts.onProgress?.({
+        phase: "extracting",
+        currentChunk: completedCount,
+        totalChunks: chunks.length,
+        currentPage: c.end,
+        totalPages: pageCount,
+      });
+    }
   }
-  await Promise.all(workers);
+  try {
+    // deno-lint-ignore no-explicit-any
+    await (doc as any).destroy?.();
+  } catch { /* ignore */ }
 
   const parts: string[] = [];
   const failedChunks: string[] = [];
