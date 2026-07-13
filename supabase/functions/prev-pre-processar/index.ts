@@ -872,7 +872,7 @@ async function runPreProcessJob(args: {
     const pdfBytes = new Uint8Array(await blob.arrayBuffer());
     const sizeMB = (pdfBytes.byteLength / 1024 / 1024).toFixed(2);
     console.log(`[prev-pre-processar] job ${jobId} PDF ${sizeMB}MB`);
-    if (pdfBytes.byteLength > 50_000_000) throw new Error(`PDF muito grande: ${sizeMB}MB (limite 50MB).`);
+    if (pdfBytes.byteLength > 150_000_000) throw new Error(`PDF acima de 150MB (${sizeMB}MB) — divida manualmente antes do upload.`);
 
     await updateJob(admin, jobId, { stage: "ocr_processing", progress: 18 });
     const ocr = await runOcrWithConfiguredProvider(pdfBytes, { logPrefix: `[prev-pre-processar job ${jobId}]` });
