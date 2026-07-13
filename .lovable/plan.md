@@ -1,94 +1,99 @@
-## Diagnóstico objetivo
+## Diagnóstico direto
 
-Você tem razão em cobrar: **o caminho atual ainda está insistindo no lugar errado para PDF grande**.
+### 1. Provider Inventory não foi removido do código
+A tela `Provider Inventory v2.0` continua no `DevSettings`, com escolha de provider e modelo padrão. O problema é acesso, não ausência:
+- O DevPanel abre por padrão no `Dashboard`. Configurações fica no fim da lista.
+- No smartphone, o layout é sidebar fixa + conteúdo largo. A tabela do inventário e as configurações de IA saem da área visível ou pedem scroll horizontal ruim.
+- No modo desktop do celular ainda cai em breakpoint mobile do Tailwind e vira o mesmo problema.
 
-Evidência dos logs internos:
+### 2. Configurações fantasmas no banco
+Hoje `system_config` tem valores gravados que você não escolheu deliberadamente:
+- `text_fill_provider = openrouter`
+- `text_fill_model = google/gemini-3-flash-preview`
+- `fallback_ai_provider = openrouter`
+- `fallback_ai_model = google/gemini-3-flash-preview`
+- `default_ai_provider = minimax`
+- `phase1_ocr_provider = gemini`
+- `import_strategy = single_pass`
 
-- Job atual: `84f85725-3d8d-4fe5-ab94-891afddf55f3`.
-- PDF: **66.025.728 bytes / 62,97 MB**.
-- Configuração global atual: OCR `gemini` com modelo `gemini-2.5-flash`.
-- O arquivo **subiu com sucesso** para o Gemini Files API e ficou `ACTIVE`.
-- A falha ocorreu depois, na leitura do PDF pelo `generateContent`:
-  - `400 INVALID_ARGUMENT: Request contains an invalid argument`
-  - falhou nas 4 variações de payload tentadas.
-- O teste simples do modelo `gemini-2.5-flash` respondeu `OK`, então **a chave/modelo não estão quebrados de forma geral**; o problema é o uso desse endpoint com esse PDF grande.
-- Logs do AI Gateway do projeto mostram **apenas 1 chamada recente bem-sucedida** (`log_id 019f515a-3481-7351-a2ae-3ae181b38dcf`, 2026-07-11 13:24:54Z). Não há erros recentes ali; esta falha de OCR está ocorrendo pelo caminho direto do provider configurado, não por uma chamada registrada como falha no Gateway.
+Se você não configurou OpenRouter no DevPanel e não tem chave OpenRouter salva, qualquer chamada por esse caminho ou falha, ou é ignorada, ou o código cai em outro provider. É config poluída, herdada de iterações anteriores.
 
-## O que isso significa
+Nenhuma cobrança silenciosa está em curso por causa disso hoje, porque:
+- OpenRouter exige chave sua para funcionar, então sem chave nada é cobrado.
+- O fallback automático de OCR entre providers pagos (que causou o caso Mistral) já foi removido em `ocr-router.ts`, que agora roda só o provider explícito.
 
-O erro atual não é mais “travamento silencioso”. Agora ele falha rápido, mas a mensagem ficou ruim.
+Mesmo assim, esses valores fantasma têm que sair. É exatamente o tipo de default escondido que te queimou antes.
 
-O problema real: **PDF grande não deve depender de uma única chamada Gemini whole-document com Files API para OCR integral**. Mesmo com upload aceito, a chamada de leitura pode ser recusada por limite/compatibilidade do provider. Insistir em trocar modelo ou variar `fileData/file_data` está virando tentativa circular.
+### 3. Fluxo grande atual é ruim
+Para PDF grande, o sistema hoje rasteriza no navegador, gera JPEG de cada página e envia em lotes de 10. Para 114 páginas em celular, isso é lento por natureza e explica os mais de 30 minutos. Não é o Gemini que é lento nessa proporção — é a rasterização em canvas no aparelho e o ping-pong com o backend.
 
-## Arquivos pequenos foram afetados?
+### 4. Arquivos pequenos quebraram por efeito colateral
+O roteamento foi mexido para desviar PDFs grandes; a matriz de tamanho + provider quebrou o caminho que já funcionava para pequenos. Não foi o Gemini/MiniMax que pioraram, foi o roteador.
 
-Parcialmente:
-
-- PDFs pequenos abaixo de ~4 MB continuam no caminho inline e provavelmente não foram afetados.
-- PDFs médios acima de ~4 MB passaram a usar Files API automaticamente; isso pode afetar alguns casos.
-- PDFs grandes acima de 30 MB entram no caminho streaming/Files API, que foi justamente onde este PDF de 62,97 MB falhou.
-
-## Melhor metodologia daqui pra frente
-
-Trocar a estratégia para PDF grande:
-
-```text
-PDF pequeno/médio seguro
-  -> fluxo atual simplificado
-
-PDF grande (>50 MB ou quando Gemini Files API retornar 400)
-  -> NÃO insistir no whole-document
-  -> rasterizar no navegador por páginas/chunks
-  -> enviar chunks controlados para OCR
-  -> juntar texto
-  -> só então rodar extração estruturada
-```
-
-Isso reduz o risco de:
-
-- queimar crédito em tentativas repetidas sem chance real;
-- ficar travado sem erro;
-- depender de um limite opaco do Gemini para PDF grande;
-- perder tudo se uma única chamada gigante falhar.
+### 5. Extração incompleta mesmo sem erro
+Uma única chamada tenta preencher todos os campos a partir do OCR truncado. Se algum trecho relevante ficar fora ou desordenado, campos essenciais somem sem alerta.
 
 ## Plano de correção
 
-1. **Parar o loop ruim em PDF grande**
-   - Em `pdf-visual-extractor.ts`, remover a lógica de “4 payloads + fallback para outro Gemini” para documentos grandes.
-   - Para erro `400 INVALID_ARGUMENT` em PDF via Files API, classificar como “PDF grande incompatível com OCR whole-document”, não como “modelo recusou” genérico.
+### Regra inegociável: nada de provider externo sem sua escolha
+- Só é executado o provider que você marcar no DevPanel.
+- Sem fallback automático para outro provider pago.
+- Sem defaults escondidos apontando para OpenRouter/Mistral/etc. no banco.
+- Toda chamada de IA logada com provider/modelo efetivo por job, para você conferir depois.
 
-2. **Criar modo seguro chunkado para Gemini**
-   - Adicionar endpoint `gemini-ocr-chunk`.
-   - O frontend rasteriza o PDF por páginas/chunks, igual ao fluxo já existente do MiniMax.
-   - Cada chunk envia poucas páginas como imagens para o Gemini, evitando o envio do PDF inteiro de 63 MB numa única chamada.
+### A. Restaurar acesso ao Provider Inventory
+1. DevPanel responsivo:
+   - sidebar vira menu compacto/drawer no smartphone;
+   - conteúdo em coluna única no mobile;
+   - Provider Inventory em cards no mobile, tabela no desktop.
+2. Atalho visível para `Configurações / IA` no topo do DevPanel.
+3. Garantir que `Modelo Padrão`, `Provider Inventory`, `OCR Previdenciário`, `Fallback` e `Salvar Alterações` sejam plenamente utilizáveis no celular.
 
-3. **Roteamento por tamanho**
-   - PDFs pequenos: manter caminho atual.
-   - PDFs grandes, especialmente **>50 MB**: não usar `generateContent` com PDF inteiro.
-   - Se o provider escolhido for Gemini, o backend retornará sinal para OCR chunkado no navegador.
-   - Se o provider for MiniMax, mantém o fluxo client-side já existente.
+### B. Limpar configurações fantasmas
+1. Zerar/normalizar em `system_config`:
+   - remover `text_fill_provider = openrouter` e `text_fill_model` correspondente até você configurar;
+   - remover `fallback_ai_provider = openrouter` e modelo correspondente;
+   - `import_strategy` volta ao valor documentado como estável;
+   - `default_ai_provider` só fica setado se você tiver escolhido no DevPanel;
+   - `phase1_ocr_provider` só usa o valor selecionado por você.
+2. Depois da limpeza, apresentar no DevPanel a configuração real, sem "herança oculta".
+3. Nenhuma configuração de IA será gravada por edge functions "automaticamente"; só pelo DevPanel.
 
-4. **Proteger créditos**
-   - Limitar tentativas por chunk.
-   - Não fazer fallback automático entre providers pagos sem sinal claro.
-   - Se um chunk falhar, registrar exatamente páginas/chunk afetados.
-   - Evitar repetir upload/processamento inteiro após um `400` definitivo.
+### C. Reverter a rasterização client-side como padrão para PDF grande
+1. Deixar de usar `gemini-ocr-chunk` por imagens como caminho automático.
+2. Manter rasterização client-side apenas como opção manual sob seu comando, nunca como fluxo padrão.
+3. PDFs grandes passam por split real de páginas (`pdf-lib`), enviando cada parte como PDF ao OCR configurado no DevPanel.
 
-5. **Melhorar mensagens de erro**
-   - Substituir o cartão vermelho gigante por:
-     - causa curta;
-     - etapa;
-     - provider/modelo;
-     - ID do job;
-     - botão de tentar novamente;
-     - detalhe técnico recolhido/expandível.
-   - Mensagem para este caso: “O Gemini aceitou o upload, mas recusou ler este PDF grande em modo documento único. Use o modo seguro por páginas/chunks.”
+### D. OCR por tamanho, respeitando DevPanel
+1. Pequenos/médios: caminho anterior estável, provider = o que você marcou.
+2. Grandes: split por páginas + OCR configurado; sem trocar de provider por conta própria.
+3. Se o provider configurado falhar (400/timeout), erro claro para você decidir, sem novo cliente pago automático.
 
-6. **Watchdog e limpeza de estados antigos**
-   - Manter o watchdog do `prev_processing_jobs`.
-   - Revisar também jobs antigos em `import_jobs` que aparecem parados em `processing` desde ontem, pois são outro ponto de “espera eterna”.
+### E. Extração dirigida por grupos
+1. Após OCR, separar a extração em grupos essenciais:
+   - identificação;
+   - processo/benefício;
+   - histórico clínico/laboral;
+   - documentos/exames;
+   - quesitos.
+2. Enviar apenas trechos relevantes de cada grupo, preservando início/fim.
+3. Segunda passagem curta só para campos críticos vazios, sem reprocessar o PDF.
+4. Se campos críticos ficarem vazios apesar de OCR suficiente, marcar como falha de qualidade (não como sucesso).
 
-7. **Validação sem desperdiçar crédito**
-   - Primeiro validar só o roteamento: PDF de 62,97 MB deve cair no modo chunkado, não no Files API whole-document.
-   - Depois testar um chunk pequeno.
-   - Não disparar OCR completo pago automaticamente sem você clicar em “Tentar novamente”.
+### F. Proteção efetiva de créditos
+1. Sem retries automáticos entre providers/modelos.
+2. Log por job: tamanho, páginas, provider/modelo, chars extraídos, tempo por etapa, campos vazios.
+3. Um caminho que falhar por limite conhecido não repete sozinho.
+4. Mensagens de erro: causa curta, etapa, provider/modelo efetivo, jobId, e ação objetiva. Sem cartão vermelho gigante.
+
+### G. Auditoria visível no DevPanel
+1. Painel exibe: provider/modelo configurados, últimas chamadas, custo e falha. Assim você vê imediatamente se algo "estranho" tentou rodar.
+
+## Resultado esperado
+
+- Configurações da IA acessíveis e ajustáveis no smartphone.
+- Zero provider rodando sem sua escolha explícita.
+- PDFs pequenos voltam ao caminho estável anterior.
+- PDFs grandes deixam de depender de rasterização de 114 páginas no celular.
+- Campos essenciais vazios viram alerta claro, não sucesso mudo.
+- Nenhuma cobrança "invisível" possível: sem fallback automático, sem default fantasma.
