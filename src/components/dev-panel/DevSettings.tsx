@@ -869,6 +869,9 @@ export function DevSettings() {
       }, {
         id: "phase1_ocr_provider",
         value: config.phase1_ocr_provider
+      }, {
+        id: "minimax_render_concurrency",
+        value: Math.min(8, Math.max(1, Number(config.minimax_render_concurrency) || 4))
       }];
       for (const update of updates) {
         const { error } = await supabase.from("system_config").upsert({
