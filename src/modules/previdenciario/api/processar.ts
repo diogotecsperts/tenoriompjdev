@@ -36,6 +36,7 @@ interface PrevProcessingStatus {
   errorMessage?: string;
   technicalDetail?: string;
   result?: Partial<PreProcessarResult> & Record<string, unknown>;
+  updatedAt?: string;
 }
 
 export type PreProcessarErrorCode =
@@ -204,8 +205,14 @@ async function pollPreProcessarJob(
   onProgress?: (message: string) => void,
 ): Promise<PreProcessarResult> {
   const startedAt = Date.now();
-  const maxWaitMs = 12 * 60_000;
+  const maxWaitMs = 8 * 60_000;
   let delayMs = 2500;
+  let lastUpdatedAt: string | undefined;
+  let stagnantSince: number | null = null;
+  // Se o `updated_at` do servidor não muda por mais de 130s, provavelmente
+  // o worker morreu (o watchdog server-side finaliza em 120s). Não vale a pena
+  // ficar em polling até o timeout global.
+  const STAGNATION_LIMIT_MS = 130_000;
 
   while (Date.now() - startedAt < maxWaitMs) {
     const status = await checkStatus(start.jobId);
@@ -236,6 +243,30 @@ async function pollPreProcessarJob(
         status.technicalDetail,
         start.jobId,
       );
+    }
+
+    // Detecta estagnação: se `updatedAt` do job não muda entre polls sucessivos,
+    // o worker pode ter morrido. Aguarda o watchdog server-side (que finaliza em
+    // 120s) e propaga o erro real ao invés de esperar 8 min em silêncio.
+    if (status.updatedAt) {
+      if (status.updatedAt === lastUpdatedAt) {
+        stagnantSince ??= Date.now();
+        if (Date.now() - stagnantSince > STAGNATION_LIMIT_MS) {
+          throw new PreProcessarError(
+            "Worker de OCR não respondeu — o processo travou em segundo plano. Tente novamente.",
+            "provider_timeout",
+            status.stage,
+            null,
+            status.provider || start.provider,
+            status.model || start.model,
+            `sem update há ${Math.round((Date.now() - stagnantSince) / 1000)}s (jobId=${start.jobId})`,
+            start.jobId,
+          );
+        }
+      } else {
+        lastUpdatedAt = status.updatedAt;
+        stagnantSince = null;
+      }
     }
 
     await new Promise((resolve) => setTimeout(resolve, delayMs));
