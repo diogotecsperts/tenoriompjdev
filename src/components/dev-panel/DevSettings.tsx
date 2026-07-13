@@ -240,7 +240,8 @@ const DEFAULT_CONFIG: SystemConfig = {
   text_fill_model: "openai/gpt-4o-mini",
   store_extracted_text: true,
   phase1_gemini_model: "gemini-2.5-flash",
-  phase1_ocr_provider: "gemini"
+  phase1_ocr_provider: "gemini",
+  minimax_render_concurrency: 4
 };
 
 // Gemini Vision models available for PDF extraction (aliases estáveis)
