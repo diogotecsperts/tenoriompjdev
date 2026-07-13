@@ -647,6 +647,16 @@ async function finalizeFailedJob(
   fallback?: { provider?: string; model?: string; stage?: string },
 ) {
   const classified = classifyProcessingError(err, fallback);
+  // Enriquecer error_message com um trecho do detalhe técnico para dar ao
+  // usuário/analista uma pista real (ex.: "Interactions create failed (400): ...")
+  // em vez de apenas "Falha no provider backend/processamento".
+  let userMessage = classified.error;
+  if (classified.technicalDetail) {
+    const detailPreview = String(classified.technicalDetail).slice(0, 240).trim();
+    if (detailPreview && !userMessage.includes(detailPreview.slice(0, 40))) {
+      userMessage = `${classified.error} Detalhe: ${detailPreview}`;
+    }
+  }
   await updateJob(admin, jobId, {
     status: "failed",
     progress: 100,
@@ -654,7 +664,7 @@ async function finalizeFailedJob(
     provider: classified.provider || fallback?.provider || null,
     model: classified.model || fallback?.model || null,
     error_code: classified.code,
-    error_message: classified.error,
+    error_message: userMessage,
     technical_detail: classified.technicalDetail,
     completed_at: new Date().toISOString(),
   });

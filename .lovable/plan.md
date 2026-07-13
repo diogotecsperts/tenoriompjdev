@@ -1,105 +1,63 @@
+# Correção do erro 400 no OCR de PDFs grandes (Gemini)
 
-## Diagnóstico
+## O que aconteceu no PDF de 63 MB
 
-Job atual do Bruno (`9994ae70-7209-455d-b606-99579043781c`) travado no banco em:
+Fluxo executado (logs `prev-pre-processar`):
 
-```
-status=processing  stage=ocr_processing  progress=18
-provider=gemini    model=gemini-3.1-flash-lite
-updated_at=01:45:26  (sem mexer há >7 min)
-```
-
-O que aconteceu:
-
-1. `prev-pre-processar` disparou `runPreProcessJob` em background via `EdgeRuntime.waitUntil` (linha 1038-1041).
-2. Dentro do OCR, PDF de 63 MB entrou no caminho `runGeminiOcrChunked` (chunk >30 MB).
-3. O worker foi morto pelo runtime **sem executar o `catch`** — provável OOM (150 MB de limite; pdf-lib duplica bytes ao copiar páginas) ou wall-clock (~400s) estourado antes de terminar as 3 partes.
-4. Como o `catch` nunca rodou, `finalizeFailedJob` não foi chamado → linha ficou `processing` para sempre → frontend fica em polling até o timeout de 12 min do cliente, então mostra "OCR gemini em execução · 18%" indefinidamente.
-
-Não é bug do Gemini; é worker morto silenciosamente + falta de watchdog.
-
-## Objetivos
-
-1. **Nunca mais travar em silêncio** — job estagnado tem que virar `failed` com mensagem clara em <2 min.
-2. **Eliminar a causa raiz do 63 MB** — parar de rasterizar/split em edge (pressão de memória) e usar Gemini Files API por streaming direto do storage.
-3. **Feedback incremental durante o chunking** (enquanto ele existir como fallback).
-
-## Mudanças
-
-### 1. Watchdog server-side em `check-prev-processing-status`
-
-Ao consultar um job, se `status IN ('queued','processing')` **e** `updated_at` foi há mais de `120s`, marcar automaticamente como:
+1. Upload streaming para o Gemini Files API → ✅ 200, arquivo `files/wucww8ccwy3l` ficou `ACTIVE`.
+2. Chamada para gerar o OCR → ❌ **400 invalid_argument** em:
 
 ```
-status=failed
-error_code=provider_timeout
-error_message="Worker de OCR encerrou sem responder (provável estouro de memória ou tempo em PDF grande). Tente reduzir o PDF ou dividir manualmente."
-technical_detail="job zombie: last update at <ts>, stage=<stage>, provider=<provider>"
-progress=100
-completed_at=now()
+POST https://generativelanguage.googleapis.com/v1beta/interactions
+→ { "error": { "message": "Request contains an invalid argument." } }
 ```
 
-Retornar o registro já atualizado. Isso quebra o polling infinito em qualquer cliente sem depender do worker morto.
+O toast genérico ("Falha no provider backend/processamento") apareceu porque o erro cru do provider foi engolido e substituído por uma mensagem padronizada.
 
-### 2. Streaming direto ao Gemini Files API para PDFs > 30 MB
+## Causa raiz
 
-Em `ocr-router.ts` (`runOcrWithConfiguredProvider`), para provider `gemini` e `pdfBytes.byteLength > 30_000_000`:
-
-- Trocar `runGeminiOcrChunked` (split + Uint8Array por parte) por uma nova função `runGeminiOcrLargeStream` que:
-  - Recebe o `Blob` original do storage (via novo parâmetro) e faz `blob.stream()` diretamente para `uploadToGeminiFilesAPIStream` (já existe em `gemini-files-api.ts`).
-  - Chama `generateContent` referenciando `fileUri`, sem carregar o PDF em memória do worker.
-  - Retorna `provider="gemini-files-stream"`.
-- Manter o caminho <30 MB inalterado (single-shot in-memory).
-- Ajustar `runPreProcessJob` para passar o `blob` (ou um `stream()` builder) para o router quando o PDF for grande, em vez de sempre materializar `Uint8Array`.
-
-Isso remove o pico de memória de ~180 MB (63 MB bytes + partes pdf-lib) e elimina o OOM. Gemini Files API aceita até 2 GB, então cobre todos os PDFs viáveis.
-
-### 3. Heartbeat durante OCR grande
-
-Antes de cada etapa longa (upload Files API, polling `PROCESSING`, `generateContent`), atualizar o job com progresso incremental:
+Em `supabase/functions/_shared/pdf-visual-extractor.ts` existe um roteador `shouldUseGeminiInteractionsAPI(apiModel)` que, para qualquer modelo `gemini-3.x` (inclui `gemini-3.1-flash-lite`), envia a chamada de OCR para o endpoint **Interactions API** (`/v1beta/interactions`) com este payload:
 
 ```
-20 → upload iniciado
-35 → upload concluído
-45 → Gemini processando arquivo
-58 → generateContent em execução
-60 → OCR concluído
+input: [
+  { type: 'document', uri: fileUri, mime_type: 'application/pdf' },
+  { type: 'text',     text: prompt },
+]
 ```
 
-Isso serve para:
-- UX (usuário vê que está avançando)
-- Habilitar o watchdog do item 1 (`updated_at` muda; se parar de mudar, é zumbi de verdade).
+Esse payload é rejeitado pelo Google com 400 invalid_argument (o shape suportado hoje pelo Files API é `file_data.file_uri` dentro de `contents.parts` via `models/{model}:generateContent`, não `type:'document'` no Interactions). A função irmã `callGeminiGenerateContentWithFile` já implementa a chamada correta, com variantes de URI e retry, e funcionou nos PDFs pequenos (que caem no path inline base64 e não passam pelo mesmo endpoint).
 
-### 4. Frontend: detectar estagnação antes do timeout global
+Ou seja: **não é problema do arquivo de 63 MB nem do streaming** — o upload deu certo. É o endpoint escolhido para o passo seguinte que é o errado para OCR com Files API.
 
-Em `pollPreProcessarJob` (`src/modules/previdenciario/api/processar.ts`):
+## Correção proposta
 
-- Guardar `lastUpdatedAt` retornado pelo status.
-- Se em 6 polls seguidos (~30-40s) o `updatedAt` não mudar e `status='processing'`, chamar o watchdog explicitamente (o próprio `check-prev-processing-status` já vai finalizar após 120s no lado do servidor) e usar o erro dele.
-- Reduzir o `maxWaitMs` global de 12 min para 8 min (com watchdog em 2 min, 8 min é folga suficiente).
+**Regra nova:** sempre que o OCR usar Files API (fileUri já existente no servidor Gemini), usar `generateContent`, independente do modelo. O `Interactions API` deixa de ser roteado para OCR — não há benefício e o payload atual quebra.
 
-### 5. Recuperar o job atual do Bruno
+### Arquivos a alterar
 
-Executar UPDATE único para marcar `9994ae70` como `failed` com a mesma mensagem do watchdog, para o cliente conseguir tentar de novo sem esperar.
+1. **`supabase/functions/_shared/pdf-visual-extractor.ts`**
+   - Nos três pontos onde há `shouldUseGeminiInteractionsAPI(apiModel) ? callGeminiInteractionsWithFile(...) : callGeminiGenerateContentWithFile(...)` (linhas ~467, ~513, ~614), remover o ternário e chamar sempre `callGeminiGenerateContentWithFile`.
+   - Ajustar os rótulos `provider` para `gemini-files-api` / `gemini-streaming` (remover as variantes `-interactions-*`).
+   - Manter `callGeminiInteractionsWithFile` e `shouldUseGeminiInteractionsAPI` no arquivo por ora (não usados), com comentário explicando que o payload precisa ser revisto antes de reativar.
 
-## Arquivos afetados
+2. **`supabase/functions/prev-pre-processar/index.ts`**
+   - Melhorar a propagação do erro real do provider para o toast: quando o provider Gemini falhar, incluir `error.message` (já sanitizado por `sanitizeGeminiError`) no campo `error_message` do job, para que o front mostre algo como *"Gemini Files API generateContent 400: …"* em vez de "Falha no provider backend/processamento".
 
-- `supabase/functions/check-prev-processing-status/index.ts` — watchdog de 120s.
-- `supabase/functions/_shared/ocr-router.ts` — nova branch streaming; remover chunking com split para >30 MB (manter função só como fallback caso streaming falhe).
-- `supabase/functions/_shared/gemini-files-api.ts` — já tem `uploadToGeminiFilesAPIStream`, adicionar helper `generateContentFromFileUri(fileUri, model)` que faz o `generateContent` OCR.
-- `supabase/functions/prev-pre-processar/index.ts` — passar `blob` ao router; heartbeats de progresso durante OCR grande.
-- `src/modules/previdenciario/api/processar.ts` — detecção de estagnação + `maxWaitMs` menor.
-- Uma migration/UPDATE pontual para recuperar `9994ae70`.
+3. **`src/modules/previdenciario/api/processar.ts`** (só ajuste de UX)
+   - No toast de erro, dar preferência a `job.error_message` do backend quando existir, e cair no genérico só se estiver vazio.
+
+### Job travado do Bruno
+
+Marcar `d4e4c935-b9f4-4c17-a866-45dc2fb916bf` como `failed` na tabela `prev_processing_jobs` com mensagem clara (`Gemini generateContent 400 — payload legacy Interactions API`) para liberar o botão "Tentar novamente".
 
 ## Validação
 
-- Reprocessar o PDF de 63 MB do Bruno → deve subir por streaming (sem pico de memória), completar `ocr_processing` sem chunking, ir para `ai_extraction`.
-- Simular worker morto (matar edge function no meio) → em <2 min o próximo poll retorna `failed` com mensagem clara, sem esperar 12 min.
-- Reprocessar PDF de 14 MB (Bruno original) → caminho single-shot inalterado.
-- Confirmar no `prev_processing_jobs` que nenhum job novo fica >2 min sem `updated_at` mudar.
+1. Reprocessar o PDF de 63 MB do Bruno com `phase1_ocr_provider=gemini` + `gemini-3.1-flash-lite`:
+   - Deve subir via streaming ao Files API (já funciona), gerar OCR via `generateContent`, e retornar `provider=gemini-streaming` com 200.
+2. Reprocessar o PDF de 14 MB para garantir que o path inline não foi afetado.
+3. Forçar um 400 artificial (ex.: apiKey inválida) e conferir que o toast mostra a mensagem sanitizada do Gemini, não mais "Falha no provider backend/processamento".
 
-## Trade-offs
+## Fora de escopo
 
-- Streaming ao Files API adiciona ~5-15s de upload para PDFs grandes, mas remove chance de OOM.
-- Watchdog pode marcar como `failed` um OCR muito lento (>2 min sem heartbeat). Mitigado pelo heartbeat do item 3 — cada etapa emite update, então só finaliza jobs realmente mortos.
-- Não precisa aumentar tamanho da instância Cloud (compute) — o gargalo é memória por invocação, não CPU global.
+- Nenhuma mudança no DevPanel, prompts, chunking, watchdog ou frontend do laudo.
+- Não trocamos o modelo padrão nem alteramos regras de OCR globais.
