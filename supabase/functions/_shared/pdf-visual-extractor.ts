@@ -505,19 +505,14 @@ async function extractWithFilesAPIStream(
     const apiModel = resolveGeminiModelName(model);
     console.log(`[pdf-visual-extractor] Calling Gemini generateContent with model: ${apiModel}, fileUri: ${fileUri}`);
 
-    const result = shouldUseGeminiInteractionsAPI(apiModel)
-      ? await callGeminiInteractionsWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT)
-      : await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
-    
+    // OCR sempre via generateContent com Files API (Interactions API rejeita esse payload com 400).
+    const result = await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
+
     if (!result.ok) {
       throw new Error(`Gemini Vision (Streaming) error: ${result.error}`);
     }
 
-    return parseExtractionResult(
-      result.text,
-      model,
-      shouldUseGeminiInteractionsAPI(apiModel) ? 'gemini-interactions-streaming' : 'gemini-streaming'
-    );
+    return parseExtractionResult(result.text, model, 'gemini-streaming');
   } finally {
     // Clean up uploaded file
     try {
