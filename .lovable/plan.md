@@ -57,7 +57,7 @@ Aproveita `import_jobs` + `backend_logs` que já existem. Sem tabela nova.
 
 ---
 
-## Bloco 3 — Smoke test no DevPanel (PDF pequeno + Trabalhista)
+## Bloco 3 — Smoke test no DevPanel (PDF pequeno + Trabalhista) ✅ IMPLEMENTADO
 
 Objetivo: 1 clique valida OCR → preenchimento → export.
 
