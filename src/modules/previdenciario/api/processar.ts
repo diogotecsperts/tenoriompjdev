@@ -36,6 +36,7 @@ interface PrevProcessingStatus {
   errorMessage?: string;
   technicalDetail?: string;
   result?: Partial<PreProcessarResult> & Record<string, unknown>;
+  updatedAt?: string;
 }
 
 export type PreProcessarErrorCode =
