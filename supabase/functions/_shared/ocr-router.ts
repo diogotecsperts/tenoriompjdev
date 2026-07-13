@@ -118,7 +118,10 @@ export async function runOcrWithConfiguredProvider(
         `Frontend deve chamar 'minimax-ocr-chunk' endpoint diretamente.`,
       );
     }
-    // gemini visual (default)
+    // gemini visual (default) — com split automático se PDF > 30 MB
+    if (pdfBytes.byteLength > GEMINI_CHUNK_THRESHOLD_BYTES) {
+      return await runGeminiOcrChunked(pdfBytes, cfg.geminiModel, prefix);
+    }
     const r = await extractVisualContent(pdfBytes, { model: cfg.geminiModel });
     return {
       text: r.rawText,
@@ -131,5 +134,71 @@ export async function runOcrWithConfiguredProvider(
     console.error(`${prefix} provider ${cfg.provider} falhou (sem fallback): ${err.message.slice(0, 400)}`);
     throw err;
   }
+}
+
+/**
+ * OCR via Gemini Files API com split automático em partes.
+ *
+ * Motivo: PDFs muito grandes (>30 MB) pressionam a memória de 150 MB do worker
+ * e podem exceder o teto de tokens de saída do Gemini (~65k tokens) em documentos
+ * longos. Split por páginas (via pdf-lib) preserva qualidade — cada página é uma
+ * unidade de OCR independente, e o texto concatenado é idêntico ao single-shot.
+ *
+ * Processa partes **sequencialmente** para manter pico de memória baixo.
+ */
+async function runGeminiOcrChunked(
+  pdfBytes: Uint8Array,
+  geminiModel: string,
+  prefix: string,
+): Promise<OcrRouterResult> {
+  const sizeMB = (pdfBytes.byteLength / 1024 / 1024).toFixed(2);
+  console.log(`${prefix} PDF ${sizeMB}MB > ${GEMINI_CHUNK_THRESHOLD_BYTES / 1024 / 1024}MB → iniciando split`);
+
+  const split = await splitPDF(pdfBytes, {
+    maxSizeBytes: GEMINI_CHUNK_MAX_PART_BYTES,
+    maxParts: GEMINI_CHUNK_MAX_PARTS,
+  });
+
+  // Libera bytes originais imediatamente para reduzir pico de memória.
+  // deno-lint-ignore no-explicit-any
+  (pdfBytes as any) = null;
+
+  console.log(`${prefix} split concluído: ${split.parts.length} partes, ${split.totalPages} páginas totais`);
+
+  const texts: string[] = [];
+  let totalPages = 0;
+
+  for (let i = 0; i < split.parts.length; i++) {
+    const partBytes = split.parts[i];
+    const range = split.pageRanges[i];
+    const partMB = (partBytes.byteLength / 1024 / 1024).toFixed(2);
+    console.log(`${prefix} parte ${i + 1}/${split.parts.length} (${partMB}MB, páginas ${range.start}-${range.end}) → Gemini`);
+
+    try {
+      const r = await extractVisualContent(partBytes, { model: geminiModel });
+      const header = `\n\n=== PARTE ${i + 1}/${split.parts.length} (páginas ${range.start}-${range.end}) ===\n\n`;
+      texts.push((i === 0 ? "" : header) + r.rawText);
+      totalPages += r.pageCount || (range.end - range.start + 1);
+      console.log(`${prefix} parte ${i + 1}/${split.parts.length} OK (${r.rawText.length} chars)`);
+    } catch (e) {
+      const err = e as Error;
+      throw new Error(
+        `Falha na parte ${i + 1}/${split.parts.length} (páginas ${range.start}-${range.end}): ${err.message}`,
+      );
+    } finally {
+      // Descarta bytes da parte processada antes da próxima
+      split.parts[i] = new Uint8Array(0);
+    }
+  }
+
+  const merged = texts.join("");
+  console.log(`${prefix} merge concluído: ${split.parts.length} partes, ${totalPages} páginas, ${merged.length} chars`);
+
+  return {
+    text: merged,
+    pageCount: totalPages,
+    provider: "gemini-visual-chunked",
+    model: geminiModel,
+  };
 }
 
