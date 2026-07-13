@@ -28,7 +28,6 @@ if (typeof window !== "undefined" && !pdfjs.GlobalWorkerOptions.workerSrc) {
 const DEFAULT_MAX_SIDE_PX = 1500;
 const DEFAULT_JPEG_QUALITY = 0.80;
 const DEFAULT_CHUNK_SIZE = 10;
-const DEFAULT_PARALLELISM = 3;
 const CHECKPOINT_EVERY = 5; // chunks
 
 type ClientOcrProvider = "minimax" | "gemini";
@@ -79,7 +78,6 @@ export async function runMinimaxClientOcr(
   const maxSide = opts.maxSidePx ?? DEFAULT_MAX_SIDE_PX;
   const quality = opts.jpegQuality ?? DEFAULT_JPEG_QUALITY;
   const chunkSize = opts.chunkSize ?? DEFAULT_CHUNK_SIZE;
-  const parallelism = opts.parallelism ?? DEFAULT_PARALLELISM;
 
   const bytes = await toUint8Array(source);
   const doc = await pdfjs.getDocument({ data: bytes }).promise;
