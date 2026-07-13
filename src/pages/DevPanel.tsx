@@ -133,6 +133,8 @@ export default function DevPanel() {
         return <DevBackendLogs />;
       case "job-timeline":
         return <DevJobTimeline />;
+      case "smoke-test":
+        return <DevSmokeTest />;
       case "errors":
         return <DevErrorLogs />;
       case "ai":
