@@ -316,9 +316,12 @@ async function callGeminiInteractionsWithFile(
   }
 
   const interactionId = interaction?.id;
+  const initialStatus = String(interaction?.status || '').toLowerCase();
+  const immediateText = extractTextFromInteraction(interaction);
+  if (immediateText && (!interactionId || !['in_progress', 'queued', 'running', 'pending'].includes(initialStatus))) {
+    return { ok: true, text: immediateText, interactionId };
+  }
   if (!interactionId) {
-    const text = extractTextFromInteraction(interaction);
-    if (text) return { ok: true, text };
     return { ok: false, error: `Interactions create did not return id or output: ${sanitizeGeminiError(createText)}` };
   }
 
@@ -328,7 +331,7 @@ async function callGeminiInteractionsWithFile(
   let delayMs = 2500;
 
   while (Date.now() < deadline) {
-    if (lastStatus === 'completed') {
+    if (lastStatus === 'completed' || lastStatus === 'succeeded' || lastStatus === 'done') {
       const text = extractTextFromInteraction(lastBody);
       if (!text) {
         return { ok: false, interactionId, error: `Interactions completed without text output (interactionId=${interactionId})` };
