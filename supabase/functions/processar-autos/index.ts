@@ -1987,10 +1987,17 @@ async function processarPDFBackground(
   };
   
   try {
+    // Marca rota (PDF pequeno → fast path direto) para diagnóstico
+    await supabaseAdmin.from('import_jobs').update({
+      result: { route: 'fast_small', fileName, startedAt: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    }).eq('id', jobId);
+
     // Log job start
     await logInfo('processar-autos', `Iniciando processamento de PDF: ${fileName}`, jobId, {
       isRetry,
-      filePath
+      filePath,
+      route: 'fast_small',
     });
 
     // Get current retry_count from job
