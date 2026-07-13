@@ -72,10 +72,10 @@ export async function getOcrRouterConfig(): Promise<OcrRouterConfig> {
 /**
  * Executa OCR usando **exclusivamente** o provider configurado no DevPanel.
  *
- * Sem cadeia de fallback silenciosa: se o provider escolhido falhar, o erro
- * é propagado direto ao caller. Fallback silencioso pra Mistral gerou cobrança
- * inesperada quando o Gemini 3.x quebrava (bug de `response_mime_type` no body
- * da Files API — jul/2026). DevPanel agora é fonte única da verdade.
+ * Sem fallback silencioso para outro provider: se o provider escolhido falhar,
+ * o erro é propagado direto ao caller. Exceção técnica: dentro do próprio
+ * provider Gemini, modelos 3.x instáveis para PDF podem cair uma vez para
+ * `gemini-2.5-flash`, registrando o modelo efetivo no resultado.
  *
  * MiniMax continua sinalizando `MINIMAX_CLIENT_RASTERIZE_ERROR` para o caller
  * delegar ao pipeline client-side (`runMinimaxClientOcr`); isso não é fallback
@@ -165,7 +165,7 @@ export async function runOcrWithConfiguredProvider(
     };
   } catch (e) {
     const err = e as Error;
-    console.error(`${prefix} provider ${cfg.provider} falhou (sem fallback): ${err.message.slice(0, 400)}`);
+    console.error(`${prefix} provider ${cfg.provider} falhou: ${err.message.slice(0, 400)}`);
     throw err;
   }
 }
