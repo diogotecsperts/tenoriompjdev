@@ -483,10 +483,7 @@ export async function callAI(
     throw new Error(`API key not configured for provider: ${config.provider}`);
   }
 
-  const totalBudgetMs = options?.requestTimeoutMs;
-  const primaryTimeoutMs = totalBudgetMs && config.fallback?.apiKey
-    ? Math.max(15_000, Math.floor(totalBudgetMs * 0.55))
-    : totalBudgetMs;
+  const primaryTimeoutMs = options?.requestTimeoutMs;
 
   try {
     const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: primaryTimeoutMs });
@@ -508,10 +505,10 @@ export async function callAI(
     return { ...result, usedFallback: false };
   } catch (primaryError) {
     const classifiedPrimary = classifyAIProviderError(primaryError, config.provider, config.model, 'ai_generation');
-    console.error(`[AI Call] Primary provider ${config.provider} failed:`, classifiedPrimary);
+    console.error(`[AI Call] Provider ${config.provider} failed (no cross-provider fallback):`, classifiedPrimary);
     const primaryLatency = Date.now() - startTime;
 
-    // Log primary failure
+    // Log failure
     if (options?.promptType) {
       await logAIUsage({
         userId: options.userId,
@@ -523,69 +520,6 @@ export async function callAI(
         errorMessage: `${classifiedPrimary.code}: ${classifiedPrimary.technicalDetail}`,
         usedFallback: false
       });
-    }
-
-    // Try fallback if available
-    if (config.fallback && config.fallback.apiKey) {
-      console.log(`[AI Fallback] Trying fallback: ${config.fallback.provider}/${config.fallback.model}`);
-      const fallbackStartTime = Date.now();
-      const fallbackBudgetMs = totalBudgetMs
-        ? totalBudgetMs - (fallbackStartTime - startTime) - 2_000
-        : 60_000;
-
-      if (fallbackBudgetMs < 10_000) {
-        console.warn(`[AI Fallback] Skipping fallback: insufficient time budget (${fallbackBudgetMs}ms)`);
-        throw classifiedPrimary;
-      }
-
-      try {
-        const fallbackConfig: AIConfig = {
-          provider: config.fallback.provider,
-          model: config.fallback.model,
-          apiKey: config.fallback.apiKey,
-          endpoint: config.fallback.endpoint,
-          displayModel: config.fallback.displayModel
-        };
-
-        const result = await callProvider(fallbackConfig, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: Math.min(fallbackBudgetMs, 60_000) });
-        const fallbackLatency = Date.now() - fallbackStartTime;
-
-        // Log successful fallback
-        if (options?.promptType) {
-          await logAIUsage({
-            userId: options.userId,
-            provider: result.provider,
-            model: result.model,
-            promptType: options.promptType,
-            latencyMs: fallbackLatency,
-            success: true,
-            usedFallback: true
-          });
-        }
-
-        console.log(`[AI Fallback] Success with ${result.provider}/${result.model}`);
-        return { ...result, usedFallback: true };
-      } catch (fallbackError) {
-        const classifiedFallback = classifyAIProviderError(fallbackError, config.fallback.provider, config.fallback.model, 'ai_generation');
-        console.error(`[AI Fallback] Fallback also failed:`, classifiedFallback);
-        const fallbackLatency = Date.now() - fallbackStartTime;
-
-        // Log fallback failure
-        if (options?.promptType) {
-          await logAIUsage({
-            userId: options.userId,
-            provider: config.fallback.provider,
-            model: config.fallback.model,
-            promptType: options.promptType,
-            latencyMs: fallbackLatency,
-            success: false,
-          errorMessage: `${classifiedFallback.code}: ${classifiedFallback.technicalDetail}`,
-            usedFallback: true
-          });
-        }
-
-        throw classifiedFallback;
-      }
     }
 
     throw classifiedPrimary;
