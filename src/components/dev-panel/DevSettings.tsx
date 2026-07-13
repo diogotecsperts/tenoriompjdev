@@ -661,7 +661,12 @@ export function DevSettings() {
           text_fill_model: configMap.text_fill_model || DEFAULT_CONFIG.text_fill_model,
           store_extracted_text: configMap.store_extracted_text ?? DEFAULT_CONFIG.store_extracted_text,
           phase1_gemini_model: configMap.phase1_gemini_model || DEFAULT_CONFIG.phase1_gemini_model,
-          phase1_ocr_provider: configMap.phase1_ocr_provider || DEFAULT_CONFIG.phase1_ocr_provider
+          phase1_ocr_provider: configMap.phase1_ocr_provider || DEFAULT_CONFIG.phase1_ocr_provider,
+          minimax_render_concurrency: (() => {
+            const v = configMap.minimax_render_concurrency;
+            const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) : NaN;
+            return Number.isFinite(n) && n > 0 ? Math.min(8, Math.max(1, n)) : DEFAULT_CONFIG.minimax_render_concurrency;
+          })()
         });
       }
     } catch (error) {
