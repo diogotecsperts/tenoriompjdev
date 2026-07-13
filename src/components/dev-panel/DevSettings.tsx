@@ -78,16 +78,16 @@ interface TestResult {
 
 const GEMINI_SAFE_DEFAULT_MODEL = "gemini-2.5-flash";
 const GEMINI_FLASH_PRIORITY = [
-  "gemini-3.1-flash-lite",
-  "gemini-3.1-flash-lite-preview",
-  "gemini-2.5-flash-lite",
-  "gemini-3.5-flash",
-  "gemini-3-flash-preview",
   "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
   "gemini-2.5-flash-8b",
   "gemini-2.0-flash",
   "gemini-2.0-flash-lite",
-  "gemini-1.5-flash"
+  "gemini-1.5-flash",
+  "gemini-3-flash-preview",
+  "gemini-3.1-flash-lite",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-3.5-flash"
 ];
 
 const normalizeGeminiModelId = (modelId?: string | null) => (modelId || "").replace(/^google\//, "");
@@ -95,6 +95,7 @@ const normalizeGeminiModelId = (modelId?: string | null) => (modelId || "").repl
 const isGeminiProModel = (modelId: string) => /(^|-)pro($|-)/i.test(modelId) || /pro-preview/i.test(modelId);
 const isGeminiFlashModel = (modelId: string) => /(^|-)flash($|-)/i.test(modelId) || /flash-lite/i.test(modelId);
 const isGeminiNonTextUtilityModel = (modelId: string) => /(?:image|imagen|tts|audio|lyria|robotics|computer-use|deep-research|omni|banana|antigravity)/i.test(modelId);
+const isGeminiUnstableForPdfOcr = (modelId: string) => /gemini-3\.1-flash-lite|gemini-3\.5-flash/i.test(normalizeGeminiModelId(modelId));
 
 const getGeminiModelRank = (modelId: string) => {
   const normalized = normalizeGeminiModelId(modelId);
@@ -148,7 +149,7 @@ const AI_PROVIDERS: ProviderInfo[] = [{
 }, {
   id: "gemini",
   name: "Google Gemini",
-  description: "Modelos Gemini via Google AI Studio. Gemini 3.x/3.5 usa Interactions API com processamento em background para OCR longo.",
+  description: "Modelos Gemini via Google AI Studio. Para OCR de PDFs grandes, Gemini 2.5 Flash é o modelo estável recomendado.",
   models: sortGeminiModelsSafely([
     // Flash — FREE TIER (recomendados como padrão)
     "gemini-2.5-flash",
@@ -2046,8 +2047,8 @@ export function DevSettings() {
               Previdenciário, Impugnação e Trabalhista (em Passagem Única faz OCR + preenchimento
               num só request; em Duas Fases faz apenas o OCR). Mistral tem precisão elite (~94.9%)
               em tabelas/escaneados. <strong>MiniMax M3</strong> rasteriza no navegador (pdfjs) +
-              chunks de 10 páginas com 3 paralelismos e backoff em rate limit. Gemini 3.1 Flash-Lite
-              é suportado por Interactions API com processamento em segundo plano para PDFs demorados.
+              chunks de 10 páginas com 3 paralelismos e backoff em rate limit. Para Gemini,
+              use <strong>gemini-2.5-flash</strong> como padrão estável para OCR de autos grandes.
             </p>
 
 
@@ -2127,7 +2128,7 @@ export function DevSettings() {
                               const details = geminiModelDetails[modelId];
                               return details?.supportsPdf !== false;
                             })
-                          : ["gemini-3.1-flash-lite", "gemini-3.1-flash-lite-preview", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-3-pro-preview"]
+                          : ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro", "gemini-3-pro-preview", "gemini-3.1-flash-lite", "gemini-3.1-flash-lite-preview", "gemini-3.5-flash"]
                         ).map(modelId => {
                           const details = geminiModelDetails[modelId];
                           return (
@@ -2144,6 +2145,12 @@ export function DevSettings() {
                                   <Badge className="text-[10px] px-1 py-0 bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300">
                                     {(details.inputTokenLimit / 1000000).toFixed(0)}M tokens
                                   </Badge>
+                                )}
+                                {modelId === "gemini-2.5-flash" && (
+                                  <Badge variant="default" className="text-[10px] px-1 py-0">OCR recomendado</Badge>
+                                )}
+                                {isGeminiUnstableForPdfOcr(modelId) && (
+                                  <Badge variant="destructive" className="text-[10px] px-1 py-0">Instável PDF</Badge>
                                 )}
                               </div>
                             </SelectItem>
@@ -2168,7 +2175,7 @@ export function DevSettings() {
                     )}
                     
                     <p className="text-xs text-muted-foreground">
-                      💡 Flash-Lite é a opção econômica para alto volume; Gemini 3.x/3.5 roda com processamento em segundo plano quando o OCR demora.
+                      Para OCR de PDFs grandes, mantenha gemini-2.5-flash. Modelos 3.x/3.5 podem recusar PDFs com erro 400; o backend tenta fallback técnico quando isso ocorre.
                     </p>
                   </div>
                 )}
