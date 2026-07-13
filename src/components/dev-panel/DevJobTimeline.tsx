@@ -82,12 +82,11 @@ export default function DevJobTimeline() {
   const fetchJobs = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: "80" });
-      if (statusFilter !== "all") params.set("status", statusFilter);
-      const { data, error } = await supabase.functions.invoke(
-        `dev-list-jobs?${params.toString()}`,
-        { method: "GET" },
-      );
+      const body: Record<string, unknown> = { limit: 80 };
+      if (statusFilter !== "all") body.status = statusFilter;
+      const { data, error } = await supabase.functions.invoke("dev-list-jobs", {
+        body,
+      });
       if (error) throw error;
       setJobs((data as any)?.jobs ?? []);
     } catch (err) {
