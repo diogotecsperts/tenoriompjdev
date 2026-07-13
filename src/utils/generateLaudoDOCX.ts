@@ -1161,6 +1161,7 @@ export const generateLaudoDOCX = async (
   
   const filename = `laudo-pericial-${processNumber}-${periciandoName}.docx`;
   
+  if (options?.returnBlob) return blob;
   saveAs(blob, filename);
 };
 
