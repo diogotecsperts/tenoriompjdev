@@ -60,6 +60,10 @@ interface SystemConfig {
   store_extracted_text: boolean;
   phase1_gemini_model: string;
   phase1_ocr_provider: string; // 'gemini' or 'mistral'
+  // Legacy (obsoletos, mantidos apenas para compatibilidade da UI até a limpeza do form)
+  fallback_ai_provider?: string;
+  fallback_ai_model?: string;
+  pdf_ai_provider?: string;
 }
 
 interface ApiKeys {
