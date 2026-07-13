@@ -14,6 +14,7 @@ import {
   DollarSign,
   RefreshCw,
   Server,
+  Activity,
   Gauge,
   MessageSquare,
   History,
