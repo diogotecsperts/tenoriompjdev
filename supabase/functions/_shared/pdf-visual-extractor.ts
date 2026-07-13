@@ -44,14 +44,12 @@ function resolveGeminiModelName(model: string): string {
   return resolved;
 }
 
-// Gemini 3.x deve ler PDFs via Interactions API. A rota generateContent +
-// file_data é legado para modelos 2.x e tem retornado 400 INVALID_ARGUMENT em
-// PDFs com modelos 3.x/3.5.
+// Gemini 3.x deve ler PDFs via Interactions API. Para PDFs grandes, o módulo
+// previdenciário agora desvia antes para OCR client-side por chunks; este
+// arquivo fica apenas como caminho síncrono para PDFs pequenos/médios.
 function shouldUseGeminiInteractionsAPI(apiModel: string): boolean {
   return /^gemini-3(?:\.|-|$)/.test(apiModel) || apiModel === 'gemini-3.5-flash';
 }
-
-const GEMINI_STABLE_PDF_FALLBACK_MODEL = 'gemini-2.5-flash';
 
 type GeminiPdfFileResult =
   | { ok: true; text: string; model: string; route: string; usedFallback: boolean; originalModel?: string }
@@ -62,10 +60,6 @@ function sanitizeGeminiError(raw: string, max = 1600): string {
     .replace(/key=AIza[\w-]+/gi, 'key=[redacted]')
     .replace(/x-goog-api-key["'\s:=]+[A-Za-z0-9._\-]+/gi, 'x-goog-api-key=[redacted]')
     .slice(0, max);
-}
-
-function isInvalidArgumentGeminiError(error: string): boolean {
-  return /\b400\b|INVALID_ARGUMENT|invalid argument|invalid_argument/i.test(error);
 }
 
 function extractTextFromInteraction(data: any): string {
@@ -117,27 +111,6 @@ export interface StreamInput {
 }
 
 /**
- * Gera variantes de URI HTTPS completas para tentar (com e sem /v1beta)
- * A API pode aceitar diferentes formatos dependendo da versão
- */
-function getFileUriVariants(fileUri: string): string[] {
-  const variants: string[] = [fileUri]; // Original primeiro
-  
-  // Se tem /v1beta/, adicionar variante sem /v1beta/
-  if (fileUri.includes('/v1beta/files/')) {
-    const withoutV1beta = fileUri.replace('/v1beta/files/', '/files/');
-    variants.push(withoutV1beta);
-  }
-  // Se não tem /v1beta/, adicionar variante com /v1beta/
-  else if (fileUri.includes('googleapis.com/files/') && !fileUri.includes('/v1beta/')) {
-    const withV1beta = fileUri.replace('/files/', '/v1beta/files/');
-    variants.push(withV1beta);
-  }
-  
-  return variants;
-}
-
-/**
  * Helper resiliente para chamar generateContent com arquivo via Files API
  * IMPORTANTE: Usa apenas URIs HTTPS completas (nunca formato curto files/ID)
  * Tenta múltiplos formatos de payload para compatibilidade com variações da API
@@ -153,119 +126,54 @@ async function callGeminiGenerateContentWithFile(
   // recebe apenas "Edge Function returned a non-2xx status code", sem causa real.
   const OCR_GENERATE_TIMEOUT_MS = 105_000;
   
-  // Gerar variantes de URI HTTPS completas (nunca usar formato curto!)
-  const uriVariants = getFileUriVariants(fileUri);
-  console.log(`[pdf-visual-extractor] URI variants to try: ${uriVariants.join(', ')}`);
-  
-  // Configurações base de geração (alinhado com callGeminiVision que funciona)
+  // Configuração mínima: evita combinações de payload que o provider pode
+  // rejeitar com 400 genérico. O prompt já pede JSON; parseamos de forma robusta.
   const generationConfig = {
     temperature: 0.1,
-    topP: 0.95,
     maxOutputTokens: 65536,
-    responseMimeType: "application/json",
   };
 
-  // Definir as tentativas em ordem (SEM URIs curtas!)
-  const attempts: Array<{
-    name: string;
-    payload: object;
-  }> = [];
-  
-  // Para cada variante de URI, tentar camelCase e snake_case
-  for (let i = 0; i < uriVariants.length; i++) {
-    const uri = uriVariants[i];
-    const variantLabel = i === 0 ? 'original' : `variant${i}`;
-    
-    // Tentativa com camelCase (fileData)
-    attempts.push({
-      name: `A${i + 1}-camelCase-${variantLabel}`,
-      payload: {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), OCR_GENERATE_TIMEOUT_MS);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         contents: [{
           parts: [
-            { fileData: { fileUri: uri, mimeType: 'application/pdf' } },
-            { text: prompt }
-          ]
+            { text: prompt },
+            { file_data: { file_uri: fileUri, mime_type: 'application/pdf' } },
+          ],
         }],
-        generationConfig
-      }
-    });
-    
-    // Tentativa com snake_case (file_data)
-    attempts.push({
-      name: `C${i + 1}-snake_case-${variantLabel}`,
-      payload: {
-        contents: [{
-          parts: [
-            { file_data: { file_uri: uri, mime_type: 'application/pdf' } },
-            { text: prompt }
-          ]
-        }],
-        generationConfig
-      }
-    });
-  }
+        generationConfig,
+      }),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutId));
 
-  let lastError = '';
-  
-  for (const attempt of attempts) {
-    console.log(`[pdf-visual-extractor] Trying ${attempt.name} with model: ${apiModel}`);
-    
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), OCR_GENERATE_TIMEOUT_MS);
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(attempt.payload),
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timeoutId));
-
-      const responseText = await response.text();
-      
-      if (response.ok) {
-        console.log(`[pdf-visual-extractor] SUCCESS with ${attempt.name}`);
-        try {
-          const data = JSON.parse(responseText);
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          return { ok: true, text };
-        } catch (parseErr) {
-          console.error(`[pdf-visual-extractor] ${attempt.name} - Failed to parse response JSON:`, parseErr);
-          return { ok: false, error: `Parse error: ${parseErr}` };
-        }
-      }
-      
-      // Check if it's an INVALID_ARGUMENT error (retry-able with next format)
-      const isInvalidArgument = response.status === 400 && 
-        (responseText.includes('INVALID_ARGUMENT') || responseText.toLowerCase().includes('invalid argument'));
-      
-      if (isInvalidArgument) {
-        console.warn(`[pdf-visual-extractor] ${attempt.name} failed with INVALID_ARGUMENT (400), trying next format...`);
-        console.warn(`[pdf-visual-extractor] Response: ${responseText.substring(0, 500)}`);
-        lastError = `${attempt.name}: ${responseText.substring(0, 300)}`;
-        continue; // Try next format
-      }
-      
-      // For other errors (401, 403, 429, 5xx), don't retry - return immediately
-      console.error(`[pdf-visual-extractor] ${attempt.name} failed with non-retryable error (${response.status})`);
-      console.error(`[pdf-visual-extractor] Response: ${responseText.substring(0, 1000)}`);
-      return { ok: false, error: `HTTP ${response.status}: ${responseText}` };
-      
-    } catch (fetchErr) {
-      if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {
-        const timeoutMsg = `Gemini OCR timeout after ${Math.round(OCR_GENERATE_TIMEOUT_MS / 1000)}s (model=${apiModel}, payload=${attempt.name}). Documento provavelmente grande/demorado demais para processamento síncrono.`;
-        console.error(`[pdf-visual-extractor] ${timeoutMsg}`);
-        return { ok: false, error: timeoutMsg };
-      }
-      console.error(`[pdf-visual-extractor] ${attempt.name} fetch error:`, fetchErr);
-      lastError = `${attempt.name}: ${fetchErr}`;
-      // Network errors are retry-able
-      continue;
+    const responseText = await response.text();
+    if (!response.ok) {
+      const sanitized = sanitizeGeminiError(responseText, 800);
+      const isInvalidArgument = response.status === 400 && /INVALID_ARGUMENT|invalid argument/i.test(responseText);
+      const guidance = isInvalidArgument
+        ? 'PDF recusado pelo Gemini em modo documento único. Para PDF grande, use OCR seguro por páginas/chunks.'
+        : 'Falha na chamada Gemini Files API.';
+      console.error(`[pdf-visual-extractor] generateContent/${apiModel} failed ${response.status}: ${sanitized}`);
+      return { ok: false, error: `HTTP ${response.status}: ${guidance} ${sanitized}` };
     }
+
+    const data = JSON.parse(responseText);
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return { ok: true, text };
+  } catch (fetchErr) {
+    if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {
+      const timeoutMsg = `Gemini OCR timeout after ${Math.round(OCR_GENERATE_TIMEOUT_MS / 1000)}s (model=${apiModel}). Documento provavelmente grande/demorado demais para processamento síncrono.`;
+      console.error(`[pdf-visual-extractor] ${timeoutMsg}`);
+      return { ok: false, error: timeoutMsg };
+    }
+    console.error(`[pdf-visual-extractor] generateContent fetch error:`, fetchErr);
+    return { ok: false, error: `Fetch error: ${fetchErr}` };
   }
-  
-  // All attempts failed
-  console.error(`[pdf-visual-extractor] All ${attempts.length} payload attempts failed. Last error: ${lastError}`);
-  return { ok: false, error: `All attempts failed. Last: ${lastError}` };
 }
 
 async function callGeminiInteractionsWithFile(
@@ -396,46 +304,14 @@ async function callGeminiPdfFileWithFallback(
     return { ok: true, text: primary.text, model: requestedModel, route, usedFallback: false };
   }
 
-  const shouldFallback =
-    apiModel !== GEMINI_STABLE_PDF_FALLBACK_MODEL &&
-    isInvalidArgumentGeminiError(primary.error);
-
-  if (!shouldFallback) {
-    return { ok: false, error: `${route}/${apiModel}: ${primary.error}`, model: requestedModel, route };
-  }
-
-  console.warn(
-    `[pdf-visual-extractor] ${route}/${apiModel} rejected PDF with INVALID_ARGUMENT. ` +
-    `Retrying once with stable OCR fallback ${GEMINI_STABLE_PDF_FALLBACK_MODEL}.`,
-  );
-
-  const fallback = await callGeminiGenerateContentWithFile(
-    apiKey,
-    GEMINI_STABLE_PDF_FALLBACK_MODEL,
-    fileUri,
-    prompt,
-  );
-
-  if (fallback.ok) {
-    return {
-      ok: true,
-      text: fallback.text,
-      model: GEMINI_STABLE_PDF_FALLBACK_MODEL,
-      route: 'generateContent-fallback',
-      usedFallback: true,
-      originalModel: requestedModel,
-    };
-  }
-
   return {
     ok: false,
-    model: GEMINI_STABLE_PDF_FALLBACK_MODEL,
-    route: 'generateContent-fallback',
-    originalModel: requestedModel,
     error:
-      `Modelo OCR configurado (${requestedModel}) recusou o PDF em ${route} com INVALID_ARGUMENT; ` +
-      `fallback técnico ${GEMINI_STABLE_PDF_FALLBACK_MODEL} também falhou. ` +
-      `Erro original: ${primary.error}. Erro fallback: ${fallback.error}`,
+      `${route}/${apiModel}: ${primary.error}. ` +
+      `Fallback automático entre modelos Gemini desativado para não queimar crédito em requisições equivalentes; ` +
+      `PDFs grandes devem seguir o OCR seguro por páginas/chunks.`,
+    model: requestedModel,
+    route,
   };
 }
 

@@ -1,90 +1,94 @@
-## Diagnóstico rígido
+## Diagnóstico objetivo
 
-O erro agora está bem localizado: o PDF de 62,97 MB foi enviado corretamente para a Files API, mas a chamada de OCR falhou quando tentou ler o arquivo com o modelo configurado no DevPanel: `gemini-3.1-flash-lite`.
+Você tem razão em cobrar: **o caminho atual ainda está insistindo no lugar errado para PDF grande**.
 
-Evidências encontradas:
-- Job afetado: `3705b14e-16f3-4649-942b-f9982bfa78cf`.
-- Provider OCR atual: `gemini`.
-- Modelo OCR atual: `gemini-3.1-flash-lite`.
-- O upload por streaming aconteceu: `PDF 62.97MB → streaming direto ao Gemini Files API`.
-- A falha vem depois, na leitura do arquivo: `Gemini Vision (Streaming) error: All attempts failed ... 400 INVALID_ARGUMENT`.
-- A documentação atual do Google recomenda **Interactions API** para modelos Gemini 3.x com PDF/Files API.
-- Há relatos recentes no fórum do Google de falhas específicas em PDF com modelos `gemini-3.1-flash-lite` e `gemini-3.5-flash`, enquanto `gemini-2.5-flash`, `gemini-2.5-pro` e `gemini-3.1-pro-preview` funcionam melhor para PDF.
+Evidência dos logs internos:
 
-Conclusão técnica: o problema não é mais “travamento” nem upload de 63 MB. O problema provável é **incompatibilidade/instabilidade do modelo `gemini-3.1-flash-lite` para OCR de PDF grande via Files API/generateContent**, agravada pelo fato de o código ter desativado a Interactions API após o erro anterior.
+- Job atual: `84f85725-3d8d-4fe5-ab94-891afddf55f3`.
+- PDF: **66.025.728 bytes / 62,97 MB**.
+- Configuração global atual: OCR `gemini` com modelo `gemini-2.5-flash`.
+- O arquivo **subiu com sucesso** para o Gemini Files API e ficou `ACTIVE`.
+- A falha ocorreu depois, na leitura do PDF pelo `generateContent`:
+  - `400 INVALID_ARGUMENT: Request contains an invalid argument`
+  - falhou nas 4 variações de payload tentadas.
+- O teste simples do modelo `gemini-2.5-flash` respondeu `OK`, então **a chave/modelo não estão quebrados de forma geral**; o problema é o uso desse endpoint com esse PDF grande.
+- Logs do AI Gateway do projeto mostram **apenas 1 chamada recente bem-sucedida** (`log_id 019f515a-3481-7351-a2ae-3ae181b38dcf`, 2026-07-11 13:24:54Z). Não há erros recentes ali; esta falha de OCR está ocorrendo pelo caminho direto do provider configurado, não por uma chamada registrada como falha no Gateway.
+
+## O que isso significa
+
+O erro atual não é mais “travamento silencioso”. Agora ele falha rápido, mas a mensagem ficou ruim.
+
+O problema real: **PDF grande não deve depender de uma única chamada Gemini whole-document com Files API para OCR integral**. Mesmo com upload aceito, a chamada de leitura pode ser recusada por limite/compatibilidade do provider. Insistir em trocar modelo ou variar `fileData/file_data` está virando tentativa circular.
+
+## Arquivos pequenos foram afetados?
+
+Parcialmente:
+
+- PDFs pequenos abaixo de ~4 MB continuam no caminho inline e provavelmente não foram afetados.
+- PDFs médios acima de ~4 MB passaram a usar Files API automaticamente; isso pode afetar alguns casos.
+- PDFs grandes acima de 30 MB entram no caminho streaming/Files API, que foi justamente onde este PDF de 62,97 MB falhou.
+
+## Melhor metodologia daqui pra frente
+
+Trocar a estratégia para PDF grande:
+
+```text
+PDF pequeno/médio seguro
+  -> fluxo atual simplificado
+
+PDF grande (>50 MB ou quando Gemini Files API retornar 400)
+  -> NÃO insistir no whole-document
+  -> rasterizar no navegador por páginas/chunks
+  -> enviar chunks controlados para OCR
+  -> juntar texto
+  -> só então rodar extração estruturada
+```
+
+Isso reduz o risco de:
+
+- queimar crédito em tentativas repetidas sem chance real;
+- ficar travado sem erro;
+- depender de um limite opaco do Gemini para PDF grande;
+- perder tudo se uma única chamada gigante falhar.
 
 ## Plano de correção
 
-### 1. Corrigir o roteamento Gemini para PDF grande
-- Para modelos Gemini 3.x (`gemini-3.1-flash-lite`, `gemini-3.5-flash`, `gemini-3-pro-preview`, etc.), usar **Interactions API** com payload documentado:
-  - `input: [{ type: "text", text: prompt }, { type: "document", uri: fileUri, mime_type: "application/pdf" }]`
-  - Sem `generation_config` arriscado no primeiro momento.
-  - Sem `background: true` enquanto a compatibilidade não estiver comprovada, para reduzir variáveis.
-- Para modelos Gemini 2.5, manter o caminho estável por `generateContent + file_data`.
+1. **Parar o loop ruim em PDF grande**
+   - Em `pdf-visual-extractor.ts`, remover a lógica de “4 payloads + fallback para outro Gemini” para documentos grandes.
+   - Para erro `400 INVALID_ARGUMENT` em PDF via Files API, classificar como “PDF grande incompatível com OCR whole-document”, não como “modelo recusou” genérico.
 
-### 2. Tornar `gemini-2.5-flash` o fallback técnico automático para OCR de PDF
-- Se Gemini 3.x retornar `400 INVALID_ARGUMENT` ao processar PDF, repetir automaticamente uma única vez com `gemini-2.5-flash`.
-- Isso não muda os dados salvos retroativamente; só evita que um modelo instável derrube o processamento.
-- O resultado deve registrar o modelo efetivamente usado, para auditoria.
+2. **Criar modo seguro chunkado para Gemini**
+   - Adicionar endpoint `gemini-ocr-chunk`.
+   - O frontend rasteriza o PDF por páginas/chunks, igual ao fluxo já existente do MiniMax.
+   - Cada chunk envia poucas páginas como imagens para o Gemini, evitando o envio do PDF inteiro de 63 MB numa única chamada.
 
-### 3. Proteger o DevPanel contra escolha instável para OCR
-- No seletor de modelo OCR, marcar `gemini-2.5-flash` como recomendado para OCR de autos.
-- Remover ou despriorizar `gemini-3.1-flash-lite`/`gemini-3.5-flash` do caminho de OCR, ou exibir aviso claro de instabilidade para PDF.
-- Manter modelos 3.x disponíveis para geração textual se necessário, mas não como padrão de OCR.
+3. **Roteamento por tamanho**
+   - PDFs pequenos: manter caminho atual.
+   - PDFs grandes, especialmente **>50 MB**: não usar `generateContent` com PDF inteiro.
+   - Se o provider escolhido for Gemini, o backend retornará sinal para OCR chunkado no navegador.
+   - Se o provider for MiniMax, mantém o fluxo client-side já existente.
 
-### 4. Melhorar drasticamente a mensagem de erro
-- Substituir a mensagem atual genérica por algo como:
-  - “O modelo de OCR configurado (`gemini-3.1-flash-lite`) recusou este PDF. O arquivo foi enviado corretamente, mas o Gemini retornou erro 400 ao ler o documento. Tente `gemini-2.5-flash` ou aguarde a tentativa automática com fallback técnico.”
-- Separar claramente:
-  - tamanho do PDF,
-  - modelo usado,
-  - endpoint usado,
-  - se houve fallback automático,
-  - erro técnico resumido.
+4. **Proteger créditos**
+   - Limitar tentativas por chunk.
+   - Não fazer fallback automático entre providers pagos sem sinal claro.
+   - Se um chunk falhar, registrar exatamente páginas/chunk afetados.
+   - Evitar repetir upload/processamento inteiro após um `400` definitivo.
 
-### 5. Adicionar logs decisivos para não trabalhar no escuro
-- Logar, sem expor chave:
-  - endpoint (`interactions` ou `generateContent`),
-  - modelo,
-  - tamanho do arquivo,
-  - estado do arquivo na Files API,
-  - tentativa de fallback,
-  - trecho sanitizado do erro do provider.
-- Isso evita novo ciclo de “erro vermelho sem causa clara”.
+5. **Melhorar mensagens de erro**
+   - Substituir o cartão vermelho gigante por:
+     - causa curta;
+     - etapa;
+     - provider/modelo;
+     - ID do job;
+     - botão de tentar novamente;
+     - detalhe técnico recolhido/expandível.
+   - Mensagem para este caso: “O Gemini aceitou o upload, mas recusou ler este PDF grande em modo documento único. Use o modo seguro por páginas/chunks.”
 
-### 6. Ajustar o timeout sem mascarar erro
-- Manter watchdog para não travar indefinidamente.
-- Mas quando o provider retornar erro real antes do timeout, gravar esse erro no job imediatamente.
-- O frontend deve mostrar a causa real, não só “backend/processamento”.
+6. **Watchdog e limpeza de estados antigos**
+   - Manter o watchdog do `prev_processing_jobs`.
+   - Revisar também jobs antigos em `import_jobs` que aparecem parados em `processing` desde ontem, pois são outro ponto de “espera eterna”.
 
-### 7. Validação após implementar
-- Conferir configuração atual do DevPanel após ajuste.
-- Reprocessar o PDF de 63 MB.
-- Resultado esperado:
-  - não trava em 18%,
-  - se Gemini 3.x falhar, fallback para `gemini-2.5-flash`,
-  - se ainda falhar, erro legível e acionável.
-
-## Arquivos que serão alterados
-
-- `supabase/functions/_shared/pdf-visual-extractor.ts`
-  - corrigir roteamento Gemini 3.x/2.5,
-  - reativar Interactions API de forma documentada,
-  - adicionar fallback técnico para `gemini-2.5-flash`,
-  - melhorar logs e detalhes de erro.
-
-- `supabase/functions/_shared/ocr-router.ts`
-  - registrar modelo efetivo e fallback técnico quando ocorrer.
-
-- `supabase/functions/prev-pre-processar/index.ts`
-  - classificar melhor erro Gemini 400 em OCR.
-
-- `src/modules/previdenciario/api/processar.ts`
-  - exibir mensagem amigável baseada no erro real do job.
-
-- `src/components/dev-panel/DevSettings.tsx`
-  - ajustar opções/avisos do modelo OCR para evitar `gemini-3.1-flash-lite` como escolha silenciosamente problemática.
-
-## Decisão técnica principal
-
-Para este caso específico, a correção mais segura é: **OCR de PDF grande deve preferir `gemini-2.5-flash` como modelo estável**, e modelos Gemini 3.x só devem ser usados com rota documentada e fallback automático. O erro atual indica que insistir em `gemini-3.1-flash-lite` para esse PDF tende a continuar falhando.
+7. **Validação sem desperdiçar crédito**
+   - Primeiro validar só o roteamento: PDF de 62,97 MB deve cair no modo chunkado, não no Files API whole-document.
+   - Depois testar um chunk pequeno.
+   - Não disparar OCR completo pago automaticamente sem você clicar em “Tentar novamente”.

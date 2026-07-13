@@ -25,9 +25,9 @@ const corsHeaders = {
 interface ReqBody {
   periciaId: string;
   /**
-   * Texto OCR já extraído pelo pipeline client-side (usado quando o provider
-   * configurado é MiniMax — rasterização é feita no navegador para não estourar
-   * o limite de CPU de 2s da edge function).
+   * Texto OCR já extraído pelo pipeline client-side. Usado por providers que
+   * precisam de rasterização/chunking no navegador (MiniMax e PDFs Gemini
+   * grandes, para evitar chamada única whole-document instável/cara).
    */
   preExtractedText?: string;
   preExtractedProvider?: string;
@@ -152,6 +152,8 @@ TEXTO OCR DO PROCESSO:
 const SYSTEM_PROMPT =
   'Você extrai dados objetivos de processos judiciais previdenciários e devolve APENAS JSON válido, sem markdown e sem texto adicional. É proibido usar a expressão "IA".';
 
+const GEMINI_CLIENT_CHUNK_THRESHOLD_BYTES = 50 * 1024 * 1024;
+
 /**
  * Reduz texto OCR preservando cabeça e cauda (quesitos costumam ficar no fim).
  */
@@ -162,6 +164,29 @@ function trimOcrPreservingTail(text: string, maxChars = 120_000): string {
   const head = text.slice(0, headSize);
   const tail = text.slice(-tailSize);
   return `${head}\n\n[...trecho omitido por limite de contexto...]\n\n${tail}`;
+}
+
+async function getPrevPdfSizeBytes(admin: any, pdfPath: string): Promise<number | null> {
+  try {
+    const slash = pdfPath.lastIndexOf("/");
+    const folder = slash >= 0 ? pdfPath.slice(0, slash) : "";
+    const filename = slash >= 0 ? pdfPath.slice(slash + 1) : pdfPath;
+    const { data, error } = await admin.storage.from("prev-pdfs").list(folder, {
+      limit: 100,
+      search: filename,
+    });
+    if (error) {
+      console.warn("[prev-pre-processar] não foi possível ler metadata do PDF:", error.message);
+      return null;
+    }
+    const item = (data || []).find((x: any) => x?.name === filename);
+    const rawSize = item?.metadata?.size ?? item?.metadata?.contentLength;
+    const size = typeof rawSize === "number" ? rawSize : Number(rawSize || 0);
+    return Number.isFinite(size) && size > 0 ? size : null;
+  } catch (e) {
+    console.warn("[prev-pre-processar] falha ao checar tamanho do PDF:", e);
+    return null;
+  }
 }
 
 function classifyProcessingError(
@@ -1049,17 +1074,29 @@ Deno.serve(async (req: Request) => {
     }
 
     const ocrConfig = await getOcrRouterConfig();
-    if (ocrConfig.provider === "minimax") {
+    const pdfSizeBytes = await getPrevPdfSizeBytes(admin, pericia.pdf_path);
+    const shouldUseGeminiClientChunking =
+      ocrConfig.provider === "gemini" &&
+      typeof pdfSizeBytes === "number" &&
+      pdfSizeBytes >= GEMINI_CLIENT_CHUNK_THRESHOLD_BYTES;
+
+    if (ocrConfig.provider === "minimax" || shouldUseGeminiClientChunking) {
+      const isGeminiChunking = ocrConfig.provider === "gemini";
       return new Response(
         JSON.stringify({
           ok: false,
           needsClientRasterize: true,
-          mode: "minimax-client-rasterize",
-          chunkEndpoint: "minimax-ocr-chunk",
+          mode: isGeminiChunking ? "gemini-client-rasterize" : "minimax-client-rasterize",
+          chunkEndpoint: isGeminiChunking ? "gemini-ocr-chunk" : "minimax-ocr-chunk",
           pdfPath: pericia.pdf_path,
           bucket: "prev-pdfs",
+          provider: ocrConfig.provider,
+          model: isGeminiChunking ? ocrConfig.geminiModel : "MiniMax-M3",
+          sizeBytes: pdfSizeBytes,
           message:
-            "Provider MiniMax selecionado. Rode a rasterização no navegador e re-invoque com preExtractedText.",
+            isGeminiChunking
+              ? "PDF grande detectado. O Gemini será executado em modo seguro por páginas/chunks, sem chamada única ao PDF inteiro."
+              : "Provider MiniMax selecionado. Rode a rasterização no navegador e re-invoque com preExtractedText.",
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
