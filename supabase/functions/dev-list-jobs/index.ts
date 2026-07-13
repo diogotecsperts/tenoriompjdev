@@ -82,11 +82,25 @@ Deno.serve(async (req) => {
     }
     const admin = gate.admin;
 
-    const url = new URL(req.url);
-    const jobId = url.searchParams.get("job_id");
-    const limit = Math.min(Number(url.searchParams.get("limit") ?? "50"), 200);
-    const statusFilter = url.searchParams.get("status");
-    const userFilter = url.searchParams.get("user_id");
+    let jobId: string | null = null;
+    let limit = 50;
+    let statusFilter: string | null = null;
+    let userFilter: string | null = null;
+    if (req.method === "POST") {
+      try {
+        const body = await req.json();
+        jobId = body?.job_id ?? null;
+        limit = Math.min(Number(body?.limit ?? 50), 200);
+        statusFilter = body?.status ?? null;
+        userFilter = body?.user_id ?? null;
+      } catch { /* ignore */ }
+    } else {
+      const url = new URL(req.url);
+      jobId = url.searchParams.get("job_id");
+      limit = Math.min(Number(url.searchParams.get("limit") ?? "50"), 200);
+      statusFilter = url.searchParams.get("status");
+      userFilter = url.searchParams.get("user_id");
+    }
 
     // ── Single-job detail ────────────────────────────────────────────────
     if (jobId) {
