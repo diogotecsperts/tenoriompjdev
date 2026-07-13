@@ -466,13 +466,6 @@ function getDefaultConfig(): AIConfig {
     apiKey: lovableKey || null,
     endpoint: PROVIDER_ENDPOINTS.lovable,
     displayModel: 'gemini-2.5-flash',
-    fallback: {
-      provider: 'lovable',
-      model: 'google/gemini-2.5-flash',
-      apiKey: lovableKey || null,
-      endpoint: PROVIDER_ENDPOINTS.lovable,
-      displayModel: 'gemini-2.5-flash'
-    }
   };
 }
 
