@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Server,
   Activity,
+  FlaskConical,
   Gauge,
   MessageSquare,
   History,
