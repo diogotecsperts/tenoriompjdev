@@ -265,7 +265,7 @@ export default function PautaDetalhe() {
       try {
         await preProcessarPericia(p.id, {
           onMinimaxProgress: (progress) => {
-            setProcessandoDetalhes((s) => ({ ...s, [p.id]: formatMinimaxProgress(progress) }));
+            setProcessandoDetalhes((s) => ({ ...s, [p.id]: formatClientOcrProgress(progress) }));
           },
           onJobProgress: (message) => {
             setProcessandoDetalhes((s) => ({ ...s, [p.id]: message }));
