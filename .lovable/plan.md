@@ -1,79 +1,105 @@
-# OCR de PDFs grandes (>30 MB) via split automático em partes
 
-## Resposta às suas perguntas
+## Diagnóstico
 
-**Gemini processa 63 MB direto?** Tecnicamente sim — a Files API do Gemini aceita até 2 GB / 1000 páginas. Mas na prática temos dois gargalos nossos:
-1. **Hard-limit atual de 50 MB** em `prev-pre-processar/index.ts` (linha 875) → arquivos maiores são rejeitados antes de tocar o Gemini.
-2. **Memória da edge function (150 MB)** — segurar 63 MB em `Uint8Array` + upload multipart deixa muito pouca folga; risco de OOM em picos.
+Job atual do Bruno (`9994ae70-7209-455d-b606-99579043781c`) travado no banco em:
 
-Sem correção, o cliente vai bater no erro "PDF muito grande" já no upload de 63 MB. E, mesmo se removêssemos o limite, o Gemini começaria a perder qualidade em PDFs muito longos por causa do teto de tokens de saída (65k tokens ≈ ~200 páginas de texto denso). Split é a solução certa.
+```
+status=processing  stage=ocr_processing  progress=18
+provider=gemini    model=gemini-3.1-flash-lite
+updated_at=01:45:26  (sem mexer há >7 min)
+```
 
-**Chunk mantém a qualidade?** Para **OCR (Fase 1)** o chunk **é neutro-a-positivo**, não perde nada:
-- OCR é transcrição por página; cada página é auto-contida. Não há "raciocínio" a preservar entre páginas — é só copiar o texto.
-- Ao concatenar `rawText` das partes na ordem correta, o texto final é idêntico ao que seria em um único request.
-- Contextos menores costumam **melhorar** a fidelidade do Gemini (menos "lost-in-the-middle").
-- A **Fase 2** (MiniMax M3 extraindo campos) recebe o texto final já mergeado — ela vê o documento inteiro, então nenhum raciocínio é fragmentado.
+O que aconteceu:
 
-O caso em que chunk *poderia* perder qualidade é análise semântica com dependência entre chunks (ex.: MiniMax M3 fazendo Fase 2 em pedaços), e é exatamente por isso que o MiniMax OCR client-side usa `cross-chunk context`. Para Gemini OCR, isso não se aplica.
+1. `prev-pre-processar` disparou `runPreProcessJob` em background via `EdgeRuntime.waitUntil` (linha 1038-1041).
+2. Dentro do OCR, PDF de 63 MB entrou no caminho `runGeminiOcrChunked` (chunk >30 MB).
+3. O worker foi morto pelo runtime **sem executar o `catch`** — provável OOM (150 MB de limite; pdf-lib duplica bytes ao copiar páginas) ou wall-clock (~400s) estourado antes de terminar as 3 partes.
+4. Como o `catch` nunca rodou, `finalizeFailedJob` não foi chamado → linha ficou `processing` para sempre → frontend fica em polling até o timeout de 12 min do cliente, então mostra "OCR gemini em execução · 18%" indefinidamente.
 
-**Threshold de 30 MB é razoável?** Sim, com folga. Aciona split cedo, mantém margem contra picos de memória, e não penaliza a maioria (a mediana dos seus PDFs até hoje é bem < 30 MB pelos logs).
+Não é bug do Gemini; é worker morto silenciosamente + falta de watchdog.
 
-## O que já existe no projeto
-- `supabase/functions/_shared/pdf-splitter.ts` — helper com `splitPDF()` usando `pdf-lib`, preserva imagens/fontes/refs internas. **Está pronto e não é usado por ninguém ainda.**
-- `pdf-visual-extractor.ts` — sabe rodar Gemini Files API para uma parte de qualquer tamanho.
+## Objetivos
 
-## Arquitetura proposta
+1. **Nunca mais travar em silêncio** — job estagnado tem que virar `failed` com mensagem clara em <2 min.
+2. **Eliminar a causa raiz do 63 MB** — parar de rasterizar/split em edge (pressão de memória) e usar Gemini Files API por streaming direto do storage.
+3. **Feedback incremental durante o chunking** (enquanto ele existir como fallback).
 
-### 1. Novo helper `runGeminiOcrChunked` em `_shared/ocr-router.ts`
-- Recebe `pdfBytes` + `geminiModel`.
-- Se `pdfBytes.byteLength <= 30 MB` → caminho single-shot atual (sem regressão).
-- Se `> 30 MB` → chama `splitPDF()` com `maxSizeBytes: 25 MB` (folga vs. 30 MB para absorver overhead do pdf-lib) e `maxParts: 6` (permite até ~150 MB de PDF; acima disso, negar com erro claro).
-- Libera `pdfBytes` original imediatamente após split (`pdfBytes = null`) para reduzir picos de memória.
-- Processa partes **sequencialmente** (não paralelo — evita 3× uso de memória simultâneo na Files API e mantém dentro dos 150 MB do worker).
-- Cada parte:
-  - `extractVisualContent(partBytes, { model: geminiModel })` (usa Files API porque > 4 MB).
-  - Guarda `rawText`, `pageCount`.
-  - Descarta bytes da parte antes de processar a próxima.
-- Ao final: concatena `rawText` das partes com separador `\n\n=== PARTE X (páginas Y–Z) ===\n\n` e soma `pageCount`.
-- Retorna `OcrRouterResult` com `provider: "gemini-visual-chunked"` e `model: <modelo>`.
+## Mudanças
 
-### 2. Integração em `runOcrWithConfiguredProvider`
-- Só o ramo `gemini` chama o novo helper.
-- Ramo `mistral` mantém erro > 50 MB (limite real do provider).
-- Ramo `minimax` inalterado (já é chunked client-side).
+### 1. Watchdog server-side em `check-prev-processing-status`
 
-### 3. Remover hard-limit de 50 MB em `prev-pre-processar/index.ts`
-- Trocar por limite mais generoso (e realista): **150 MB**.
-- Acima disso, erro claro: "PDF acima de 150 MB — divida manualmente antes do upload."
+Ao consultar um job, se `status IN ('queued','processing')` **e** `updated_at` foi há mais de `120s`, marcar automaticamente como:
 
-### 4. Timeouts e progresso
-- O timeout hoje da edge é dominado pelo Gemini (~105 s por chamada). Para PDF de 63 MB em 3 partes, teto teórico 3× 105 s = 315 s — acima do gateway (150 s).
-- Mitigação: mesmo padrão async job que já existe (`prev_pre_processar_jobs` + polling). Como já é async, o wall time longo não trava a UI.
-- Logar progresso por parte no worker: `[ocr-router] parte 2/3 concluída (páginas 21–40)` — aparece nos logs da edge.
+```
+status=failed
+error_code=provider_timeout
+error_message="Worker de OCR encerrou sem responder (provável estouro de memória ou tempo em PDF grande). Tente reduzir o PDF ou dividir manualmente."
+technical_detail="job zombie: last update at <ts>, stage=<stage>, provider=<provider>"
+progress=100
+completed_at=now()
+```
 
-### 5. Instrumentação
-- Log claro de decisão: `[ocr-router] PDF 63.2MB > 30MB → split em 3 partes de ~21MB`.
-- Log de conclusão: `[ocr-router] merge concluído: 3 partes, 158 páginas, 412k chars`.
-- No caso de falha de uma parte, propagar erro com contexto (`Falha na parte 2/3, páginas 21–40`).
+Retornar o registro já atualizado. Isso quebra o polling infinito em qualquer cliente sem depender do worker morto.
 
-## Escopo
-**Arquivos afetados:**
-- `supabase/functions/_shared/ocr-router.ts` — adicionar helper chunked + integrar
-- `supabase/functions/prev-pre-processar/index.ts` — subir hard-limit para 150 MB
+### 2. Streaming direto ao Gemini Files API para PDFs > 30 MB
 
-**Não afeta:**
-- `pdf-visual-extractor.ts` (o extrator não precisa saber de chunk — recebe bytes já cortados)
-- `pdf-splitter.ts` (usar como está)
-- Fase 2 (MiniMax M3), DevPanel, `user_settings`, dados salvos
-- Fluxos MiniMax client-side e Mistral
+Em `ocr-router.ts` (`runOcrWithConfiguredProvider`), para provider `gemini` e `pdfBytes.byteLength > 30_000_000`:
 
-## Trade-offs assumidos
-- **Custo Gemini**: N requisições em vez de 1. Cada uma tem input próprio (páginas) → custo total ≈ igual (é cobrado por token de input, não por request). Sem regressão de custo relevante.
-- **Latência**: PDFs > 30 MB ficam ~N× mais lentos (linear no número de partes). Aceitável porque roda em background job com polling.
-- **Memória do worker**: pico agora é `size(parte)` ≈ 25 MB durante processamento sequencial, ao invés de 63 MB inteiros → **menor pressão de memória**, não maior.
+- Trocar `runGeminiOcrChunked` (split + Uint8Array por parte) por uma nova função `runGeminiOcrLargeStream` que:
+  - Recebe o `Blob` original do storage (via novo parâmetro) e faz `blob.stream()` diretamente para `uploadToGeminiFilesAPIStream` (já existe em `gemini-files-api.ts`).
+  - Chama `generateContent` referenciando `fileUri`, sem carregar o PDF em memória do worker.
+  - Retorna `provider="gemini-files-stream"`.
+- Manter o caminho <30 MB inalterado (single-shot in-memory).
+- Ajustar `runPreProcessJob` para passar o `blob` (ou um `stream()` builder) para o router quando o PDF for grande, em vez de sempre materializar `Uint8Array`.
+
+Isso remove o pico de memória de ~180 MB (63 MB bytes + partes pdf-lib) e elimina o OOM. Gemini Files API aceita até 2 GB, então cobre todos os PDFs viáveis.
+
+### 3. Heartbeat durante OCR grande
+
+Antes de cada etapa longa (upload Files API, polling `PROCESSING`, `generateContent`), atualizar o job com progresso incremental:
+
+```
+20 → upload iniciado
+35 → upload concluído
+45 → Gemini processando arquivo
+58 → generateContent em execução
+60 → OCR concluído
+```
+
+Isso serve para:
+- UX (usuário vê que está avançando)
+- Habilitar o watchdog do item 1 (`updated_at` muda; se parar de mudar, é zumbi de verdade).
+
+### 4. Frontend: detectar estagnação antes do timeout global
+
+Em `pollPreProcessarJob` (`src/modules/previdenciario/api/processar.ts`):
+
+- Guardar `lastUpdatedAt` retornado pelo status.
+- Se em 6 polls seguidos (~30-40s) o `updatedAt` não mudar e `status='processing'`, chamar o watchdog explicitamente (o próprio `check-prev-processing-status` já vai finalizar após 120s no lado do servidor) e usar o erro dele.
+- Reduzir o `maxWaitMs` global de 12 min para 8 min (com watchdog em 2 min, 8 min é folga suficiente).
+
+### 5. Recuperar o job atual do Bruno
+
+Executar UPDATE único para marcar `9994ae70` como `failed` com a mesma mensagem do watchdog, para o cliente conseguir tentar de novo sem esperar.
+
+## Arquivos afetados
+
+- `supabase/functions/check-prev-processing-status/index.ts` — watchdog de 120s.
+- `supabase/functions/_shared/ocr-router.ts` — nova branch streaming; remover chunking com split para >30 MB (manter função só como fallback caso streaming falhe).
+- `supabase/functions/_shared/gemini-files-api.ts` — já tem `uploadToGeminiFilesAPIStream`, adicionar helper `generateContentFromFileUri(fileUri, model)` que faz o `generateContent` OCR.
+- `supabase/functions/prev-pre-processar/index.ts` — passar `blob` ao router; heartbeats de progresso durante OCR grande.
+- `src/modules/previdenciario/api/processar.ts` — detecção de estagnação + `maxWaitMs` menor.
+- Uma migration/UPDATE pontual para recuperar `9994ae70`.
 
 ## Validação
-1. Reprocessar o PDF de 63 MB do cliente: deve dividir em ~3 partes, concluir sem erro, retornar texto completo.
-2. Reprocessar PDF < 30 MB (ex.: 14 MB do Bruno): deve ir pelo single-shot (sem regressão, logs confirmam "no split needed").
-3. Simular PDF acima do teto (>150 MB): erro claro na UI, sem tentativa muda.
-4. Conferir logs: zero requisições saindo para Mistral (garantia do fix anterior continua valendo).
+
+- Reprocessar o PDF de 63 MB do Bruno → deve subir por streaming (sem pico de memória), completar `ocr_processing` sem chunking, ir para `ai_extraction`.
+- Simular worker morto (matar edge function no meio) → em <2 min o próximo poll retorna `failed` com mensagem clara, sem esperar 12 min.
+- Reprocessar PDF de 14 MB (Bruno original) → caminho single-shot inalterado.
+- Confirmar no `prev_processing_jobs` que nenhum job novo fica >2 min sem `updated_at` mudar.
+
+## Trade-offs
+
+- Streaming ao Files API adiciona ~5-15s de upload para PDFs grandes, mas remove chance de OOM.
+- Watchdog pode marcar como `failed` um OCR muito lento (>2 min sem heartbeat). Mitigado pelo heartbeat do item 3 — cada etapa emite update, então só finaliza jobs realmente mortos.
+- Não precisa aumentar tamanho da instância Cloud (compute) — o gargalo é memória por invocação, não CPU global.
