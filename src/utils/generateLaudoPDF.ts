@@ -626,7 +626,10 @@ const addFooterToPages = async (doc: jsPDF, footerImageBase64: string | null) =>
 
 // ========== FUNÇÃO PRINCIPAL ==========
 
-export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
+export const generateLaudoPDF = async (
+  laudo: LaudoData,
+  options?: { returnBlob?: boolean },
+): Promise<Blob | void> => {
   const doc = new jsPDF();
   let sectionNumber = 1;
   
