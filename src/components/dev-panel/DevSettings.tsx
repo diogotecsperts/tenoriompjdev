@@ -218,16 +218,13 @@ const AI_PROVIDERS: ProviderInfo[] = [{
 const DEFAULT_CONFIG: SystemConfig = {
   default_ai_provider: "lovable",
   default_ai_model: "google/gemini-2.5-flash",
-  fallback_ai_provider: "lovable",
-  fallback_ai_model: "google/gemini-2.5-flash",
   gemini_pdf_model: "gemini-2.5-flash",
-  pdf_ai_provider: "openrouter",
   pdf_ai_model: "google/gemini-2.5-flash",
   pdf_fallback_provider: "lovable",
   pdf_fallback_model: "google/gemini-2.5-flash",
   maintenance_mode: false,
   max_pdf_size_mb: 50,
-  
+
   retry_enabled: true,
   retry_max_attempts: 3,
   retry_base_delay_ms: 1000,
