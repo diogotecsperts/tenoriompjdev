@@ -10,12 +10,15 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractWithMistralOCR, getMistralAPIKey } from "./mistral-ocr.ts";
 import { extractVisualContent } from "./pdf-visual-extractor.ts";
 import { getMinimaxAPIKey, MINIMAX_CLIENT_RASTERIZE_ERROR } from "./minimax-client.ts";
-import { splitPDF } from "./pdf-splitter.ts";
 
-/** Acima deste tamanho, Gemini OCR roda em partes (split via pdf-lib). */
-const GEMINI_CHUNK_THRESHOLD_BYTES = 30_000_000; // 30 MB
-const GEMINI_CHUNK_MAX_PART_BYTES = 25_000_000;  // 25 MB por parte (folga p/ overhead)
-const GEMINI_CHUNK_MAX_PARTS = 6;                // teto: ~150 MB de PDF
+/**
+ * Acima deste tamanho, o Gemini OCR roda via **streaming** direto ao Files API
+ * (sem carregar o PDF inteiro em memória do worker). Elimina risco de OOM em
+ * PDFs grandes (63 MB+). Files API aceita até 2 GB.
+ */
+const GEMINI_STREAM_THRESHOLD_BYTES = 30_000_000; // 30 MB
+
+export type OcrHeartbeat = (stage: string, progress: number) => Promise<void> | void;
 
 export type OcrProvider = "gemini" | "mistral" | "minimax";
 
