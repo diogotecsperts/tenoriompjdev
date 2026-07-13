@@ -162,7 +162,7 @@ function classifyInvokeError(error: unknown, body: Record<string, unknown> | nul
           : rawMessage;
 
   return new PreProcessarError(
-    code === "session_expired" || rawMessage.includes("Edge Function returned") ? fallbackMessage : rawMessage,
+    code === "session_expired" || isGemini400 || rawMessage.includes("Edge Function returned") ? fallbackMessage : rawMessage,
     code,
     typeof body?.stage === "string" ? body.stage : undefined,
     status,
