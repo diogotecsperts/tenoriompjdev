@@ -127,10 +127,10 @@ export default function PautaDetalhe() {
 
   const pendentes = pericias.filter((p) => p.pdf_path && !p.pdf_processado);
 
-  const formatMinimaxProgress = (p: MinimaxOcrProgress) => {
+  const formatClientOcrProgress = (p: MinimaxOcrProgress) => {
     if (p.message) return p.message;
     if (p.phase === "rasterizing") return `Rasterizando página ${p.currentPage}/${p.totalPages}`;
-    if (p.phase === "extracting") return `Extraindo MiniMax ${p.currentChunk}/${p.totalChunks}`;
+    if (p.phase === "extracting") return `Extraindo OCR por chunks ${p.currentChunk}/${p.totalChunks}`;
     return "Consolidando extração";
   };
 
@@ -138,7 +138,7 @@ export default function PautaDetalhe() {
     switch (code) {
       case "provider_timeout":
       case "response_truncated":
-        return "Sugestão: tente novamente — o backend acionará o fallback automático.";
+        return "Sugestão: tente novamente. Para PDF grande, o sistema usará o modo seguro por páginas/chunks.";
       case "file_too_large":
         return "Sugestão: PDF acima do limite — divida o arquivo manualmente e refaça o upload.";
       case "quota_exceeded":
@@ -146,7 +146,7 @@ export default function PautaDetalhe() {
       case "invalid_key":
         return "Sugestão: revise a credencial do provider no DevPanel.";
       case "invalid_request":
-        return "Sugestão: verifique o modelo de OCR selecionado no DevPanel — o provider recusou a requisição.";
+        return "Sugestão: para PDF grande, tente novamente para usar o OCR seguro por páginas/chunks em vez da leitura do PDF inteiro.";
       case "rate_limited":
         return "Sugestão: aguarde alguns segundos e tente novamente.";
       case "provider_unavailable":
@@ -185,7 +185,7 @@ export default function PautaDetalhe() {
     try {
       const r = await preProcessarPericia(pericia.id, {
         onMinimaxProgress: (p) => {
-          setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: formatMinimaxProgress(p) }));
+          setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: formatClientOcrProgress(p) }));
         },
         onJobProgress: (message) => {
           setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: message }));
@@ -212,7 +212,7 @@ export default function PautaDetalhe() {
               : err?.code === "provider_timeout"
                 ? "Tempo excedido na IA"
                 : err?.code === "invalid_request"
-                  ? "Requisição inválida para IA"
+                  ? "OCR recusado pelo provider"
                   : err?.code === "response_truncated"
                     ? "Resposta incompleta da IA"
                     : err?.code === "file_too_large"
