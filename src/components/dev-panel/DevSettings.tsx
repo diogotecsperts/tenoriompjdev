@@ -642,10 +642,7 @@ export function DevSettings() {
         setConfig({
           default_ai_provider: configMap.default_ai_provider || DEFAULT_CONFIG.default_ai_provider,
           default_ai_model: configMap.default_ai_model || DEFAULT_CONFIG.default_ai_model,
-          fallback_ai_provider: configMap.fallback_ai_provider || DEFAULT_CONFIG.fallback_ai_provider,
-          fallback_ai_model: configMap.fallback_ai_model || DEFAULT_CONFIG.fallback_ai_model,
           gemini_pdf_model: configMap.gemini_pdf_model || DEFAULT_CONFIG.gemini_pdf_model,
-          pdf_ai_provider: configMap.pdf_ai_provider || DEFAULT_CONFIG.pdf_ai_provider,
           pdf_ai_model: configMap.pdf_ai_model || DEFAULT_CONFIG.pdf_ai_model,
           pdf_fallback_provider: configMap.pdf_fallback_provider || DEFAULT_CONFIG.pdf_fallback_provider,
           pdf_fallback_model: configMap.pdf_fallback_model || DEFAULT_CONFIG.pdf_fallback_model,
