@@ -109,10 +109,9 @@ export default function DevJobTimeline() {
     if (detail[jobId]) return;
     setDetailLoading(jobId);
     try {
-      const { data, error } = await supabase.functions.invoke(
-        `dev-list-jobs?job_id=${encodeURIComponent(jobId)}`,
-        { method: "GET" },
-      );
+      const { data, error } = await supabase.functions.invoke("dev-list-jobs", {
+        body: { job_id: jobId },
+      });
       if (error) throw error;
       setDetail((d) => ({ ...d, [jobId]: data as any }));
     } catch (err) {
