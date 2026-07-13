@@ -14,6 +14,7 @@ import {
   DollarSign,
   RefreshCw,
   Server,
+  Activity,
   Gauge,
   MessageSquare,
   History,
@@ -47,6 +48,7 @@ import { DevUserModules } from "@/components/dev-panel/DevUserModules";
 import { DevUsageControl } from "@/components/dev-panel/DevUsageControl";
 import { DevEmailTracking } from "@/components/dev-panel/DevEmailTracking";
 import { DevSignupRequests } from "@/components/dev-panel/DevSignupRequests";
+import DevJobTimeline from "@/components/dev-panel/DevJobTimeline";
 
 type DevTab =
   | "dashboard"
@@ -56,6 +58,7 @@ type DevTab =
   | "usage-control"
   | "logs"
   | "backend-logs"
+  | "job-timeline"
   | "errors"
   | "ai"
   | "ai-efficiency"
@@ -84,6 +87,7 @@ const navItems: NavItem[] = [
   { id: "email-tracking", label: "Rastreamento via Email", icon: Mail },
   { id: "logs", label: "AI Analytics", icon: FileText },
   { id: "backend-logs", label: "Servidor & Jobs", icon: Server },
+  { id: "job-timeline", label: "Job Timeline", icon: Activity },
   { id: "errors", label: "UI Reports", icon: AlertTriangle },
   { id: "ai-efficiency", label: "Eficiência de IAs", icon: Gauge },
   { id: "retries", label: "Retries & Rate Limits", icon: RefreshCw },
@@ -123,6 +127,8 @@ export default function DevPanel() {
         return <DevLogs />;
       case "backend-logs":
         return <DevBackendLogs />;
+      case "job-timeline":
+        return <DevJobTimeline />;
       case "errors":
         return <DevErrorLogs />;
       case "ai":

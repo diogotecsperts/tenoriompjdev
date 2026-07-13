@@ -23,7 +23,7 @@ Divido em 3 blocos independentes, aprovados/executados na ordem. Nada aqui toca 
 
 ---
 
-## Bloco 2 — Job status e logs ponta a ponta (OCR → preenchimento → exportação)
+## Bloco 2 — Job status e logs ponta a ponta (OCR → preenchimento → exportação) ✅ IMPLEMENTADO
 
 Aproveita `import_jobs` + `backend_logs` que já existem. Sem tabela nova.
 
