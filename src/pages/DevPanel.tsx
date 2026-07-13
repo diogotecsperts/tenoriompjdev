@@ -58,6 +58,7 @@ type DevTab =
   | "usage-control"
   | "logs"
   | "backend-logs"
+  | "job-timeline"
   | "errors"
   | "ai"
   | "ai-efficiency"
