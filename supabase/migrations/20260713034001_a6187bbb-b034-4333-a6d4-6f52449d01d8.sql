@@ -1,0 +1,1 @@
+DELETE FROM public.system_config WHERE id IN ('fallback_ai_provider', 'fallback_ai_model', 'pdf_ai_provider');
