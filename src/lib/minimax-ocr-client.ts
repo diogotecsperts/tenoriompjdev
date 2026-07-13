@@ -1,5 +1,5 @@
 /**
- * Client-side MiniMax M3 OCR pipeline.
+ * Client-side OCR pipeline.
  *
  * Rasteriza PDFs no navegador (pdfjs) e envia chunks de páginas ao endpoint
  * fino `minimax-ocr-chunk`. Necessário porque rodar rasterização WASM dentro
@@ -31,6 +31,8 @@ const DEFAULT_CHUNK_SIZE = 10;
 const DEFAULT_PARALLELISM = 3;
 const CHECKPOINT_EVERY = 5; // chunks
 
+type ClientOcrProvider = "minimax" | "gemini";
+
 export interface MinimaxOcrProgress {
   phase: "rasterizing" | "extracting" | "done";
   currentChunk: number;
@@ -41,6 +43,9 @@ export interface MinimaxOcrProgress {
 }
 
 export interface MinimaxOcrOptions {
+  provider?: ClientOcrProvider;
+  chunkEndpoint?: "minimax-ocr-chunk" | "gemini-ocr-chunk";
+  model?: string;
   maxSidePx?: number;
   jpegQuality?: number;
   chunkSize?: number;
@@ -54,8 +59,8 @@ export interface MinimaxOcrResult {
   pageCount: number;
   chunkCount: number;
   failedChunks: string[];
-  provider: "minimax-ocr-client";
-  model: "MiniMax-M3";
+  provider: "minimax-ocr-client" | "gemini-ocr-client";
+  model: string;
   durationMs: number;
 }
 
@@ -68,6 +73,9 @@ export async function runMinimaxClientOcr(
   opts: MinimaxOcrOptions = {},
 ): Promise<MinimaxOcrResult> {
   const t0 = performance.now();
+  const provider = opts.provider ?? "minimax";
+  const endpoint = opts.chunkEndpoint ?? (provider === "gemini" ? "gemini-ocr-chunk" : "minimax-ocr-chunk");
+  const model = opts.model ?? (provider === "gemini" ? "gemini-2.5-flash" : "MiniMax-M3");
   const maxSide = opts.maxSidePx ?? DEFAULT_MAX_SIDE_PX;
   const quality = opts.jpegQuality ?? DEFAULT_JPEG_QUALITY;
   const chunkSize = opts.chunkSize ?? DEFAULT_CHUNK_SIZE;
@@ -147,17 +155,18 @@ export async function runMinimaxClientOcr(
         const isCheckpoint = myIdx > 0 && myIdx % CHECKPOINT_EVERY === 0;
 
         try {
-          const r = await callChunkEndpoint({
+          const r = await callChunkEndpoint(endpoint, {
             images: c.images,
             contextSummary: prevSummary,
             chunkIndex: c.index,
             pageStart: c.start,
             pageEnd: c.end,
             isCheckpoint,
+            model,
           });
           results[myIdx] = { text: r.text, summary: r.summary };
         } catch (e) {
-          console.error(`[minimax-ocr-client] chunk ${c.start}-${c.end} falhou:`, e);
+          console.error(`[${provider}-ocr-client] chunk ${c.start}-${c.end} falhou:`, e);
           results[myIdx] = { failed: true, range: `${c.start}-${c.end}` };
         } finally {
           completedCount++;
@@ -199,8 +208,8 @@ export async function runMinimaxClientOcr(
     pageCount,
     chunkCount: chunks.length,
     failedChunks,
-    provider: "minimax-ocr-client",
-    model: "MiniMax-M3",
+    provider: provider === "gemini" ? "gemini-ocr-client" : "minimax-ocr-client",
+    model,
     durationMs: performance.now() - t0,
   };
 }
@@ -247,16 +256,17 @@ interface ChunkCallBody {
   pageStart: number;
   pageEnd: number;
   isCheckpoint: boolean;
+  model?: string;
 }
 
-async function callChunkEndpoint(body: ChunkCallBody): Promise<{ text: string; summary: string }> {
+async function callChunkEndpoint(endpoint: "minimax-ocr-chunk" | "gemini-ocr-chunk", body: ChunkCallBody): Promise<{ text: string; summary: string }> {
   // Backoff exponencial em falhas transitórias (429/5xx)
   let lastErr: Error | null = null;
   const delays = [0, 1000, 2000, 4000];
   for (const delay of delays) {
     if (delay > 0) await new Promise((r) => setTimeout(r, delay));
     try {
-      const { data, error } = await supabase.functions.invoke("minimax-ocr-chunk", {
+      const { data, error } = await supabase.functions.invoke(endpoint, {
         body,
       });
       if (error) {
@@ -278,7 +288,7 @@ async function callChunkEndpoint(body: ChunkCallBody): Promise<{ text: string; s
       lastErr = e as Error;
     }
   }
-  throw lastErr || new Error("Falha ao chamar minimax-ocr-chunk");
+  throw lastErr || new Error(`Falha ao chamar ${endpoint}`);
 }
 
 async function toUint8Array(src: File | Blob | ArrayBuffer | Uint8Array): Promise<Uint8Array> {
