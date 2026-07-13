@@ -1614,11 +1614,18 @@ async function processarChunkedPDFBackground(
   
   try {
     console.log(`[processar-autos-chunked] Starting chunked processing for job ${jobId}: ${fileParts.length} parts, ${totalPages} pages`);
-    
+
+    // Marca rota (PDF grande → chunked) já no início do result para diagnóstico
+    await supabaseAdmin.from('import_jobs').update({
+      result: { route: 'chunked_large', partsCount: fileParts.length, totalPages, startedAt: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    }).eq('id', jobId);
+
     await logInfo('processar-autos', `Iniciando processamento chunked: ${fileParts.length} partes, ${totalPages} páginas`, jobId, {
       partsCount: fileParts.length,
       totalPages,
-      fileName
+      fileName,
+      route: 'chunked_large',
     });
 
     // Create attempt record
@@ -1980,10 +1987,17 @@ async function processarPDFBackground(
   };
   
   try {
+    // Marca rota (PDF pequeno → fast path direto) para diagnóstico
+    await supabaseAdmin.from('import_jobs').update({
+      result: { route: 'fast_small', fileName, startedAt: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    }).eq('id', jobId);
+
     // Log job start
     await logInfo('processar-autos', `Iniciando processamento de PDF: ${fileName}`, jobId, {
       isRetry,
-      filePath
+      filePath,
+      route: 'fast_small',
     });
 
     // Get current retry_count from job

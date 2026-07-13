@@ -353,10 +353,24 @@ export async function preProcessarPericia(
     const provider = firstSignal.mode === "gemini-client-rasterize" || firstSignal.chunkEndpoint === "gemini-ocr-chunk"
       ? "gemini"
       : "minimax";
+    // Lê concorrência configurada pelo dev (default 4). Cap 1..8 aplicado no client OCR.
+    let parallelism = 4;
+    try {
+      const { data: cfg } = await supabase
+        .from("system_config")
+        .select("value")
+        .eq("id", "minimax_render_concurrency")
+        .maybeSingle();
+      const v = cfg?.value;
+      const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) : NaN;
+      if (Number.isFinite(n) && n > 0) parallelism = n;
+    } catch { /* usa default */ }
+
     const ocr = await runMinimaxClientOcr(blob, {
       provider,
       chunkEndpoint: firstSignal.chunkEndpoint,
       model: typeof firstSignal.model === "string" ? firstSignal.model : undefined,
+      parallelism,
       onProgress: opts.onMinimaxProgress,
     });
     // 2ª tentativa: reenvio com texto pré-extraído (garante JWT fresco após OCR longo)

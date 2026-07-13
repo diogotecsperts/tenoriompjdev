@@ -60,6 +60,8 @@ interface SystemConfig {
   store_extracted_text: boolean;
   phase1_gemini_model: string;
   phase1_ocr_provider: string; // 'gemini' or 'mistral'
+  // Concorrência da rasterização client-side MiniMax/Gemini (1..8, default 4)
+  minimax_render_concurrency: number;
   // Legacy (obsoletos, mantidos apenas para compatibilidade da UI até a limpeza do form)
   fallback_ai_provider?: string;
   fallback_ai_model?: string;
@@ -238,7 +240,8 @@ const DEFAULT_CONFIG: SystemConfig = {
   text_fill_model: "openai/gpt-4o-mini",
   store_extracted_text: true,
   phase1_gemini_model: "gemini-2.5-flash",
-  phase1_ocr_provider: "gemini"
+  phase1_ocr_provider: "gemini",
+  minimax_render_concurrency: 4
 };
 
 // Gemini Vision models available for PDF extraction (aliases estáveis)
@@ -658,7 +661,12 @@ export function DevSettings() {
           text_fill_model: configMap.text_fill_model || DEFAULT_CONFIG.text_fill_model,
           store_extracted_text: configMap.store_extracted_text ?? DEFAULT_CONFIG.store_extracted_text,
           phase1_gemini_model: configMap.phase1_gemini_model || DEFAULT_CONFIG.phase1_gemini_model,
-          phase1_ocr_provider: configMap.phase1_ocr_provider || DEFAULT_CONFIG.phase1_ocr_provider
+          phase1_ocr_provider: configMap.phase1_ocr_provider || DEFAULT_CONFIG.phase1_ocr_provider,
+          minimax_render_concurrency: (() => {
+            const v = configMap.minimax_render_concurrency;
+            const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) : NaN;
+            return Number.isFinite(n) && n > 0 ? Math.min(8, Math.max(1, n)) : DEFAULT_CONFIG.minimax_render_concurrency;
+          })()
         });
       }
     } catch (error) {
@@ -861,6 +869,9 @@ export function DevSettings() {
       }, {
         id: "phase1_ocr_provider",
         value: config.phase1_ocr_provider
+      }, {
+        id: "minimax_render_concurrency",
+        value: Math.min(8, Math.max(1, Number(config.minimax_render_concurrency) || 4))
       }];
       for (const update of updates) {
         const { error } = await supabase.from("system_config").upsert({
@@ -2334,6 +2345,24 @@ export function DevSettings() {
               </SelectTrigger>
               <SelectContent>
                 {[10, 20, 30, 50, 100, 150, 200].map(size => <SelectItem key={size} value={String(size)}>{size} MB</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <Separator />
+          <div className="space-y-2">
+            <Label>Concorrência de Rasterização (PDF grande)</Label>
+            <p className="text-sm text-muted-foreground">
+              Quantas partes do PDF são rasterizadas e enviadas ao provider em paralelo (MiniMax/Gemini client-side). Default 4. Aumente com cautela: cada onda consome rate-limit e memória do navegador.
+            </p>
+            <Select
+              value={String(config.minimax_render_concurrency ?? 4)}
+              onValueChange={value => setConfig({ ...config, minimax_render_concurrency: parseInt(value, 10) })}
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[1, 2, 3, 4, 5, 6, 8].map(n => <SelectItem key={n} value={String(n)}>{n} {n === 1 ? "(serial)" : "em paralelo"}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

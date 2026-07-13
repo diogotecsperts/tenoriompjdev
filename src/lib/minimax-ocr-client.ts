@@ -112,16 +112,19 @@ export async function runMinimaxClientOcr(
     message: `${chunks.length} chunks em modo seguro`,
   });
 
-  // Executa chunk-a-chunk para não manter todas as páginas rasterizadas em
-  // memória. Isso é essencial para PDFs grandes (50MB+) e também impede que
-  // várias chamadas caras sejam disparadas em paralelo antes do primeiro erro.
+  // Execução em ondas paralelas (waves) do MESMO provider — sem fallback
+  // cross-provider. Cada onda processa `concurrency` chunks em paralelo;
+  // ondas rodam em sequência para não estourar memória do browser nem
+  // rate-limit do provider. Retry 2× por chunk antes de marcar como failed.
   const results: Array<{ text: string; summary: string } | { failed: true; range: string }> =
     new Array(chunks.length);
   let completedCount = 0;
   let rollingSummary = "";
+  const concurrency = Math.max(1, Math.min(8, opts.parallelism ?? 1));
 
-  for (const c of chunks) {
+  const processChunk = async (c: { index: number; start: number; end: number }, seedSummary: string) => {
     if (opts.signal?.aborted) throw new Error("Operação cancelada");
+    // Rasteriza páginas do chunk (serial dentro do chunk para não travar main thread)
     const images: string[] = [];
     for (let pageNumber = c.start; pageNumber <= c.end; pageNumber++) {
       if (opts.signal?.aborted) throw new Error("Operação cancelada");
@@ -136,30 +139,60 @@ export async function runMinimaxClientOcr(
     }
 
     const isCheckpoint = c.index > 0 && c.index % CHECKPOINT_EVERY === 0;
-    try {
-      const r = await callChunkEndpoint(endpoint, {
-        images,
-        contextSummary: rollingSummary,
-        chunkIndex: c.index,
-        pageStart: c.start,
-        pageEnd: c.end,
-        isCheckpoint,
-        model,
-      });
-      results[c.index] = { text: r.text, summary: r.summary };
-      rollingSummary = r.summary || rollingSummary;
-    } catch (e) {
-      console.error(`[${provider}-ocr-client] chunk ${c.start}-${c.end} falhou:`, e);
-      results[c.index] = { failed: true, range: `${c.start}-${c.end}` };
-    } finally {
-      completedCount++;
-      opts.onProgress?.({
-        phase: "extracting",
-        currentChunk: completedCount,
-        totalChunks: chunks.length,
-        currentPage: c.end,
-        totalPages: pageCount,
-      });
+    const MAX_ATTEMPTS = 3; // 1 tentativa + 2 retries
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      if (opts.signal?.aborted) throw new Error("Operação cancelada");
+      try {
+        const r = await callChunkEndpoint(endpoint, {
+          images,
+          contextSummary: seedSummary,
+          chunkIndex: c.index,
+          pageStart: c.start,
+          pageEnd: c.end,
+          isCheckpoint,
+          model,
+        });
+        results[c.index] = { text: r.text, summary: r.summary };
+        return r.summary || "";
+      } catch (e) {
+        lastError = e;
+        if (attempt < MAX_ATTEMPTS) {
+          const backoff = 500 * Math.pow(2, attempt - 1);
+          console.warn(`[${provider}-ocr-client] chunk ${c.start}-${c.end} tentativa ${attempt} falhou, retry em ${backoff}ms`);
+          await new Promise(res => setTimeout(res, backoff));
+        }
+      }
+    }
+    console.error(`[${provider}-ocr-client] chunk ${c.start}-${c.end} falhou após ${MAX_ATTEMPTS} tentativas:`, lastError);
+    results[c.index] = { failed: true, range: `${c.start}-${c.end}` };
+    return "";
+  };
+
+  // Processa em ondas de `concurrency`. O rollingSummary da onda anterior é
+  // usado como seed para todos os chunks da próxima — preserva contexto sem
+  // serializar totalmente.
+  for (let waveStart = 0; waveStart < chunks.length; waveStart += concurrency) {
+    if (opts.signal?.aborted) throw new Error("Operação cancelada");
+    const wave = chunks.slice(waveStart, waveStart + concurrency);
+    const seed = rollingSummary;
+    const summaries = await Promise.all(
+      wave.map(async (c) => {
+        const s = await processChunk(c, seed);
+        completedCount++;
+        opts.onProgress?.({
+          phase: "extracting",
+          currentChunk: completedCount,
+          totalChunks: chunks.length,
+          currentPage: c.end,
+          totalPages: pageCount,
+        });
+        return s;
+      })
+    );
+    // Usa o último summary não-vazio da onda como novo seed
+    for (let i = summaries.length - 1; i >= 0; i--) {
+      if (summaries[i]) { rollingSummary = summaries[i]; break; }
     }
   }
   try {
