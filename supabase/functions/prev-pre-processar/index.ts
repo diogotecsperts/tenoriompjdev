@@ -176,6 +176,28 @@ function classifyProcessingError(
     fallback?.stage || "processamento",
   );
 
+  if (/Gemini Vision|Gemini OCR|Modelo OCR configurado|generateContent|interactions|Files API/i.test(msg) && /400|INVALID_ARGUMENT|invalid argument|invalid_argument/i.test(msg)) {
+    const configuredModel =
+      msg.match(/configurado \((gemini-[^)]+)\)/i)?.[1] ||
+      msg.match(/(?:interactions|generateContent)\/(gemini-[^:\s]+)/i)?.[1] ||
+      msg.match(/model[=:]\s*(gemini-[^,\s)]+)/i)?.[1] ||
+      fallback?.model ||
+      "modelo Gemini de OCR";
+    return {
+      error:
+        `O modelo de OCR ${configuredModel} recusou este PDF. ` +
+        `O upload do arquivo foi concluído, mas o Gemini retornou erro 400 ao ler o documento. ` +
+        `O sistema tenta fallback técnico com gemini-2.5-flash quando aplicável; se esta mensagem apareceu, também houve falha no fallback ou o provider recusou a requisição.`,
+      code: "invalid_request",
+      stage: "ocr",
+      provider: "gemini",
+      model: configuredModel,
+      upstreamStatus: 400,
+      technicalDetail: msg.slice(0, 1600),
+      httpStatus: 400,
+    };
+  }
+
   if (/Gemini OCR timeout|pdf-visual-extractor|OCR timeout|generateContent.*timeout/i.test(msg)) {
     return {
       error:
@@ -804,6 +826,8 @@ async function processStructuredExtraction(args: {
     _meta: {
       ocr_pages: ocr.pageCount,
       ocr_chars: ocr.text.length,
+      ocr_provider: ocr.provider,
+      ocr_model: ocr.model,
       ai_provider: aiResp.provider,
       ai_model: aiResp.model,
       used_fallback: aiResp.usedFallback,
