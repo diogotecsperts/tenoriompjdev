@@ -1,54 +1,49 @@
+# Correção do OCR — bug do Gemini 3.1 Files API + eliminar fallback silencioso pra Mistral
 
-## Diagnóstico honesto
+## Causa raiz
+`pdf-visual-extractor.ts` envia `response_mime_type` no body da **Files API do Gemini** (ramo usado para PDF > 4 MB). A família **Gemini 3.x rejeita** esse parâmetro com HTTP 400. Todo PDF grande falha no Gemini e cai no fallback interno oculto (`ocr-router.ts`: escolhido → gemini → **mistral** → minimax), gerando cobrança inesperada da Mistral. Só o Bruno viu o erro porque ele enviou PDF de 14 MB; nos testes internos os PDFs eram < 4 MB e usavam o ramo inline, que não tem o bug.
 
-### 1) Lote não atualiza status por item
-Em `src/modules/previdenciario/pages/PautaDetalhe.tsx`, `handleProcessarLote` só chama `reload()` **depois** do `for` inteiro (linha 285). Enquanto o loop roda, o `Badge` de cada perícia continua com o status antigo. Só no fim ele lê o DB e todos aparecem processados de uma vez.
+## Escopo do que roda no DevPanel (não muda)
+- **Fase 1 — OCR:** `phase1_ocr_provider = gemini` + `phase1_gemini_model = gemini-3.1-flash-lite`.
+- **Fase 2 — Geração de texto:** `provider = minimax` + `MiniMax-M3`.
+- Tudo continua controlado pelo DevPanel; nada de hardcode novo.
 
-### 2) "Credencial inválida" para o Bruno — NÃO é mistura de credenciais
-Depurei a cadeia inteira. As credenciais de IA no app são **100% globais**: `getAIConfig()` lê `system_config` + `global_api_keys` com service-role e não recebe nenhum `userId` no header do provider. Não há como "confundir" a chave do seu user com a do Bruno.
+## Correções
 
-O que está acontecendo é uma **classificação enganosa** feita pelo próprio frontend:
+### 1. Corrigir body do Gemini Files API
+`supabase/functions/_shared/pdf-visual-extractor.ts`:
+- Para modelos `gemini-3.*`, **não** enviar `response_mime_type` / `responseMimeType` em `generationConfig`/`generation_config`. Manter apenas prompt + instrução JSON no texto.
+- Aplicar tanto no ramo inline (< 4 MB) quanto no ramo Files API (> 4 MB), para garantir compatibilidade em qualquer tamanho de PDF.
+- Manter o parâmetro apenas para `gemini-2.*`, que aceita.
 
-- Em `supabase/functions/prev-pre-processar/index.ts` (linhas 933-939) quando `supabaseUser.auth.getUser()` falha (token expirado / sessão inválida), a função retorna `HTTP 401` com `{ "error": "Sessão inválida" }`.
-- Em `src/modules/previdenciario/api/processar.ts` → `classifyInvokeError`, qualquer `status === 401` cai em `code = "invalid_key"`.
-- Em `PautaDetalhe.tsx`, `code === "invalid_key"` vira o título **"Credencial inválida"** + descrição **"Sessão inválida · Status: 401 · Sugestão: revise a credencial do provider no DevPanel."**
+Efeito: Gemini 3.1-flash-lite volta a funcionar em qualquer tamanho de PDF. Cliente pode mandar PDF pequeno ou grande sem diferença de comportamento.
 
-Ou seja: o Bruno teve o **JWT dele expirado/renovação de refresh token quebrada** (confirmado no auth-log: `refresh_token_not_found` às 22:31:17Z antes do relogin). O frontend mascarou isso como se fosse chave de IA errada. No seu login o token estava válido → passa direto.
+### 2. Eliminar fallback silencioso pra Mistral
+`supabase/functions/_shared/ocr-router.ts`:
+- Remover Mistral e Gemini da cadeia automática. Só rodar o provider que o DevPanel escolheu.
+- Se o provider escolhido falhar, propagar o erro real para o frontend (sem trocar de provider por baixo).
+- MiniMax continua sinalizando `MINIMAX_CLIENT_RASTERIZE_ERROR` para o Previdenciário chamar o pipeline client-side (`runMinimaxClientOcr`) — esse fluxo é intencional e não é fallback pago.
 
-No lote, cada perícia consumia o mesmo JWT stale → 10/10 falharam com o mesmo 401 → "0 processadas(s) · 10 falha(s)". Consistente com o que ele viu.
+Efeito: DevPanel vira fonte única da verdade. Fim das cobranças Mistral inesperadas. A chave Mistral pode ficar bloqueada indefinidamente.
 
-## Plano de correção
+### 3. Mensagem de erro útil
+`src/modules/previdenciario/api/processar.ts` + `src/modules/previdenciario/pages/PautaDetalhe.tsx`:
+- Detectar 400 do Gemini e mostrar motivo real ("Gemini rejeitou o modelo/parâmetro — verificar DevPanel"), em vez do genérico "Falha no provider backend/processamento".
+- Manter tratamento de `ocr_requires_client_rasterize` (já existe) e `session_expired` (fix anterior).
 
-### A) `src/modules/previdenciario/pages/PautaDetalhe.tsx`
-Dentro do `for` de `handleProcessarLote`, após cada `await preProcessarPericia(...)` bem-sucedido:
-1. Atualizar imediatamente o item no estado local: `setPericias(prev => prev.map(x => x.id === p.id ? { ...x, pdf_processado: true } : x))`.
-2. Fazer `void reload()` sem `await` para reconciliar com o DB em background e trazer `periciado_nome`/`prev_extracao`.
-3. Manter o `reload()` final para consolidação.
+### 4. Verificação
+- Reprocessar o PDF de 14 MB do Bruno com `phase1_ocr_provider=gemini` + `gemini-3.1-flash-lite` e confirmar 200 direto no Gemini (Fase 1). Depois disso, a Fase 2 (MiniMax M3) roda normalmente sobre o texto extraído.
+- Conferir logs pós-deploy: zero requisições saindo pra `api.mistral.ai`.
+- Testar PDF pequeno (~2 MB) e grande (~15 MB) do mesmo user para confirmar que o comportamento é idêntico independentemente do tamanho.
 
-### B) `src/modules/previdenciario/api/processar.ts`
-1. Adicionar novo `PreProcessarErrorCode` `"session_expired"`.
-2. Em `classifyInvokeError`: se o body vier com `error === "Sessão inválida"` **ou** `error === "Não autenticado"` **ou** `code === "session_expired"`, mapear para `"session_expired"` (não mais `"invalid_key"`), com mensagem "Sua sessão expirou. Saia e entre novamente."
-3. Antes de invocar `prev-pre-processar` (e no segundo invoke pós-OCR client-side), chamar `supabase.auth.getSession()` e, se `session` for `null` ou `expires_at` ≤ `now + 30s`, chamar `supabase.auth.refreshSession()`. Se refresh falhar, lançar `PreProcessarError("Sua sessão expirou...", "session_expired")` antes mesmo de tocar a edge function. Evita queimar tempo de processar num JWT morto.
+## Arquivos afetados
+- `supabase/functions/_shared/pdf-visual-extractor.ts`
+- `supabase/functions/_shared/ocr-router.ts`
+- `src/modules/previdenciario/api/processar.ts`
+- `src/modules/previdenciario/pages/PautaDetalhe.tsx`
 
-### C) `supabase/functions/prev-pre-processar/index.ts`
-No branch que retorna `{ error: "Sessão inválida" }` (linhas 934-939 e 909-914), incluir `code: "session_expired"` no body para a classificação frontend ser inequívoca.
-
-### D) `src/modules/previdenciario/pages/PautaDetalhe.tsx` — UX do erro
-Em `handleProcessar` e `handleProcessarLote`, tratar `err?.code === "session_expired"`:
-- Título "Sessão expirada"
-- Descrição "Sua sessão expirou. Saia e entre novamente para continuar."
-- Sem "Tentar novamente" (não adianta insistir com JWT morto).
-- Ideal: também parar o loop do lote no primeiro `session_expired` (não faz sentido tentar as próximas 9).
-
-## Escopo e garantias
-
-- Nada muda em `getAIConfig` / `global_api_keys` / configuração do DevPanel — não há problema real ali.
-- Login e dados do Bruno (`MED001`) permanecem intactos; a correção é puramente de classificação e UX.
-- Seu fluxo dev continua funcionando idêntico — a mudança só se manifesta quando o JWT está expirado (não é seu caso hoje).
-- Não toca em `AuthContext`, impersonation, nem nos edge functions `dev-*` recentes.
-
-## Como validar
-
-1. **Lote incremental:** processar em lote e observar cada linha virar "processado" logo que termina, sem esperar o fim.
-2. **Sessão expirada:** com DevTools, apagar `sb-*-auth-token` do localStorage e clicar Processar. Deve mostrar "Sessão expirada — saia e entre novamente" (não mais "Credencial inválida... revise DevPanel").
-3. **Bruno:** após o deploy, pedir ao Bruno para deslogar → logar → processar. Se o problema retornar, o toast agora vai dizer explicitamente "Sessão expirada", o que confirma o diagnóstico e direciona ele para o fluxo certo (relogin), não para o DevPanel.
+## Não afeta
+- `user_settings`, `global_api_keys`, `system_config`.
+- Fase 2 (MiniMax M3 continua padrão intocado).
+- Pipeline MiniMax client-side (`runMinimaxClientOcr` + `minimax-ocr-chunk`).
+- Dados salvos, AuthContext, edge functions `dev-*`.
