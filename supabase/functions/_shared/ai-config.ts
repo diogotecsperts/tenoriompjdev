@@ -1,19 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 export interface AIConfig {
-  provider: string;       // 'lovable', 'gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter'
+  provider: string;       // 'lovable', 'gemini', 'openai', 'claude', 'groq', 'deepseek', 'openrouter', 'minimax'
   model: string;          // ex: 'gemini-2.5-pro', 'gpt-4o'
   apiKey: string | null;  // API key do provider (null se lovable)
   endpoint: string;       // URL do endpoint
   displayModel: string;   // Nome amigável para exibição
-  // Fallback configuration
-  fallback?: {
-    provider: string;
-    model: string;
-    apiKey: string | null;
-    endpoint: string;
-    displayModel: string;
-  };
 }
 
 // Mapeamento de providers para endpoints
