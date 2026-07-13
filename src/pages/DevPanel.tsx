@@ -127,6 +127,8 @@ export default function DevPanel() {
         return <DevLogs />;
       case "backend-logs":
         return <DevBackendLogs />;
+      case "job-timeline":
+        return <DevJobTimeline />;
       case "errors":
         return <DevErrorLogs />;
       case "ai":
