@@ -51,8 +51,6 @@ function shouldUseGeminiInteractionsAPI(apiModel: string): boolean {
   return /^gemini-3(?:\.|-|$)/.test(apiModel) || apiModel === 'gemini-3.5-flash';
 }
 
-const GEMINI_STABLE_PDF_FALLBACK_MODEL = 'gemini-2.5-flash';
-
 type GeminiPdfFileResult =
   | { ok: true; text: string; model: string; route: string; usedFallback: boolean; originalModel?: string }
   | { ok: false; error: string; model: string; route: string; originalModel?: string };
@@ -62,10 +60,6 @@ function sanitizeGeminiError(raw: string, max = 1600): string {
     .replace(/key=AIza[\w-]+/gi, 'key=[redacted]')
     .replace(/x-goog-api-key["'\s:=]+[A-Za-z0-9._\-]+/gi, 'x-goog-api-key=[redacted]')
     .slice(0, max);
-}
-
-function isInvalidArgumentGeminiError(error: string): boolean {
-  return /\b400\b|INVALID_ARGUMENT|invalid argument|invalid_argument/i.test(error);
 }
 
 function extractTextFromInteraction(data: any): string {
@@ -114,27 +108,6 @@ IMPORTANTE: estimatedSections deve listar as seções principais detectadas no d
 export interface StreamInput {
   stream: ReadableStream<Uint8Array>;
   size: number;
-}
-
-/**
- * Gera variantes de URI HTTPS completas para tentar (com e sem /v1beta)
- * A API pode aceitar diferentes formatos dependendo da versão
- */
-function getFileUriVariants(fileUri: string): string[] {
-  const variants: string[] = [fileUri]; // Original primeiro
-  
-  // Se tem /v1beta/, adicionar variante sem /v1beta/
-  if (fileUri.includes('/v1beta/files/')) {
-    const withoutV1beta = fileUri.replace('/v1beta/files/', '/files/');
-    variants.push(withoutV1beta);
-  }
-  // Se não tem /v1beta/, adicionar variante com /v1beta/
-  else if (fileUri.includes('googleapis.com/files/') && !fileUri.includes('/v1beta/')) {
-    const withV1beta = fileUri.replace('/files/', '/v1beta/files/');
-    variants.push(withV1beta);
-  }
-  
-  return variants;
 }
 
 /**
