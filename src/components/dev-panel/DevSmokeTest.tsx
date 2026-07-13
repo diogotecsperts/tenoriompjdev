@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { generateLaudoPDF } from "@/utils/generateLaudoPDF";
 import { generateLaudoDOCX } from "@/utils/generateLaudoDOCX";
-import type { LaudoData } from "@/lib/laudo-structure";
+import type { LaudoData } from "@/contexts/LaudoContext";
 
 type StepStatus = "pending" | "running" | "ok" | "fail" | "warn";
 
