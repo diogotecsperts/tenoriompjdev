@@ -106,7 +106,6 @@ export function DevAIStatus() {
         .select('id, value')
         .in('id', [
           'default_ai_provider', 'default_ai_model',
-          'fallback_ai_provider', 'fallback_ai_model',
           'phase1_ocr_provider', 'phase1_gemini_model',
           'pdf_fallback_provider', 'pdf_fallback_model'
         ]);
@@ -140,25 +139,13 @@ export function DevAIStatus() {
         status: primaryHasKey ? 'active' : 'error'
       });
 
-      // Parse fallback config
-      const fallbackProvider = configMap.fallback_ai_provider?.replace(/"/g, '') || 'lovable';
-      const fallbackModel = configMap.fallback_ai_model?.replace(/"/g, '') || 'google/gemini-2.5-flash';
-      const fallbackHasKey = fallbackProvider === 'lovable' || savedKeys.has(fallbackProvider);
-
-      setFallbackConfig({
-        provider: fallbackProvider,
-        model: fallbackModel,
-        hasKey: fallbackHasKey,
-        status: fallbackHasKey ? 'ready' : 'error'
-      });
-
       // Parse PDF-specific config (unified: phase1_ocr_provider + phase1_gemini_model)
       const pdfProvider = configMap.phase1_ocr_provider?.replace(/"/g, '') || 'gemini';
       const pdfModel = configMap.phase1_gemini_model?.replace(/"/g, '') || 'gemini-2.5-flash';
 
       const pdfFallbackProvider = configMap.pdf_fallback_provider?.replace(/"/g, '') || 'lovable';
       const pdfFallbackModel = configMap.pdf_fallback_model?.replace(/"/g, '') || 'google/gemini-2.5-flash';
-      
+
       const pdfHasKey = pdfProvider === 'lovable' || savedKeys.has(pdfProvider);
       const pdfFallbackHasKey = pdfFallbackProvider === 'lovable' || savedKeys.has(pdfFallbackProvider);
 
