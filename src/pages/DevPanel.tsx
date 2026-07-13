@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Server,
   Activity,
+  FlaskConical,
   Gauge,
   MessageSquare,
   History,
@@ -49,6 +50,7 @@ import { DevUsageControl } from "@/components/dev-panel/DevUsageControl";
 import { DevEmailTracking } from "@/components/dev-panel/DevEmailTracking";
 import { DevSignupRequests } from "@/components/dev-panel/DevSignupRequests";
 import DevJobTimeline from "@/components/dev-panel/DevJobTimeline";
+import DevSmokeTest from "@/components/dev-panel/DevSmokeTest";
 
 type DevTab =
   | "dashboard"
@@ -59,6 +61,7 @@ type DevTab =
   | "logs"
   | "backend-logs"
   | "job-timeline"
+  | "smoke-test"
   | "errors"
   | "ai"
   | "ai-efficiency"
@@ -88,6 +91,7 @@ const navItems: NavItem[] = [
   { id: "logs", label: "AI Analytics", icon: FileText },
   { id: "backend-logs", label: "Servidor & Jobs", icon: Server },
   { id: "job-timeline", label: "Job Timeline", icon: Activity },
+  { id: "smoke-test", label: "Smoke Test", icon: FlaskConical },
   { id: "errors", label: "UI Reports", icon: AlertTriangle },
   { id: "ai-efficiency", label: "Eficiência de IAs", icon: Gauge },
   { id: "retries", label: "Retries & Rate Limits", icon: RefreshCw },
@@ -129,6 +133,8 @@ export default function DevPanel() {
         return <DevBackendLogs />;
       case "job-timeline":
         return <DevJobTimeline />;
+      case "smoke-test":
+        return <DevSmokeTest />;
       case "errors":
         return <DevErrorLogs />;
       case "ai":

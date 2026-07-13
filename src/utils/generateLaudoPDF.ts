@@ -626,7 +626,10 @@ const addFooterToPages = async (doc: jsPDF, footerImageBase64: string | null) =>
 
 // ========== FUNÇÃO PRINCIPAL ==========
 
-export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
+export const generateLaudoPDF = async (
+  laudo: LaudoData,
+  options?: { returnBlob?: boolean },
+): Promise<Blob | void> => {
   const doc = new jsPDF();
   let sectionNumber = 1;
   
@@ -1113,7 +1116,10 @@ export const generateLaudoPDF = async (laudo: LaudoData): Promise<void> => {
   
   const filename = `laudo-pericial-${processNumber}-${periciandoName}.pdf`;
   
-  // Download do PDF
+  // Download do PDF (ou retorna blob para o smoke test)
+  if (options?.returnBlob) {
+    return doc.output("blob");
+  }
   doc.save(filename);
 };
 
