@@ -1116,7 +1116,10 @@ export const generateLaudoPDF = async (
   
   const filename = `laudo-pericial-${processNumber}-${periciandoName}.pdf`;
   
-  // Download do PDF
+  // Download do PDF (ou retorna blob para o smoke test)
+  if (options?.returnBlob) {
+    return doc.output("blob");
+  }
   doc.save(filename);
 };
 
