@@ -50,6 +50,7 @@ import { DevUsageControl } from "@/components/dev-panel/DevUsageControl";
 import { DevEmailTracking } from "@/components/dev-panel/DevEmailTracking";
 import { DevSignupRequests } from "@/components/dev-panel/DevSignupRequests";
 import DevJobTimeline from "@/components/dev-panel/DevJobTimeline";
+import DevSmokeTest from "@/components/dev-panel/DevSmokeTest";
 
 type DevTab =
   | "dashboard"
