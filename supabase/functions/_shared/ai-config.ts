@@ -443,73 +443,8 @@ export async function getAIConfig(forceRefresh = false): Promise<AIConfig> {
       }
     }
 
-    // Build fallback config
-    let fallbackConfig: AIConfig['fallback'] | undefined;
-    
-    if (fallbackProvider === 'lovable') {
-      const lovableKey = Deno.env.get('LOVABLE_API_KEY');
-      fallbackConfig = {
-        provider: 'lovable',
-        model: fallbackModel,
-        apiKey: lovableKey || null,
-        endpoint: PROVIDER_ENDPOINTS.lovable,
-        displayModel: fallbackModel.replace('google/', '')
-      };
-    } else if (fallbackProvider === 'minimax') {
-      const minimaxKey = Deno.env.get('MINIMAX_API_KEY');
-      if (minimaxKey) {
-        fallbackConfig = {
-          provider: 'minimax',
-          model: 'MiniMax-M3',
-          apiKey: minimaxKey,
-          endpoint: PROVIDER_ENDPOINTS.minimax,
-          displayModel: 'MiniMax-M3',
-        };
-      } else {
-        const lovableKey = Deno.env.get('LOVABLE_API_KEY');
-        fallbackConfig = {
-          provider: 'lovable',
-          model: 'google/gemini-2.5-flash',
-          apiKey: lovableKey || null,
-          endpoint: PROVIDER_ENDPOINTS.lovable,
-          displayModel: 'gemini-2.5-flash'
-        };
-      }
-    } else {
-      // Buscar API key do fallback provider
-      const { data: fallbackKeyData } = await supabase
-        .from('global_api_keys')
-        .select('api_key')
-        .eq('id', fallbackProvider)
-        .single();
+    // Fallback cross-provider foi removido — nada é atribuído a primaryConfig.fallback.
 
-      if (fallbackKeyData?.api_key) {
-        let adjustedFallbackModel = fallbackModel;
-        if (fallbackProvider === 'gemini' && fallbackModel.startsWith('google/')) {
-          adjustedFallbackModel = fallbackModel.replace('google/', '');
-        }
-        
-        fallbackConfig = {
-          provider: fallbackProvider,
-          model: adjustedFallbackModel,
-          apiKey: fallbackKeyData.api_key,
-          endpoint: PROVIDER_ENDPOINTS[fallbackProvider] || PROVIDER_ENDPOINTS.lovable,
-          displayModel: adjustedFallbackModel
-        };
-      } else {
-        // Fallback do fallback: Lovable AI
-        const lovableKey = Deno.env.get('LOVABLE_API_KEY');
-        fallbackConfig = {
-          provider: 'lovable',
-          model: 'google/gemini-2.5-flash',
-          apiKey: lovableKey || null,
-          endpoint: PROVIDER_ENDPOINTS.lovable,
-          displayModel: 'gemini-2.5-flash'
-        };
-      }
-    }
-
-    primaryConfig.fallback = fallbackConfig;
 
     // Store in cache
     configCache = { config: primaryConfig, timestamp: Date.now() };
