@@ -289,10 +289,18 @@ async function callGeminiInteractionsWithFile(
   };
 
   console.log(`[pdf-visual-extractor] Creating Gemini interaction with model=${apiModel}, uri=${fileUri}`);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 105_000);
   const createResponse = await fetch(createUrl, {
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeoutId)).catch((err) => {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error(`Interactions create timeout after 105s (model=${apiModel}).`);
+    }
+    throw err;
   });
   const createText = await createResponse.text();
 
@@ -315,7 +323,7 @@ async function callGeminiInteractionsWithFile(
   }
 
   const deadline = Date.now() + 8 * 60_000;
-  let lastStatus = interaction?.status || 'in_progress';
+  let lastStatus = String(interaction?.status || 'in_progress').toLowerCase();
   let lastBody = interaction;
   let delayMs = 2500;
 
@@ -349,7 +357,7 @@ async function callGeminiInteractionsWithFile(
     }
     try {
       lastBody = JSON.parse(pollText);
-      lastStatus = lastBody?.status || 'in_progress';
+      lastStatus = String(lastBody?.status || 'in_progress').toLowerCase();
       console.log(`[pdf-visual-extractor] Gemini interaction ${interactionId} status=${lastStatus}`);
     } catch (parseErr) {
       return { ok: false, interactionId, error: `Interactions poll parse error (interactionId=${interactionId}): ${parseErr}` };
