@@ -86,6 +86,10 @@ type ClientRasterizeSignal = Record<string, unknown> & {
   needsClientRasterize: true;
   pdfPath?: string;
   bucket?: string;
+  mode?: string;
+  chunkEndpoint?: "minimax-ocr-chunk" | "gemini-ocr-chunk";
+  provider?: string;
+  model?: string;
 };
 
 function isAsyncStart(value: unknown): value is AsyncPreProcessarStart {
@@ -346,7 +350,15 @@ export async function preProcessarPericia(
     if (dlErr || !blob) {
       throw new PreProcessarError(`Falha ao baixar PDF do storage: ${dlErr?.message ?? "vazio"}`);
     }
-    const ocr = await runMinimaxClientOcr(blob, { onProgress: opts.onMinimaxProgress });
+    const provider = firstSignal.mode === "gemini-client-rasterize" || firstSignal.chunkEndpoint === "gemini-ocr-chunk"
+      ? "gemini"
+      : "minimax";
+    const ocr = await runMinimaxClientOcr(blob, {
+      provider,
+      chunkEndpoint: firstSignal.chunkEndpoint,
+      model: typeof firstSignal.model === "string" ? firstSignal.model : undefined,
+      onProgress: opts.onMinimaxProgress,
+    });
     // 2ª tentativa: reenvio com texto pré-extraído (garante JWT fresco após OCR longo)
     await ensureFreshSession();
     const second = await supabase.functions.invoke("prev-pre-processar", {
