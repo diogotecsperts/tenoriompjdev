@@ -361,11 +361,13 @@ export async function getAIConfig(forceRefresh = false): Promise<AIConfig> {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
-    // Buscar configurações do sistema incluindo fallback
+    // Fallback cross-provider foi removido por decisão do DevPanel:
+    // a IA principal é sempre o que estiver em default_ai_*. Falhas propagam
+    // como erro visível, sem retry silencioso em outro provider.
     const { data: configData, error: configError } = await supabase
       .from('system_config')
       .select('id, value')
-      .in('id', ['default_ai_provider', 'default_ai_model', 'fallback_ai_provider', 'fallback_ai_model']);
+      .in('id', ['default_ai_provider', 'default_ai_model']);
 
     if (configError) {
       console.error('[AI Config] Error fetching config:', configError);
@@ -379,11 +381,8 @@ export async function getAIConfig(forceRefresh = false): Promise<AIConfig> {
 
     const provider = configMap.default_ai_provider || 'lovable';
     let model = configMap.default_ai_model || DEFAULT_MODELS[provider] || 'google/gemini-2.5-flash';
-    
-    const fallbackProvider = configMap.fallback_ai_provider || 'lovable';
-    const fallbackModel = configMap.fallback_ai_model || 'google/gemini-2.5-flash';
 
-    console.log(`[AI Config] Provider: ${provider}, Model: ${model}, Fallback: ${fallbackProvider}/${fallbackModel}`);
+    console.log(`[AI Config] Provider: ${provider}, Model: ${model} (no cross-provider fallback)`);
 
     // Build primary config
     let primaryConfig: AIConfig;
