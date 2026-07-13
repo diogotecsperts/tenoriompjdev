@@ -43,16 +43,13 @@ interface GeminiModelInfo {
 interface SystemConfig {
   default_ai_provider: string;
   default_ai_model: string;
-  fallback_ai_provider: string;
-  fallback_ai_model: string;
   gemini_pdf_model: string;
-  pdf_ai_provider: string;
   pdf_ai_model: string;
   pdf_fallback_provider: string;
   pdf_fallback_model: string;
   maintenance_mode: boolean;
   max_pdf_size_mb: number;
-  
+
   retry_enabled: boolean;
   retry_max_attempts: number;
   retry_base_delay_ms: number;
