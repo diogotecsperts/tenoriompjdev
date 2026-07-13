@@ -90,3 +90,64 @@ export async function logDebug(
 ): Promise<void> {
   await logToBackend({ functionName, jobId, level: 'debug', message, metadata });
 }
+
+/**
+ * Wrap an async step with automatic timing + structured logging.
+ * Emits an `info` log on success and an `error` log on failure, both tagged
+ * with `metadata.step` and `metadata.duration_ms` so DevJobTimeline can render
+ * ponta-a-ponta duration per etapa (OCR → preenchimento → export).
+ *
+ * Never throws from the logger itself — the underlying work's error is
+ * re-thrown untouched so calling code keeps its existing control flow.
+ */
+export async function logStep<T>(
+  params: {
+    functionName: string;
+    jobId?: string;
+    step: string;                    // e.g. "ocr.chunk", "fill.quesitos", "export.pdf"
+    provider?: string | null;
+    model?: string | null;
+    meta?: Record<string, unknown>;
+  },
+  fn: () => Promise<T>,
+): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    const out = await fn();
+    const duration_ms = Date.now() - startedAt;
+    await logToBackend({
+      functionName: params.functionName,
+      jobId: params.jobId,
+      level: 'info',
+      message: `[step:ok] ${params.step}`,
+      metadata: {
+        step: params.step,
+        status: 'ok',
+        duration_ms,
+        provider: params.provider ?? null,
+        model: params.model ?? null,
+        ...(params.meta ?? {}),
+      },
+    });
+    return out;
+  } catch (err) {
+    const duration_ms = Date.now() - startedAt;
+    const message = err instanceof Error ? err.message : String(err);
+    await logToBackend({
+      functionName: params.functionName,
+      jobId: params.jobId,
+      level: 'error',
+      message: `[step:error] ${params.step}: ${message}`,
+      metadata: {
+        step: params.step,
+        status: 'error',
+        duration_ms,
+        provider: params.provider ?? null,
+        model: params.model ?? null,
+        error: message,
+        ...(params.meta ?? {}),
+      },
+    });
+    throw err;
+  }
+}
