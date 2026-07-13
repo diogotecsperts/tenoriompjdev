@@ -44,6 +44,10 @@ function resolveGeminiModelName(model: string): string {
   return resolved;
 }
 
+// DEPRECATED (2026-07): o payload atual de `callGeminiInteractionsWithFile`
+// (`type:'document'` + `uri` em `/v1beta/interactions`) é rejeitado pelo
+// Gemini com 400 invalid_argument. Enquanto o shape correto não é
+// revalidado, todo OCR via Files API usa `generateContent`.
 function shouldUseGeminiInteractionsAPI(apiModel: string): boolean {
   return /^gemini-3(?:\.|-|$)/.test(apiModel) || apiModel === 'gemini-3.5-flash';
 }
