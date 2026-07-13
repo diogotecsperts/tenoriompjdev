@@ -601,19 +601,13 @@ async function extractWithFilesAPI(
     const apiModel = resolveGeminiModelName(model);
     console.log(`[pdf-visual-extractor] Calling Gemini Files API with model: ${apiModel} (original: ${model})`);
     
-    const result = shouldUseGeminiInteractionsAPI(apiModel)
-      ? await callGeminiInteractionsWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT)
-      : await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
-    
+    const result = await callGeminiGenerateContentWithFile(apiKey, apiModel, fileUri, EXTRACTION_PROMPT);
+
     if (!result.ok) {
       throw new Error(`Gemini Vision (Files API) error: ${result.error}`);
     }
 
-    return parseExtractionResult(
-      result.text,
-      model,
-      shouldUseGeminiInteractionsAPI(apiModel) ? 'gemini-interactions-files-api' : 'gemini-files-api'
-    );
+    return parseExtractionResult(result.text, model, 'gemini-files-api');
   } finally {
     // Clean up uploaded file
     try {
