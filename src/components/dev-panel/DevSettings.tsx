@@ -1943,6 +1943,73 @@ export function DevSettings() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Fallback de OCR — nada é acionado sem escolha explícita aqui */}
+            <div className="space-y-3 p-3 border rounded-md bg-background/60">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium">Habilitar fallback de OCR</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Se o provider principal falhar, tenta o provider de fallback escolhido abaixo.
+                    <strong> Desligado por padrão</strong> — enquanto ficar desligado, nenhum outro
+                    provider (incluindo Mistral) é chamado; o job falha explicitamente.
+                  </p>
+                </div>
+                <Switch
+                  checked={!!config.ocr_fallback_enabled}
+                  onCheckedChange={(v) => setConfig({ ...config, ocr_fallback_enabled: v })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs">Provider de fallback</Label>
+                <Select
+                  value={config.ocr_fallback_provider || "none"}
+                  onValueChange={(v) => setConfig({ ...config, ocr_fallback_provider: v })}
+                  disabled={!config.ocr_fallback_enabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      <span className="text-muted-foreground">Nenhum (falhar em caso de erro)</span>
+                    </SelectItem>
+                    <SelectItem value="gemini">Google Gemini</SelectItem>
+                    <SelectItem value="mistral">Mistral OCR</SelectItem>
+                    <SelectItem value="minimax">MiniMax M3</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Ao escolher o mesmo provider do principal, o fallback é ignorado (evita loop).
+                </p>
+              </div>
+
+              <div className="flex items-start justify-between gap-3 pt-1 border-t">
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium">
+                    Trocar por fallback quando arquivo excede o limite do provider principal
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Relevante quando Mistral é o principal (rejeita &gt; 50 MB). Desligado: o job
+                    falha com o erro nativo do provider primário.
+                  </p>
+                </div>
+                <Switch
+                  checked={!!config.ocr_fallback_on_size_exceeded}
+                  onCheckedChange={(v) => setConfig({ ...config, ocr_fallback_on_size_exceeded: v })}
+                  disabled={!config.ocr_fallback_enabled}
+                />
+              </div>
+
+              <div className="text-[11px] p-2 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-100">
+                Por segurança, nenhum fallback é acionado automaticamente. Se o provider principal
+                falhar e o fallback estiver desligado (ou definido como "Nenhum"), o processamento
+                falha explicitamente — nada é cobrado de outros providers sem sua ordem.
+              </div>
+            </div>
+
+
                 
                 {/* Gemini Model Selector (only if Gemini selected) */}
                 {config.phase1_ocr_provider === "gemini" && (
