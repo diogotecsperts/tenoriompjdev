@@ -50,6 +50,7 @@ export type PreProcessarErrorCode =
   | "file_too_large"
   | "unsupported_file"
   | "provider_unavailable"
+  | "canceled"
   | "unknown";
 
 export class PreProcessarError extends Error {
