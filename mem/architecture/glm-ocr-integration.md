@@ -17,6 +17,17 @@ Provider server-side adicionado como opção do DevPanel (principal ou fallback)
 - Limites da API: PDF ≤ 50 MB, imagens ≤ 10 MB, **máximo 30 páginas por request**
 - Paginação: campos `start_page_id` e `end_page_id` (1-based) para PDFs com > 30 páginas
 
+## Divisão em duas camadas
+
+O limite de 50MB da API GLM é global para o PDF inteiro (não por página) — a paginação por `start_page_id/end_page_id` sozinha não resolve arquivos grandes, porque o binário é reenviado a cada chamada. Por isso a divisão acontece em **duas camadas complementares**:
+
+1. **Física (client-side, antes do upload).** Em `ImportarAutosDialog.tsx`, quando `ocrConfig.provider === "glm"`, o PDF é dividido no navegador via `splitPDFClientSide(file, { maxSizeBytes: 38_000_000, maxPagesPerPart: 26 })` — margem de segurança contra o limite de 50MB / 30 páginas. Cada parte é subida separadamente como um arquivo.
+
+2. **Verificação pós-split (bug do pdf-lib).** `pdf-lib.copyPages()` pode carregar imagens não usadas do PDF original, inflando o tamanho da parte gerada em PDFs escaneados pesados. Após `splitPDFClientSide`, o dialog percorre cada parte; se alguma passar de 38MB, é re-dividida recursivamente (`maxPagesPerPart / 2`), máximo 2 níveis. `console.warn` cada ocorrência. Se após 2 níveis ainda passar, o processo falha com erro claro pedindo troca de provider ou redução manual.
+
+3. **Lógica (server-side, dentro do helper).** Dentro de cada parte que chega no `extractWithGlmOCR`, se ainda houver mais de 30 páginas (não deveria após a divisão física, mas serve como segunda linha), o helper itera com `start_page_id/end_page_id` em blocos de 30 páginas e concatena os `md_results`.
+
+
 ## Formato de resposta relevante
 
 ```

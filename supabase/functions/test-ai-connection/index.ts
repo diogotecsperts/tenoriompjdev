@@ -53,6 +53,16 @@ serve(async (req) => {
         ({ success, errorMessage } = await testOpenAICompatible('https://api.minimax.io/v1/chat/completions', key, model || 'MiniMax-M3'));
         break;
       }
+      case 'mistral-ocr': {
+        const key = apiKey || Deno.env.get('MISTRAL_API_KEY') || '';
+        ({ success, errorMessage } = await testMistralOCR(key));
+        break;
+      }
+      case 'glm': {
+        const key = apiKey || Deno.env.get('GLM_API_KEY') || '';
+        ({ success, errorMessage } = await testGlmOCR(key));
+        break;
+      }
       default:
         throw new Error(`Unknown provider: ${provider}`);
     }
@@ -392,6 +402,53 @@ async function testOpenAICompatible(endpoint: string, apiKey: string, model: str
 
     const data = await response.json();
     return { success: !!data.choices?.[0]?.message?.content, errorMessage: null };
+  } catch (error) {
+    return { success: false, errorMessage: error instanceof Error ? error.message : 'Erro desconhecido' };
+  }
+}
+
+// Testa Mistral OCR: GET /v1/models valida a chave sem consumir OCR.
+async function testMistralOCR(apiKey: string): Promise<{ success: boolean; errorMessage: string | null }> {
+  if (!apiKey) return { success: false, errorMessage: 'API Key não fornecida' };
+  try {
+    const response = await fetch('https://api.mistral.ai/v1/models', {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    });
+    if (response.status === 401 || response.status === 403) {
+      return { success: false, errorMessage: `Chave Mistral inválida (HTTP ${response.status})` };
+    }
+    if (!response.ok) {
+      const error = await response.text();
+      return { success: false, errorMessage: `HTTP ${response.status}: ${error.substring(0, 100)}` };
+    }
+    return { success: true, errorMessage: null };
+  } catch (error) {
+    return { success: false, errorMessage: error instanceof Error ? error.message : 'Erro desconhecido' };
+  }
+}
+
+// Testa GLM (Z.AI): request propositalmente sem `file` provoca 400 (validação de payload).
+// 200/400 = chave OK; 401/403 = chave inválida.
+async function testGlmOCR(apiKey: string): Promise<{ success: boolean; errorMessage: string | null }> {
+  if (!apiKey) return { success: false, errorMessage: 'API Key não fornecida' };
+  try {
+    const response = await fetch('https://api.z.ai/api/paas/v4/layout_parsing', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ model: 'glm-ocr' }),
+    });
+    if (response.status === 401 || response.status === 403) {
+      return { success: false, errorMessage: `Chave GLM inválida (HTTP ${response.status})` };
+    }
+    // 400 é esperado (falta `file`), significa que a chave passou pela autenticação.
+    if (response.status === 400 || response.ok) {
+      return { success: true, errorMessage: null };
+    }
+    const error = await response.text();
+    return { success: false, errorMessage: `HTTP ${response.status}: ${error.substring(0, 100)}` };
   } catch (error) {
     return { success: false, errorMessage: error instanceof Error ? error.message : 'Erro desconhecido' };
   }

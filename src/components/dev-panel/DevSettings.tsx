@@ -138,14 +138,9 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   requiresKey: false,
   color: "hsl(168, 58%, 39%)"
 }, {
-  id: "mistral-ocr",
-  name: "Mistral OCR",
-  description: "Precisão elite (~94.9%) para tabelas e documentos escaneados. OCR especializado.",
-  models: ["mistral-ocr-latest"],
-  requiresKey: true,
-  color: "hsl(168, 58%, 39%)",
-  keyPlaceholder: "..."
-}, {
+  // NOTE: Mistral OCR e GLM-OCR foram movidos para OCR_PROVIDERS (nova tabela
+  // "Provedores de OCR"). Não aparecem mais no Provider Inventory principal
+  // porque não são providers generalistas de Fase 2 — só extraem texto de PDF.
   id: "openai",
   name: "OpenAI",
   description: "Modelos GPT-4o e série o1.",
@@ -224,6 +219,32 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   color: "hsl(45, 93%, 47%)",
   keyPlaceholder: "sk-cp-..."
 }];
+
+// Providers de OCR (Fase 1) — só extraem texto de PDF, nunca preenchem laudo (Fase 2).
+// Renderizados em uma tabela separada abaixo do Provider Inventory principal.
+// Gemini e MiniMax também fazem OCR, mas sua chave é gerenciada no Provider Inventory
+// principal — não duplicar aqui.
+const OCR_PROVIDERS: ProviderInfo[] = [{
+  id: "mistral-ocr",
+  name: "Mistral OCR",
+  description: "Precisão elite (~94.9%) para tabelas e documentos escaneados.",
+  models: ["mistral-ocr-latest"],
+  requiresKey: true,
+  color: "hsl(168, 58%, 39%)",
+  keyPlaceholder: "..."
+}, {
+  id: "glm",
+  name: "GLM-OCR (Z.AI)",
+  description: "Layout parsing (Markdown estruturado). Limite: 50MB / 30 páginas por chamada.",
+  models: ["glm-ocr"],
+  requiresKey: true,
+  color: "hsl(217, 91%, 60%)",
+  keyPlaceholder: "..."
+}];
+
+const ALL_PROVIDERS: ProviderInfo[] = [...AI_PROVIDERS, ...OCR_PROVIDERS];
+
+
 
 const DEFAULT_CONFIG: SystemConfig = {
   default_ai_provider: "lovable",
@@ -493,7 +514,7 @@ export function DevSettings() {
       });
       if (error) throw error;
       setPinnedProviders(updated);
-      const providerName = AI_PROVIDERS.find(p => p.id === providerId)?.name;
+      const providerName = ALL_PROVIDERS.find(p => p.id === providerId)?.name;
       toast({
         title: isPinned ? "Desafixado" : "Fixado",
         description: <div className="flex items-center gap-2">
@@ -940,7 +961,7 @@ export function DevSettings() {
       }));
       toast({
         title: "Sucesso",
-        description: `API Key do ${AI_PROVIDERS.find(p => p.id === providerId)?.name} salva`
+        description: `API Key do ${ALL_PROVIDERS.find(p => p.id === providerId)?.name} salva`
       });
       
       // Auto-teste com debounce após salvar
@@ -965,7 +986,7 @@ export function DevSettings() {
   };
 
   const deleteApiKey = async (providerId: string) => {
-    if (!confirm(`Remover API Key do ${AI_PROVIDERS.find(p => p.id === providerId)?.name}?`)) {
+    if (!confirm(`Remover API Key do ${ALL_PROVIDERS.find(p => p.id === providerId)?.name}?`)) {
       return;
     }
     try {
@@ -1004,7 +1025,7 @@ export function DevSettings() {
   };
 
   const testConnection = async (providerId: string) => {
-    const provider = AI_PROVIDERS.find(p => p.id === providerId);
+    const provider = ALL_PROVIDERS.find(p => p.id === providerId);
     if (!provider) return;
 
     // Check if key is required and available
@@ -1096,7 +1117,7 @@ export function DevSettings() {
   };
 
   const selectProvider = (providerId: string) => {
-    const provider = AI_PROVIDERS.find(p => p.id === providerId);
+    const provider = ALL_PROVIDERS.find(p => p.id === providerId);
     if (!provider) return;
 
     // If provider requires key and no key is saved, show a message
@@ -1319,10 +1340,13 @@ export function DevSettings() {
     );
   };
 
-  // Render individual provider row
-  const renderProviderRow = (provider: ProviderInfo) => {
-    const isActive = provider.id === config.default_ai_provider;
-    const isPinned = pinnedProviders.includes(provider.id);
+  // Render individual provider row.
+  // `variant: 'ocr'` desabilita "selectProvider" e ícones de default/pin —
+  // providers de OCR não são selecionáveis como default AI provider.
+  const renderProviderRow = (provider: ProviderInfo, variant: 'general' | 'ocr' = 'general') => {
+    const isOcr = variant === 'ocr';
+    const isActive = !isOcr && provider.id === config.default_ai_provider;
+    const isPinned = !isOcr && pinnedProviders.includes(provider.id);
     const hasKey = savedApiKeys[provider.id];
     const status = getProviderStatus(provider);
     const testResult = testResults[provider.id];
@@ -1332,16 +1356,19 @@ export function DevSettings() {
       <TableRow 
         key={provider.id}
         className={cn(
-          "group transition-all duration-200 cursor-pointer",
+          "group transition-all duration-200",
+          !isOcr && "cursor-pointer",
           isActive && "bg-primary/5 border-l-4 border-l-primary",
           isPinned && !isActive && "bg-amber-50/50 dark:bg-amber-950/20",
           "hover:bg-muted/50"
         )}
-        onClick={() => selectProvider(provider.id)}
+        onClick={isOcr ? undefined : () => selectProvider(provider.id)}
       >
         {/* Coluna Pin/Status */}
         <TableCell className="w-12 text-center" onClick={e => e.stopPropagation()}>
-          {isActive ? (
+          {isOcr ? (
+            <div className="w-2 h-2 rounded-full bg-primary/40 mx-auto" title="Provider de OCR (Fase 1)" />
+          ) : isActive ? (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger>
@@ -1364,6 +1391,7 @@ export function DevSettings() {
             </Button>
           )}
         </TableCell>
+        
         
         {/* Coluna Nome */}
         <TableCell>
@@ -1702,6 +1730,43 @@ export function DevSettings() {
             )}>{stats.healthPct}%</span>
           </div>
         </div>
+
+        {/* Section: Provedores de OCR (Fase 1) — tabela separada */}
+        <div id="ocr-providers-section" className="space-y-4 pt-2">
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-primary" />
+            <h2 className="text-xl font-bold uppercase tracking-tight">
+              Provedores de OCR <span className="text-primary">(Fase 1)</span>
+            </h2>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Providers usados exclusivamente para extrair texto de PDF (Fase 1). Estas chaves não aparecem no seletor da Fase 2.
+            <br />
+            <span className="text-xs">
+              Observação: Gemini e MiniMax também fazem OCR — as chaves deles ficam no Provider Inventory acima.
+            </span>
+          </p>
+
+          <div className="border rounded-lg overflow-hidden bg-card shadow-sm">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableHead className="w-12"></TableHead>
+                  <TableHead className="text-[11px] font-bold uppercase tracking-wider">Provider</TableHead>
+                  <TableHead className="text-[11px] font-bold uppercase tracking-wider">Modelos</TableHead>
+                  <TableHead className="w-28 text-center text-[11px] font-bold uppercase tracking-wider">Status</TableHead>
+                  <TableHead className="w-56 text-[11px] font-bold uppercase tracking-wider">API Key</TableHead>
+                  <TableHead className="w-32 text-right text-[11px] font-bold uppercase tracking-wider">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {OCR_PROVIDERS.map(provider => renderProviderRow(provider, 'ocr'))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+
+
 
         {/* Toggle para modelos versionados do Gemini */}
         {(dynamicGeminiModels.length > 0 || versionedGeminiModels.length > 0) && (
@@ -2126,9 +2191,16 @@ export function DevSettings() {
                           <li>• Custo: ~$1.00 por 1.000 páginas</li>
                           <li>• Limite: 50MB por arquivo (usa split automático)</li>
                         </ul>
-                        {!savedApiKeys['mistral'] && (
+                        {!savedApiKeys['mistral-ocr'] && (
                           <p className="text-destructive font-medium mt-2">
-                            ⚠️ Requer MISTRAL_API_KEY configurada nas secrets
+                            ⚠️ Chave Mistral não configurada.{' '}
+                            <button
+                              type="button"
+                              className="underline hover:text-destructive/80"
+                              onClick={() => document.getElementById('ocr-providers-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                            >
+                              Configure em Provedores de OCR ↓
+                            </button>
                           </p>
                         )}
                       </div>
@@ -2153,7 +2225,14 @@ export function DevSettings() {
                         </ul>
                         {!savedApiKeys['glm'] && (
                           <p className="text-destructive font-medium mt-2">
-                            ⚠️ Requer GLM_API_KEY configurada nas secrets
+                            ⚠️ Chave GLM não configurada.{' '}
+                            <button
+                              type="button"
+                              className="underline hover:text-destructive/80"
+                              onClick={() => document.getElementById('ocr-providers-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                            >
+                              Configure em Provedores de OCR ↓
+                            </button>
                           </p>
                         )}
                       </div>
