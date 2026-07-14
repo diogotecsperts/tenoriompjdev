@@ -514,7 +514,7 @@ export function DevSettings() {
       });
       if (error) throw error;
       setPinnedProviders(updated);
-      const providerName = AI_PROVIDERS.find(p => p.id === providerId)?.name;
+      const providerName = ALL_PROVIDERS.find(p => p.id === providerId)?.name;
       toast({
         title: isPinned ? "Desafixado" : "Fixado",
         description: <div className="flex items-center gap-2">
@@ -961,7 +961,7 @@ export function DevSettings() {
       }));
       toast({
         title: "Sucesso",
-        description: `API Key do ${AI_PROVIDERS.find(p => p.id === providerId)?.name} salva`
+        description: `API Key do ${ALL_PROVIDERS.find(p => p.id === providerId)?.name} salva`
       });
       
       // Auto-teste com debounce após salvar
@@ -986,7 +986,7 @@ export function DevSettings() {
   };
 
   const deleteApiKey = async (providerId: string) => {
-    if (!confirm(`Remover API Key do ${AI_PROVIDERS.find(p => p.id === providerId)?.name}?`)) {
+    if (!confirm(`Remover API Key do ${ALL_PROVIDERS.find(p => p.id === providerId)?.name}?`)) {
       return;
     }
     try {
@@ -1025,7 +1025,7 @@ export function DevSettings() {
   };
 
   const testConnection = async (providerId: string) => {
-    const provider = AI_PROVIDERS.find(p => p.id === providerId);
+    const provider = ALL_PROVIDERS.find(p => p.id === providerId);
     if (!provider) return;
 
     // Check if key is required and available
@@ -1117,7 +1117,7 @@ export function DevSettings() {
   };
 
   const selectProvider = (providerId: string) => {
-    const provider = AI_PROVIDERS.find(p => p.id === providerId);
+    const provider = ALL_PROVIDERS.find(p => p.id === providerId);
     if (!provider) return;
 
     // If provider requires key and no key is saved, show a message
