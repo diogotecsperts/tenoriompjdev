@@ -832,7 +832,12 @@ async function processStructuredExtraction(args: {
     parsed.comorbidades_fixas = normalized;
   }
 
-  await updateJob(admin, jobId, { stage: "ai_refinement", progress: 78 });
+  await updateJob(admin, jobId, {
+    stage: "ai_refinement",
+    progress: 78,
+    provider: aiConfig.provider,
+    model: aiConfig.model,
+  });
 
   let queixaUnificada = "";
   try {
