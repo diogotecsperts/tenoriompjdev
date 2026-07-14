@@ -168,7 +168,7 @@ export function DevAIStatus() {
       // Parse primary config
       const primaryProvider = configMap.default_ai_provider?.replace(/"/g, '') || 'lovable';
       const primaryModel = configMap.default_ai_model?.replace(/"/g, '') || 'google/gemini-2.5-flash';
-      const primaryHasKey = primaryProvider === 'lovable' || savedKeys.has(primaryProvider);
+      const primaryHasKey = hasKeyFor(primaryProvider, savedKeys);
 
       setPrimaryConfig({
         provider: primaryProvider,
