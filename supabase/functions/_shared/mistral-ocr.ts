@@ -217,13 +217,30 @@ async function deleteMistralFile(fileId: string, apiKey: string): Promise<void> 
  * Verificar se a chave Mistral está configurada
  */
 export async function hasMistralAPIKey(): Promise<boolean> {
-  const apiKey = Deno.env.get('MISTRAL_API_KEY');
+  const apiKey = await getMistralAPIKey();
   return !!apiKey && apiKey.length > 0;
 }
 
 /**
- * Obter chave Mistral do ambiente
+ * Obter chave Mistral: primeiro do `global_api_keys` (DevPanel "Provedores de OCR"),
+ * fallback para `Deno.env.get('MISTRAL_API_KEY')`. Segue exatamente o mesmo padrão
+ * de getGeminiApiKey em pdf-visual-extractor.ts.
  */
-export function getMistralAPIKey(): string | null {
+export async function getMistralAPIKey(): Promise<string | null> {
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (supabaseUrl && supabaseKey) {
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      const { data } = await supabase
+        .from('global_api_keys')
+        .select('api_key')
+        .eq('id', 'mistral-ocr')
+        .maybeSingle();
+      if (data?.api_key) return data.api_key;
+    }
+  } catch (e) {
+    console.warn('[mistral-ocr] falha ao ler global_api_keys, usando env fallback:', (e as Error).message);
+  }
   return Deno.env.get('MISTRAL_API_KEY') || null;
 }
