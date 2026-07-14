@@ -148,6 +148,123 @@ export async function uploadPericiaPdf(
   return path;
 }
 
+// ---------- Split de PDFs grandes (>48MB) ----------
+//
+// Provider mais restritivo hoje é o GLM-OCR (teto de 50MB por request).
+// Usamos 48MB como corte defensivo. Só divide quando estritamente necessário:
+// PDFs ≤ 48MB seguem o caminho rápido intacto (preProcessarPericia).
+
+export const PREV_SPLIT_MAX_BYTES = 48 * 1024 * 1024;
+
+export interface PrevPdfSplitPart {
+  blob: Blob;
+  startPage: number; // 1-based
+  endPage: number; // 1-based, inclusive
+  totalPages: number;
+}
+
+export function prevPdfNeedsSplit(source: Blob | File | { size: number }): boolean {
+  return source.size > PREV_SPLIT_MAX_BYTES;
+}
+
+/**
+ * Divide um PDF em partes ≤ maxBytes usando halving recursivo.
+ * Cada parte é serializada via pdf-lib preservando referências internas.
+ * Se uma única página exceder o limite, lança erro (extremamente raro).
+ */
+export async function splitPrevPdf(
+  source: Blob | File | Uint8Array,
+  maxBytes: number = PREV_SPLIT_MAX_BYTES,
+): Promise<PrevPdfSplitPart[]> {
+  const { PDFDocument } = await import("pdf-lib");
+  const bytes =
+    source instanceof Uint8Array
+      ? source
+      : new Uint8Array(await (source as Blob).arrayBuffer());
+  const srcDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const totalPages = srcDoc.getPageCount();
+
+  const serializeRange = async (startIdx: number, endIdx: number): Promise<Blob> => {
+    const doc = await PDFDocument.create();
+    const indices = Array.from({ length: endIdx - startIdx + 1 }, (_, i) => startIdx + i);
+    const copied = await doc.copyPages(srcDoc, indices);
+    copied.forEach((p) => doc.addPage(p));
+    const out = await doc.save({ useObjectStreams: true });
+    return new Blob([out], { type: "application/pdf" });
+  };
+
+  const parts: PrevPdfSplitPart[] = [];
+
+  const divide = async (startIdx: number, endIdx: number): Promise<void> => {
+    const blob = await serializeRange(startIdx, endIdx);
+    if (blob.size <= maxBytes) {
+      parts.push({
+        blob,
+        startPage: startIdx + 1,
+        endPage: endIdx + 1,
+        totalPages,
+      });
+      return;
+    }
+    if (endIdx === startIdx) {
+      throw new Error(
+        `Uma única página do PDF (pág. ${startIdx + 1}) excede ${(
+          maxBytes /
+          1024 /
+          1024
+        ).toFixed(0)}MB (${(blob.size / 1024 / 1024).toFixed(1)}MB). ` +
+          `Reduza a qualidade das imagens do arquivo original antes de reenviar.`,
+      );
+    }
+    const mid = Math.floor((startIdx + endIdx) / 2);
+    await divide(startIdx, mid);
+    await divide(mid + 1, endIdx);
+  };
+
+  await divide(0, totalPages - 1);
+  return parts;
+}
+
+/** Sobe uma parte temporária em `prev-pdfs/{userId}/{periciaId}/parts/part-{index}.pdf`. */
+export async function uploadPericiaPdfPart(
+  userId: string,
+  periciaId: string,
+  index: number,
+  blob: Blob,
+): Promise<string> {
+  const path = `${userId}/${periciaId}/parts/part-${String(index).padStart(3, "0")}.pdf`;
+  const { error } = await supabase.storage
+    .from("prev-pdfs")
+    .upload(path, blob, { upsert: true, contentType: "application/pdf" });
+  if (error) throw error;
+  return path;
+}
+
+/** Baixa o PDF completo de uma perícia (para split client-side). */
+export async function downloadPericiaPdf(pdfPath: string): Promise<Blob> {
+  const { data, error } = await supabase.storage.from("prev-pdfs").download(pdfPath);
+  if (error || !data) throw error ?? new Error("PDF não encontrado no storage.");
+  return data;
+}
+
+/** Remove todas as partes temporárias de `{userId}/{periciaId}/parts/`. Best-effort. */
+export async function deletePericiaPdfParts(
+  userId: string,
+  periciaId: string,
+): Promise<void> {
+  try {
+    const prefix = `${userId}/${periciaId}/parts`;
+    const { data, error } = await supabase.storage.from("prev-pdfs").list(prefix, {
+      limit: 100,
+    });
+    if (error || !data || data.length === 0) return;
+    const paths = data.map((f) => `${prefix}/${f.name}`);
+    await supabase.storage.from("prev-pdfs").remove(paths);
+  } catch (e) {
+    console.warn("[prev-pdfs] falha ao limpar partes temporárias:", e);
+  }
+}
+
 export async function getPericiaPdfSignedUrl(
   path: string,
   expiresInSec = 3600
