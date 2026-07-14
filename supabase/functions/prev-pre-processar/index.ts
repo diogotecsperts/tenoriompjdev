@@ -747,6 +747,12 @@ async function processStructuredExtraction(args: {
   });
 
   const aiConfig = await getAIConfig();
+  // Reflete a IA generalista ativa (DevPanel) no job para o label de progresso
+  // mostrar dinamicamente qual provider/modelo está rodando esta fase.
+  await updateJob(admin, jobId, {
+    provider: aiConfig.provider,
+    model: aiConfig.model,
+  });
   const ocrText = trimOcrPreservingTail(ocr.text, 120_000);
   const remainingAiBudgetMs = jobId
     ? 120_000
@@ -826,7 +832,12 @@ async function processStructuredExtraction(args: {
     parsed.comorbidades_fixas = normalized;
   }
 
-  await updateJob(admin, jobId, { stage: "ai_refinement", progress: 78 });
+  await updateJob(admin, jobId, {
+    stage: "ai_refinement",
+    progress: 78,
+    provider: aiConfig.provider,
+    model: aiConfig.model,
+  });
 
   let queixaUnificada = "";
   try {
