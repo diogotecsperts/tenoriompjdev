@@ -45,7 +45,7 @@ const KNOWN_PROVIDERS: readonly OcrFallbackProvider[] = [
   "gemini",
   "mistral",
   "minimax",
-  // "glm" será adicionado no Bloco C
+  "glm",
 ] as const;
 
 function parseBool(v: unknown, fallback: boolean): boolean {
