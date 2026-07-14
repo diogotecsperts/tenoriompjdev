@@ -148,6 +148,181 @@ export async function uploadPericiaPdf(
   return path;
 }
 
+// ---------- Rebuild raster de PDFs grandes ----------
+//
+// Estratégia principal para PDFs > 48MB: em vez de dividir e mandar N chamadas
+// ao provider de OCR, rasterizamos todas as páginas via pdfjs no browser, e
+// remontamos um PDF novo, só-imagens (JPEG), sem herança de /Resources. Esse
+// PDF limpo geralmente fica em 15-30MB para dezenas/centenas de páginas e
+// pode ser enviado ao provider configurado no DevPanel em UMA única chamada.
+
+export interface RebuildRasterOptions {
+  /** DPI base (default 150). O fallback usa 120 se o PDF ainda ficar grande. */
+  dpi?: number;
+  /** Qualidade JPEG 0..1 (default 0.75). Fallback usa 0.65. */
+  jpegQuality?: number;
+  /** Concorrência de rasterização (default 4). */
+  parallelism?: number;
+  /** Aborta a operação. */
+  signal?: AbortSignal;
+  /** Callback de progresso por página. */
+  onPageProgress?: (done: number, total: number) => void;
+}
+
+/**
+ * Rasteriza todas as páginas de um PDF e remonta um PDF novo, só-imagens.
+ * Faz uma segunda passada com DPI/qualidade menores se o resultado exceder
+ * `maxBytes`. Retorna o Blob final (sempre `application/pdf`).
+ */
+export async function rebuildPdfAsRasterClean(
+  source: Blob | File | Uint8Array,
+  maxBytes: number = PREV_SPLIT_MAX_BYTES,
+  opts: RebuildRasterOptions = {},
+): Promise<{ blob: Blob; pageCount: number; dpiUsed: number; qualityUsed: number }> {
+  const parallelism = Math.max(1, Math.min(8, opts.parallelism ?? 4));
+
+  const doRebuild = async (dpi: number, quality: number) => {
+    if (opts.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    // pdfjs
+    const pdfjs = await import("pdfjs-dist");
+    // @ts-ignore worker via Vite ?url
+    const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+    if (typeof window !== "undefined" && !pdfjs.GlobalWorkerOptions.workerSrc) {
+      pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+    }
+    const bytes =
+      source instanceof Uint8Array
+        ? source
+        : new Uint8Array(await (source as Blob).arrayBuffer());
+    // pdfjs consome o buffer — copia para não invalidar reuso em segunda passada
+    const bufCopy = bytes.slice();
+    const loadingTask = pdfjs.getDocument({ data: bufCopy } as any);
+    const pdf = await loadingTask.promise;
+    const totalPages = pdf.numPages;
+
+    // Renderiza uma página → JPEG bytes
+    const renderPage = async (pageNum: number): Promise<Uint8Array> => {
+      if (opts.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      const page = await pdf.getPage(pageNum);
+      // dpi → scale (pdfjs base é 72 dpi)
+      const scale = dpi / 72;
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const ctx = canvas.getContext("2d", { alpha: false });
+      if (!ctx) throw new Error("Canvas 2D indisponível");
+      // Fundo branco para JPEG (sem alpha)
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport, background: "white" } as any).promise;
+      const blob: Blob = await new Promise((resolve, reject) => {
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("toBlob null"))),
+          "image/jpeg",
+          quality,
+        );
+      });
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      // libera canvas
+      canvas.width = 0;
+      canvas.height = 0;
+      page.cleanup();
+      return buf;
+    };
+
+    // Renderiza em paralelo (concorrência limitada), preservando ordem
+    const jpegs: Uint8Array[] = new Array(totalPages);
+    let nextIdx = 0;
+    let done = 0;
+    const workers: Promise<void>[] = [];
+    for (let w = 0; w < parallelism; w++) {
+      workers.push(
+        (async () => {
+          while (true) {
+            const i = nextIdx++;
+            if (i >= totalPages) return;
+            jpegs[i] = await renderPage(i + 1);
+            done++;
+            opts.onPageProgress?.(done, totalPages);
+          }
+        })(),
+      );
+    }
+    await Promise.all(workers);
+
+    // Monta o novo PDF com pdf-lib
+    const { PDFDocument } = await import("pdf-lib");
+    const out = await PDFDocument.create();
+    for (let i = 0; i < totalPages; i++) {
+      const jpg = await out.embedJpg(jpegs[i]);
+      const page = out.addPage([jpg.width, jpg.height]);
+      page.drawImage(jpg, { x: 0, y: 0, width: jpg.width, height: jpg.height });
+      // libera referência
+      jpegs[i] = undefined as unknown as Uint8Array;
+    }
+    const outBytes = await out.save({ useObjectStreams: true });
+    const outBuf = new ArrayBuffer(outBytes.byteLength);
+    new Uint8Array(outBuf).set(outBytes);
+    const outBlob = new Blob([outBuf], { type: "application/pdf" });
+    return { blob: outBlob, pageCount: totalPages };
+  };
+
+  const dpi1 = opts.dpi ?? 150;
+  const q1 = opts.jpegQuality ?? 0.75;
+  const first = await doRebuild(dpi1, q1);
+  console.info(
+    `[prev-rebuild] passada 1: ${first.pageCount} págs @ ${dpi1}dpi q=${q1} → ${(first.blob.size / 1024 / 1024).toFixed(1)}MB`,
+  );
+  if (first.blob.size <= maxBytes) {
+    return { blob: first.blob, pageCount: first.pageCount, dpiUsed: dpi1, qualityUsed: q1 };
+  }
+
+  // Segunda passada mais agressiva
+  const dpi2 = 120;
+  const q2 = 0.65;
+  console.warn(
+    `[prev-rebuild] passada 1 excedeu ${(maxBytes / 1024 / 1024).toFixed(0)}MB — refazendo @ ${dpi2}dpi q=${q2}`,
+  );
+  const second = await doRebuild(dpi2, q2);
+  console.info(
+    `[prev-rebuild] passada 2: ${(second.blob.size / 1024 / 1024).toFixed(1)}MB`,
+  );
+  return { blob: second.blob, pageCount: second.pageCount, dpiUsed: dpi2, qualityUsed: q2 };
+}
+
+const CLEAN_SUFFIX = "-clean";
+
+/** Path do PDF limpo auxiliar (não sobrescreve o original). */
+export function cleanPericiaPdfPath(userId: string, periciaId: string): string {
+  return `${userId}/${periciaId}${CLEAN_SUFFIX}.pdf`;
+}
+
+/** Rasteriza + sobe o PDF limpo. Retorna path e metadados. */
+export async function rasterAndUploadCleanPdf(
+  userId: string,
+  periciaId: string,
+  source: Blob | File | Uint8Array,
+  opts: RebuildRasterOptions = {},
+): Promise<{ path: string; sizeBytes: number; pageCount: number }> {
+  const { blob, pageCount } = await rebuildPdfAsRasterClean(source, PREV_SPLIT_MAX_BYTES, opts);
+  const path = cleanPericiaPdfPath(userId, periciaId);
+  const { error } = await supabase.storage
+    .from("prev-pdfs")
+    .upload(path, blob, { upsert: true, contentType: "application/pdf" });
+  if (error) throw error;
+  return { path, sizeBytes: blob.size, pageCount };
+}
+
+/** Remove o PDF limpo auxiliar (best-effort). */
+export async function deletePericiaPdfClean(userId: string, periciaId: string): Promise<void> {
+  try {
+    await supabase.storage.from("prev-pdfs").remove([cleanPericiaPdfPath(userId, periciaId)]);
+  } catch (e) {
+    console.warn("[prev-pdfs] falha ao apagar PDF limpo:", e);
+  }
+}
+
 // ---------- Split de PDFs grandes (>48MB) ----------
 //
 // Provider mais restritivo hoje é o GLM-OCR (teto de 50MB por request).
