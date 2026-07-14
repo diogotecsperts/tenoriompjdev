@@ -285,7 +285,7 @@ export default function PautaDetalhe() {
       setProcessandoIds((s) => new Set(s).add(p.id));
       setProcessandoDetalhes((s) => ({ ...s, [p.id]: "Preparando PDF" }));
       try {
-        await preProcessarPericia(p.id, {
+        await preProcessarPericiaComSplit(p.id, p.pdf_path ?? null, {
           onMinimaxProgress: (progress) => {
             setProcessandoDetalhes((s) => ({ ...s, [p.id]: formatClientOcrProgress(progress) }));
           },
