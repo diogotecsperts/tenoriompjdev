@@ -2191,9 +2191,16 @@ export function DevSettings() {
                           <li>• Custo: ~$1.00 por 1.000 páginas</li>
                           <li>• Limite: 50MB por arquivo (usa split automático)</li>
                         </ul>
-                        {!savedApiKeys['mistral'] && (
+                        {!savedApiKeys['mistral-ocr'] && (
                           <p className="text-destructive font-medium mt-2">
-                            ⚠️ Requer MISTRAL_API_KEY configurada nas secrets
+                            ⚠️ Chave Mistral não configurada.{' '}
+                            <button
+                              type="button"
+                              className="underline hover:text-destructive/80"
+                              onClick={() => document.getElementById('ocr-providers-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                            >
+                              Configure em Provedores de OCR ↓
+                            </button>
                           </p>
                         )}
                       </div>
