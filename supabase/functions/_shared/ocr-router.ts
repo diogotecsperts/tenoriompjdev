@@ -239,6 +239,17 @@ export async function runOcrWithConfiguredProvider(
         model: r.model || cfg.geminiModel,
       };
     }
+    if (decision.provider === "glm") {
+      if (!glmKey) {
+        throw new Error(
+          `Fallback configurado para GLM mas GLM_API_KEY ausente. ` +
+          `Configure a chave no DevPanel.`,
+        );
+      }
+      const bytes = await materializeBytes();
+      const r = await extractWithGlmOCR(bytes, glmKey);
+      return { text: r.text, pageCount: r.pageCount, provider: `${r.provider}-fallback`, model: r.model };
+    }
     // Não deveria chegar aqui (restrictTo filtrou), mas por segurança:
     throw err;
   }
