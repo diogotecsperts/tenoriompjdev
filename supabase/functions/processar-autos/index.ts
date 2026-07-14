@@ -1155,7 +1155,7 @@ async function processLargePDFWithSplit(
 
       // decision.provider === "mistral" (único aceito neste caminho)
       console.warn(`[processar-autos] Gemini falhou parte ${i + 1}, usando fallback configurado: ${decision.provider}`);
-      const mistralKey = getMistralAPIKey();
+      const mistralKey = await getMistralAPIKey();
       if (!mistralKey) {
         throw new Error(`Fallback '${decision.provider}' configurado mas MISTRAL_API_KEY ausente.`);
       }
@@ -2132,7 +2132,7 @@ async function processarPDFBackground(
         if (ocrProvider === 'mistral') {
           console.log('[processar-autos] Using MISTRAL OCR for Phase 1...');
           
-          const mistralKey = getMistralAPIKey();
+          const mistralKey = await getMistralAPIKey();
           if (!mistralKey) {
             throw new Error('MISTRAL_API_KEY não configurada. Configure nas secrets do Supabase.');
           }
@@ -2467,7 +2467,7 @@ async function processarPDFBackground(
       } else if (pdfProvider === 'mistral-ocr') {
         console.log('[processar-autos] Using MISTRAL OCR for single-pass extraction...');
 
-        const mistralKey = getMistralAPIKey();
+        const mistralKey = await getMistralAPIKey();
         if (!mistralKey) {
           // Sem fallback silencioso: se o usuário escolheu Mistral no DevPanel
           // e a chave não está configurada, o job falha explicitamente.
@@ -2785,7 +2785,7 @@ async function processarPDFBackground(
               await logWarn('processar-autos', `Fallback configurado ativado (Gemini → Mistral OCR)`, jobId, { errorMsg });
 
               // Check if Mistral key is available
-              const mistralKey = getMistralAPIKey();
+              const mistralKey = await getMistralAPIKey();
               if (!mistralKey) {
                 throw new Error('Fallback configurado para Mistral OCR mas MISTRAL_API_KEY ausente. Configure no DevPanel.');
               }
