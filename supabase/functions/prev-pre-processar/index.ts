@@ -747,6 +747,12 @@ async function processStructuredExtraction(args: {
   });
 
   const aiConfig = await getAIConfig();
+  // Reflete a IA generalista ativa (DevPanel) no job para o label de progresso
+  // mostrar dinamicamente qual provider/modelo está rodando esta fase.
+  await updateJob(admin, jobId, {
+    provider: aiConfig.provider,
+    model: aiConfig.model,
+  });
   const ocrText = trimOcrPreservingTail(ocr.text, 120_000);
   const remainingAiBudgetMs = jobId
     ? 120_000
