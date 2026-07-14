@@ -34,7 +34,7 @@ import {
   updatePericia,
   uploadPericiaPdf,
 } from "../api/pautas";
-import { preProcessarPericia } from "../api/processar";
+import { preProcessarPericiaComSplit } from "../api/processar";
 import type { MinimaxOcrProgress } from "@/lib/minimax-ocr-client";
 import { NovaPericiaDialog } from "../components/NovaPericiaDialog";
 import { EditarPautaDialog } from "../components/EditarPautaDialog";
@@ -195,7 +195,7 @@ export default function PautaDetalhe() {
     const controller = new AbortController();
     abortersRef.current.set(pericia.id, controller);
     try {
-      const r = await preProcessarPericia(pericia.id, {
+      const r = await preProcessarPericiaComSplit(pericia.id, pericia.pdf_path ?? null, {
         signal: controller.signal,
         onMinimaxProgress: (p) => {
           setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: formatClientOcrProgress(p) }));
@@ -285,7 +285,7 @@ export default function PautaDetalhe() {
       setProcessandoIds((s) => new Set(s).add(p.id));
       setProcessandoDetalhes((s) => ({ ...s, [p.id]: "Preparando PDF" }));
       try {
-        await preProcessarPericia(p.id, {
+        await preProcessarPericiaComSplit(p.id, p.pdf_path ?? null, {
           onMinimaxProgress: (progress) => {
             setProcessandoDetalhes((s) => ({ ...s, [p.id]: formatClientOcrProgress(progress) }));
           },
