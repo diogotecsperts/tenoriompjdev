@@ -1,68 +1,58 @@
-# DevAIStatus: refletir dinamicamente OCR + IA generalista reais
+# Trabalhista single-pass: honrar GLM/MiniMax do DevPanel (fim do "Gemini fantasma")
 
-A página **DevPanel → Inteligência Artificial** (`src/components/dev-panel/DevAIStatus.tsx`) tem 5 problemas que fazem o quadro "não bater com o que está ativo".
+## Diagnóstico (confirmado no código e no DB)
 
-## Diagnóstico (confirmado com leitura do DB e do código)
+Os registros que aparecem em **DevPanel → Logs de Uso de IA** a 03:57/03:58 são reais e vieram do módulo Trabalhista:
 
-Estado atual em `system_config`:
-- `phase1_ocr_provider = "glm"` ✓
-- `phase1_gemini_model = "gemini-3-flash-preview"` (resíduo antigo, só faria sentido se OCR fosse Gemini)
-- `default_ai_provider = "minimax"`, `default_ai_model = "MiniMax-M3"` ✓
-
-Bugs em `DevAIStatus.tsx`:
-
-1. **`pdfModel` sempre lê `phase1_gemini_model`** (L142). Quando o OCR é GLM/Mistral/MiniMax, o modelo é fixo (`glm-ocr`, `mistral-ocr-latest`, `MiniMax-OCR`), e `phase1_gemini_model` só serve para o caminho Gemini. Resultado atual na tela: "OCR = GLM + gemini-3-flash-preview", que parece o Gemini rodando. **Este é o problema reportado.**
-
-2. **`PROVIDER_NAMES` incompleto** (L42-50): sem `glm`, `mistral`, `minimax`. Mostra id cru para esses.
-
-3. **Fallback OCR aponta para chave errada**: L144-145 lê `pdf_fallback_provider` / `pdf_fallback_model` — chave legada do fluxo single-pass do Trabalhista. O DevSettings hoje configura fallback OCR em `ocr_fallback_provider` (ver DevSettings L2039). São coisas diferentes; a linha "Fallback PDF (Vision)" mostra o provider errado.
-
-4. **`AI_OPERATIONS` desatualizada** (L52-60): lista fixa de operações do Trabalhista antigo (Resumo Petição/Contestação/Descrição Doenças/Nexo/Incapacidade). Nada do Previdenciário. Todas apontam para a IA Principal, o que é correto conceitualmente, mas a lista de nomes não reflete o pipeline real.
-
-5. **Estatísticas de fallback só olham `import_jobs`** (L179): ignora `prev_processing_jobs`. Um usuário que só usa Previdenciário vê "0 jobs processados" mesmo tendo rodado dezenas de perícias.
-
-## Correções
-
-**1. Modelo do OCR conforme o provider (fix do bug reportado):**
-```ts
-const pdfProvider = configMap.phase1_ocr_provider?.replace(/"/g, '') || 'gemini';
-const pdfModel =
-  pdfProvider === 'glm' ? 'glm-ocr'
-  : pdfProvider === 'mistral' ? 'mistral-ocr-latest'
-  : pdfProvider === 'minimax' ? 'MiniMax-OCR'
-  : configMap.phase1_gemini_model?.replace(/"/g, '') || 'gemini-2.5-flash';
 ```
-A chave da API muda por provider: `glm` → verifica `glm`, `mistral` → `mistral-ocr`, `minimax` → `minimax`, `gemini` → env `GEMINI_API_KEY` (não fica em `global_api_keys`, tratar como sempre disponível se o backend tem env).
-
-**2. `PROVIDER_NAMES` ampliado:**
-```ts
-glm: 'GLM-OCR (Z.AI)',
-mistral: 'Mistral OCR',
-minimax: 'MiniMax',
-'mistral-ocr': 'Mistral OCR',
+prompt_type=pdf_extraction | provider=lovable | model=google/gemini-2.5-flash
 ```
 
-**3. Fallback OCR aponta para `ocr_fallback_provider`:**
-Trocar leitura de `pdf_fallback_provider`/`pdf_fallback_model` por `ocr_fallback_provider` + modelo derivado do mesmo mapa acima. Se `ocr_fallback_provider === 'none'` (default), a linha "Fallback OCR" mostra "Nenhum configurado" em vez de um provider fantasma.
+Origem: `supabase/functions/processar-autos/index.ts` L2415-2437 (fluxo **single-pass**). O código lê `phase1_ocr_provider = "glm"` do DevPanel mas então faz o mapeamento:
 
-**4. Reorganizar `AI_OPERATIONS` em duas seções claras:**
-- **OCR (Fase 1)** — 1 linha "Leitura de PDF (OCR)" apontando para o `phase1_ocr_provider`, 1 linha "Fallback OCR" apontando para o `ocr_fallback_provider`.
-- **IA Generalista (Fase 2)** — 1 linha consolidada "Extração/geração de laudos e perícias" apontando para `default_ai_provider`, com nota "Usada por Trabalhista, Previdenciário e Impugnação".
+```ts
+const rawOcrProvider = (pdfProviderMap['phase1_ocr_provider'] || 'gemini').toLowerCase();
+const pdfProvider = rawOcrProvider === 'mistral' ? 'mistral-ocr' : 'gemini';
+```
 
-Fim das linhas com nomes hardcoded do Trabalhista antigo — que hoje passam informação incorreta (todas mostram sempre o mesmo provider, dando falsa sensação de granularidade).
+Ou seja: quando OCR ativo é **GLM** (ou **MiniMax**), o Trabalhista single-pass **descarta a configuração e cai em Gemini/Lovable**. Isso viola a Core rule "DevPanel AI = global" (`mem://architecture/devpanel-ai-config-global-scope`).
 
-**5. Estatísticas cobrindo os dois módulos:**
-Além de `import_jobs`, buscar `prev_processing_jobs` dos últimos 30 dias e somar `totalJobs`. Para `fallbackCount`/motivos, `import_jobs` já grava em `result.aiUsage.pdfExtraction.usedFallback`; `prev_processing_jobs` guarda o `provider` efetivo em `result.provider` e o `ocr_fallback_provider` no DevPanel decide o fallback — para MVP, contar como "fallback usado" quando `result.provider` termina em `-fallback` (padrão emitido por `ocr-router.ts`).
+E o `pdf_fallback_provider` — chave legada usada só nesse fluxo — está `= "gemini"` no DB, reforçando o Gemini como último recurso.
+
+Resposta direta às perguntas do usuário:
+
+- **"Por que rodou Gemini às 03:58?"** — Um PDF do Trabalhista foi processado nesse horário; o roteamento single-pass ignorou o GLM ativo e chamou Gemini/Lovable. É bug de código, não de exibição.
+- **"Os próximos vão vir corretos?"** — Não, enquanto esse mapeamento estiver hardcoded. Precisa da correção abaixo.
+
+## Correção
+
+Substituir o mapeamento legado por roteamento via `ocr-router` (já usado no Previdenciário e configurado pelo DevPanel). O router honra GLM, Mistral, MiniMax e Gemini, e aplica o fallback correto (`ocr_fallback_provider`, não o `pdf_fallback_provider` antigo).
+
+**Arquivo:** `supabase/functions/processar-autos/index.ts`
+
+1. **Bloco L2415-2437 (single-pass extraction):**
+   - Remover o mapeamento `rawOcrProvider === 'mistral' ? 'mistral-ocr' : 'gemini'`.
+   - Ler `phase1_ocr_provider` cru e passar para o mesmo helper `runOcrWithConfiguredProvider` que o Previdenciário usa. O helper já entrega texto OCR + provider real usado.
+   - Se o provider ativo não for viável no ambiente de edge function single-pass (ex.: MiniMax OCR exige rasterização de browser), ainda assim tentar via router; se o router falhar, cair no `ocr_fallback_provider` do DevPanel — não em Gemini hardcoded.
+
+2. **Bloco fallback L2380-2385 (após two-phase falhar):**
+   - Trocar `callPDFProvider(..., { promptType: 'pdf_extraction' })` (que hoje chama Lovable/Gemini direto) por `runOcrWithConfiguredProvider` + `callAI(getAIConfig(), ...)` para o parse estruturado. OCR e IA generalista passam a refletir o DevPanel real.
+
+3. **Log de `ai_usage_logs`:**
+   - Manter `prompt_type: 'pdf_extraction'`, mas o `provider`/`model` gravados passam a ser os retornados pelo router (ex.: `provider="glm"`, `model="glm-ocr"`). Isso remove a poluição "lovable/google-gemini-2.5-flash" dos logs futuros.
+   - Registros antigos permanecem — não vamos reescrever histórico. A tela apenas para de acumular Gemini fantasma dos próximos jobs.
+
+4. **Warning coerente:**
+   - Se um provider realmente não suportar single-pass no runtime da edge function, logar `logWarn` claro com o provider real e o motivo, em vez de silenciosamente cair em Gemini.
 
 ## Escopo
 
-- Arquivo único: `src/components/dev-panel/DevAIStatus.tsx`.
-- Nenhuma migração, nenhum toque em backend, ai-config, ocr-router, DevSettings ou nos módulos.
-- Realtime subscription (`system_config` + `global_api_keys`) mantém tudo dinâmico: trocar OCR no DevSettings passa a refletir na hora.
+- **Único arquivo:** `supabase/functions/processar-autos/index.ts` (dois blocos, ~20 linhas cada).
+- Zero mudanças em Previdenciário, Impugnação, DevPanel, ai-config, ocr-router ou DB.
+- Nenhuma migração; a chave `pdf_fallback_provider` fica no DB inerte (não removeremos para não quebrar histórico).
 
-## Efeito visual esperado (com o estado atual do DB)
+## Como o usuário valida
 
-- IA Principal: **MiniMax** · `MiniMax-M3` · Chave configurada
-- OCR (Fase 1): **GLM-OCR (Z.AI)** · `glm-ocr` · Chave configurada
-- Fallback OCR: **Nenhum configurado**
-- IA Generalista (Fase 2): **MiniMax** · `MiniMax-M3` · usada por Trabalhista, Previdenciário e Impugnação
+1. Processar um novo PDF pelo Trabalhista com GLM/MiniMax selecionado no DevPanel.
+2. Abrir **DevPanel → Logs de Uso de IA**: o novo registro `pdf_extraction` deve mostrar `provider=glm`, `model=glm-ocr` (ou `minimax`/`mistral`), nunca mais `lovable`+`google/gemini-2.5-flash`.
+3. Registros anteriores continuam visíveis — são histórico verídico do bug corrigido.
