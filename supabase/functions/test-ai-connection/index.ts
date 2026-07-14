@@ -53,6 +53,16 @@ serve(async (req) => {
         ({ success, errorMessage } = await testOpenAICompatible('https://api.minimax.io/v1/chat/completions', key, model || 'MiniMax-M3'));
         break;
       }
+      case 'mistral-ocr': {
+        const key = apiKey || Deno.env.get('MISTRAL_API_KEY') || '';
+        ({ success, errorMessage } = await testMistralOCR(key));
+        break;
+      }
+      case 'glm': {
+        const key = apiKey || Deno.env.get('GLM_API_KEY') || '';
+        ({ success, errorMessage } = await testGlmOCR(key));
+        break;
+      }
       default:
         throw new Error(`Unknown provider: ${provider}`);
     }
