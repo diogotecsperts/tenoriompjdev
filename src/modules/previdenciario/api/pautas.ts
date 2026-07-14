@@ -161,6 +161,12 @@ export interface PrevPdfSplitPart {
   startPage: number; // 1-based
   endPage: number; // 1-based, inclusive
   totalPages: number;
+  /**
+   * Sinaliza que esta parte (tipicamente uma página única com conteúdo pesado
+   * genuíno) não coube em `maxBytes` mesmo após clone+remove. O caller deve
+   * rasterizar essa parte client-side (pdfjs) em vez de subir ao provider.
+   */
+  needsClientRasterize?: boolean;
 }
 
 export function prevPdfNeedsSplit(source: Blob | File | { size: number }): boolean {
@@ -169,8 +175,15 @@ export function prevPdfNeedsSplit(source: Blob | File | { size: number }): boole
 
 /**
  * Divide um PDF em partes ≤ maxBytes usando halving recursivo.
- * Cada parte é serializada via pdf-lib preservando referências internas.
- * Se uma única página exceder o limite, lança erro (extremamente raro).
+ *
+ * Estratégia: em vez de `PDFDocument.create()` + `copyPages()` (que inlineia
+ * o dicionário `/Resources` compartilhado da árvore de páginas — bug conhecido
+ * do pdf-lib em PDFs judiciais), recarrega os bytes originais e **remove** as
+ * páginas fora do range. Ao salvar com `useObjectStreams: true`, o pdf-lib só
+ * emite objetos alcançáveis a partir do trailer — recursos órfãos somem.
+ *
+ * Se, mesmo após clone+remove, uma única página exceder `maxBytes`, marca a
+ * parte com `needsClientRasterize: true` para o caller resolver via pdfjs.
  */
 export async function splitPrevPdf(
   source: Blob | File | Uint8Array,
@@ -181,15 +194,17 @@ export async function splitPrevPdf(
     source instanceof Uint8Array
       ? source
       : new Uint8Array(await (source as Blob).arrayBuffer());
-  const srcDoc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-  const totalPages = srcDoc.getPageCount();
+  const probe = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const totalPages = probe.getPageCount();
 
+  // Clone + remove: recarrega o PDF por range e remove páginas fora dele.
   const serializeRange = async (startIdx: number, endIdx: number): Promise<Blob> => {
-    const doc = await PDFDocument.create();
-    const indices = Array.from({ length: endIdx - startIdx + 1 }, (_, i) => startIdx + i);
-    const copied = await doc.copyPages(srcDoc, indices);
-    copied.forEach((p) => doc.addPage(p));
-    const out = await doc.save({ useObjectStreams: true });
+    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const n = doc.getPageCount();
+    // Remove de trás pra frente para não deslocar índices.
+    for (let i = n - 1; i > endIdx; i--) doc.removePage(i);
+    for (let i = startIdx - 1; i >= 0; i--) doc.removePage(i);
+    const out = await doc.save({ useObjectStreams: true, updateFieldAppearances: false });
     const buf = new ArrayBuffer(out.byteLength);
     new Uint8Array(buf).set(out);
     return new Blob([buf], { type: "application/pdf" });
@@ -199,7 +214,11 @@ export async function splitPrevPdf(
 
   const divide = async (startIdx: number, endIdx: number): Promise<void> => {
     const blob = await serializeRange(startIdx, endIdx);
+    const sizeMB = (blob.size / 1024 / 1024).toFixed(1);
     if (blob.size <= maxBytes) {
+      console.info(
+        `[prev-split] parte págs ${startIdx + 1}-${endIdx + 1}: ${sizeMB}MB (OK)`,
+      );
       parts.push({
         blob,
         startPage: startIdx + 1,
@@ -209,15 +228,22 @@ export async function splitPrevPdf(
       return;
     }
     if (endIdx === startIdx) {
-      throw new Error(
-        `Uma única página do PDF (pág. ${startIdx + 1}) excede ${(
-          maxBytes /
-          1024 /
-          1024
-        ).toFixed(0)}MB (${(blob.size / 1024 / 1024).toFixed(1)}MB). ` +
-          `Reduza a qualidade das imagens do arquivo original antes de reenviar.`,
+      // Página única ainda pesada após clone+remove — cai no fallback rasterizado.
+      console.warn(
+        `[prev-split] página ${startIdx + 1} ainda ${sizeMB}MB após clone+remove; marcando para rasterização client-side`,
       );
+      parts.push({
+        blob,
+        startPage: startIdx + 1,
+        endPage: endIdx + 1,
+        totalPages,
+        needsClientRasterize: true,
+      });
+      return;
     }
+    console.info(
+      `[prev-split] range ${startIdx + 1}-${endIdx + 1} = ${sizeMB}MB > ${(maxBytes / 1024 / 1024).toFixed(0)}MB — dividindo`,
+    );
     const mid = Math.floor((startIdx + endIdx) / 2);
     await divide(startIdx, mid);
     await divide(mid + 1, endIdx);

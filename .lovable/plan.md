@@ -1,115 +1,73 @@
-# Split de PDFs grandes no Previdenciário (respeitando o provider do DevPanel)
+# Corrigir split de PDFs com Resources compartilhados
 
-## Resposta às duas dúvidas do Claude
+## Causa raiz confirmada
 
-### 1. Como o `preProcessarPericiaComSplit` obtém o `pdf_path`?
-**Opção A — passar como parâmetro.** `PautaDetalhe.tsx` já tem `pericia.pdf_path` em memória (é renderizado na lista). Passar como argumento evita 1 round-trip ao Supabase por invocação e mantém a função pura. Assinatura final:
+O erro "página 1 excede 48MB (53.6MB)" **não é** porque a página realmente pesa isso. É um comportamento conhecido do `pdf-lib` em `src/modules/previdenciario/api/pautas.ts` (função `serializeRange`):
 
-```ts
-preProcessarPericiaComSplit(
-  periciaId: string,
-  pdfPath: string | null,           // vem de pericia.pdf_path
-  opts: { signal?, onJobProgress?, onMinimaxProgress? } = {}
-): Promise<PreProcessarResult>
+- PDFs judiciais grandes são geralmente montados com um **dicionário `/Resources` compartilhado** na árvore de páginas (fontes, XObjects, imagens comuns).
+- `PDFDocument.create()` + `copyPages()` **inlineia** esse dicionário inteiro em cada parte gerada — mesmo que a página copiada não use quase nada dele.
+- Resultado: qualquer parte, inclusive uma página de índice (só texto/links), sai carregando o peso das outras 113 páginas junto.
+
+O índice/hyperlinks em si **não** causam o inchaço — `copyPages` não segue links, só o grafo `/Page → /Resources`.
+
+## Estratégia de correção (duas camadas)
+
+### Camada 1 — trocar `copyPages` por `clone + removePages`
+
+Em vez de criar um doc vazio e copiar páginas para dentro, **clonar o documento original** e **remover as páginas fora do range**. Ao salvar com `useObjectStreams: true`, o pdf-lib só emite objetos alcançáveis a partir do trailer — resources realmente órfãos são descartados. Para o padrão dos PDFs judiciais, isso costuma cortar 60–90% do inchaço.
+
+Fluxo novo em `serializeRange(startIdx, endIdx)`:
+
+```
+doc = await srcDoc.copy()          // clone estrutural
+totalPages = doc.getPageCount()
+// remove de trás pra frente para não deslocar índices
+for i in [totalPages-1 .. endIdx+1]: doc.removePage(i)
+for i in [startIdx-1 .. 0]:          doc.removePage(i)
+out = await doc.save({ useObjectStreams: true })
 ```
 
-Se `pdfPath` for `null`/vazio, delega direto para `preProcessarPericia` (que já valida e devolve erro claro).
+Se `copy()` não estiver disponível na versão instalada, usa-se o pattern equivalente: `PDFDocument.load(bytes)` novamente por chamada (mais lento, mas isolado) — o `load` já é feito uma vez fora e reaproveitado; o overhead recai só no clone, aceitável para <10 chamadas de halving.
 
-### 2. Trabalhista já tem chunk — é a mesma coisa?
-**Não é a mesma. O do Prev é uma evolução.** Comparação lado a lado:
+### Camada 2 — fallback rasterizado para páginas patológicas
 
-| Aspecto | Trabalhista (hoje, `ImportarAutosDialog.tsx` L712-781) | Prev (novo) |
-|---|---|---|
-| Algoritmo | Split linear (estima `bytesPerPage` × `pagesPerPart`) + **rescueSplit** re-tenta partes que estouraram | **Halving recursivo** até cada parte caber em 48MB |
-| Threshold | 38MB para GLM, 20MB para outros — **hardcoded no dialog** | 48MB, único (só GLM tem esse teto duro; Mistral aceita >50MB streaming, Gemini vai por Files API, MiniMax é client) |
-| Pipeline pós-split | **Cada parte roda o pipeline inteiro** (OCR + extração estruturada) e depois um merger consolida os campos | **OCR-only por parte**, textos concatenados com marcadores `=== CONTINUAÇÃO (parte i/N) ===`, e **uma única** chamada de extração AI generalista com o texto completo |
-| Nº de chamadas ao modelo generalista | N (uma por parte) + lógica de merge | **1** (com contexto completo) |
-| Risco de duplicar/perder campos entre partes | Existe — o merger precisa deduplicar seções que aparecem em duas partes | **Zero** — a IA vê o processo inteiro de uma vez |
-| Consistência com o DevPanel | Hoje o Trabalhista **quebra** essa regra em outros pontos (bug do "Gemini fantasma" descrito em `.lovable/plan.md`); o split em si respeita, mas o resto da pipeline não | **Respeita 100%** — passa por `runOcrWithConfiguredProvider` do lado server em cada parte |
+Se, mesmo após clone+remove, uma **única página** ainda ficar > 48MB (raríssimo, mas possível para páginas com uma imagem enorme legítima), em vez de abortar o job:
 
-**Ganhos reais da abordagem Prev:**
-1. **Custos menores:** 1 chamada de IA generalista em vez de N.
-2. **Melhor qualidade de extração:** modelo vê nexo causal, quesitos e conclusões no mesmo contexto — nada de campo "cortado no meio" entre partes.
-3. **Menos código de merge para manter** (o merger do Trabalhista é uma fonte histórica de bugs de deduplicação).
-4. **Halving recursivo é auto-corretivo:** se `bytesPerPage` for irregular (PDF com 3 páginas de imagem + 200 de texto), o algoritmo continua dividindo até caber, sem precisar de "rescueSplit" como camada extra.
+- Marcar aquela parte específica como "requer rasterização client-side".
+- Reaproveitar `runMinimaxClientOcr` (`src/lib/minimax-ocr-client.ts`) **apenas para essa página**, que rasteriza via `pdfjs-dist` e ignora completamente o tamanho binário do PDF.
+- Concatenar o texto retornado no mesmo fluxo de `preExtractedText` que o restante das partes já usa.
 
-**Pode ser aplicado no Trabalhista depois?** Sim, com 2 ressalvas técnicas — por isso não faremos agora:
-- **Janela de contexto do modelo generalista.** Um processo trabalhista de 500+ páginas concatenado pode ultrapassar ~500k chars. Antes de portar, precisamos medir o percentil 95 de tamanho concatenado real (via `ai_usage_logs.prompt_length`) e confirmar que cabe no modelo ativo. Se não couber, o merge parte-a-parte do Trabalhista continua sendo necessário para os casos gigantes — o padrão vira **híbrido**: OCR sempre por parte + generalista único quando cabe, generalista parte-a-parte + merge só nos outliers.
-- **Custo de refatorar o merger.** O merge atual está entrelaçado com dedução de seções, quesitos e resumos individuais (`gerar-resumos`). Remover isso exige regressão cuidadosa dos ~75 campos do `laudos`. Trabalho não trivial, mas isolado no `processar-autos`.
+Isso NÃO troca o provider global — as outras partes continuam no provider do DevPanel (GLM/Mistral/etc). Só a página patológica cai no rasterizador.
 
-Recomendação: **implementar no Prev primeiro (é onde o bug está e a superfície é menor), estabilizar por 1-2 semanas em produção, e só então portar** com o fluxo híbrido acima. Sem risco para o Trabalhista até lá.
+## Arquivos a alterar
 
----
+| Arquivo | Mudança |
+|---|---|
+| `src/modules/previdenciario/api/pautas.ts` | Reescrever `serializeRange` para usar clone+removePages. Ajustar a mensagem de erro final (agora indicando que nem clone+remove nem rasterização resolveram — cenário improvável). |
+| `src/modules/previdenciario/api/processar.ts` | Em `preProcessarPericiaComSplit`, quando `splitPrevPdf` retornar uma parte marcada como `needsClientRasterize`, chamar `runMinimaxClientOcr` para ela antes de concatenar. Demais partes seguem via `prev-ocr-part` (sem mudança). |
+| `src/modules/previdenciario/api/pautas.ts` (tipo) | Adicionar campo opcional `needsClientRasterize?: boolean` em `PrevPdfSplitPart` para sinalizar a exceção. |
 
-## Plano de implementação (Previdenciário)
+**Zero mudança em:** `prev-ocr-part`, `prev-pre-processar`, DevPanel, DB, config.toml, Trabalhista, Impugnação.
 
-Segue idêntico ao anterior, com a assinatura ajustada para a opção A.
+## Detalhes técnicos
 
-### 1. `src/modules/previdenciario/api/pautas.ts`
-Adicionar:
-- `PREV_SPLIT_MAX_BYTES = 48 * 1024 * 1024` (defensivo vs. teto 50MB do GLM).
-- `prevPdfNeedsSplit(blob: Blob | File): boolean` — só compara `size`.
-- `splitPrevPdf(blob, maxBytes = PREV_SPLIT_MAX_BYTES)` via `pdf-lib` (já no projeto), **halving recursivo**: divide em metades até cada parte caber. Retorna `Array<{ blob, startPage, endPage, totalPages }>`. Se uma única página sozinha exceder o limite, lança erro `file_too_large` com mensagem clara.
-- `uploadPericiaPdfPart(userId, periciaId, index, blob)` → path `{userId}/{periciaId}/parts/part-{index}.pdf` no bucket `prev-pdfs`.
-- `deletePericiaPdfParts(userId, periciaId)` — remoção best-effort ao final.
+- `pdf-lib` **v1.17.1** (versão já instalada no shared/pdf-splitter): `PDFDocument.load()` seguido de `removePage()` funciona. Não existe `.copy()` público — reaproveita-se o mesmo `srcDoc` mas se recarrega os bytes originais uma vez por range (custo aceitável, halving faz no máximo ~log₂(114) ≈ 7 níveis).
+- Recarregar os bytes originais a cada `serializeRange` é seguro em memória: os `bytes` já estão em `Uint8Array` e o GC recolhe os `PDFDocument` intermediários.
+- O parâmetro `updateFieldAppearances: false` no `save()` evita reprocessar campos de formulário (irrelevantes aqui, mas acelera).
+- Log em `console.info` do ganho por parte (`before/after MB`) para instrumentação em produção.
 
-### 2. Nova edge function `supabase/functions/prev-ocr-part/index.ts`
-Enxuta e reutiliza infra existente:
-- Registrar em `supabase/config.toml` com `verify_jwt = true` e `wall_clock_limit = 300`.
-- Body: `{ periciaId: string, partPath: string }` (Zod).
-- Valida JWT, confirma que `partPath` começa com `{user.id}/{periciaId}/parts/` e que a `pericia` pertence ao user.
-- Baixa do bucket `prev-pdfs` e chama `runOcrWithConfiguredProvider(bytes, { logPrefix })` — **mesmo helper do DevPanel usado em `prev-pre-processar`**, garantindo GLM/Mistral/Gemini corretos.
-- Se receber `MINIMAX_CLIENT_RASTERIZE_ERROR`, devolve `409 { needsClientRasterize: true, mode, chunkEndpoint, pdfPath: partPath, bucket: "prev-pdfs" }` — o client cai em `runMinimaxClientOcr(partBlob, ...)` parte por parte, mantendo o padrão MiniMax existente.
-- Sucesso → `{ ok: true, text, pageCount, provider, model }`.
-- Registra `ai_usage_logs` com `prompt_type: 'ocr_prev_part'` para auditoria/DevPanel.
+## Não é este o problema
 
-### 3. `src/modules/previdenciario/api/processar.ts`
-Nova função exportada — não altera `preProcessarPericia`:
+- **Índice/hyperlinks não inflam o peso.** `copyPages` não segue `/Annot` → `/Dest`; apenas o grafo de recursos gráficos.
+- **Compressão** já está ativa (`useObjectStreams: true`). Não há folga aí.
+- **Encrypt/DRM** — já tratado com `ignoreEncryption: true`.
 
-```ts
-export async function preProcessarPericiaComSplit(
-  periciaId: string,
-  pdfPath: string | null,
-  opts: { signal?; onJobProgress?; onMinimaxProgress? } = {},
-): Promise<PreProcessarResult>
-```
+## Fluxo de validação após implementação
 
-Fluxo:
-1. Se `!pdfPath` ou `blob.size` cabe no limite → delega para `preProcessarPericia` (**caminho rápido, zero mudança**).
-2. Caso contrário:
-   - `onJobProgress("Dividindo PDF grande em partes...")`
-   - `splitPrevPdf(blob)` → sobe cada parte via `uploadPericiaPdfPart`.
-   - Loop **sequencial** (respeita `signal.aborted` em cada iteração):
-     - `supabase.functions.invoke("prev-ocr-part", { periciaId, partPath })`.
-     - Se `needsClientRasterize` → `runMinimaxClientOcr(partBlob, ...)`.
-     - Acumula `text`, `pageCount`, `provider`, `model` (usa o do 1º sucesso como representativo).
-   - Concatena: `parts.map((p, i) => \`=== CONTINUAÇÃO (parte ${i+1}/${N}, págs ${p.start}-${p.end}) ===\\n${p.text}\`).join("\\n\\n")`.
-   - `ensureFreshSession()` + `invoke("prev-pre-processar", { periciaId, preExtractedText, preExtractedProvider, preExtractedModel, preExtractedPageCount })`.
-   - Se resposta for `AsyncPreProcessarStart` → `pollPreProcessarJob(...)` (já existe).
-   - `finally`: `deletePericiaPdfParts` (best-effort, não bloqueia sucesso).
-- Reusa `classifyInvokeError`, `readErrorBody`, `PreProcessarError`, `pollPreProcessarJob`, `providerDisplayName`, `formatStageLabel` — zero duplicação.
+1. Reupload do mesmo PDF de 114 páginas que gerou o erro.
+2. Esperado: split gera N partes ≤ 48MB via clone+remove; nenhuma cai no fallback rasterizado.
+3. Log deve mostrar redução de tamanho por parte (ex: "parte 1: 53.6MB → 3.2MB").
+4. OCR conclui via provider configurado no DevPanel.
+5. Extração generalista roda em chamada única com texto concatenado.
 
-### 4. `src/modules/previdenciario/pages/PautaDetalhe.tsx`
-Trocas mínimas (não mexe em state, progresso, aborters):
-- `handleProcessar(pericia)` → chama `preProcessarPericiaComSplit(pericia.id, pericia.pdf_path, opts)`.
-- `handleProcessarLote()` → idem no loop.
-- Update do import no topo.
-
-## O que NÃO muda
-- `preProcessarPericia` original (caminho rápido intacto).
-- `prev-pre-processar/index.ts` (o gancho `preExtractedText` na L1068 já existe).
-- `glm-ocr.ts`, `ocr-router.ts`, `ai-config`, `getAIConfig` — provider continua vindo do DevPanel dinamicamente.
-- `uploadPericiaPdf`, `UploadLotePdfsDialog`, `NovaPericiaDialog`.
-- Trabalhista, Impugnação, DevPanel, DB — **zero migração**.
-
-## Riscos e mitigações
-- **Página única > 48MB:** `splitPrevPdf` propaga `PreProcessarError("file_too_large")` com mensagem clara. Extremamente raro.
-- **Parte temporária órfã se o browser cair no meio:** `parts/` fica no bucket até nova execução (que sobrescreve com `upsert:true`) ou limpeza manual. Custo desprezível; podemos adicionar TTL depois.
-- **Custo extra em `ai_usage_logs`:** N registros OCR por PDF grande — auditável via `prompt_type='ocr_prev_part'`.
-- **Timeout de invoke:** cada parte é uma chamada independente (~90s p/ GLM 48MB); progresso reportado via `onJobProgress` a cada parte.
-
-## Como o usuário valida
-1. Subir um PDF Previdenciário >50MB com GLM ativo no DevPanel.
-2. Ver toasts sequenciais: "Dividindo…" → "Processando parte 1/N…" → "Refinando campos via GLM" → "Concluído".
-3. DevPanel → Logs de Uso de IA: registros `ocr_prev_part` com `provider=glm`, e ao final 1 registro de extração estruturada. Nada de "gemini fantasma".
-4. PDF ≤48MB: fluxo idêntico ao atual, sem toast de split — garantia de zero regressão no caminho rápido.
+Se o log mostrar que alguma parte ainda saiu grande, a Camada 2 (rasterização client-side apenas naquela parte) absorve o caso — sem travar o job.

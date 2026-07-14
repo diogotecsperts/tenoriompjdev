@@ -706,14 +706,33 @@ export async function preProcessarPericiaComSplit(
       const label = `parte ${i + 1}/${parts.length} (págs ${part.startPage}-${part.endPage})`;
       opts.onJobProgress?.(`OCR ${label}...`);
 
-      const partPath = await uploadPericiaPdfPart(userIdFromPath, periciaId, i + 1, part.blob);
-      const r = await ocrSinglePart(periciaId, part, partPath, {
-        onMinimaxProgress: (p) => {
-          opts.onMinimaxProgress?.(p);
-          opts.onJobProgress?.(`OCR ${label} · ${p.message ?? p.phase}`);
-        },
-        signal: opts.signal,
-      });
+      let r: OcrPartResult;
+      if (part.needsClientRasterize) {
+        // Página patológica: pdf-lib não conseguiu enxugar abaixo do teto do provider.
+        // Rasteriza direto via pdfjs (ignora tamanho binário).
+        console.warn(`[prev-split] ${label} → fallback rasterização client-side`);
+        opts.onJobProgress?.(`OCR ${label} (rasterizando localmente)...`);
+        r = await ocrPartClientSide(
+          part,
+          { needsClientRasterize: true, chunkEndpoint: "minimax-ocr-chunk" },
+          {
+            onMinimaxProgress: (p) => {
+              opts.onMinimaxProgress?.(p);
+              opts.onJobProgress?.(`OCR ${label} · ${p.message ?? p.phase}`);
+            },
+            signal: opts.signal,
+          },
+        );
+      } else {
+        const partPath = await uploadPericiaPdfPart(userIdFromPath, periciaId, i + 1, part.blob);
+        r = await ocrSinglePart(periciaId, part, partPath, {
+          onMinimaxProgress: (p) => {
+            opts.onMinimaxProgress?.(p);
+            opts.onJobProgress?.(`OCR ${label} · ${p.message ?? p.phase}`);
+          },
+          signal: opts.signal,
+        });
+      }
 
       collectedText.push(
         `=== CONTINUAÇÃO (parte ${i + 1}/${parts.length}, págs ${part.startPage}-${part.endPage}) ===\n${r.text}`,
