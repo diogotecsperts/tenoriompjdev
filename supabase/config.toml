@@ -1,5 +1,9 @@
 project_id = "tpiaceyooekujzsvsyid"
 
+[functions.mcp]
+verify_jwt = false
+
+
 [functions.processar-autos]
 verify_jwt = true
 wall_clock_limit = 600
