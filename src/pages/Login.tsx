@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,13 @@ export default function Login() {
 
   const { login, logout, isAuthenticated, profile, loading } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  // Preserva `next` (usado pela rota de consentimento OAuth do MCP e outros
+  // fluxos que precisam voltar para uma URL específica após o login).
+  // Só aceita caminhos same-origin (começam com "/") para evitar open-redirect.
+  const rawNext = searchParams.get("next");
+  const safeNext = rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : null;
 
   useEffect(() => {
     const checkDevAndNavigate = async () => {
@@ -38,11 +46,16 @@ export default function Login() {
           }
         }
         setIsNavigating(true);
+        if (safeNext) {
+          window.location.replace(safeNext);
+          return;
+        }
         navigate("/hub", { replace: true });
       }
     };
     checkDevAndNavigate();
-  }, [loading, isAuthenticated, profile, isNavigating, navigate, devMode]);
+  }, [loading, isAuthenticated, profile, isNavigating, navigate, devMode, safeNext]);
+
 
   const handleDevClick = () => {
     devClickCountRef.current += 1;
