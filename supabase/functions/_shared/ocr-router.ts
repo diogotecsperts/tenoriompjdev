@@ -10,6 +10,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractWithMistralOCR, getMistralAPIKey } from "./mistral-ocr.ts";
 import { extractVisualContent } from "./pdf-visual-extractor.ts";
 import { getMinimaxAPIKey, MINIMAX_CLIENT_RASTERIZE_ERROR } from "./minimax-client.ts";
+import { extractWithGlmOCR, getGlmAPIKey } from "./glm-ocr.ts";
 import { resolveOcrFallback } from "./ocr-fallback.ts";
 
 /**
