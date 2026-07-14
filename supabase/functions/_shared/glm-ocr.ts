@@ -20,6 +20,8 @@
  * automaticamente por caminho hardcoded.
  */
 
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
 const GLM_LAYOUT_URL = "https://api.z.ai/api/paas/v4/layout_parsing";
 const GLM_MODEL = "glm-ocr";
 const GLM_PAGES_PER_REQUEST = 30;
