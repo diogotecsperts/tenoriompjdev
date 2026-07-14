@@ -40,24 +40,64 @@ interface FallbackStats {
 }
 
 const PROVIDER_NAMES: Record<string, string> = {
-  lovable: 'IA Integrada',
+  lovable: 'IA Integrada (Lovable)',
   gemini: 'Google Gemini',
+  google: 'Google Gemini',
   openai: 'OpenAI',
   claude: 'Anthropic Claude',
+  anthropic: 'Anthropic Claude',
   groq: 'Groq',
   deepseek: 'DeepSeek',
-  openrouter: 'OpenRouter'
+  openrouter: 'OpenRouter',
+  glm: 'GLM-OCR (Z.AI)',
+  zhipu: 'GLM-OCR (Z.AI)',
+  mistral: 'Mistral OCR',
+  'mistral-ocr': 'Mistral OCR',
+  minimax: 'MiniMax',
+  none: 'Nenhum',
 };
 
-const AI_OPERATIONS: AIOperation[] = [
-  { id: 'pdf_extraction', name: 'Extração PDF (Vision)', provider: '', model: '', status: 'ok' },
-  { id: 'pdf_fallback', name: 'Fallback PDF (Vision)', provider: '', model: '', status: 'ok' },
-  { id: 'resumo_peticao', name: 'Resumo Petição', provider: '', model: '', status: 'ok' },
-  { id: 'resumo_contestacao', name: 'Resumo Contestação', provider: '', model: '', status: 'ok' },
-  { id: 'descricao_doencas', name: 'Descrição Doenças', provider: '', model: '', status: 'ok' },
-  { id: 'nexo_causal', name: 'Análise Nexo Causal', provider: '', model: '', status: 'ok' },
-  { id: 'incapacidade', name: 'Análise Incapacidade', provider: '', model: '', status: 'ok' },
-];
+// API key id in global_api_keys for each provider
+const PROVIDER_KEY_ID: Record<string, string> = {
+  glm: 'glm',
+  mistral: 'mistral-ocr',
+  minimax: 'minimax',
+  openai: 'openai',
+  claude: 'anthropic',
+  anthropic: 'anthropic',
+  groq: 'groq',
+  deepseek: 'deepseek',
+  openrouter: 'openrouter',
+};
+
+// Fixed OCR model per provider (Gemini uses phase1_gemini_model)
+function ocrModelFor(provider: string, geminiModel: string): string {
+  switch (provider) {
+    case 'glm':
+    case 'zhipu':
+      return 'glm-ocr';
+    case 'mistral':
+    case 'mistral-ocr':
+      return 'mistral-ocr-latest';
+    case 'minimax':
+      return 'MiniMax-OCR';
+    case 'gemini':
+    case 'google':
+      return geminiModel;
+    case 'none':
+      return '—';
+    default:
+      return geminiModel;
+  }
+}
+
+function hasKeyFor(provider: string, savedKeys: Set<string>): boolean {
+  if (!provider || provider === 'none') return false;
+  if (provider === 'lovable') return true;
+  if (provider === 'gemini' || provider === 'google') return true; // env-based
+  const keyId = PROVIDER_KEY_ID[provider] || provider;
+  return savedKeys.has(keyId);
+}
 
 export function DevAIStatus() {
   const [loading, setLoading] = useState(true);
