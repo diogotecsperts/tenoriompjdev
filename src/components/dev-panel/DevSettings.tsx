@@ -1366,7 +1366,9 @@ export function DevSettings() {
       >
         {/* Coluna Pin/Status */}
         <TableCell className="w-12 text-center" onClick={e => e.stopPropagation()}>
-          {isActive ? (
+          {isOcr ? (
+            <div className="w-2 h-2 rounded-full bg-primary/40 mx-auto" title="Provider de OCR (Fase 1)" />
+          ) : isActive ? (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger>
@@ -1389,6 +1391,7 @@ export function DevSettings() {
             </Button>
           )}
         </TableCell>
+        
         
         {/* Coluna Nome */}
         <TableCell>
