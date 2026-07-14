@@ -63,7 +63,16 @@ export default function PautaDetalhe() {
   const [processandoLote, setProcessandoLote] = useState(false);
   const [processandoDetalhes, setProcessandoDetalhes] = useState<Record<string, string>>({});
   const [loteProgresso, setLoteProgresso] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+  // Um AbortController por perícia em processamento; permite o botão "Parar" cortar o polling
+  // e disparar cancel-prev-processing-job sem depender do watchdog server-side.
+  const abortersRef = useRef<Map<string, AbortController>>(new Map());
   const { progress, finish } = useFakeProgress(processandoIds.size > 0 || processandoLote);
+
+  const handleStopProcessar = (periciaId: string) => {
+    const ctrl = abortersRef.current.get(periciaId);
+    if (ctrl) ctrl.abort();
+  };
+
 
   const reload = async () => {
     if (!pautaId) return;
