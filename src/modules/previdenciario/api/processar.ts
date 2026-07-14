@@ -490,9 +490,23 @@ export async function preProcessarPericia(
   // 1ª tentativa: envia só o periciaId. Se o DevPanel estiver com MiniMax como
   // provider de OCR, a edge function sinaliza needsClientRasterize e rodamos o
   // pipeline no navegador.
-  const first = await supabase.functions.invoke("prev-pre-processar", {
-    body: { periciaId },
-  });
+  const first = await withRetry(
+    "Iniciando processamento",
+    async () => {
+      const r = await supabase.functions.invoke("prev-pre-processar", {
+        body: { periciaId },
+      });
+      // Retryable somente se erro E ainda não é sinal de client-rasterize.
+      if (r.error) {
+        const body = await readErrorBody(r.error);
+        if (isClientRasterizeSignal(body)) return r;
+        const classified = classifyInvokeError(r.error, body);
+        if (isRetryable(classified)) throw classified;
+      }
+      return r;
+    },
+    { signal, onProgress: opts.onJobProgress },
+  );
 
   const errorBody = first.error ? await readErrorBody(first.error) : null;
   const firstSignal = isClientRasterizeSignal(first.data)
@@ -528,6 +542,7 @@ export async function preProcessarPericia(
       if (Number.isFinite(n) && n > 0) parallelism = n;
     } catch { /* usa default */ }
 
+    // runMinimaxClientOcr já tem retry interno por chunk — não envelopar.
     const ocr = await runMinimaxClientOcr(blob, {
       provider,
       chunkEndpoint: firstSignal.chunkEndpoint,
@@ -535,17 +550,30 @@ export async function preProcessarPericia(
       parallelism,
       onProgress: opts.onMinimaxProgress,
     });
-    // 2ª tentativa: reenvio com texto pré-extraído (garante JWT fresco após OCR longo)
+    // 2ª tentativa: reenvio com texto pré-extraído — envolvida em retry (a IA
+    // generalista precisa ter chance de recuperar de rate_limit/timeout).
     await ensureFreshSession();
-    const second = await supabase.functions.invoke("prev-pre-processar", {
-      body: {
-        periciaId,
-        preExtractedText: ocr.text,
-        preExtractedProvider: ocr.provider,
-        preExtractedModel: ocr.model,
-        preExtractedPageCount: ocr.pageCount,
+    const second = await withRetry(
+      "Extração final",
+      async () => {
+        const r = await supabase.functions.invoke("prev-pre-processar", {
+          body: {
+            periciaId,
+            preExtractedText: ocr.text,
+            preExtractedProvider: ocr.provider,
+            preExtractedModel: ocr.model,
+            preExtractedPageCount: ocr.pageCount,
+          },
+        });
+        if (r.error) {
+          const body = await readErrorBody(r.error);
+          const classified = classifyInvokeError(r.error, body);
+          if (isRetryable(classified)) throw classified;
+        }
+        return r;
       },
-    });
+      { signal, onProgress: opts.onJobProgress },
+    );
     return unwrap(second.data, second.error);
   }
 
