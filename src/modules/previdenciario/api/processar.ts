@@ -390,8 +390,10 @@ async function ensureFreshSession(): Promise<void> {
  */
 export async function preProcessarPericia(
   periciaId: string,
-  opts: { onMinimaxProgress?: (p: MinimaxOcrProgress) => void; onJobProgress?: (message: string) => void } = {},
+  opts: { onMinimaxProgress?: (p: MinimaxOcrProgress) => void; onJobProgress?: (message: string) => void; signal?: AbortSignal } = {},
 ): Promise<PreProcessarResult> {
+  const { signal } = opts;
+  if (signal?.aborted) throwCanceled();
   await ensureFreshSession();
   // 1ª tentativa: envia só o periciaId. Se o DevPanel estiver com MiniMax como
   // provider de OCR, a edge function sinaliza needsClientRasterize e rodamos o
