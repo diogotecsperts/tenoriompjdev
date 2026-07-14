@@ -553,9 +553,21 @@ export default function PautaDetalhe() {
                       {p.pdf_processado ? "Reprocessar" : "Processar"}
                     </Button>
                     {processandoIds.has(p.id) && (
-                      <span className="text-[10px] text-muted-foreground tabular-nums leading-none mt-0.5">
-                        {processandoDetalhes[p.id] || `${progress}%`}
-                      </span>
+                      <>
+                        <span className="text-[10px] text-muted-foreground tabular-nums leading-none mt-0.5">
+                          {processandoDetalhes[p.id] || `${progress}%`}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 mt-0.5 px-2 text-[10px] text-destructive hover:text-destructive"
+                          onClick={() => handleStopProcessar(p.id)}
+                          title="Parar processamento"
+                        >
+                          <Square className="h-3 w-3 mr-1 fill-current" />
+                          Parar
+                        </Button>
+                      </>
                     )}
                   </div>
                 )}
