@@ -657,13 +657,25 @@ async function ocrSinglePart(
     signal?: AbortSignal;
   },
 ): Promise<OcrPartResult> {
-  const { data, error } = await supabase.functions.invoke("prev-ocr-part", {
-    body: { periciaId, partPath },
-  });
+  const { data, error } = await withRetry(
+    "OCR desta parte",
+    async () => {
+      const r = await supabase.functions.invoke("prev-ocr-part", {
+        body: { periciaId, partPath },
+      });
+      if (r.error) {
+        const body = await readErrorBody(r.error);
+        if (isRasterizeResp(body)) return r; // sinal — não retentar
+        const classified = classifyInvokeError(r.error, body);
+        if (isRetryable(classified)) throw classified;
+      }
+      return r;
+    },
+    { signal: opts.signal },
+  );
 
   if (error) {
     const body = await readErrorBody(error);
-    // Se veio como erro estruturado com needsClientRasterize, cai em client OCR
     if (isRasterizeResp(body)) {
       return await ocrPartClientSide(part, body, opts);
     }
