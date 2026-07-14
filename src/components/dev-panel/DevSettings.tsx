@@ -2135,6 +2135,31 @@ export function DevSettings() {
                     </div>
                   </div>
                 )}
+
+                {/* GLM-OCR Info (only if GLM selected) */}
+                {config.phase1_ocr_provider === "glm" && (
+                  <div className="p-3 rounded-lg border border-border bg-muted/50">
+                    <div className="flex items-start gap-2">
+                      <Crown className="h-4 w-4 text-primary mt-0.5" />
+                      <div className="text-xs space-y-1">
+                        <p className="font-medium text-foreground">
+                          GLM-OCR (Z.AI) — Layout Parsing
+                        </p>
+                        <ul className="text-muted-foreground space-y-0.5">
+                          <li>• Endpoint: <code>api.z.ai/api/paas/v4/layout_parsing</code></li>
+                          <li>• Modelo: <code>glm-ocr</code> (Markdown estruturado)</li>
+                          <li>• Limite: PDF ≤ 50MB, 30 páginas por chamada (paginação automática)</li>
+                          <li>• Excelente custo-benefício para PDFs digitais e escaneados</li>
+                        </ul>
+                        {!savedApiKeys['glm'] && (
+                          <p className="text-destructive font-medium mt-2">
+                            ⚠️ Requer GLM_API_KEY configurada nas secrets
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
           </div>
 
           {config.import_strategy === "two_phase" && (
