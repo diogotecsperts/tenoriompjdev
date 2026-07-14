@@ -2225,7 +2225,14 @@ export function DevSettings() {
                         </ul>
                         {!savedApiKeys['glm'] && (
                           <p className="text-destructive font-medium mt-2">
-                            ⚠️ Requer GLM_API_KEY configurada nas secrets
+                            ⚠️ Chave GLM não configurada.{' '}
+                            <button
+                              type="button"
+                              className="underline hover:text-destructive/80"
+                              onClick={() => document.getElementById('ocr-providers-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                            >
+                              Configure em Provedores de OCR ↓
+                            </button>
                           </p>
                         )}
                       </div>
