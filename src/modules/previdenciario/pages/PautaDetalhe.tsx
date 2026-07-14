@@ -192,8 +192,11 @@ export default function PautaDetalhe() {
     }
     setProcessandoIds((s) => new Set(s).add(pericia.id));
     setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: "Preparando PDF" }));
+    const controller = new AbortController();
+    abortersRef.current.set(pericia.id, controller);
     try {
       const r = await preProcessarPericia(pericia.id, {
+        signal: controller.signal,
         onMinimaxProgress: (p) => {
           setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: formatClientOcrProgress(p) }));
         },
@@ -210,44 +213,52 @@ export default function PautaDetalhe() {
       );
       void reload();
     } catch (err: any) {
-      const title =
-        err?.code === "session_expired"
-          ? "Sessão expirada"
-          : err?.code === "quota_exceeded"
-          ? "Saldo/cota insuficiente"
-          : err?.code === "invalid_key"
-            ? "Credencial inválida"
-            : err?.code === "rate_limited"
-              ? "Muitas requisições"
-              : err?.code === "provider_timeout"
-                ? "Tempo excedido na IA"
-                : err?.code === "invalid_request"
-                  ? "OCR recusado pelo provider"
-                  : err?.code === "response_truncated"
-                    ? "Resposta incompleta da IA"
-                    : err?.code === "file_too_large"
-                      ? "PDF muito grande"
-                      : err?.code === "unsupported_file"
-                        ? "Arquivo não suportado"
-                        : err?.code === "provider_unavailable"
-                          ? "IA indisponível"
-                          : "Erro no processamento";
-      const retryable =
-        err?.code !== "file_too_large" &&
-        err?.code !== "unsupported_file" &&
-        err?.code !== "invalid_key" &&
-        err?.code !== "session_expired";
-      toast({
-        variant: "destructive",
-        title,
-        description: formatProcessarErrorDescription(err),
-        action: retryable ? (
-          <ToastAction altText="Tentar novamente" onClick={() => void handleProcessar(pericia)}>
-            Tentar novamente
-          </ToastAction>
-        ) : undefined,
-      });
+      if (err?.code === "canceled") {
+        toast({
+          title: "Processamento interrompido",
+          description: "Você parou o processamento desta perícia.",
+        });
+      } else {
+        const title =
+          err?.code === "session_expired"
+            ? "Sessão expirada"
+            : err?.code === "quota_exceeded"
+            ? "Saldo/cota insuficiente"
+            : err?.code === "invalid_key"
+              ? "Credencial inválida"
+              : err?.code === "rate_limited"
+                ? "Muitas requisições"
+                : err?.code === "provider_timeout"
+                  ? "Tempo excedido na IA"
+                  : err?.code === "invalid_request"
+                    ? "OCR recusado pelo provider"
+                    : err?.code === "response_truncated"
+                      ? "Resposta incompleta da IA"
+                      : err?.code === "file_too_large"
+                        ? "PDF muito grande"
+                        : err?.code === "unsupported_file"
+                          ? "Arquivo não suportado"
+                          : err?.code === "provider_unavailable"
+                            ? "IA indisponível"
+                            : "Erro no processamento";
+        const retryable =
+          err?.code !== "file_too_large" &&
+          err?.code !== "unsupported_file" &&
+          err?.code !== "invalid_key" &&
+          err?.code !== "session_expired";
+        toast({
+          variant: "destructive",
+          title,
+          description: formatProcessarErrorDescription(err),
+          action: retryable ? (
+            <ToastAction altText="Tentar novamente" onClick={() => void handleProcessar(pericia)}>
+              Tentar novamente
+            </ToastAction>
+          ) : undefined,
+        });
+      }
     } finally {
+      abortersRef.current.delete(pericia.id);
       setProcessandoIds((s) => {
         const n = new Set(s);
         n.delete(pericia.id);
@@ -260,6 +271,7 @@ export default function PautaDetalhe() {
       finish();
     }
   };
+
 
   const handleProcessarLote = async () => {
     if (pendentes.length === 0) return;
