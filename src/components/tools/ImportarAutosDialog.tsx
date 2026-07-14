@@ -703,10 +703,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       setBackendLogs([]);
       
       const fileSizeMB = selectedFile.size / (1024 * 1024);
-      
+
+      // GLM-OCR tem limite mais rígido (50MB / 30 páginas por chamada). Divide antes
+      // de subir usando margem de segurança (38MB / 26 páginas). Para outros providers
+      // mantém o comportamento atual (20MB / 50 páginas).
+      const isGlm = ocrConfig?.provider === 'glm';
+      const splitOptions = isGlm
+        ? { maxSizeBytes: 38_000_000, maxPagesPerPart: 26 }
+        : { maxSizeBytes: 20_000_000, maxPagesPerPart: 50 };
+      const splitThresholdMB = isGlm ? 38 : 20;
+      const shouldSplit = isGlm ? fileSizeMB > splitThresholdMB : needsClientSplit(fileSizeMB);
+
       // === CHECK IF CLIENT-SIDE SPLIT IS NEEDED ===
-      if (needsClientSplit(fileSizeMB)) {
-        console.log(`[ImportarAutosDialog] Large PDF detected (${fileSizeMB.toFixed(2)}MB), starting client-side split...`);
+      if (shouldSplit) {
+        console.log(`[ImportarAutosDialog] Large PDF detected (${fileSizeMB.toFixed(2)}MB, provider=${ocrConfig?.provider}), starting client-side split with params:`, splitOptions);
         
         // === CHUNKED UPLOAD MODE ===
         setIsSplitting(true);
@@ -717,9 +727,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         
         try {
           // Split PDF in browser
-          const { parts, pageRanges, totalPages } = await splitPDFClientSide(
+          let { parts, pageRanges, totalPages } = await splitPDFClientSide(
             selectedFile,
-            { maxSizeBytes: 20_000_000, maxPagesPerPart: 50 },
+            splitOptions,
             (progress, message) => {
               setSplitProgress(progress);
               setSplitMessage(message);
@@ -729,7 +739,61 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               setSplitParts(prev => [...prev, partInfo]);
             }
           );
-          
+
+          // GLM: verificação pós-split contra o bug conhecido do pdf-lib
+          // (copyPages pode inflar imagens não usadas). Re-divide qualquer parte
+          // que ainda tenha passado do limite, máximo 2 níveis de recursão.
+          if (isGlm) {
+            const MAX_PART_BYTES = splitOptions.maxSizeBytes;
+            const rescueSplit = async (
+              blob: Blob,
+              pagesPerPart: number,
+              depth: number,
+              parentRange: { start: number; end: number }
+            ): Promise<{ blobs: Blob[]; ranges: { start: number; end: number }[] }> => {
+              if (blob.size <= MAX_PART_BYTES || depth >= 2) {
+                return { blobs: [blob], ranges: [parentRange] };
+              }
+              console.warn(`[ImportarAutosDialog][glm-rescue depth=${depth}] parte ${parentRange.start}-${parentRange.end} ficou com ${(blob.size / 1024 / 1024).toFixed(2)}MB (>${(MAX_PART_BYTES / 1024 / 1024).toFixed(0)}MB), re-dividindo…`);
+              const file = new File([blob], `rescue_${parentRange.start}-${parentRange.end}.pdf`, { type: 'application/pdf' });
+              const res = await splitPDFClientSide(
+                file,
+                { maxSizeBytes: MAX_PART_BYTES, maxPagesPerPart: Math.max(4, Math.floor(pagesPerPart / 2)) }
+              );
+              const outBlobs: Blob[] = [];
+              const outRanges: { start: number; end: number }[] = [];
+              for (let i = 0; i < res.parts.length; i++) {
+                const relStart = res.pageRanges[i].start;
+                const relEnd = res.pageRanges[i].end;
+                // remapeia ranges relativos ao pai
+                const absStart = parentRange.start + (relStart - 1);
+                const absEnd = parentRange.start + (relEnd - 1);
+                const inner = await rescueSplit(res.parts[i], Math.max(4, Math.floor(pagesPerPart / 2)), depth + 1, { start: absStart, end: absEnd });
+                outBlobs.push(...inner.blobs);
+                outRanges.push(...inner.ranges);
+              }
+              return { blobs: outBlobs, ranges: outRanges };
+            };
+
+            const rescuedParts: Blob[] = [];
+            const rescuedRanges: { start: number; end: number }[] = [];
+            for (let i = 0; i < parts.length; i++) {
+              const rescued = await rescueSplit(parts[i], splitOptions.maxPagesPerPart, 0, pageRanges[i]);
+              rescuedParts.push(...rescued.blobs);
+              rescuedRanges.push(...rescued.ranges);
+            }
+            const oversized = rescuedParts.filter(p => p.size > MAX_PART_BYTES);
+            if (oversized.length > 0) {
+              throw new Error(
+                `Após duas rodadas de divisão, ${oversized.length} parte(s) ainda ficaram acima do limite do GLM (${(MAX_PART_BYTES / 1024 / 1024).toFixed(0)}MB). ` +
+                `Reduza o PDF manualmente ou troque o provider de OCR no DevPanel.`
+              );
+            }
+            parts = rescuedParts;
+            pageRanges = rescuedRanges;
+            console.log(`[ImportarAutosDialog] GLM post-split verification OK: ${parts.length} partes finais`);
+          }
+
           console.log(`[ImportarAutosDialog] Split complete: ${parts.length} parts, ${totalPages} pages`);
           
           setIsSplitting(false);
