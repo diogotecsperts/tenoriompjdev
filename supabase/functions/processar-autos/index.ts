@@ -2977,17 +2977,46 @@ async function processarPDFBackground(
             usedFallback: false
           };
         } else if (pdfBytes) {
-          // Small PDFs (<20MB): use base64 inline (original flow)
-          const pdfBase64 = base64FromBytes();
-          
-          // Clear bytes after conversion
-          pdfBytes = null;
-          console.log('[processar-autos] MEMORY: Cleared PDF bytes after base64 conversion');
+          // Small PDFs (<20MB): OCR via router (respeita DevPanel: glm/mistral/minimax/gemini)
+          // + IA generalista via getAIConfig para extração estruturada.
+          try {
+            const ocrResult = await runOcrWithConfiguredProvider(pdfBytes, {
+              logPrefix: '[processar-autos/single-pass]',
+            });
+            // Clear bytes after OCR
+            pdfBytes = null;
+            console.log(`[processar-autos] OCR ${ocrResult.provider}/${ocrResult.model} → ${ocrResult.text.length} chars`);
 
-          visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
-            promptType: 'pdf_extraction',
-            userId: userId
-          });
+            const fillResult = await callAI(
+              await getAIConfig(),
+              systemPrompt,
+              `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${ocrResult.text}`,
+              { promptType: 'pdf_extraction', userId, maxOutputTokens: 65536, jsonMode: true }
+            );
+
+            visionResult = {
+              provider: ocrResult.provider,
+              model: ocrResult.model,
+              text: fillResult.text,
+              finishReason: 'STOP',
+              usedFallback: false,
+            };
+          } catch (routerError) {
+            const msg = routerError instanceof Error ? routerError.message : String(routerError);
+            if (msg.includes(MINIMAX_CLIENT_RASTERIZE_ERROR)) {
+              // MiniMax OCR não roda em edge function; cai no callPDFProvider legado
+              // (Lovable/Gemini) com log claro para o operador.
+              await logWarn('processar-autos', `MiniMax OCR não suportado em single-pass; usando fallback legado (Lovable/Gemini).`, jobId);
+              const pdfBase64 = base64FromBytes();
+              pdfBytes = null;
+              visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
+                promptType: 'pdf_extraction',
+                userId: userId,
+              });
+            } else {
+              throw routerError;
+            }
+          }
         } else {
           throw new Error('No PDF input available (bytes or stream)');
         }
