@@ -138,14 +138,9 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   requiresKey: false,
   color: "hsl(168, 58%, 39%)"
 }, {
-  id: "mistral-ocr",
-  name: "Mistral OCR",
-  description: "Precisão elite (~94.9%) para tabelas e documentos escaneados. OCR especializado.",
-  models: ["mistral-ocr-latest"],
-  requiresKey: true,
-  color: "hsl(168, 58%, 39%)",
-  keyPlaceholder: "..."
-}, {
+  // NOTE: Mistral OCR e GLM-OCR foram movidos para OCR_PROVIDERS (nova tabela
+  // "Provedores de OCR"). Não aparecem mais no Provider Inventory principal
+  // porque não são providers generalistas de Fase 2 — só extraem texto de PDF.
   id: "openai",
   name: "OpenAI",
   description: "Modelos GPT-4o e série o1.",
