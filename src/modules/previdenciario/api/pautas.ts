@@ -196,7 +196,7 @@ export async function rebuildPdfAsRasterClean(
         : new Uint8Array(await (source as Blob).arrayBuffer());
     // pdfjs consome o buffer — copia para não invalidar reuso em segunda passada
     const bufCopy = bytes.slice();
-    const loadingTask = pdfjs.getDocument({ data: bufCopy, isEvalSupported: false });
+    const loadingTask = pdfjs.getDocument({ data: bufCopy } as any);
     const pdf = await loadingTask.promise;
     const totalPages = pdf.numPages;
 
