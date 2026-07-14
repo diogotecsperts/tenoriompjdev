@@ -245,6 +245,9 @@ const DEFAULT_CONFIG: SystemConfig = {
   store_extracted_text: true,
   phase1_gemini_model: "gemini-2.5-flash",
   phase1_ocr_provider: "gemini",
+  ocr_fallback_enabled: false,
+  ocr_fallback_provider: "none",
+  ocr_fallback_on_size_exceeded: false,
   minimax_render_concurrency: 4
 };
 
