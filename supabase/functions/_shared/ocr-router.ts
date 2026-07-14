@@ -10,6 +10,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractWithMistralOCR, getMistralAPIKey } from "./mistral-ocr.ts";
 import { extractVisualContent } from "./pdf-visual-extractor.ts";
 import { getMinimaxAPIKey, MINIMAX_CLIENT_RASTERIZE_ERROR } from "./minimax-client.ts";
+import { extractWithGlmOCR, getGlmAPIKey } from "./glm-ocr.ts";
 import { resolveOcrFallback } from "./ocr-fallback.ts";
 
 /**
@@ -21,7 +22,7 @@ const GEMINI_STREAM_THRESHOLD_BYTES = 30_000_000; // 30 MB
 
 export type OcrHeartbeat = (stage: string, progress: number) => Promise<void> | void;
 
-export type OcrProvider = "gemini" | "mistral" | "minimax";
+export type OcrProvider = "gemini" | "mistral" | "minimax" | "glm";
 
 export interface OcrRouterResult {
   text: string;
@@ -62,7 +63,8 @@ export async function getOcrRouterConfig(): Promise<OcrRouterConfig> {
     const providerRaw = (map.phase1_ocr_provider || "gemini").toLowerCase();
     const provider: OcrProvider =
       providerRaw === "mistral" ? "mistral" :
-      providerRaw === "minimax" ? "minimax" : "gemini";
+      providerRaw === "minimax" ? "minimax" :
+      providerRaw === "glm" ? "glm" : "gemini";
     const geminiModel = map.phase1_gemini_model || "gemini-2.5-flash";
     return { provider, geminiModel };
   } catch (_e) {
@@ -99,10 +101,12 @@ export async function runOcrWithConfiguredProvider(
   const mistralKey = getMistralAPIKey();
   const geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("LOVABLE_API_KEY");
   const minimaxKey = getMinimaxAPIKey();
+  const glmKey = getGlmAPIKey();
 
   const missingKey =
     (cfg.provider === "mistral" && !mistralKey) ||
     (cfg.provider === "minimax" && !minimaxKey) ||
+    (cfg.provider === "glm" && !glmKey) ||
     (cfg.provider === "gemini" && !geminiKey);
 
   if (missingKey) {
@@ -131,6 +135,13 @@ export async function runOcrWithConfiguredProvider(
         `${MINIMAX_CLIENT_RASTERIZE_ERROR}: MiniMax OCR requer rasterização no navegador. ` +
         `Frontend deve chamar 'minimax-ocr-chunk' endpoint diretamente.`,
       );
+    }
+    if (cfg.provider === "glm") {
+      const bytes = await materializeBytes();
+      await opts.onHeartbeat?.("ocr_processing", 25);
+      const r = await extractWithGlmOCR(bytes, glmKey!);
+      await opts.onHeartbeat?.("ocr_processing", 55);
+      return { text: r.text, pageCount: r.pageCount, provider: r.provider, model: r.model };
     }
 
     // Gemini visual — streaming direto ao Files API para PDFs grandes (>30 MB).
@@ -177,9 +188,9 @@ export async function runOcrWithConfiguredProvider(
     // Fallback só ocorre se explicitamente configurado no DevPanel
     // (system_config.ocr_fallback_*). Defaults: propaga.
     // Neste hook, aceitamos fallback apenas para providers que rodam server-side
-    // (gemini, mistral) — MiniMax é excluído porque exige rasterização no browser.
+    // (gemini, mistral, glm) — MiniMax é excluído porque exige rasterização no browser.
     const decision = await resolveOcrFallback(cfg.provider, err, {
-      restrictTo: ["gemini", "mistral"],
+      restrictTo: ["gemini", "mistral", "glm"],
       logPrefix: `${prefix}[fallback]`,
     });
     if (decision.action === "propagate") {
@@ -227,6 +238,17 @@ export async function runOcrWithConfiguredProvider(
         provider: `${r.provider || "gemini-visual"}-fallback`,
         model: r.model || cfg.geminiModel,
       };
+    }
+    if (decision.provider === "glm") {
+      if (!glmKey) {
+        throw new Error(
+          `Fallback configurado para GLM mas GLM_API_KEY ausente. ` +
+          `Configure a chave no DevPanel.`,
+        );
+      }
+      const bytes = await materializeBytes();
+      const r = await extractWithGlmOCR(bytes, glmKey);
+      return { text: r.text, pageCount: r.pageCount, provider: `${r.provider}-fallback`, model: r.model };
     }
     // Não deveria chegar aqui (restrictTo filtrou), mas por segurança:
     throw err;

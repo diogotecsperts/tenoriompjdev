@@ -59,10 +59,10 @@ interface SystemConfig {
   text_fill_model: string;
   store_extracted_text: boolean;
   phase1_gemini_model: string;
-  phase1_ocr_provider: string; // 'gemini' or 'mistral' or 'minimax'
+  phase1_ocr_provider: string; // 'gemini' or 'mistral' or 'minimax' or 'glm'
   // OCR fallback (nada é acionado sem escolha explícita aqui)
   ocr_fallback_enabled: boolean;
-  ocr_fallback_provider: string; // 'none' | 'gemini' | 'mistral' | 'minimax'
+  ocr_fallback_provider: string; // 'none' | 'gemini' | 'mistral' | 'minimax' | 'glm'
   ocr_fallback_on_size_exceeded: boolean;
   // Concorrência da rasterização client-side MiniMax/Gemini (1..8, default 4)
   minimax_render_concurrency: number;
@@ -1940,6 +1940,13 @@ export function DevSettings() {
                       <Badge variant="secondary" className="text-[10px]">Chunked</Badge>
                     </div>
                   </SelectItem>
+                  <SelectItem value="glm">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "hsl(200, 80%, 55%)" }} />
+                      <span>GLM-OCR (Z.AI)</span>
+                      <Badge variant="secondary" className="text-[10px]">50MB · 30p</Badge>
+                    </div>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1978,6 +1985,7 @@ export function DevSettings() {
                     <SelectItem value="gemini">Google Gemini</SelectItem>
                     <SelectItem value="mistral">Mistral OCR</SelectItem>
                     <SelectItem value="minimax">MiniMax M3</SelectItem>
+                    <SelectItem value="glm">GLM-OCR (Z.AI)</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-muted-foreground">
@@ -2121,6 +2129,31 @@ export function DevSettings() {
                         {!savedApiKeys['mistral'] && (
                           <p className="text-destructive font-medium mt-2">
                             ⚠️ Requer MISTRAL_API_KEY configurada nas secrets
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* GLM-OCR Info (only if GLM selected) */}
+                {config.phase1_ocr_provider === "glm" && (
+                  <div className="p-3 rounded-lg border border-border bg-muted/50">
+                    <div className="flex items-start gap-2">
+                      <Crown className="h-4 w-4 text-primary mt-0.5" />
+                      <div className="text-xs space-y-1">
+                        <p className="font-medium text-foreground">
+                          GLM-OCR (Z.AI) — Layout Parsing
+                        </p>
+                        <ul className="text-muted-foreground space-y-0.5">
+                          <li>• Endpoint: <code>api.z.ai/api/paas/v4/layout_parsing</code></li>
+                          <li>• Modelo: <code>glm-ocr</code> (Markdown estruturado)</li>
+                          <li>• Limite: PDF ≤ 50MB, 30 páginas por chamada (paginação automática)</li>
+                          <li>• Excelente custo-benefício para PDFs digitais e escaneados</li>
+                        </ul>
+                        {!savedApiKeys['glm'] && (
+                          <p className="text-destructive font-medium mt-2">
+                            ⚠️ Requer GLM_API_KEY configurada nas secrets
                           </p>
                         )}
                       </div>
