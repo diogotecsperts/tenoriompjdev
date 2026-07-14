@@ -1,5 +1,13 @@
 import { supabase } from "@/integrations/supabase/client";
 import { runMinimaxClientOcr, type MinimaxOcrProgress } from "@/lib/minimax-ocr-client";
+import {
+  prevPdfNeedsSplit,
+  splitPrevPdf,
+  uploadPericiaPdfPart,
+  downloadPericiaPdf,
+  deletePericiaPdfParts,
+  type PrevPdfSplitPart,
+} from "./pautas";
 
 export interface PreProcessarResult {
   ok: true;
