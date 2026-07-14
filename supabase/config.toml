@@ -45,6 +45,10 @@ verify_jwt = true
 verify_jwt = true
 wall_clock_limit = 300
 
+[functions.prev-ocr-part]
+verify_jwt = true
+wall_clock_limit = 300
+
 [functions.dev-list-prev-usage]
 verify_jwt = false
 
