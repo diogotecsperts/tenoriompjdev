@@ -63,7 +63,8 @@ export async function getOcrRouterConfig(): Promise<OcrRouterConfig> {
     const providerRaw = (map.phase1_ocr_provider || "gemini").toLowerCase();
     const provider: OcrProvider =
       providerRaw === "mistral" ? "mistral" :
-      providerRaw === "minimax" ? "minimax" : "gemini";
+      providerRaw === "minimax" ? "minimax" :
+      providerRaw === "glm" ? "glm" : "gemini";
     const geminiModel = map.phase1_gemini_model || "gemini-2.5-flash";
     return { provider, geminiModel };
   } catch (_e) {
