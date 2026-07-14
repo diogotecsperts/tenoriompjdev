@@ -195,7 +195,7 @@ export default function PautaDetalhe() {
     const controller = new AbortController();
     abortersRef.current.set(pericia.id, controller);
     try {
-      const r = await preProcessarPericia(pericia.id, {
+      const r = await preProcessarPericiaComSplit(pericia.id, pericia.pdf_path ?? null, {
         signal: controller.signal,
         onMinimaxProgress: (p) => {
           setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: formatClientOcrProgress(p) }));
