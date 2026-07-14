@@ -188,9 +188,9 @@ export async function runOcrWithConfiguredProvider(
     // Fallback só ocorre se explicitamente configurado no DevPanel
     // (system_config.ocr_fallback_*). Defaults: propaga.
     // Neste hook, aceitamos fallback apenas para providers que rodam server-side
-    // (gemini, mistral) — MiniMax é excluído porque exige rasterização no browser.
+    // (gemini, mistral, glm) — MiniMax é excluído porque exige rasterização no browser.
     const decision = await resolveOcrFallback(cfg.provider, err, {
-      restrictTo: ["gemini", "mistral"],
+      restrictTo: ["gemini", "mistral", "glm"],
       logPrefix: `${prefix}[fallback]`,
     });
     if (decision.action === "propagate") {
