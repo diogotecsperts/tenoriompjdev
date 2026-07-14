@@ -513,3 +513,251 @@ async function unwrap(
   }
   return d as unknown as PreProcessarResult;
 }
+
+// ============================================================================
+// preProcessarPericiaComSplit
+// ----------------------------------------------------------------------------
+// Wrapper que baixa o PDF completo, decide se precisa split (>48MB) e, quando
+// precisa, divide client-side, OCR-a cada parte via `prev-ocr-part` (mesmo
+// provider do DevPanel) e reinvoca `prev-pre-processar` com `preExtractedText`.
+// PDFs ≤48MB caem 100% no fluxo original — zero regressão no caminho rápido.
+// ============================================================================
+
+interface OcrPartResult {
+  text: string;
+  pageCount: number;
+  provider: string;
+  model: string;
+}
+
+interface ClientRasterizeSignalResponse {
+  ok?: false;
+  needsClientRasterize: true;
+  mode?: string;
+  chunkEndpoint?: "minimax-ocr-chunk" | "gemini-ocr-chunk";
+  provider?: string;
+  model?: string;
+  pdfPath?: string;
+  bucket?: string;
+}
+
+function isRasterizeResp(v: unknown): v is ClientRasterizeSignalResponse {
+  return !!v && typeof v === "object" && (v as Record<string, unknown>).needsClientRasterize === true;
+}
+
+async function ocrSinglePart(
+  periciaId: string,
+  part: PrevPdfSplitPart,
+  partPath: string,
+  opts: {
+    onMinimaxProgress?: (p: MinimaxOcrProgress) => void;
+    signal?: AbortSignal;
+  },
+): Promise<OcrPartResult> {
+  const { data, error } = await supabase.functions.invoke("prev-ocr-part", {
+    body: { periciaId, partPath },
+  });
+
+  if (error) {
+    const body = await readErrorBody(error);
+    // Se veio como erro estruturado com needsClientRasterize, cai em client OCR
+    if (isRasterizeResp(body)) {
+      return await ocrPartClientSide(part, body, opts);
+    }
+    throw classifyInvokeError(error, body);
+  }
+
+  if (isRasterizeResp(data)) {
+    return await ocrPartClientSide(part, data, opts);
+  }
+
+  const d = data as {
+    ok?: boolean;
+    text?: string;
+    pageCount?: number;
+    provider?: string;
+    model?: string;
+    error?: string;
+  } | null;
+
+  if (!d?.ok || typeof d.text !== "string") {
+    throw new PreProcessarError(
+      d?.error || "Falha no OCR desta parte do PDF.",
+      "unknown",
+      "ocr_processing",
+    );
+  }
+
+  return {
+    text: d.text,
+    pageCount: Number(d.pageCount || 0),
+    provider: String(d.provider || "backend"),
+    model: String(d.model || "processamento"),
+  };
+}
+
+async function ocrPartClientSide(
+  part: PrevPdfSplitPart,
+  signal: ClientRasterizeSignalResponse,
+  opts: {
+    onMinimaxProgress?: (p: MinimaxOcrProgress) => void;
+    signal?: AbortSignal;
+  },
+): Promise<OcrPartResult> {
+  const provider =
+    signal.mode === "gemini-client-rasterize" || signal.chunkEndpoint === "gemini-ocr-chunk"
+      ? "gemini"
+      : "minimax";
+
+  // Concorrência client-side lida da config
+  let parallelism = 4;
+  try {
+    const { data: cfg } = await supabase
+      .from("system_config")
+      .select("value")
+      .eq("id", "minimax_render_concurrency")
+      .maybeSingle();
+    const v = cfg?.value;
+    const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) : NaN;
+    if (Number.isFinite(n) && n > 0) parallelism = n;
+  } catch { /* usa default */ }
+
+  const ocr = await runMinimaxClientOcr(part.blob, {
+    provider,
+    chunkEndpoint: signal.chunkEndpoint,
+    model: typeof signal.model === "string" ? signal.model : undefined,
+    parallelism,
+    onProgress: opts.onMinimaxProgress,
+    signal: opts.signal,
+  });
+  return {
+    text: ocr.text,
+    pageCount: ocr.pageCount,
+    provider: ocr.provider,
+    model: ocr.model,
+  };
+}
+
+/**
+ * Variante inteligente de preProcessarPericia:
+ *   - PDF ≤ 48MB → chama preProcessarPericia (fluxo idêntico ao original).
+ *   - PDF  > 48MB → split client-side, OCR por parte via prev-ocr-part, concatena
+ *                   textos e reenvia via preExtractedText.
+ *
+ * Preserva o mesmo shape de callbacks/signal para o UI (progresso e cancelamento).
+ */
+export async function preProcessarPericiaComSplit(
+  periciaId: string,
+  pdfPath: string | null,
+  opts: {
+    signal?: AbortSignal;
+    onJobProgress?: (message: string) => void;
+    onMinimaxProgress?: (p: MinimaxOcrProgress) => void;
+  } = {},
+): Promise<PreProcessarResult> {
+  if (opts.signal?.aborted) throwCanceled();
+
+  // Sem pdf_path em memória → cai no fluxo canônico (que já valida no server).
+  if (!pdfPath) {
+    return preProcessarPericia(periciaId, opts);
+  }
+
+  await ensureFreshSession();
+
+  // Baixa o PDF completo para inspecionar tamanho antes de decidir split.
+  let blob: Blob;
+  try {
+    blob = await downloadPericiaPdf(pdfPath);
+  } catch (err) {
+    console.warn("[prev-split] falha ao baixar PDF para checagem de tamanho; usando fluxo original:", err);
+    return preProcessarPericia(periciaId, opts);
+  }
+
+  if (!prevPdfNeedsSplit(blob)) {
+    // Caminho rápido — zero alteração no comportamento.
+    return preProcessarPericia(periciaId, opts);
+  }
+
+  const totalMB = (blob.size / 1024 / 1024).toFixed(1);
+  console.log(`[prev-split] PDF ${totalMB}MB > 48MB → dividindo client-side`);
+  opts.onJobProgress?.(`PDF grande (${totalMB}MB): dividindo em partes...`);
+
+  let parts: PrevPdfSplitPart[];
+  try {
+    parts = await splitPrevPdf(blob);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new PreProcessarError(msg, "file_too_large", "download");
+  }
+
+  if (opts.signal?.aborted) throwCanceled();
+
+  const started = Date.now();
+  const userIdFromPath = pdfPath.split("/")[0]; // path é `{userId}/{periciaId}.pdf`
+  const collectedText: string[] = [];
+  let representativeProvider = "";
+  let representativeModel = "";
+  let sumPages = 0;
+
+  try {
+    for (let i = 0; i < parts.length; i++) {
+      if (opts.signal?.aborted) throwCanceled();
+      const part = parts[i];
+      const label = `parte ${i + 1}/${parts.length} (págs ${part.startPage}-${part.endPage})`;
+      opts.onJobProgress?.(`OCR ${label}...`);
+
+      const partPath = await uploadPericiaPdfPart(userIdFromPath, periciaId, i + 1, part.blob);
+      const r = await ocrSinglePart(periciaId, part, partPath, {
+        onMinimaxProgress: (p) => {
+          opts.onMinimaxProgress?.(p);
+          opts.onJobProgress?.(`OCR ${label} · ${p.message ?? p.phase}`);
+        },
+        signal: opts.signal,
+      });
+
+      collectedText.push(
+        `=== CONTINUAÇÃO (parte ${i + 1}/${parts.length}, págs ${part.startPage}-${part.endPage}) ===\n${r.text}`,
+      );
+      sumPages += r.pageCount || (part.endPage - part.startPage + 1);
+      if (!representativeProvider) representativeProvider = r.provider;
+      if (!representativeModel) representativeModel = r.model;
+    }
+
+    if (opts.signal?.aborted) throwCanceled();
+
+    const preExtractedText = collectedText.join("\n\n");
+    console.log(
+      `[prev-split] OCR concluído: ${parts.length} partes, ${preExtractedText.length} chars, ${sumPages} págs (${representativeProvider}/${representativeModel})`,
+    );
+    opts.onJobProgress?.("OCR concluído. Enviando para extração final...");
+
+    // JWT pode ter envelhecido durante OCR de várias partes
+    await ensureFreshSession();
+
+    const final = await supabase.functions.invoke("prev-pre-processar", {
+      body: {
+        periciaId,
+        preExtractedText,
+        preExtractedProvider: representativeProvider,
+        preExtractedModel: representativeModel,
+        preExtractedPageCount: sumPages,
+      },
+    });
+
+    if (final.error) {
+      const body = await readErrorBody(final.error);
+      throw classifyInvokeError(final.error, body);
+    }
+
+    if (isAsyncStart(final.data)) {
+      opts.onJobProgress?.("Processamento em segundo plano iniciado");
+      return await pollPreProcessarJob(final.data, opts.onJobProgress, opts.signal);
+    }
+
+    return await unwrap(final.data, null);
+  } finally {
+    // Limpa partes temporárias (best-effort)
+    void deletePericiaPdfParts(userIdFromPath, periciaId);
+    console.log(`[prev-split] cleanup em ${Date.now() - started}ms`);
+  }
+}
