@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "sdk_version": "0.21.0",
+  "path": "/functions/v1/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://tpiaceyooekujzsvsyid.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "tenorio-mpj-mcp",
+      "version": "0.1.0",
+      "title": "Tenório MPJ — MCP"
+    },
+    "tools": [
+      {
+        "name": "list_laudos",
+        "title": "Listar laudos",
+        "description": "Lista os laudos periciais do usuário autenticado (id, título, reclamante, processo, status, datas). Não retorna o conteúdo completo do laudo.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "limit": {
+              "description": "Máximo de laudos (padrão 20).",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "status": {
+              "description": "Filtrar por status (ex: rascunho, finalizado).",
+              "type": "string"
+            },
+            "search": {
+              "description": "Busca em título, reclamante ou número do processo.",
+              "type": "string"
+            }
+          }
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_laudo",
+        "title": "Obter laudo",
+        "description": "Retorna todos os campos de um laudo pericial do usuário autenticado (dados do processo, vítima, histórico, exames, nexo, conclusão, quesitos).",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "laudo_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "description": "UUID do laudo."
+            }
+          },
+          "required": [
+            "laudo_id"
+          ]
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_pericias_previdenciarias",
+        "title": "Listar perícias previdenciárias",
+        "description": "Lista as perícias previdenciárias do usuário autenticado, opcionalmente filtradas por pauta.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "pauta_id": {
+              "description": "Filtrar por pauta.",
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_financeiro",
+        "title": "Listar lançamentos financeiros",
+        "description": "Lista os lançamentos financeiros do usuário autenticado (honorários, despesas, status de pagamento).",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "status": {
+              "description": "Filtrar por status (ex: pendente, pago).",
+              "type": "string"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}

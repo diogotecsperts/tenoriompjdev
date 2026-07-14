@@ -17,6 +17,8 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GlobalErrorListener } from "@/components/GlobalErrorListener";
 import { ImpersonationBanner } from "@/components/ImpersonationBanner";
 import Login from "./pages/Login";
+import OAuthConsent from "./pages/OAuthConsent";
+
 import { PrevLayout } from "./modules/previdenciario/components/PrevLayout";
 
 // Lazy-loaded pages — cada rota vira um chunk separado, mantendo o bundle
@@ -65,6 +67,8 @@ function AppRoutes() {
     <Suspense fallback={<RouteFallback />}>
       <Routes>
         <Route path="/" element={<Login />} />
+        <Route path="/.lovable/oauth/consent" element={<OAuthConsent />} />
+
         <Route path="/solicitar-cadastro" element={<SolicitarCadastro />} />
         <Route path="/finalizar-cadastro" element={<FinalizarCadastro />} />
         <Route path="/impersonate" element={<Impersonate />} />
