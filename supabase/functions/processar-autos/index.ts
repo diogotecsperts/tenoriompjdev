@@ -2378,15 +2378,39 @@ async function processarPDFBackground(
           updated_at: new Date().toISOString()
         }).eq('id', jobId);
         
-        // Fallback requires base64 (only works if we still have bytes)
-        const pdfBase64 = base64FromBytes();
-
-        visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
-          promptType: 'pdf_extraction',
-          userId: userId
-        });
-        // Clear PDF after use
-        pdfBytes = null;
+        // Fallback: OCR via router (respeita DevPanel) + IA generalista.
+        try {
+          const ocrResult = await runOcrWithConfiguredProvider(pdfBytes!, {
+            logPrefix: '[processar-autos/two-phase-fallback]',
+          });
+          pdfBytes = null;
+          const fillResult = await callAI(
+            await getAIConfig(),
+            systemPrompt,
+            `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${ocrResult.text}`,
+            { promptType: 'pdf_extraction', userId, maxOutputTokens: 65536, jsonMode: true }
+          );
+          visionResult = {
+            provider: ocrResult.provider,
+            model: ocrResult.model,
+            text: fillResult.text,
+            finishReason: 'STOP',
+            usedFallback: false,
+          };
+        } catch (routerError) {
+          const msg = routerError instanceof Error ? routerError.message : String(routerError);
+          if (msg.includes(MINIMAX_CLIENT_RASTERIZE_ERROR)) {
+            await logWarn('processar-autos', `MiniMax OCR não suportado no fallback single-pass; usando callPDFProvider legado.`, jobId);
+            const pdfBase64 = base64FromBytes();
+            pdfBytes = null;
+            visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
+              promptType: 'pdf_extraction',
+              userId: userId,
+            });
+          } else {
+            throw routerError;
+          }
+        }
         
         timings.pdfExtraction.end = Date.now();
         modelUsed = `${visionResult.provider}/${visionResult.model}`;
