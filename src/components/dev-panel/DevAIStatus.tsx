@@ -103,7 +103,7 @@ export function DevAIStatus() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [primaryConfig, setPrimaryConfig] = useState<ProviderConfig | null>(null);
-  const [operations, setOperations] = useState<AIOperation[]>(AI_OPERATIONS);
+  const [operations, setOperations] = useState<AIOperation[]>([]);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [fallbackStats, setFallbackStats] = useState<FallbackStats | null>(null);
 
