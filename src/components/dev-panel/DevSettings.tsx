@@ -1731,6 +1731,43 @@ export function DevSettings() {
           </div>
         </div>
 
+        {/* Section: Provedores de OCR (Fase 1) — tabela separada */}
+        <div id="ocr-providers-section" className="space-y-4 pt-2">
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-primary" />
+            <h2 className="text-xl font-bold uppercase tracking-tight">
+              Provedores de OCR <span className="text-primary">(Fase 1)</span>
+            </h2>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Providers usados exclusivamente para extrair texto de PDF (Fase 1). Estas chaves não aparecem no seletor da Fase 2.
+            <br />
+            <span className="text-xs">
+              Observação: Gemini e MiniMax também fazem OCR — as chaves deles ficam no Provider Inventory acima.
+            </span>
+          </p>
+
+          <div className="border rounded-lg overflow-hidden bg-card shadow-sm">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableHead className="w-12"></TableHead>
+                  <TableHead className="text-[11px] font-bold uppercase tracking-wider">Provider</TableHead>
+                  <TableHead className="text-[11px] font-bold uppercase tracking-wider">Modelos</TableHead>
+                  <TableHead className="w-28 text-center text-[11px] font-bold uppercase tracking-wider">Status</TableHead>
+                  <TableHead className="w-56 text-[11px] font-bold uppercase tracking-wider">API Key</TableHead>
+                  <TableHead className="w-32 text-right text-[11px] font-bold uppercase tracking-wider">Ações</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {OCR_PROVIDERS.map(provider => renderProviderRow(provider, 'ocr'))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+
+
+
         {/* Toggle para modelos versionados do Gemini */}
         {(dynamicGeminiModels.length > 0 || versionedGeminiModels.length > 0) && (
           <div className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
