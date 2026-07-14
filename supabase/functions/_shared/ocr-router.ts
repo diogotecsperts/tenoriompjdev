@@ -22,7 +22,7 @@ const GEMINI_STREAM_THRESHOLD_BYTES = 30_000_000; // 30 MB
 
 export type OcrHeartbeat = (stage: string, progress: number) => Promise<void> | void;
 
-export type OcrProvider = "gemini" | "mistral" | "minimax";
+export type OcrProvider = "gemini" | "mistral" | "minimax" | "glm";
 
 export interface OcrRouterResult {
   text: string;
