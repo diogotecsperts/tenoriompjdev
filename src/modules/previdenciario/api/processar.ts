@@ -326,7 +326,22 @@ async function pollPreProcessarJob(
       }
     }
 
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    // Sleep responsivo ao abort: acorda cedo se signal disparar durante a espera.
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, delayMs);
+      const onAbort = () => {
+        clearTimeout(t);
+        resolve();
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    if (signal?.aborted) {
+      void requestJobCancel(start.jobId);
+      throwCanceled(start.jobId, "ocr_processing");
+    }
     delayMs = Math.min(7000, delayMs + 500);
   }
 
