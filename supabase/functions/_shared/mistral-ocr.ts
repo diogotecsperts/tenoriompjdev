@@ -11,6 +11,8 @@
  * documentos complexos com tabelas e imagens.
  */
 
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
 const MISTRAL_FILES_URL = 'https://api.mistral.ai/v1/files';
 const MISTRAL_OCR_URL = 'https://api.mistral.ai/v1/ocr';
 
