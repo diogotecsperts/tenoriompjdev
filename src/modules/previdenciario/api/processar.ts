@@ -191,19 +191,25 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 /**
- * Nome legível do provider de OCR — usado para montar o label real do stage
- * a partir de `status.provider` (que reflete o `phase1_ocr_provider` do
- * DevPanel). Evita o falso "OCR Gemini em execução" quando o provider real é
- * GLM / Mistral / MiniMax.
+ * Nome legível do provider — usado tanto para OCR (fase 1) quanto para IA
+ * generalista (fase 2). O provider vem de `status.provider`, que é atualizado
+ * pelo backend em cada transição de stage refletindo o que está ativo no
+ * DevPanel. Nada aqui é hardcode: se um novo provider aparecer, cai no
+ * fallback capitalizado.
  */
 function providerDisplayName(provider?: string | null): string | null {
   if (!provider) return null;
   const p = provider.toLowerCase();
-  if (p.includes("glm")) return "GLM";
+  if (p.includes("glm") || p.includes("zhipu")) return "GLM";
   if (p.includes("mistral")) return "Mistral";
   if (p.includes("minimax")) return "MiniMax";
-  if (p.includes("gemini")) return "Gemini";
-  return null;
+  if (p.includes("gemini") || p.includes("google")) return "Gemini";
+  if (p.includes("claude") || p.includes("anthropic")) return "Claude";
+  if (p.includes("openai") || p.startsWith("gpt")) return "OpenAI";
+  if (p.includes("lovable")) return "Lovable AI";
+  // Fallback: mostra o próprio token (primeira letra maiúscula) para não perder o nome.
+  const token = p.split(/[\/\-_.:]/)[0] || p;
+  return token.charAt(0).toUpperCase() + token.slice(1);
 }
 
 function formatStageLabel(stage: string, provider?: string | null): string {
@@ -212,8 +218,11 @@ function formatStageLabel(stage: string, provider?: string | null): string {
   if (!name) return base;
   if (stage === "ocr_processing") return `OCR ${name} em execução`;
   if (stage === "ocr_completed") return `OCR ${name} concluído`;
+  if (stage === "ai_extraction") return `Extraindo dados via ${name}`;
+  if (stage === "ai_refinement") return `Refinando campos via ${name}`;
   return base;
 }
+
 
 async function checkStatus(jobId: string): Promise<PrevProcessingStatus> {
   const { data, error } = await supabase.functions.invoke("check-prev-processing-status", {
