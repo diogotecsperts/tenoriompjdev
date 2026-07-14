@@ -11,7 +11,8 @@ import { getPrompt } from "../_shared/prompt-manager.ts";
 import { buildModularImportPrompt, isValidSystemPrompt } from "../_shared/build-import-prompt.ts";
 import { notifyPdfErrorFireAndForget } from "../_shared/notify-pdf-error.ts";
 import { resolveOcrFallback, resolveSizeExceededFallback } from "../_shared/ocr-fallback.ts";
-import { runOcrWithConfiguredProvider, MINIMAX_CLIENT_RASTERIZE_ERROR } from "../_shared/ocr-router.ts";
+import { runOcrWithConfiguredProvider } from "../_shared/ocr-router.ts";
+import { MINIMAX_CLIENT_RASTERIZE_ERROR } from "../_shared/minimax-client.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
