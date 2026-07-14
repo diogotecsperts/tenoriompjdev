@@ -230,9 +230,31 @@ async function checkStatus(jobId: string): Promise<PrevProcessingStatus> {
   return d as PrevProcessingStatus;
 }
 
+async function requestJobCancel(jobId: string): Promise<void> {
+  try {
+    await supabase.functions.invoke("cancel-prev-processing-job", { body: { jobId } });
+  } catch (e) {
+    console.warn("[prev-pre-processar] cancel invoke failed", e);
+  }
+}
+
+function throwCanceled(jobId?: string, stage?: string): never {
+  throw new PreProcessarError(
+    "Processamento cancelado.",
+    "canceled",
+    stage,
+    null,
+    undefined,
+    undefined,
+    undefined,
+    jobId,
+  );
+}
+
 async function pollPreProcessarJob(
   start: AsyncPreProcessarStart,
   onProgress?: (message: string) => void,
+  signal?: AbortSignal,
 ): Promise<PreProcessarResult> {
   const startedAt = Date.now();
   const maxWaitMs = 8 * 60_000;
@@ -245,9 +267,14 @@ async function pollPreProcessarJob(
   const STAGNATION_LIMIT_MS = 130_000;
 
   while (Date.now() - startedAt < maxWaitMs) {
+    if (signal?.aborted) {
+      void requestJobCancel(start.jobId);
+      throwCanceled(start.jobId, "ocr_processing");
+    }
     const status = await checkStatus(start.jobId);
-    const label = STAGE_LABELS[status.stage] || status.stage || status.status;
+    const label = formatStageLabel(status.stage, status.provider || start.provider);
     onProgress?.(`${label}${typeof status.progress === "number" ? ` · ${status.progress}%` : ""}`);
+
 
     if (status.status === "completed") {
       const result = status.result || {};
