@@ -40,30 +40,70 @@ interface FallbackStats {
 }
 
 const PROVIDER_NAMES: Record<string, string> = {
-  lovable: 'IA Integrada',
+  lovable: 'IA Integrada (Lovable)',
   gemini: 'Google Gemini',
+  google: 'Google Gemini',
   openai: 'OpenAI',
   claude: 'Anthropic Claude',
+  anthropic: 'Anthropic Claude',
   groq: 'Groq',
   deepseek: 'DeepSeek',
-  openrouter: 'OpenRouter'
+  openrouter: 'OpenRouter',
+  glm: 'GLM-OCR (Z.AI)',
+  zhipu: 'GLM-OCR (Z.AI)',
+  mistral: 'Mistral OCR',
+  'mistral-ocr': 'Mistral OCR',
+  minimax: 'MiniMax',
+  none: 'Nenhum',
 };
 
-const AI_OPERATIONS: AIOperation[] = [
-  { id: 'pdf_extraction', name: 'Extração PDF (Vision)', provider: '', model: '', status: 'ok' },
-  { id: 'pdf_fallback', name: 'Fallback PDF (Vision)', provider: '', model: '', status: 'ok' },
-  { id: 'resumo_peticao', name: 'Resumo Petição', provider: '', model: '', status: 'ok' },
-  { id: 'resumo_contestacao', name: 'Resumo Contestação', provider: '', model: '', status: 'ok' },
-  { id: 'descricao_doencas', name: 'Descrição Doenças', provider: '', model: '', status: 'ok' },
-  { id: 'nexo_causal', name: 'Análise Nexo Causal', provider: '', model: '', status: 'ok' },
-  { id: 'incapacidade', name: 'Análise Incapacidade', provider: '', model: '', status: 'ok' },
-];
+// API key id in global_api_keys for each provider
+const PROVIDER_KEY_ID: Record<string, string> = {
+  glm: 'glm',
+  mistral: 'mistral-ocr',
+  minimax: 'minimax',
+  openai: 'openai',
+  claude: 'anthropic',
+  anthropic: 'anthropic',
+  groq: 'groq',
+  deepseek: 'deepseek',
+  openrouter: 'openrouter',
+};
+
+// Fixed OCR model per provider (Gemini uses phase1_gemini_model)
+function ocrModelFor(provider: string, geminiModel: string): string {
+  switch (provider) {
+    case 'glm':
+    case 'zhipu':
+      return 'glm-ocr';
+    case 'mistral':
+    case 'mistral-ocr':
+      return 'mistral-ocr-latest';
+    case 'minimax':
+      return 'MiniMax-OCR';
+    case 'gemini':
+    case 'google':
+      return geminiModel;
+    case 'none':
+      return '—';
+    default:
+      return geminiModel;
+  }
+}
+
+function hasKeyFor(provider: string, savedKeys: Set<string>): boolean {
+  if (!provider || provider === 'none') return false;
+  if (provider === 'lovable') return true;
+  if (provider === 'gemini' || provider === 'google') return true; // env-based
+  const keyId = PROVIDER_KEY_ID[provider] || provider;
+  return savedKeys.has(keyId);
+}
 
 export function DevAIStatus() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [primaryConfig, setPrimaryConfig] = useState<ProviderConfig | null>(null);
-  const [operations, setOperations] = useState<AIOperation[]>(AI_OPERATIONS);
+  const [operations, setOperations] = useState<AIOperation[]>([]);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [fallbackStats, setFallbackStats] = useState<FallbackStats | null>(null);
 
@@ -105,7 +145,7 @@ export function DevAIStatus() {
         .in('id', [
           'default_ai_provider', 'default_ai_model',
           'phase1_ocr_provider', 'phase1_gemini_model',
-          'pdf_fallback_provider', 'pdf_fallback_model'
+          'ocr_fallback_provider',
         ]);
 
 
@@ -128,7 +168,7 @@ export function DevAIStatus() {
       // Parse primary config
       const primaryProvider = configMap.default_ai_provider?.replace(/"/g, '') || 'lovable';
       const primaryModel = configMap.default_ai_model?.replace(/"/g, '') || 'google/gemini-2.5-flash';
-      const primaryHasKey = primaryProvider === 'lovable' || savedKeys.has(primaryProvider);
+      const primaryHasKey = hasKeyFor(primaryProvider, savedKeys);
 
       setPrimaryConfig({
         provider: primaryProvider,
@@ -137,79 +177,102 @@ export function DevAIStatus() {
         status: primaryHasKey ? 'active' : 'error'
       });
 
-      // Parse PDF-specific config (unified: phase1_ocr_provider + phase1_gemini_model)
+      // OCR (Fase 1) — provider e modelo por provider ativo
+      const geminiModelFallback = configMap.phase1_gemini_model?.replace(/"/g, '') || 'gemini-2.5-flash';
       const pdfProvider = configMap.phase1_ocr_provider?.replace(/"/g, '') || 'gemini';
-      const pdfModel = configMap.phase1_gemini_model?.replace(/"/g, '') || 'gemini-2.5-flash';
+      const pdfModel = ocrModelFor(pdfProvider, geminiModelFallback);
+      const pdfHasKey = hasKeyFor(pdfProvider, savedKeys);
 
-      const pdfFallbackProvider = configMap.pdf_fallback_provider?.replace(/"/g, '') || 'lovable';
-      const pdfFallbackModel = configMap.pdf_fallback_model?.replace(/"/g, '') || 'google/gemini-2.5-flash';
+      // Fallback OCR — chave correta é ocr_fallback_provider (não pdf_fallback_*)
+      const ocrFallbackProvider = configMap.ocr_fallback_provider?.replace(/"/g, '') || 'none';
+      const ocrFallbackModel = ocrModelFor(ocrFallbackProvider, geminiModelFallback);
+      const ocrFallbackHasKey = hasKeyFor(ocrFallbackProvider, savedKeys);
 
-      const pdfHasKey = pdfProvider === 'lovable' || savedKeys.has(pdfProvider);
-      const pdfFallbackHasKey = pdfFallbackProvider === 'lovable' || savedKeys.has(pdfFallbackProvider);
-
-      // Update operations with current config
-      setOperations(AI_OPERATIONS.map(op => {
-        if (op.id === 'pdf_extraction') {
-          return {
-            ...op,
-            provider: pdfProvider,
-            model: pdfModel,
-            status: pdfHasKey ? 'ok' : 'error'
-          };
-        }
-        if (op.id === 'pdf_fallback') {
-          return {
-            ...op,
-            provider: pdfFallbackProvider,
-            model: pdfFallbackModel,
-            status: pdfFallbackHasKey ? 'ok' : 'error'
-          };
-        }
-        return {
-          ...op,
+      // Operações reais do sistema
+      const ops: AIOperation[] = [
+        {
+          id: 'ocr_primary',
+          name: 'OCR (Fase 1) — Leitura de PDF',
+          provider: pdfProvider,
+          model: pdfModel,
+          status: pdfHasKey ? 'ok' : 'error',
+        },
+        {
+          id: 'ocr_fallback',
+          name: 'Fallback OCR',
+          provider: ocrFallbackProvider,
+          model: ocrFallbackModel,
+          status: ocrFallbackProvider === 'none' ? 'warning' : (ocrFallbackHasKey ? 'ok' : 'error'),
+        },
+        {
+          id: 'ai_generalist',
+          name: 'IA Generalista (Trabalhista, Previdenciário, Impugnação)',
           provider: primaryProvider,
           model: primaryModel,
-          status: primaryHasKey ? 'ok' : 'error'
-        };
-      }));
+          status: primaryHasKey ? 'ok' : 'error',
+        },
+      ];
+      setOperations(ops);
 
-      // Fetch fallback statistics from recent jobs (last 30 days)
+      // Fetch fallback statistics from recent jobs (last 30 days) — Trabalhista + Previdenciário
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const { data: jobsData } = await supabase
-        .from('import_jobs')
-        .select('result, created_at')
-        .eq('status', 'completed')
-        .gte('created_at', thirtyDaysAgo)
-        .order('created_at', { ascending: false })
-        .limit(50);
+      const [impRes, prevRes] = await Promise.all([
+        supabase
+          .from('import_jobs')
+          .select('result, created_at')
+          .eq('status', 'completed')
+          .gte('created_at', thirtyDaysAgo)
+          .order('created_at', { ascending: false })
+          .limit(50),
+        supabase
+          .from('prev_processing_jobs')
+          .select('result, created_at, status')
+          .eq('status', 'completed')
+          .gte('created_at', thirtyDaysAgo)
+          .order('created_at', { ascending: false })
+          .limit(50),
+      ]);
 
-      // Calculate fallback stats
       let fallbackCount = 0;
       let lastFallbackReason: string | null = null;
       let lastFallbackDate: Date | null = null;
       let lastOriginalProvider: string | null = null;
 
-      jobsData?.forEach(job => {
+      // Import jobs (Trabalhista)
+      impRes.data?.forEach(job => {
         const result = job.result as Record<string, unknown> | null;
         const aiUsage = result?.aiUsage as Record<string, unknown> | undefined;
         const pdfExtraction = aiUsage?.pdfExtraction as Record<string, unknown> | undefined;
-        
         if (pdfExtraction?.usedFallback) {
           fallbackCount++;
           if (!lastFallbackReason && pdfExtraction.fallbackReason) {
             lastFallbackReason = pdfExtraction.fallbackReason as string;
             lastFallbackDate = new Date(job.created_at);
-            lastOriginalProvider = pdfExtraction.originalProvider as string || null;
+            lastOriginalProvider = (pdfExtraction.originalProvider as string) || null;
+          }
+        }
+      });
+
+      // Prev processing jobs — ocr-router marca provider com sufixo "-fallback"
+      prevRes.data?.forEach(job => {
+        const result = job.result as Record<string, unknown> | null;
+        const provider = typeof result?.provider === 'string' ? (result.provider as string) : '';
+        if (provider.endsWith('-fallback')) {
+          fallbackCount++;
+          if (!lastFallbackReason) {
+            lastFallbackReason = 'OCR primário falhou (rota fallback)';
+            lastFallbackDate = new Date(job.created_at);
+            lastOriginalProvider = provider.replace(/-fallback$/, '');
           }
         }
       });
 
       setFallbackStats({
-        totalJobs: jobsData?.length || 0,
+        totalJobs: (impRes.data?.length || 0) + (prevRes.data?.length || 0),
         fallbackCount,
         lastFallbackReason,
         lastFallbackDate,
-        lastOriginalProvider
+        lastOriginalProvider,
       });
 
       setLastUpdate(new Date());
