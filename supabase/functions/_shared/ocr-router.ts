@@ -10,6 +10,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { extractWithMistralOCR, getMistralAPIKey } from "./mistral-ocr.ts";
 import { extractVisualContent } from "./pdf-visual-extractor.ts";
 import { getMinimaxAPIKey, MINIMAX_CLIENT_RASTERIZE_ERROR } from "./minimax-client.ts";
+import { resolveOcrFallback } from "./ocr-fallback.ts";
 
 /**
  * Acima deste tamanho, o Gemini OCR roda via **streaming** direto ao Files API
@@ -166,6 +167,68 @@ export async function runOcrWithConfiguredProvider(
   } catch (e) {
     const err = e as Error;
     console.error(`${prefix} provider ${cfg.provider} falhou: ${err.message.slice(0, 400)}`);
+
+    // MiniMax exige rasterização client-side — não é fallback, é fluxo canônico.
+    // Nunca aciona fallback automático a partir deste erro.
+    if (err.message?.includes(MINIMAX_CLIENT_RASTERIZE_ERROR)) {
+      throw err;
+    }
+
+    // Fallback só ocorre se explicitamente configurado no DevPanel
+    // (system_config.ocr_fallback_*). Defaults: propaga.
+    // Neste hook, aceitamos fallback apenas para providers que rodam server-side
+    // (gemini, mistral) — MiniMax é excluído porque exige rasterização no browser.
+    const decision = await resolveOcrFallback(cfg.provider, err, {
+      restrictTo: ["gemini", "mistral"],
+      logPrefix: `${prefix}[fallback]`,
+    });
+    if (decision.action === "propagate") {
+      throw err;
+    }
+
+    // Fallback autorizado. Executa o provider configurado.
+    if (decision.provider === "mistral") {
+      if (!mistralKey) {
+        throw new Error(
+          `Fallback configurado para Mistral mas MISTRAL_API_KEY ausente. ` +
+          `Configure a chave no DevPanel.`,
+        );
+      }
+      const bytes = await materializeBytes();
+      const r = await extractWithMistralOCR(bytes, mistralKey);
+      return { text: r.text, pageCount: r.pageCount, provider: `${r.provider}-fallback`, model: r.model };
+    }
+    if (decision.provider === "gemini") {
+      if (!geminiKey) {
+        throw new Error(
+          `Fallback configurado para Gemini mas GEMINI_API_KEY/LOVABLE_API_KEY ausente. ` +
+          `Configure a chave no DevPanel.`,
+        );
+      }
+      // Preferir streaming quando possível para não estourar memória.
+      if (sizeBytes > GEMINI_STREAM_THRESHOLD_BYTES && isBlobInput) {
+        const stream = pdfInput.blob.stream();
+        const r = await extractVisualContent(
+          { stream, size: sizeBytes },
+          { model: cfg.geminiModel, useFilesAPI: true },
+        );
+        return {
+          text: r.rawText,
+          pageCount: r.pageCount,
+          provider: `${r.provider || "gemini-streaming"}-fallback`,
+          model: r.model || cfg.geminiModel,
+        };
+      }
+      const bytes = await materializeBytes();
+      const r = await extractVisualContent(bytes, { model: cfg.geminiModel });
+      return {
+        text: r.rawText,
+        pageCount: r.pageCount,
+        provider: `${r.provider || "gemini-visual"}-fallback`,
+        model: r.model || cfg.geminiModel,
+      };
+    }
+    // Não deveria chegar aqui (restrictTo filtrou), mas por segurança:
     throw err;
   }
 }
