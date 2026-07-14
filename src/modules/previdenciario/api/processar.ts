@@ -181,7 +181,7 @@ function classifyInvokeError(error: unknown, body: Record<string, unknown> | nul
 const STAGE_LABELS: Record<string, string> = {
   queued: "Na fila",
   download: "Baixando PDF",
-  ocr_processing: "OCR Gemini em execução",
+  ocr_processing: "OCR em execução",
   ocr_completed: "OCR concluído",
   ai_extraction: "Extraindo dados",
   ai_refinement: "Refinando campos",
@@ -189,6 +189,31 @@ const STAGE_LABELS: Record<string, string> = {
   completed: "Concluído",
   failed: "Falhou",
 };
+
+/**
+ * Nome legível do provider de OCR — usado para montar o label real do stage
+ * a partir de `status.provider` (que reflete o `phase1_ocr_provider` do
+ * DevPanel). Evita o falso "OCR Gemini em execução" quando o provider real é
+ * GLM / Mistral / MiniMax.
+ */
+function providerDisplayName(provider?: string | null): string | null {
+  if (!provider) return null;
+  const p = provider.toLowerCase();
+  if (p.includes("glm")) return "GLM";
+  if (p.includes("mistral")) return "Mistral";
+  if (p.includes("minimax")) return "MiniMax";
+  if (p.includes("gemini")) return "Gemini";
+  return null;
+}
+
+function formatStageLabel(stage: string, provider?: string | null): string {
+  const base = STAGE_LABELS[stage] || stage;
+  const name = providerDisplayName(provider);
+  if (!name) return base;
+  if (stage === "ocr_processing") return `OCR ${name} em execução`;
+  if (stage === "ocr_completed") return `OCR ${name} concluído`;
+  return base;
+}
 
 async function checkStatus(jobId: string): Promise<PrevProcessingStatus> {
   const { data, error } = await supabase.functions.invoke("check-prev-processing-status", {
