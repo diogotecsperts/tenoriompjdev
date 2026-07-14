@@ -1985,6 +1985,7 @@ export function DevSettings() {
                     <SelectItem value="gemini">Google Gemini</SelectItem>
                     <SelectItem value="mistral">Mistral OCR</SelectItem>
                     <SelectItem value="minimax">MiniMax M3</SelectItem>
+                    <SelectItem value="glm">GLM-OCR (Z.AI)</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] text-muted-foreground">
