@@ -17,6 +17,7 @@ import {
   Upload,
   Sparkles,
   Pencil,
+  Square,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
