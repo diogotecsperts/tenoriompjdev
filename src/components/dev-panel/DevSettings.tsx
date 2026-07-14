@@ -669,6 +669,9 @@ export function DevSettings() {
           store_extracted_text: configMap.store_extracted_text ?? DEFAULT_CONFIG.store_extracted_text,
           phase1_gemini_model: configMap.phase1_gemini_model || DEFAULT_CONFIG.phase1_gemini_model,
           phase1_ocr_provider: configMap.phase1_ocr_provider || DEFAULT_CONFIG.phase1_ocr_provider,
+          ocr_fallback_enabled: configMap.ocr_fallback_enabled ?? DEFAULT_CONFIG.ocr_fallback_enabled,
+          ocr_fallback_provider: configMap.ocr_fallback_provider || DEFAULT_CONFIG.ocr_fallback_provider,
+          ocr_fallback_on_size_exceeded: configMap.ocr_fallback_on_size_exceeded ?? DEFAULT_CONFIG.ocr_fallback_on_size_exceeded,
           minimax_render_concurrency: (() => {
             const v = configMap.minimax_render_concurrency;
             const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) : NaN;
