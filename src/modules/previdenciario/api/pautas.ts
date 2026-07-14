@@ -190,7 +190,9 @@ export async function splitPrevPdf(
     const copied = await doc.copyPages(srcDoc, indices);
     copied.forEach((p) => doc.addPage(p));
     const out = await doc.save({ useObjectStreams: true });
-    return new Blob([out], { type: "application/pdf" });
+    const buf = new ArrayBuffer(out.byteLength);
+    new Uint8Array(buf).set(out);
+    return new Blob([buf], { type: "application/pdf" });
   };
 
   const parts: PrevPdfSplitPart[] = [];
