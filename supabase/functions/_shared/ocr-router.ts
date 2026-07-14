@@ -136,6 +136,13 @@ export async function runOcrWithConfiguredProvider(
         `Frontend deve chamar 'minimax-ocr-chunk' endpoint diretamente.`,
       );
     }
+    if (cfg.provider === "glm") {
+      const bytes = await materializeBytes();
+      await opts.onHeartbeat?.("ocr_processing", 25);
+      const r = await extractWithGlmOCR(bytes, glmKey!);
+      await opts.onHeartbeat?.("ocr_processing", 55);
+      return { text: r.text, pageCount: r.pageCount, provider: r.provider, model: r.model };
+    }
 
     // Gemini visual — streaming direto ao Files API para PDFs grandes (>30 MB).
     // Evita OOM: não materializa Uint8Array no worker, o stream é passado direto
