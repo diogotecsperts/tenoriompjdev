@@ -214,43 +214,65 @@ export function DevAIStatus() {
       ];
       setOperations(ops);
 
-      // Fetch fallback statistics from recent jobs (last 30 days)
+      // Fetch fallback statistics from recent jobs (last 30 days) — Trabalhista + Previdenciário
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const { data: jobsData } = await supabase
-        .from('import_jobs')
-        .select('result, created_at')
-        .eq('status', 'completed')
-        .gte('created_at', thirtyDaysAgo)
-        .order('created_at', { ascending: false })
-        .limit(50);
+      const [impRes, prevRes] = await Promise.all([
+        supabase
+          .from('import_jobs')
+          .select('result, created_at')
+          .eq('status', 'completed')
+          .gte('created_at', thirtyDaysAgo)
+          .order('created_at', { ascending: false })
+          .limit(50),
+        supabase
+          .from('prev_processing_jobs')
+          .select('result, created_at, status')
+          .eq('status', 'completed')
+          .gte('created_at', thirtyDaysAgo)
+          .order('created_at', { ascending: false })
+          .limit(50),
+      ]);
 
-      // Calculate fallback stats
       let fallbackCount = 0;
       let lastFallbackReason: string | null = null;
       let lastFallbackDate: Date | null = null;
       let lastOriginalProvider: string | null = null;
 
-      jobsData?.forEach(job => {
+      // Import jobs (Trabalhista)
+      impRes.data?.forEach(job => {
         const result = job.result as Record<string, unknown> | null;
         const aiUsage = result?.aiUsage as Record<string, unknown> | undefined;
         const pdfExtraction = aiUsage?.pdfExtraction as Record<string, unknown> | undefined;
-        
         if (pdfExtraction?.usedFallback) {
           fallbackCount++;
           if (!lastFallbackReason && pdfExtraction.fallbackReason) {
             lastFallbackReason = pdfExtraction.fallbackReason as string;
             lastFallbackDate = new Date(job.created_at);
-            lastOriginalProvider = pdfExtraction.originalProvider as string || null;
+            lastOriginalProvider = (pdfExtraction.originalProvider as string) || null;
+          }
+        }
+      });
+
+      // Prev processing jobs — ocr-router marca provider com sufixo "-fallback"
+      prevRes.data?.forEach(job => {
+        const result = job.result as Record<string, unknown> | null;
+        const provider = typeof result?.provider === 'string' ? (result.provider as string) : '';
+        if (provider.endsWith('-fallback')) {
+          fallbackCount++;
+          if (!lastFallbackReason) {
+            lastFallbackReason = 'OCR primário falhou (rota fallback)';
+            lastFallbackDate = new Date(job.created_at);
+            lastOriginalProvider = provider.replace(/-fallback$/, '');
           }
         }
       });
 
       setFallbackStats({
-        totalJobs: jobsData?.length || 0,
+        totalJobs: (impRes.data?.length || 0) + (prevRes.data?.length || 0),
         fallbackCount,
         lastFallbackReason,
         lastFallbackDate,
-        lastOriginalProvider
+        lastOriginalProvider,
       });
 
       setLastUpdate(new Date());
