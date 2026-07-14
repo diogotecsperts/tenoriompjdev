@@ -145,7 +145,7 @@ export function DevAIStatus() {
         .in('id', [
           'default_ai_provider', 'default_ai_model',
           'phase1_ocr_provider', 'phase1_gemini_model',
-          'pdf_fallback_provider', 'pdf_fallback_model'
+          'ocr_fallback_provider',
         ]);
 
 
