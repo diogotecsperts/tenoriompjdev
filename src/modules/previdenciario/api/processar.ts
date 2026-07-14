@@ -459,7 +459,7 @@ export async function preProcessarPericia(
 
   if (isAsyncStart(first.data)) {
     opts.onJobProgress?.("Processamento em segundo plano iniciado");
-    return pollPreProcessarJob(first.data, opts.onJobProgress);
+    return pollPreProcessarJob(first.data, opts.onJobProgress, signal);
   }
 
   return unwrap(first.data, first.error);
