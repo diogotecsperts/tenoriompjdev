@@ -59,10 +59,10 @@ interface SystemConfig {
   text_fill_model: string;
   store_extracted_text: boolean;
   phase1_gemini_model: string;
-  phase1_ocr_provider: string; // 'gemini' or 'mistral' or 'minimax'
+  phase1_ocr_provider: string; // 'gemini' or 'mistral' or 'minimax' or 'glm'
   // OCR fallback (nada é acionado sem escolha explícita aqui)
   ocr_fallback_enabled: boolean;
-  ocr_fallback_provider: string; // 'none' | 'gemini' | 'mistral' | 'minimax'
+  ocr_fallback_provider: string; // 'none' | 'gemini' | 'mistral' | 'minimax' | 'glm'
   ocr_fallback_on_size_exceeded: boolean;
   // Concorrência da rasterização client-side MiniMax/Gemini (1..8, default 4)
   minimax_render_concurrency: number;
