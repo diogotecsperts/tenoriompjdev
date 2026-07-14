@@ -1340,10 +1340,13 @@ export function DevSettings() {
     );
   };
 
-  // Render individual provider row
-  const renderProviderRow = (provider: ProviderInfo) => {
-    const isActive = provider.id === config.default_ai_provider;
-    const isPinned = pinnedProviders.includes(provider.id);
+  // Render individual provider row.
+  // `variant: 'ocr'` desabilita "selectProvider" e ícones de default/pin —
+  // providers de OCR não são selecionáveis como default AI provider.
+  const renderProviderRow = (provider: ProviderInfo, variant: 'general' | 'ocr' = 'general') => {
+    const isOcr = variant === 'ocr';
+    const isActive = !isOcr && provider.id === config.default_ai_provider;
+    const isPinned = !isOcr && pinnedProviders.includes(provider.id);
     const hasKey = savedApiKeys[provider.id];
     const status = getProviderStatus(provider);
     const testResult = testResults[provider.id];
@@ -1353,12 +1356,13 @@ export function DevSettings() {
       <TableRow 
         key={provider.id}
         className={cn(
-          "group transition-all duration-200 cursor-pointer",
+          "group transition-all duration-200",
+          !isOcr && "cursor-pointer",
           isActive && "bg-primary/5 border-l-4 border-l-primary",
           isPinned && !isActive && "bg-amber-50/50 dark:bg-amber-950/20",
           "hover:bg-muted/50"
         )}
-        onClick={() => selectProvider(provider.id)}
+        onClick={isOcr ? undefined : () => selectProvider(provider.id)}
       >
         {/* Coluna Pin/Status */}
         <TableCell className="w-12 text-center" onClick={e => e.stopPropagation()}>
