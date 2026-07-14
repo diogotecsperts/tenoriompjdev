@@ -59,7 +59,11 @@ interface SystemConfig {
   text_fill_model: string;
   store_extracted_text: boolean;
   phase1_gemini_model: string;
-  phase1_ocr_provider: string; // 'gemini' or 'mistral'
+  phase1_ocr_provider: string; // 'gemini' or 'mistral' or 'minimax'
+  // OCR fallback (nada é acionado sem escolha explícita aqui)
+  ocr_fallback_enabled: boolean;
+  ocr_fallback_provider: string; // 'none' | 'gemini' | 'mistral' | 'minimax'
+  ocr_fallback_on_size_exceeded: boolean;
   // Concorrência da rasterização client-side MiniMax/Gemini (1..8, default 4)
   minimax_render_concurrency: number;
   // Legacy (obsoletos, mantidos apenas para compatibilidade da UI até a limpeza do form)
@@ -241,6 +245,9 @@ const DEFAULT_CONFIG: SystemConfig = {
   store_extracted_text: true,
   phase1_gemini_model: "gemini-2.5-flash",
   phase1_ocr_provider: "gemini",
+  ocr_fallback_enabled: false,
+  ocr_fallback_provider: "none",
+  ocr_fallback_on_size_exceeded: false,
   minimax_render_concurrency: 4
 };
 
@@ -662,6 +669,9 @@ export function DevSettings() {
           store_extracted_text: configMap.store_extracted_text ?? DEFAULT_CONFIG.store_extracted_text,
           phase1_gemini_model: configMap.phase1_gemini_model || DEFAULT_CONFIG.phase1_gemini_model,
           phase1_ocr_provider: configMap.phase1_ocr_provider || DEFAULT_CONFIG.phase1_ocr_provider,
+          ocr_fallback_enabled: configMap.ocr_fallback_enabled ?? DEFAULT_CONFIG.ocr_fallback_enabled,
+          ocr_fallback_provider: configMap.ocr_fallback_provider || DEFAULT_CONFIG.ocr_fallback_provider,
+          ocr_fallback_on_size_exceeded: configMap.ocr_fallback_on_size_exceeded ?? DEFAULT_CONFIG.ocr_fallback_on_size_exceeded,
           minimax_render_concurrency: (() => {
             const v = configMap.minimax_render_concurrency;
             const n = typeof v === "number" ? v : typeof v === "string" ? parseInt(v, 10) : NaN;
@@ -869,6 +879,15 @@ export function DevSettings() {
       }, {
         id: "phase1_ocr_provider",
         value: config.phase1_ocr_provider
+      }, {
+        id: "ocr_fallback_enabled",
+        value: config.ocr_fallback_enabled
+      }, {
+        id: "ocr_fallback_provider",
+        value: config.ocr_fallback_provider
+      }, {
+        id: "ocr_fallback_on_size_exceeded",
+        value: config.ocr_fallback_on_size_exceeded
       }, {
         id: "minimax_render_concurrency",
         value: Math.min(8, Math.max(1, Number(config.minimax_render_concurrency) || 4))
@@ -1924,6 +1943,73 @@ export function DevSettings() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Fallback de OCR — nada é acionado sem escolha explícita aqui */}
+            <div className="space-y-3 p-3 border rounded-md bg-background/60">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium">Habilitar fallback de OCR</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Se o provider principal falhar, tenta o provider de fallback escolhido abaixo.
+                    <strong> Desligado por padrão</strong> — enquanto ficar desligado, nenhum outro
+                    provider (incluindo Mistral) é chamado; o job falha explicitamente.
+                  </p>
+                </div>
+                <Switch
+                  checked={!!config.ocr_fallback_enabled}
+                  onCheckedChange={(v) => setConfig({ ...config, ocr_fallback_enabled: v })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs">Provider de fallback</Label>
+                <Select
+                  value={config.ocr_fallback_provider || "none"}
+                  onValueChange={(v) => setConfig({ ...config, ocr_fallback_provider: v })}
+                  disabled={!config.ocr_fallback_enabled}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      <span className="text-muted-foreground">Nenhum (falhar em caso de erro)</span>
+                    </SelectItem>
+                    <SelectItem value="gemini">Google Gemini</SelectItem>
+                    <SelectItem value="mistral">Mistral OCR</SelectItem>
+                    <SelectItem value="minimax">MiniMax M3</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  Ao escolher o mesmo provider do principal, o fallback é ignorado (evita loop).
+                </p>
+              </div>
+
+              <div className="flex items-start justify-between gap-3 pt-1 border-t">
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium">
+                    Trocar por fallback quando arquivo excede o limite do provider principal
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Relevante quando Mistral é o principal (rejeita &gt; 50 MB). Desligado: o job
+                    falha com o erro nativo do provider primário.
+                  </p>
+                </div>
+                <Switch
+                  checked={!!config.ocr_fallback_on_size_exceeded}
+                  onCheckedChange={(v) => setConfig({ ...config, ocr_fallback_on_size_exceeded: v })}
+                  disabled={!config.ocr_fallback_enabled}
+                />
+              </div>
+
+              <div className="text-[11px] p-2 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-100">
+                Por segurança, nenhum fallback é acionado automaticamente. Se o provider principal
+                falhar e o fallback estiver desligado (ou definido como "Nenhum"), o processamento
+                falha explicitamente — nada é cobrado de outros providers sem sua ordem.
+              </div>
+            </div>
+
+
                 
                 {/* Gemini Model Selector (only if Gemini selected) */}
                 {config.phase1_ocr_provider === "gemini" && (

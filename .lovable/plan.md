@@ -1,111 +1,115 @@
 
-# Continuação: PDF grande + Observabilidade + Smoke Test
+## Confirmação da regra
 
-Divido em 3 blocos independentes, aprovados/executados na ordem. Nada aqui toca `laudo-structure.ts`, prompts, RLS de tabelas de domínio, ou o MiniMax M3 como IA principal.
+**Nenhum provider de OCR — em especial Mistral — pode ser chamado sem sua escolha explícita no DevPanel.** Isso vale tanto para a IA principal quanto para o fallback. Defaults do rollout são seguros por construção: o sistema **nunca invoca Mistral** até você entrar no DevPanel e selecioná-lo explicitamente (como principal ou como fallback).
 
----
-
-## Bloco 1 — Restaurar caminho estável (PDFs ≤ 20MB) e paralelizar PDFs grandes
-
-**Diagnóstico:** as últimas iterações no PDF grande introduziram lógica que também passou a rodar no caminho pequeno. Precisamos separar de novo os dois caminhos e só então mexer no grande.
-
-1. **`ImportarAutosDialog.tsx`** — reintroduzir *fast path* explícito:
-   - `file.size ≤ 20MB` → upload direto para `processar-autos` com `strategy: single_pass`, sem chunking, sem rasterização client-side. Este é o caminho que funcionava.
-   - `file.size > 20MB` → caminho de PDF grande (client-side split + MiniMax rasterizado).
-   - Decisão gravada em `import_jobs.result.route` (`fast_small` vs `chunked_large`) para inspeção.
-
-2. **Paralelismo real na rasterização MiniMax (PDF grande)**:
-   - Hoje as páginas são rasterizadas em série no browser. Trocar por pool com concorrência configurável (default 4, expor no DevPanel como `minimax_render_concurrency`).
-   - Cada página vira uma chamada isolada a `minimax-ocr-chunk`; se uma falhar, é retentada 2× com backoff antes de propagar erro visível (não é fallback cross-provider — é retry na mesma página/mesmo provider, coerente com sua regra).
-   - Sem trocar provider automaticamente. MiniMax é a escolha; se cair, o job fica em `failed` com erro por página.
-
-3. **Preservar o modo `two_phase` do Trabalhista** — nada muda nele, só garantir que ele continua roteando por `text_fill_*` como hoje.
+Além disso, o plano preserva 100% os fluxos de processamento do Trabalhista e do Previdenciário — só troca *quem decide* qual provider de OCR usar, sem mexer em prompts, split, chunking, preenchimento de campos, exports ou RLS.
 
 ---
 
-## Bloco 2 — Job status e logs ponta a ponta (OCR → preenchimento → exportação) ✅ IMPLEMENTADO
+## Bloco A — Fallback de OCR vira feature controlada pelo DevPanel
 
-Aproveita `import_jobs` + `backend_logs` que já existem. Sem tabela nova.
+### 1. Novas linhas em `system_config` (migração aditiva)
 
-1. **Padronizar etapas em `import_jobs.result.steps[]`** — cada etapa grava:
-   ```json
-   {
-     "step": "upload" | "split" | "ocr" | "fill" | "export",
-     "provider": "minimax|openrouter|lovable|null",
-     "model": "MiniMax-M3|...",
-     "started_at": "...",
-     "finished_at": "...",
-     "duration_ms": 1234,
-     "status": "ok|error",
-     "error": null | "mensagem",
-     "meta": { "pages": 114, "tokens_in": ..., "tokens_out": ... }
-   }
-   ```
-
-2. **Instrumentação nas edge functions** (helper `logStep(jobId, step, fn)` em `_shared/`):
-   - `processar-autos` — envolve OCR (por chunk), preenchimento por campo modular, e o dispatch final.
-   - `minimax-ocr-chunk` / `gemini-ocr-chunk` — cada chunk grava `ocr.chunk` com página, provider, tempo.
-   - `gerar-resumos`, `regerar-campo-pdf`, `gerar-quesitos` — cada um empurra sua etapa.
-   - Exportação DOCX/PDF (client-side) — o `LaudoEditor` envia POST a um endpoint fino `log-step` (nova edge function trivial) ou insere direto em `backend_logs` via RLS já existente. Prefiro **insert direto do client** (RLS permite ao dono do job); evita edge function nova.
-
-3. **DevPanel — aba "Job Timeline"**:
-   - Nova aba (`src/components/dev-panel/DevJobTimeline.tsx`) listando os últimos N `import_jobs` do dev + timeline de cada job (etapas, tempo, provider, erro).
-   - Filtro por status (`processing|ok|failed`) e por usuário (via edge function `dev-list-jobs` com service-role + `is_developer()`, seguindo a regra de isolamento).
-   - Botão "Baixar JSON" do job (dump `import_jobs.result` + `backend_logs` filtrados).
-
-4. **Nada é logado com PII de conteúdo do laudo** — só metadados: tempos, provider, tamanho, contagem de páginas, mensagens de erro. Regra de compliance mantida.
-
----
-
-## Bloco 3 — Smoke test no DevPanel (PDF pequeno + Trabalhista) ✅ IMPLEMENTADO
-
-Objetivo: 1 clique valida OCR → preenchimento → export.
-
-1. **Fixtures**: 2 PDFs pequenos versionados em `public/dev-fixtures/`:
-   - `smoke-generico.pdf` (~1 pág, texto simples)
-   - `smoke-trabalhista.pdf` (~2 págs, com quesitos e dados básicos)
-   Servidos como assets estáticos — não vão pro storage do backend.
-
-2. **Nova aba DevPanel — "Smoke Test"** (`DevSmokeTest.tsx`):
-   - Botão "Rodar smoke test" → executa em sequência, com barra de progresso:
-     1. Baixa fixture → chama fluxo real de `ImportarAutosDialog` em modo headless (mesma função de upload).
-     2. Aguarda `import_jobs` chegar em `ok`.
-     3. Valida `laudos.<campos-chave>` preenchidos: `nome_periciando`, `numero_processo`, `quesitos_juizo`, `cid_principal`, `metodologia_pericial`, `conclusao`. Cada campo tem regra mínima (não-vazio, ≥ N chars ou match regex).
-     4. Chama export DOCX + PDF em memória e confere: arquivo gerado, tamanho > 10KB, contém string âncora esperada ("LAUDO PERICIAL").
-     5. Repete para trabalhista, validando adicionalmente `posto_trabalho` e `nexo_causal`.
-
-3. **Relatório na tela**: matriz verde/vermelha por etapa e por campo. Cada linha exporta o `job_id` para inspecionar na aba Job Timeline. Nada é salvo como laudo definitivo — cria-se laudo com flag `is_smoke_test = true` e uma migração adiciona essa coluna + policy pra dev deletar em massa.
-
-4. **Botão "Limpar smoke tests"** — chama edge function `dev-cleanup-smoke-tests` (service-role, `is_developer()`) que apaga `laudos` com essa flag e seus `import_jobs`. Zero risco de bagunçar dados reais de usuários.
-
----
-
-## Detalhes técnicos
-
-- **Ordem de execução**: Bloco 1 → validação manual sua com 1 PDF pequeno + 1 grande → Bloco 2 → Bloco 3.
-- **Migração necessária**: `laudos.is_smoke_test boolean default false` + índice parcial. Nada mais no schema.
-- **Concorrência MiniMax**: variável `minimax_render_concurrency` em `system_config`, default 4, editável no DevSettings.
-- **Sem retry cross-provider** em lugar nenhum (regra sua). Retry só na mesma página/mesmo provider, no máximo 2×, antes de erro visível.
-- **RLS**: `backend_logs` já tem policies suficientes. `laudos` policy nova só cobre delete pelo dev via edge function.
-- **Não toca**: prompts, `laudo-structure.ts`, exports (formato), OCR provider selection (segue DevPanel), `two_phase` do Trabalhista.
-
-## Diagrama do fluxo instrumentado
-
-```text
-[Upload]──log(upload)──▶[Split? size>20MB]──log(split)──▶[OCR por chunk]──log(ocr.chunk × N)
-                                                                │
-                                                                ▼
-                                    [Preenchimento por campo]──log(fill.<campo> × M)
-                                                                │
-                                                                ▼
-                                          [Export DOCX/PDF]──log(export.docx / export.pdf)
-                                                                │
-                                                                ▼
-                                                    import_jobs.status = ok|failed
+```
+ocr_fallback_enabled           boolean   default: false     -- MASTER OFF por padrão
+ocr_fallback_provider          text      default: "none"    -- nenhum provider pré-definido
+ocr_fallback_on_size_exceeded  boolean   default: false     -- não pular Mistral automaticamente
 ```
 
-## Perguntas antes de executar
+Consequência dos defaults:
+- Se o provider principal (definido em `phase1_ocr_provider`) falhar, o job **falha explicitamente** — nenhum outro provider é chamado.
+- O "shouldSkipMistral" hardcoded some. Se você escolher Mistral e o arquivo for grande, o Mistral erra naturalmente (413), e o job falha — não cai em Gemini sem sua ordem.
+- Para ter fallback, você precisa entrar no DevPanel, ligar o toggle e escolher qual provider é o fallback. Ponto.
 
-1. **Concorrência MiniMax default 4 está OK?** Se seu plano MiniMax tem rate-limit apertado, começamos em 2.
-2. **Fixture do smoke test trabalhista** — posso gerar um PDF sintético (nome/processo/quesitos fictícios) ou você prefere fornecer um real anonimizado?
-3. **Bloco 1 primeiro isolado, ou posso mandar Bloco 1 + migração da coluna `is_smoke_test` juntos** (a coluna não afeta nada até o Bloco 3)?
+### 2. Novo helper `_shared/ocr-fallback.ts`
+
+```ts
+getOcrFallbackConfig(): Promise<{
+  enabled: boolean;
+  fallbackProvider: OcrProvider | "none";
+  fallbackOnSizeExceeded: boolean;
+}>;
+
+resolveOcrFallback(primaryProvider, error, ctx): Promise<
+  | { action: "propagate" }                          // sempre que enabled=false OU provider="none" OU provider===primary
+  | { action: "fallback"; provider: OcrProvider }    // só quando você configurou explicitamente
+>;
+```
+
+Regra dura: **se `enabled=false` ou `fallbackProvider="none"` ou `fallbackProvider===primaryProvider` → sempre `propagate`.** Nenhuma condição implícita liga fallback. Zero branches "se der erro X, tenta provider Y".
+
+### 3. Refatoração cirúrgica em `processar-autos/index.ts` (Trabalhista)
+
+**Não reescrevo blocos. Só troco o critério de decisão dentro dos try/catch que já existem.** Cada ponto abaixo vira uma consulta a `resolveOcrFallback`:
+
+- **Linha ~1142** (Gemini falhou → tentava Mistral): passa a consultar `resolveOcrFallback`. Com defaults, propaga o erro. Se você configurar `fallback=mistral` no DevPanel, comporta-se como hoje.
+- **Linha ~2427** (MiniMax indisponível → caía em Gemini): mesma consulta. Com defaults, propaga (o Prev já faz assim com `MINIMAX_CLIENT_RASTERIZE_ERROR`).
+- **Linha ~2436** (`shouldSkipMistral` por >45 MB): só executa se `ocr_fallback_on_size_exceeded=true`. Com default `false`, deixa Mistral tentar — se você o escolheu explicitamente, respeita sua ordem.
+- **Linhas ~2456-2600** (Mistral falhou → caía em Gemini via `pdfBytesBackup`): mesma consulta. Com defaults, propaga.
+- **Linhas 1689-1701** (chunked com Mistral hardcoded): substituo por `runOcrWithConfiguredProvider(...)` — o chunked continua chunked, mas passa a respeitar o `phase1_ocr_provider` do DevPanel. Este é o único hardcode "cego" que sai. Sem ele, o chunked seguirá sua escolha do DevPanel; se você escolheu Gemini, chunked usa Gemini.
+
+**Escopo real da mudança no arquivo:** ~5 pontos, cada um trocando 2-3 linhas por uma chamada ao helper. Nenhum bloco reescrito. Nenhum import removido. Nenhum comportamento novo — só decisão migrada para config.
+
+### 4. `_shared/ocr-router.ts` (usado pelo Previdenciário)
+
+O `runOcrWithConfiguredProvider` **já respeita 100% o DevPanel** hoje. Adição única: quando `runOcrWithConfiguredProvider` recebe um erro final, consulta `resolveOcrFallback` antes de propagar — mesmo padrão do Trabalhista. Com defaults `enabled=false`, comportamento idêntico ao atual do Prev (propaga).
+
+### 5. UI no DevPanel (`DevSettings.tsx`, seção OCR existente)
+
+Adiciono abaixo do "Provedor de OCR", com aviso visual claro:
+
+- Toggle **"Habilitar fallback de OCR"** (`ocr_fallback_enabled`) — default OFF.
+- Select **"Provider de fallback"** (`ocr_fallback_provider`) — opções: `Nenhum`, `Gemini`, `Mistral`, `GLM` (após Bloco C), `MiniMax`. Default `Nenhum`. Desabilitado quando o toggle master está OFF.
+- Toggle **"Trocar por fallback quando arquivo excede o limite do provider principal"** (`ocr_fallback_on_size_exceeded`) — default OFF, com nota: "Só relevante se Mistral for o principal (rejeita >50 MB) e você tiver fallback configurado."
+- Banner informativo: "Por segurança, nenhum fallback é acionado automaticamente. Se o provider principal falhar, o processamento falha, exceto se você tiver explicitamente configurado um fallback aqui."
+
+### 6. Instrumentação (barato, aproveita `import_jobs.result.steps[]`)
+
+Cada etapa OCR grava `provider_requested` e `provider_used`. Divergência dispara log de warning. Assim você tem prova em cada job de que nenhum provider foi chamado fora da sua escolha.
+
+### O que NÃO muda (garantias explícitas)
+- **Trabalhista**: fluxo de processamento, chunking, single-pass, two-phase, prompts, preenchimento, exports, RLS — todos intocados. Só as decisões "vamos cair em X provider" migram para config.
+- **Previdenciário**: `ocr-router` já era config-driven. Ganha só o hook de fallback (default OFF).
+- **IA de texto (Fase 2, resumos, regeneração de campo)**: intocada. `ai-config.ts` continua exatamente como está — a regra do fallback OCR não se aplica a IA generalista.
+- **Retry interno de cada provider** (429/500/503 dentro dos módulos `mistral-ocr.ts`, `pdf-visual-extractor.ts`, `glm-ocr.ts`): intocado.
+- **MiniMax rasterização client-side**: intocada.
+- **Prompts, structure, tabelas, migrations de negócio, exports DOCX/PDF**: intocados.
+
+---
+
+## Bloco B — Auditoria e blindagem contra hardcodes futuros
+
+1. Varredura em `supabase/functions/**` para confirmar que nenhum arquivo fora de `_shared/` importa `extractWithMistralOCR`, `extractVisualContent`, `getMistralAPIKey` ou `getMinimaxAPIKey` diretamente. Já sei que `extrair-texto-pdf` está limpo. Confirmar `prev-pre-processar`, `minimax-ocr-chunk`, `gemini-ocr-chunk`.
+2. Qualquer import direto encontrado → troca por `runOcrWithConfiguredProvider` (escolha inicial) + `resolveOcrFallback` (recuperação). Mesma técnica cirúrgica.
+3. Atualizar `mem://architecture/devpanel-ai-config-global-scope.md` com a nova regra dura:
+   > **Fallback de OCR é decidido exclusivamente em `system_config.ocr_fallback_*`. Nenhum arquivo em `supabase/functions/*/index.ts` pode encadear providers de OCR hardcoded. Toda decisão passa por `resolveOcrFallback`. Defaults do sistema nunca invocam Mistral.**
+
+---
+
+## Bloco C — GLM-OCR (Z.AI) como 4º provider
+
+Adição limpa, sem tocar em Mistral/Gemini/MiniMax:
+
+1. **`_shared/glm-ocr.ts`** — endpoint `POST https://api.z.ai/api/paas/v4/layout_parsing`, upload via signed URL do bucket `processos-pdf`, validação 50 MB/30 páginas, retry 3× com backoff em 429/500/503, parse de `md_results[]` com separador `=== PÁGINA N ===`.
+2. **`_shared/ocr-router.ts`**: `OcrProvider` recebe `"glm"`, `runOcrWithConfiguredProvider` ganha branch com split defensivo interno (target 38 MB, máx 26 págs/parte, re-halving se alguma parte estourar).
+3. **`DevSettings.tsx`**: 4º `SelectItem value="glm"` com badge "Econômico" no bloco "Provedor de OCR"; entrada em `AI_PROVIDERS` para gerenciar `GLM_API_KEY`; passa a ser opção no select de fallback do Bloco A.
+4. **`DevSmokeTest.tsx`**: 4ª fixture com `phase1_ocr_provider = "glm"`.
+5. **`mem/architecture/glm-ocr-integration.md`** + entrada no `index.md`.
+6. **Secret**: `GLM_API_KEY` solicitado via `add_secret` no início do Bloco C.
+
+---
+
+## Ordem, risco e reversibilidade
+
+1. **Bloco A** primeiro. Sobe com defaults seguros (`enabled=false`, `provider=none`). Comportamento em produção fica idêntico à situação atual **exceto pelo fato de que nenhum fallback silencioso rodará mais**. Você valida Trabalhista e Prev, depois liga fallback no DevPanel se e quando quiser.
+2. **Bloco B** em seguida — auditoria, ajustes pontuais se algum hardcode remanescente aparecer, memória atualizada.
+3. **Bloco C** por último, aditivo.
+
+**Risco de quebrar Trabalhista/Previdenciário:** baixíssimo. As mudanças no `processar-autos` são substituições cirúrgicas dentro de try/catch existentes — mesma estrutura, decisão diferente. Nenhum fluxo de processamento, extração ou preenchimento é tocado.
+
+**Reversibilidade:** total. Um `UPDATE system_config SET value='true' WHERE id='ocr_fallback_enabled'` + configurar fallback devolve o comportamento antigo. Reversão de código: um único revert por bloco.
+
+**Ganho estrutural:** você elimina de vez a possibilidade de qualquer provider de OCR ser chamado fora da sua escolha explícita. O incidente da Mistral vira impossível por construção.
+
+Confirmando dessa forma para prosseguir?

@@ -10,6 +10,7 @@ import { extractWithMistralOCR, getMistralAPIKey } from "../_shared/mistral-ocr.
 import { getPrompt } from "../_shared/prompt-manager.ts";
 import { buildModularImportPrompt, isValidSystemPrompt } from "../_shared/build-import-prompt.ts";
 import { notifyPdfErrorFireAndForget } from "../_shared/notify-pdf-error.ts";
+import { resolveOcrFallback, resolveSizeExceededFallback } from "../_shared/ocr-fallback.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -1139,24 +1140,33 @@ async function processLargePDFWithSplit(
       
       console.log(`[processar-autos] Part ${i + 1} complete (Gemini): ${extracted.rawText.length} chars`);
     } catch (geminiError) {
-      console.warn(`[processar-autos] Gemini failed for part ${i + 1}, trying Mistral OCR fallback...`, geminiError);
       lastError = geminiError instanceof Error ? geminiError : new Error(String(geminiError));
-      
-      // Try Mistral OCR as fallback
+
+      // Fallback só ocorre se explicitamente configurado no DevPanel
+      // (system_config.ocr_fallback_*). Defaults: propaga o erro.
+      const decision = await resolveOcrFallback("gemini", geminiError, {
+        restrictTo: ["mistral"],
+        logPrefix: "[processar-autos/split-part]",
+      });
+      if (decision.action === "propagate") {
+        console.warn(`[processar-autos] Gemini falhou parte ${i + 1} e fallback não configurado — propagando.`);
+        throw lastError;
+      }
+
+      // decision.provider === "mistral" (único aceito neste caminho)
+      console.warn(`[processar-autos] Gemini falhou parte ${i + 1}, usando fallback configurado: ${decision.provider}`);
       const mistralKey = getMistralAPIKey();
-      if (mistralKey) {
-        try {
-          const mistralResult = await extractWithMistralOCR(part, mistralKey);
-          extractedTexts.push(`\n=== PARTE ${i + 1} (Páginas ${range.start}-${range.end}) [Mistral OCR] ===\n${mistralResult.text}`);
-          totalPageCount += mistralResult.pageCount;
-          console.log(`[processar-autos] Part ${i + 1} complete (Mistral OCR): ${mistralResult.text.length} chars`);
-        } catch (mistralError) {
-          console.error(`[processar-autos] Both Gemini and Mistral failed for part ${i + 1}:`, mistralError);
-          throw new Error(`Falha ao processar parte ${i + 1}: ambos Gemini e Mistral falharam`);
-        }
-      } else {
-        console.error(`[processar-autos] Gemini failed and Mistral API key not configured`);
-        throw new Error(`Falha ao processar parte ${i + 1}: Gemini falhou e Mistral não está configurado`);
+      if (!mistralKey) {
+        throw new Error(`Fallback '${decision.provider}' configurado mas MISTRAL_API_KEY ausente.`);
+      }
+      try {
+        const mistralResult = await extractWithMistralOCR(part, mistralKey);
+        extractedTexts.push(`\n=== PARTE ${i + 1} (Páginas ${range.start}-${range.end}) [Mistral OCR fallback] ===\n${mistralResult.text}`);
+        totalPageCount += mistralResult.pageCount;
+        console.log(`[processar-autos] Part ${i + 1} complete (Mistral OCR fallback): ${mistralResult.text.length} chars`);
+      } catch (mistralError) {
+        console.error(`[processar-autos] Fallback Mistral também falhou parte ${i + 1}:`, mistralError);
+        throw new Error(`Falha ao processar parte ${i + 1}: primário Gemini e fallback Mistral falharam`);
       }
     }
     
@@ -1650,51 +1660,48 @@ async function processarChunkedPDFBackground(
     // Start heartbeat for long-running OCR operations
     await startHeartbeat('Chunked OCR extraction');
     
-    // Get Mistral API key for OCR
-    const mistralKey = getMistralAPIKey();
-    if (!mistralKey) {
-      throw new Error('MISTRAL_API_KEY não configurada para processamento chunked');
-    }
-    
+    // OCR provider vem do DevPanel (system_config.phase1_ocr_provider) — nada de hardcode.
+    const { runOcrWithConfiguredProvider } = await import('../_shared/ocr-router.ts');
+
     // Process each part with OCR
     const extractedTexts: string[] = [];
     let processedPageCount = 0;
-    
+
     for (let i = 0; i < fileParts.length; i++) {
       const partPath = fileParts[i];
       const range = pageRanges[i];
-      
-      await supabaseAdmin.from('import_jobs').update({ 
+
+      await supabaseAdmin.from('import_jobs').update({
         current_step: `Extraindo parte ${i + 1}/${fileParts.length} (págs ${range.start}-${range.end})...`,
         progress: Math.round(5 + (i / fileParts.length) * 35),
         step_id: 'extraction',
         updated_at: new Date().toISOString()
       }).eq('id', jobId);
-      
+
       console.log(`[processar-autos-chunked] Downloading part ${i + 1}/${fileParts.length}: ${partPath}`);
-      
+
       // Download part from storage
       const { data: partData, error: downloadError } = await supabaseAdmin.storage
         .from('processos-pdf')
         .download(partPath);
-      
+
       if (downloadError || !partData) {
         throw new Error(`Falha ao baixar parte ${i + 1}: ${downloadError?.message || 'Dados vazios'}`);
       }
-      
+
       const partBytes = new Uint8Array(await partData.arrayBuffer());
       const partSizeMB = (partBytes.byteLength / 1024 / 1024).toFixed(2);
       console.log(`[processar-autos-chunked] Part ${i + 1} downloaded: ${partSizeMB}MB`);
-      
-      // Process with Mistral OCR
+
+      // OCR via router — respeita o provider escolhido no DevPanel.
       try {
-        const mistralResult = await extractWithMistralOCR(partBytes, mistralKey);
+        const ocrResult = await runOcrWithConfiguredProvider(partBytes, {
+          logPrefix: `[processar-autos-chunked/part-${i + 1}]`,
+        });
         const pageCount = range.end - range.start + 1;
-        
-        extractedTexts.push(`\n=== PARTE ${i + 1} (Páginas ${range.start}-${range.end}) ===\n${mistralResult.text}`);
+        extractedTexts.push(`\n=== PARTE ${i + 1} (Páginas ${range.start}-${range.end}) [${ocrResult.provider}] ===\n${ocrResult.text}`);
         processedPageCount += pageCount;
-        
-        console.log(`[processar-autos-chunked] Part ${i + 1} OCR complete: ${mistralResult.text.length} chars, ${pageCount} pages`);
+        console.log(`[processar-autos-chunked] Part ${i + 1} OCR complete (${ocrResult.provider}): ${ocrResult.text.length} chars, ${pageCount} pages`);
       } catch (ocrError) {
         console.error(`[processar-autos-chunked] OCR failed for part ${i + 1}:`, ocrError);
         throw new Error(`Falha no OCR da parte ${i + 1}: ${ocrError instanceof Error ? ocrError.message : 'Erro desconhecido'}`);
@@ -2431,30 +2438,40 @@ async function processarPDFBackground(
 
       
       // Check if Mistral OCR is configured as primary provider
-      // NEW: Skip Mistral for large PDFs (>45MB) - converting stream to bytes would cause OOM
+      // O "shouldSkipMistral por tamanho" só age se o DevPanel autorizar:
+      // system_config.ocr_fallback_on_size_exceeded=true + fallback configurado.
+      // Defaults: mantém Mistral tentando (falha nativa em >50 MB).
       const SAFE_MEMORY_MISTRAL_LIMIT = 45_000_000; // 45MB
-      const shouldSkipMistral = pdfProvider === 'mistral-ocr' && pdfSizeBytes > SAFE_MEMORY_MISTRAL_LIMIT;
-      
+      let shouldSkipMistral = false;
+      if (pdfProvider === 'mistral-ocr' && pdfSizeBytes > SAFE_MEMORY_MISTRAL_LIMIT) {
+        const sizeGate = await resolveSizeExceededFallback("mistral", {
+          restrictTo: ["gemini"],
+          logPrefix: "[processar-autos/single-pass]",
+        });
+        shouldSkipMistral = !!sizeGate;
+      }
+
       if (shouldSkipMistral) {
-        console.log(`[processar-autos] PDF (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB) too large for Mistral OCR (limit: 45MB), using Gemini streaming...`);
-        await logInfo('processar-autos', `Mistral OCR pulado - PDF muito grande (${(pdfSizeBytes / 1024 / 1024).toFixed(0)}MB), usando Gemini streaming`, jobId);
-        
-        await supabaseAdmin.from('import_jobs').update({ 
-          current_step: 'PDF grande detectado, usando Gemini streaming...',
+        console.log(`[processar-autos] PDF (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB) too large for Mistral OCR (limit: 45MB), fallback autorizado no DevPanel → Gemini streaming...`);
+        await logInfo('processar-autos', `Mistral OCR pulado por config do DevPanel (PDF ${(pdfSizeBytes / 1024 / 1024).toFixed(0)}MB), usando Gemini streaming`, jobId);
+
+        await supabaseAdmin.from('import_jobs').update({
+          current_step: 'PDF grande detectado, usando fallback configurado (Gemini)...',
           updated_at: new Date().toISOString()
         }).eq('id', jobId);
-        
+
         // Start heartbeat for long operation
         startHeartbeat('Gemini streaming upload');
-        
+
         // Fall through to original flow which handles streaming correctly
       } else if (pdfProvider === 'mistral-ocr') {
         console.log('[processar-autos] Using MISTRAL OCR for single-pass extraction...');
-        
+
         const mistralKey = getMistralAPIKey();
         if (!mistralKey) {
-          console.warn('[processar-autos] Mistral key not found, falling back to Gemini');
-          await logWarn('processar-autos', 'MISTRAL_API_KEY não configurada, usando Gemini como fallback', jobId);
+          // Sem fallback silencioso: se o usuário escolheu Mistral no DevPanel
+          // e a chave não está configurada, o job falha explicitamente.
+          throw new Error('MISTRAL_API_KEY não configurada. Configure a chave no DevPanel ou troque o provider de OCR.');
         } else {
            // Declared outside try/catch so catch can access it if Mistral fails
            let pdfBytesBackup: Uint8Array | null = null;
@@ -2620,23 +2637,26 @@ async function processarPDFBackground(
             console.error('[processar-autos] Mistral OCR failed:', mistralError);
             await logWarn('processar-autos', `Mistral OCR falhou: ${mistralError instanceof Error ? mistralError.message : 'Erro'}`, jobId);
 
-            // Update current_step so frontend detects fallback
-            await supabaseAdmin.from('import_jobs').update({ 
-              current_step: 'Mistral OCR falhou, usando Gemini como fallback...',
+            // Fallback só ocorre se explicitamente configurado no DevPanel.
+            const decision = await resolveOcrFallback("mistral", mistralError, {
+              restrictTo: ["gemini"],
+              logPrefix: "[processar-autos/single-pass-mistral]",
+            });
+            if (decision.action === "propagate") {
+              // Sem fallback autorizado → propaga o erro do Mistral (comportamento default).
+              throw mistralError instanceof Error ? mistralError : new Error(String(mistralError));
+            }
+
+            // Fallback configurado explicitamente para Gemini → cai no fluxo original abaixo.
+            await supabaseAdmin.from('import_jobs').update({
+              current_step: `Mistral OCR falhou, usando fallback configurado (${decision.provider})...`,
               updated_at: new Date().toISOString()
             }).eq('id', jobId);
 
             // Restore bytes so Gemini fallback has data to work with
             if (!pdfBytes && pdfBytesBackup) {
               pdfBytes = pdfBytesBackup;
-              console.log('[processar-autos] PDF bytes restored for Gemini fallback');
-            }
-
-            // Check if fallback is also Mistral - if so, fall through to Gemini
-            if (pdfFallbackProvider === 'mistral-ocr') {
-              console.log('[processar-autos] Fallback is also Mistral OCR, falling through to Gemini...');
-            } else {
-              console.log('[processar-autos] Falling through to Gemini fallback flow...');
+              console.log('[processar-autos] PDF bytes restored for Gemini fallback (configurado no DevPanel)');
             }
             // Fall through to original flow (if !extractedData block below)
           }
@@ -2746,23 +2766,28 @@ async function processarPDFBackground(
             }
           } catch (geminiError) {
             const errorMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
-            
-            // Check if this is a capacity/limit error that can be recovered with Mistral fallback
-            const isCapacityError = 
-              errorMsg.includes('INVALID_ARGUMENT') || 
-              errorMsg.includes('exceeds') || 
-              errorMsg.includes('All attempts failed') ||
-              errorMsg.includes('token') ||
-              errorMsg.includes('maximum');
-            
-            if (isCapacityError) {
-              console.log(`[processar-autos] Gemini failed with capacity error, falling back to Mistral OCR with splitting...`);
-              await logWarn('processar-autos', `Gemini falhou por limite, iniciando fallback Mistral OCR`, jobId, { errorMsg });
-              
+
+            // Fallback só ocorre se explicitamente configurado no DevPanel.
+            // Antes: qualquer erro "de capacidade" caía para Mistral silenciosamente
+            // — comportamento removido; agora requer opt-in explícito.
+            const decision = await resolveOcrFallback("gemini", geminiError, {
+              restrictTo: ["mistral"],
+              logPrefix: "[processar-autos/single-pass-large-gemini]",
+            });
+            if (decision.action === "propagate") {
+              // Sem fallback autorizado → propaga o erro do Gemini.
+              throw geminiError instanceof Error ? geminiError : new Error(errorMsg);
+            }
+
+            // Fallback === "mistral" (único aceito neste caminho) — comportamento antigo preservado.
+            {
+              console.log(`[processar-autos] Fallback configurado no DevPanel: Gemini → Mistral OCR (com splitting)...`);
+              await logWarn('processar-autos', `Fallback configurado ativado (Gemini → Mistral OCR)`, jobId, { errorMsg });
+
               // Check if Mistral key is available
               const mistralKey = getMistralAPIKey();
               if (!mistralKey) {
-                throw new Error('PDF muito grande para Gemini e Mistral OCR não disponível. Divida o arquivo manualmente (<45MB).');
+                throw new Error('Fallback configurado para Mistral OCR mas MISTRAL_API_KEY ausente. Configure no DevPanel.');
               }
               
               // Download PDF bytes from storage for splitting
@@ -2841,11 +2866,7 @@ async function processarPDFBackground(
               
               await logInfo('processar-autos', `Fallback Mistral OCR completo: ${processedPages} páginas em ${parts.length} partes`, jobId);
               
-              geminiExtractionSucceeded = true; // Mark as succeeded (via fallback)
-              
-            } else {
-              // Not a capacity error - rethrow
-              throw geminiError;
+              geminiExtractionSucceeded = true; // Mark as succeeded (via fallback configurado)
             }
           }
           
