@@ -101,10 +101,12 @@ export async function runOcrWithConfiguredProvider(
   const mistralKey = getMistralAPIKey();
   const geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("LOVABLE_API_KEY");
   const minimaxKey = getMinimaxAPIKey();
+  const glmKey = getGlmAPIKey();
 
   const missingKey =
     (cfg.provider === "mistral" && !mistralKey) ||
     (cfg.provider === "minimax" && !minimaxKey) ||
+    (cfg.provider === "glm" && !glmKey) ||
     (cfg.provider === "gemini" && !geminiKey);
 
   if (missingKey) {
