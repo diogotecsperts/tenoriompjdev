@@ -235,6 +235,78 @@ function formatStageLabel(stage: string, provider?: string | null): string {
 }
 
 
+// ============================================================================
+// withRetry — 3 tentativas com backoff exponencial + jitter
+// ----------------------------------------------------------------------------
+// Retryable: rate_limited, provider_timeout, provider_unavailable,
+// response_truncated, erros de rede, 5xx/504.
+// Não retryable: quota_exceeded, invalid_key, session_expired, canceled,
+// invalid_request, unsupported_file, file_too_large.
+// Respeita signal.aborted entre tentativas.
+// ============================================================================
+
+const RETRYABLE_CODES: PreProcessarErrorCode[] = [
+  "rate_limited",
+  "provider_timeout",
+  "provider_unavailable",
+  "response_truncated",
+];
+
+function isRetryable(err: unknown): boolean {
+  if (err instanceof PreProcessarError) {
+    if (RETRYABLE_CODES.includes(err.code)) return true;
+    if (err.upstreamStatus && err.upstreamStatus >= 500) return true;
+    return false;
+  }
+  // Erros de rede genéricos (fetch)
+  const msg = (err as { message?: string })?.message?.toLowerCase() ?? "";
+  if (/network|fetch failed|failed to fetch|timeout|econnreset|socket/.test(msg)) return true;
+  return false;
+}
+
+async function withRetry<T>(
+  label: string,
+  fn: (attempt: number) => Promise<T>,
+  opts: { attempts?: number; signal?: AbortSignal; onProgress?: (msg: string) => void } = {},
+): Promise<T> {
+  const attempts = opts.attempts ?? 3;
+  let lastErr: unknown;
+  for (let i = 1; i <= attempts; i++) {
+    if (opts.signal?.aborted) throwCanceled(undefined, label);
+    try {
+      if (i > 1) {
+        opts.onProgress?.(`${label} — tentativa ${i}/${attempts}`);
+        // Sessão pode ter envelhecido entre tentativas
+        try { await ensureFreshSession(); } catch { /* propaga na próxima chamada */ }
+      }
+      return await fn(i);
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryable(err) || i === attempts) {
+        throw err;
+      }
+      // Backoff exponencial 2s → 4s → 8s com jitter ±25%
+      const base = 2000 * Math.pow(2, i - 1);
+      const jitter = base * 0.25 * (Math.random() * 2 - 1);
+      const delay = Math.max(500, Math.round(base + jitter));
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn(`[withRetry] ${label} falhou (${i}/${attempts}): ${errMsg} — retry em ${delay}ms`);
+      opts.onProgress?.(`${label} — aguardando retry (${Math.round(delay / 1000)}s)...`);
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(() => {
+          opts.signal?.removeEventListener("abort", onAbort);
+          resolve();
+        }, delay);
+        const onAbort = () => { clearTimeout(t); resolve(); };
+        opts.signal?.addEventListener("abort", onAbort, { once: true });
+      });
+      if (opts.signal?.aborted) throwCanceled(undefined, label);
+    }
+  }
+  throw lastErr;
+}
+
+
 async function checkStatus(jobId: string): Promise<PrevProcessingStatus> {
   const { data, error } = await supabase.functions.invoke("check-prev-processing-status", {
     body: { jobId },
