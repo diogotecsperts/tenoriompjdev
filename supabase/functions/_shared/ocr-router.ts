@@ -98,10 +98,10 @@ export async function runOcrWithConfiguredProvider(
     `${prefix} provider=${cfg.provider} model=${cfg.geminiModel} bytes=${sizeBytes} input=${isBlobInput ? "blob" : "bytes"}`,
   );
 
-  const mistralKey = getMistralAPIKey();
+  const mistralKey = await getMistralAPIKey();
   const geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("LOVABLE_API_KEY");
   const minimaxKey = getMinimaxAPIKey();
-  const glmKey = getGlmAPIKey();
+  const glmKey = await getGlmAPIKey();
 
   const missingKey =
     (cfg.provider === "mistral" && !mistralKey) ||
