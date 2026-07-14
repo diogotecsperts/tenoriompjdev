@@ -50,6 +50,7 @@ export type PreProcessarErrorCode =
   | "file_too_large"
   | "unsupported_file"
   | "provider_unavailable"
+  | "canceled"
   | "unknown";
 
 export class PreProcessarError extends Error {
@@ -180,7 +181,7 @@ function classifyInvokeError(error: unknown, body: Record<string, unknown> | nul
 const STAGE_LABELS: Record<string, string> = {
   queued: "Na fila",
   download: "Baixando PDF",
-  ocr_processing: "OCR Gemini em execução",
+  ocr_processing: "OCR em execução",
   ocr_completed: "OCR concluído",
   ai_extraction: "Extraindo dados",
   ai_refinement: "Refinando campos",
@@ -188,6 +189,31 @@ const STAGE_LABELS: Record<string, string> = {
   completed: "Concluído",
   failed: "Falhou",
 };
+
+/**
+ * Nome legível do provider de OCR — usado para montar o label real do stage
+ * a partir de `status.provider` (que reflete o `phase1_ocr_provider` do
+ * DevPanel). Evita o falso "OCR Gemini em execução" quando o provider real é
+ * GLM / Mistral / MiniMax.
+ */
+function providerDisplayName(provider?: string | null): string | null {
+  if (!provider) return null;
+  const p = provider.toLowerCase();
+  if (p.includes("glm")) return "GLM";
+  if (p.includes("mistral")) return "Mistral";
+  if (p.includes("minimax")) return "MiniMax";
+  if (p.includes("gemini")) return "Gemini";
+  return null;
+}
+
+function formatStageLabel(stage: string, provider?: string | null): string {
+  const base = STAGE_LABELS[stage] || stage;
+  const name = providerDisplayName(provider);
+  if (!name) return base;
+  if (stage === "ocr_processing") return `OCR ${name} em execução`;
+  if (stage === "ocr_completed") return `OCR ${name} concluído`;
+  return base;
+}
 
 async function checkStatus(jobId: string): Promise<PrevProcessingStatus> {
   const { data, error } = await supabase.functions.invoke("check-prev-processing-status", {
@@ -204,9 +230,31 @@ async function checkStatus(jobId: string): Promise<PrevProcessingStatus> {
   return d as PrevProcessingStatus;
 }
 
+async function requestJobCancel(jobId: string): Promise<void> {
+  try {
+    await supabase.functions.invoke("cancel-prev-processing-job", { body: { jobId } });
+  } catch (e) {
+    console.warn("[prev-pre-processar] cancel invoke failed", e);
+  }
+}
+
+function throwCanceled(jobId?: string, stage?: string): never {
+  throw new PreProcessarError(
+    "Processamento cancelado.",
+    "canceled",
+    stage,
+    null,
+    undefined,
+    undefined,
+    undefined,
+    jobId,
+  );
+}
+
 async function pollPreProcessarJob(
   start: AsyncPreProcessarStart,
   onProgress?: (message: string) => void,
+  signal?: AbortSignal,
 ): Promise<PreProcessarResult> {
   const startedAt = Date.now();
   const maxWaitMs = 8 * 60_000;
@@ -219,9 +267,14 @@ async function pollPreProcessarJob(
   const STAGNATION_LIMIT_MS = 130_000;
 
   while (Date.now() - startedAt < maxWaitMs) {
+    if (signal?.aborted) {
+      void requestJobCancel(start.jobId);
+      throwCanceled(start.jobId, "ocr_processing");
+    }
     const status = await checkStatus(start.jobId);
-    const label = STAGE_LABELS[status.stage] || status.stage || status.status;
+    const label = formatStageLabel(status.stage, status.provider || start.provider);
     onProgress?.(`${label}${typeof status.progress === "number" ? ` · ${status.progress}%` : ""}`);
+
 
     if (status.status === "completed") {
       const result = status.result || {};
@@ -273,7 +326,22 @@ async function pollPreProcessarJob(
       }
     }
 
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    // Sleep responsivo ao abort: acorda cedo se signal disparar durante a espera.
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, delayMs);
+      const onAbort = () => {
+        clearTimeout(t);
+        resolve();
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    if (signal?.aborted) {
+      void requestJobCancel(start.jobId);
+      throwCanceled(start.jobId, "ocr_processing");
+    }
     delayMs = Math.min(7000, delayMs + 500);
   }
 
@@ -322,8 +390,10 @@ async function ensureFreshSession(): Promise<void> {
  */
 export async function preProcessarPericia(
   periciaId: string,
-  opts: { onMinimaxProgress?: (p: MinimaxOcrProgress) => void; onJobProgress?: (message: string) => void } = {},
+  opts: { onMinimaxProgress?: (p: MinimaxOcrProgress) => void; onJobProgress?: (message: string) => void; signal?: AbortSignal } = {},
 ): Promise<PreProcessarResult> {
+  const { signal } = opts;
+  if (signal?.aborted) throwCanceled();
   await ensureFreshSession();
   // 1ª tentativa: envia só o periciaId. Se o DevPanel estiver com MiniMax como
   // provider de OCR, a edge function sinaliza needsClientRasterize e rodamos o
@@ -389,7 +459,7 @@ export async function preProcessarPericia(
 
   if (isAsyncStart(first.data)) {
     opts.onJobProgress?.("Processamento em segundo plano iniciado");
-    return pollPreProcessarJob(first.data, opts.onJobProgress);
+    return pollPreProcessarJob(first.data, opts.onJobProgress, signal);
   }
 
   return unwrap(first.data, first.error);

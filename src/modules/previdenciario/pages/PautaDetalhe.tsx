@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -17,6 +17,7 @@ import {
   Upload,
   Sparkles,
   Pencil,
+  Square,
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
@@ -62,7 +63,16 @@ export default function PautaDetalhe() {
   const [processandoLote, setProcessandoLote] = useState(false);
   const [processandoDetalhes, setProcessandoDetalhes] = useState<Record<string, string>>({});
   const [loteProgresso, setLoteProgresso] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+  // Um AbortController por perícia em processamento; permite o botão "Parar" cortar o polling
+  // e disparar cancel-prev-processing-job sem depender do watchdog server-side.
+  const abortersRef = useRef<Map<string, AbortController>>(new Map());
   const { progress, finish } = useFakeProgress(processandoIds.size > 0 || processandoLote);
+
+  const handleStopProcessar = (periciaId: string) => {
+    const ctrl = abortersRef.current.get(periciaId);
+    if (ctrl) ctrl.abort();
+  };
+
 
   const reload = async () => {
     if (!pautaId) return;
@@ -182,8 +192,11 @@ export default function PautaDetalhe() {
     }
     setProcessandoIds((s) => new Set(s).add(pericia.id));
     setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: "Preparando PDF" }));
+    const controller = new AbortController();
+    abortersRef.current.set(pericia.id, controller);
     try {
       const r = await preProcessarPericia(pericia.id, {
+        signal: controller.signal,
         onMinimaxProgress: (p) => {
           setProcessandoDetalhes((s) => ({ ...s, [pericia.id]: formatClientOcrProgress(p) }));
         },
@@ -200,44 +213,52 @@ export default function PautaDetalhe() {
       );
       void reload();
     } catch (err: any) {
-      const title =
-        err?.code === "session_expired"
-          ? "Sessão expirada"
-          : err?.code === "quota_exceeded"
-          ? "Saldo/cota insuficiente"
-          : err?.code === "invalid_key"
-            ? "Credencial inválida"
-            : err?.code === "rate_limited"
-              ? "Muitas requisições"
-              : err?.code === "provider_timeout"
-                ? "Tempo excedido na IA"
-                : err?.code === "invalid_request"
-                  ? "OCR recusado pelo provider"
-                  : err?.code === "response_truncated"
-                    ? "Resposta incompleta da IA"
-                    : err?.code === "file_too_large"
-                      ? "PDF muito grande"
-                      : err?.code === "unsupported_file"
-                        ? "Arquivo não suportado"
-                        : err?.code === "provider_unavailable"
-                          ? "IA indisponível"
-                          : "Erro no processamento";
-      const retryable =
-        err?.code !== "file_too_large" &&
-        err?.code !== "unsupported_file" &&
-        err?.code !== "invalid_key" &&
-        err?.code !== "session_expired";
-      toast({
-        variant: "destructive",
-        title,
-        description: formatProcessarErrorDescription(err),
-        action: retryable ? (
-          <ToastAction altText="Tentar novamente" onClick={() => void handleProcessar(pericia)}>
-            Tentar novamente
-          </ToastAction>
-        ) : undefined,
-      });
+      if (err?.code === "canceled") {
+        toast({
+          title: "Processamento interrompido",
+          description: "Você parou o processamento desta perícia.",
+        });
+      } else {
+        const title =
+          err?.code === "session_expired"
+            ? "Sessão expirada"
+            : err?.code === "quota_exceeded"
+            ? "Saldo/cota insuficiente"
+            : err?.code === "invalid_key"
+              ? "Credencial inválida"
+              : err?.code === "rate_limited"
+                ? "Muitas requisições"
+                : err?.code === "provider_timeout"
+                  ? "Tempo excedido na IA"
+                  : err?.code === "invalid_request"
+                    ? "OCR recusado pelo provider"
+                    : err?.code === "response_truncated"
+                      ? "Resposta incompleta da IA"
+                      : err?.code === "file_too_large"
+                        ? "PDF muito grande"
+                        : err?.code === "unsupported_file"
+                          ? "Arquivo não suportado"
+                          : err?.code === "provider_unavailable"
+                            ? "IA indisponível"
+                            : "Erro no processamento";
+        const retryable =
+          err?.code !== "file_too_large" &&
+          err?.code !== "unsupported_file" &&
+          err?.code !== "invalid_key" &&
+          err?.code !== "session_expired";
+        toast({
+          variant: "destructive",
+          title,
+          description: formatProcessarErrorDescription(err),
+          action: retryable ? (
+            <ToastAction altText="Tentar novamente" onClick={() => void handleProcessar(pericia)}>
+              Tentar novamente
+            </ToastAction>
+          ) : undefined,
+        });
+      }
     } finally {
+      abortersRef.current.delete(pericia.id);
       setProcessandoIds((s) => {
         const n = new Set(s);
         n.delete(pericia.id);
@@ -250,6 +271,7 @@ export default function PautaDetalhe() {
       finish();
     }
   };
+
 
   const handleProcessarLote = async () => {
     if (pendentes.length === 0) return;
@@ -531,9 +553,21 @@ export default function PautaDetalhe() {
                       {p.pdf_processado ? "Reprocessar" : "Processar"}
                     </Button>
                     {processandoIds.has(p.id) && (
-                      <span className="text-[10px] text-muted-foreground tabular-nums leading-none mt-0.5">
-                        {processandoDetalhes[p.id] || `${progress}%`}
-                      </span>
+                      <>
+                        <span className="text-[10px] text-muted-foreground tabular-nums leading-none mt-0.5">
+                          {processandoDetalhes[p.id] || `${progress}%`}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 mt-0.5 px-2 text-[10px] text-destructive hover:text-destructive"
+                          onClick={() => handleStopProcessar(p.id)}
+                          title="Parar processamento"
+                        >
+                          <Square className="h-3 w-3 mr-1 fill-current" />
+                          Parar
+                        </Button>
+                      </>
                     )}
                   </div>
                 )}
