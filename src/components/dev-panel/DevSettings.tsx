@@ -220,6 +220,32 @@ const AI_PROVIDERS: ProviderInfo[] = [{
   keyPlaceholder: "sk-cp-..."
 }];
 
+// Providers de OCR (Fase 1) — só extraem texto de PDF, nunca preenchem laudo (Fase 2).
+// Renderizados em uma tabela separada abaixo do Provider Inventory principal.
+// Gemini e MiniMax também fazem OCR, mas sua chave é gerenciada no Provider Inventory
+// principal — não duplicar aqui.
+const OCR_PROVIDERS: ProviderInfo[] = [{
+  id: "mistral-ocr",
+  name: "Mistral OCR",
+  description: "Precisão elite (~94.9%) para tabelas e documentos escaneados.",
+  models: ["mistral-ocr-latest"],
+  requiresKey: true,
+  color: "hsl(168, 58%, 39%)",
+  keyPlaceholder: "..."
+}, {
+  id: "glm",
+  name: "GLM-OCR (Z.AI)",
+  description: "Layout parsing (Markdown estruturado). Limite: 50MB / 30 páginas por chamada.",
+  models: ["glm-ocr"],
+  requiresKey: true,
+  color: "hsl(217, 91%, 60%)",
+  keyPlaceholder: "..."
+}];
+
+const ALL_PROVIDERS: ProviderInfo[] = [...AI_PROVIDERS, ...OCR_PROVIDERS];
+
+
+
 const DEFAULT_CONFIG: SystemConfig = {
   default_ai_provider: "lovable",
   default_ai_model: "google/gemini-2.5-flash",
