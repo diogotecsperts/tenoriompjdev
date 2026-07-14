@@ -34,7 +34,7 @@ import {
   updatePericia,
   uploadPericiaPdf,
 } from "../api/pautas";
-import { preProcessarPericia, preProcessarPericiaComSplit } from "../api/processar";
+import { preProcessarPericiaComSplit } from "../api/processar";
 import type { MinimaxOcrProgress } from "@/lib/minimax-ocr-client";
 import { NovaPericiaDialog } from "../components/NovaPericiaDialog";
 import { EditarPautaDialog } from "../components/EditarPautaDialog";
