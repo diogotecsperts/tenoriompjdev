@@ -1940,6 +1940,13 @@ export function DevSettings() {
                       <Badge variant="secondary" className="text-[10px]">Chunked</Badge>
                     </div>
                   </SelectItem>
+                  <SelectItem value="glm">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full" style={{ backgroundColor: "hsl(200, 80%, 55%)" }} />
+                      <span>GLM-OCR (Z.AI)</span>
+                      <Badge variant="secondary" className="text-[10px]">50MB · 30p</Badge>
+                    </div>
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
