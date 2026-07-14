@@ -36,12 +36,31 @@ export interface GlmOcrResult {
   processingTimeMs: number;
 }
 
-export function getGlmAPIKey(): string | null {
+/**
+ * Obter chave GLM: primeiro do `global_api_keys` (DevPanel "Provedores de OCR"),
+ * fallback para `Deno.env.get('GLM_API_KEY')`. Mesmo padrão de getGeminiApiKey.
+ */
+export async function getGlmAPIKey(): Promise<string | null> {
+  try {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (supabaseUrl && supabaseKey) {
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      const { data } = await supabase
+        .from("global_api_keys")
+        .select("api_key")
+        .eq("id", "glm")
+        .maybeSingle();
+      if (data?.api_key) return data.api_key;
+    }
+  } catch (e) {
+    console.warn("[glm-ocr] falha ao ler global_api_keys, usando env fallback:", (e as Error).message);
+  }
   return Deno.env.get("GLM_API_KEY") || null;
 }
 
 export async function hasGlmAPIKey(): Promise<boolean> {
-  const k = getGlmAPIKey();
+  const k = await getGlmAPIKey();
   return !!k && k.length > 0;
 }
 
