@@ -177,41 +177,42 @@ export function DevAIStatus() {
         status: primaryHasKey ? 'active' : 'error'
       });
 
-      // Parse PDF-specific config (unified: phase1_ocr_provider + phase1_gemini_model)
+      // OCR (Fase 1) — provider e modelo por provider ativo
+      const geminiModelFallback = configMap.phase1_gemini_model?.replace(/"/g, '') || 'gemini-2.5-flash';
       const pdfProvider = configMap.phase1_ocr_provider?.replace(/"/g, '') || 'gemini';
-      const pdfModel = configMap.phase1_gemini_model?.replace(/"/g, '') || 'gemini-2.5-flash';
+      const pdfModel = ocrModelFor(pdfProvider, geminiModelFallback);
+      const pdfHasKey = hasKeyFor(pdfProvider, savedKeys);
 
-      const pdfFallbackProvider = configMap.pdf_fallback_provider?.replace(/"/g, '') || 'lovable';
-      const pdfFallbackModel = configMap.pdf_fallback_model?.replace(/"/g, '') || 'google/gemini-2.5-flash';
+      // Fallback OCR — chave correta é ocr_fallback_provider (não pdf_fallback_*)
+      const ocrFallbackProvider = configMap.ocr_fallback_provider?.replace(/"/g, '') || 'none';
+      const ocrFallbackModel = ocrModelFor(ocrFallbackProvider, geminiModelFallback);
+      const ocrFallbackHasKey = hasKeyFor(ocrFallbackProvider, savedKeys);
 
-      const pdfHasKey = pdfProvider === 'lovable' || savedKeys.has(pdfProvider);
-      const pdfFallbackHasKey = pdfFallbackProvider === 'lovable' || savedKeys.has(pdfFallbackProvider);
-
-      // Update operations with current config
-      setOperations(AI_OPERATIONS.map(op => {
-        if (op.id === 'pdf_extraction') {
-          return {
-            ...op,
-            provider: pdfProvider,
-            model: pdfModel,
-            status: pdfHasKey ? 'ok' : 'error'
-          };
-        }
-        if (op.id === 'pdf_fallback') {
-          return {
-            ...op,
-            provider: pdfFallbackProvider,
-            model: pdfFallbackModel,
-            status: pdfFallbackHasKey ? 'ok' : 'error'
-          };
-        }
-        return {
-          ...op,
+      // Operações reais do sistema
+      const ops: AIOperation[] = [
+        {
+          id: 'ocr_primary',
+          name: 'OCR (Fase 1) — Leitura de PDF',
+          provider: pdfProvider,
+          model: pdfModel,
+          status: pdfHasKey ? 'ok' : 'error',
+        },
+        {
+          id: 'ocr_fallback',
+          name: 'Fallback OCR',
+          provider: ocrFallbackProvider,
+          model: ocrFallbackModel,
+          status: ocrFallbackProvider === 'none' ? 'warning' : (ocrFallbackHasKey ? 'ok' : 'error'),
+        },
+        {
+          id: 'ai_generalist',
+          name: 'IA Generalista (Trabalhista, Previdenciário, Impugnação)',
           provider: primaryProvider,
           model: primaryModel,
-          status: primaryHasKey ? 'ok' : 'error'
-        };
-      }));
+          status: primaryHasKey ? 'ok' : 'error',
+        },
+      ];
+      setOperations(ops);
 
       // Fetch fallback statistics from recent jobs (last 30 days)
       const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
