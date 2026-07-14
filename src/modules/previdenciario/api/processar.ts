@@ -6,6 +6,9 @@ import {
   uploadPericiaPdfPart,
   downloadPericiaPdf,
   deletePericiaPdfParts,
+  rasterAndUploadCleanPdf,
+  deletePericiaPdfClean,
+  updatePericia,
   type PrevPdfSplitPart,
 } from "./pautas";
 
