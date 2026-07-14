@@ -880,6 +880,15 @@ export function DevSettings() {
         id: "phase1_ocr_provider",
         value: config.phase1_ocr_provider
       }, {
+        id: "ocr_fallback_enabled",
+        value: config.ocr_fallback_enabled
+      }, {
+        id: "ocr_fallback_provider",
+        value: config.ocr_fallback_provider
+      }, {
+        id: "ocr_fallback_on_size_exceeded",
+        value: config.ocr_fallback_on_size_exceeded
+      }, {
         id: "minimax_render_concurrency",
         value: Math.min(8, Math.max(1, Number(config.minimax_render_concurrency) || 4))
       }];
