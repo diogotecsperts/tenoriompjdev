@@ -2,7 +2,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { runMinimaxClientOcr, type MinimaxOcrProgress } from "@/lib/minimax-ocr-client";
 import {
   prevPdfNeedsSplit,
-  splitPrevPdf,
+  
   splitCleanPdfByPages,
   probePdfPageCount,
   PREV_SPLIT_MAX_PAGES,
