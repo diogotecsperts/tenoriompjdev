@@ -331,6 +331,106 @@ export async function deletePericiaPdfClean(userId: string, periciaId: string): 
 
 export const PREV_SPLIT_MAX_BYTES = 48 * 1024 * 1024;
 
+/**
+ * Limite defensivo de páginas por parte. GLM-OCR aceita ≤ 100 páginas por PDF
+ * (limite duro do provider). Usamos 90 como margem de segurança.
+ */
+export const PREV_SPLIT_MAX_PAGES = 90;
+
+/**
+ * Lê o pageCount de um PDF sem rasterizar. Usado como probe rápido no gate
+ * de entrada de `preProcessarPericiaComSplit` para decidir se precisa rebuild.
+ * Custo: ~50-200ms para PDFs de dezenas/centenas de páginas.
+ */
+export async function probePdfPageCount(source: Blob | File | Uint8Array): Promise<number> {
+  const { PDFDocument } = await import("pdf-lib");
+  const bytes =
+    source instanceof Uint8Array
+      ? source
+      : new Uint8Array(await (source as Blob).arrayBuffer());
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  return doc.getPageCount();
+}
+
+/**
+ * Divide um PDF **já rasterizado limpo** em partes sequenciais de até
+ * `maxPages` páginas E ≤ `maxBytes`. Só faz sentido em cima do output de
+ * `rebuildPdfAsRasterClean` — nunca no PDF original, que pode ter recursos
+ * compartilhados que inflam qualquer range.
+ *
+ * Estratégia: janelas sequenciais de `maxPages`. Se uma janela ainda exceder
+ * `maxBytes` (raro no raster proporcional), divide a janela pela metade e
+ * reserializa — converge rápido porque cada página raster é independente.
+ */
+export async function splitCleanPdfByPages(
+  cleanSource: Blob | Uint8Array,
+  maxPages: number = PREV_SPLIT_MAX_PAGES,
+  maxBytes: number = PREV_SPLIT_MAX_BYTES,
+): Promise<PrevPdfSplitPart[]> {
+  const { PDFDocument } = await import("pdf-lib");
+  const bytes =
+    cleanSource instanceof Uint8Array
+      ? cleanSource
+      : new Uint8Array(await (cleanSource as Blob).arrayBuffer());
+  const probe = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const totalPages = probe.getPageCount();
+
+  const serializeRange = async (startIdx: number, endIdx: number): Promise<Blob> => {
+    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const n = doc.getPageCount();
+    for (let i = n - 1; i > endIdx; i--) doc.removePage(i);
+    for (let i = startIdx - 1; i >= 0; i--) doc.removePage(i);
+    const out = await doc.save({ useObjectStreams: true, updateFieldAppearances: false });
+    const buf = new ArrayBuffer(out.byteLength);
+    new Uint8Array(buf).set(out);
+    return new Blob([buf], { type: "application/pdf" });
+  };
+
+  const parts: PrevPdfSplitPart[] = [];
+
+  const emitRange = async (startIdx: number, endIdx: number): Promise<void> => {
+    const blob = await serializeRange(startIdx, endIdx);
+    const sizeMB = (blob.size / 1024 / 1024).toFixed(1);
+    if (blob.size <= maxBytes) {
+      console.info(
+        `[prev-split-clean] parte págs ${startIdx + 1}-${endIdx + 1}: ${sizeMB}MB (OK)`,
+      );
+      parts.push({ blob, startPage: startIdx + 1, endPage: endIdx + 1, totalPages });
+      return;
+    }
+    if (endIdx === startIdx) {
+      // Página única raster excedeu maxBytes — improvável, mas marca para o caller.
+      console.warn(
+        `[prev-split-clean] página raster ${startIdx + 1} ficou ${sizeMB}MB > ${(maxBytes / 1024 / 1024).toFixed(0)}MB`,
+      );
+      parts.push({
+        blob,
+        startPage: startIdx + 1,
+        endPage: endIdx + 1,
+        totalPages,
+        needsClientRasterize: true,
+      });
+      return;
+    }
+    console.info(
+      `[prev-split-clean] janela ${startIdx + 1}-${endIdx + 1} = ${sizeMB}MB > ${(maxBytes / 1024 / 1024).toFixed(0)}MB — subdividindo`,
+    );
+    const mid = Math.floor((startIdx + endIdx) / 2);
+    await emitRange(startIdx, mid);
+    await emitRange(mid + 1, endIdx);
+  };
+
+  // Janelas sequenciais de `maxPages`
+  for (let start = 0; start < totalPages; start += maxPages) {
+    const end = Math.min(start + maxPages - 1, totalPages - 1);
+    await emitRange(start, end);
+  }
+  console.info(
+    `[prev-split-clean] ${totalPages} págs → ${parts.length} partes (maxPages=${maxPages}, maxBytes=${(maxBytes / 1024 / 1024).toFixed(0)}MB)`,
+  );
+  return parts;
+}
+
 export interface PrevPdfSplitPart {
   blob: Blob;
   startPage: number; // 1-based
