@@ -2,7 +2,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { runMinimaxClientOcr, type MinimaxOcrProgress } from "@/lib/minimax-ocr-client";
 import {
   prevPdfNeedsSplit,
-  splitPrevPdf,
+  
+  splitCleanPdfByPages,
+  probePdfPageCount,
+  PREV_SPLIT_MAX_PAGES,
+  PREV_SPLIT_MAX_BYTES,
   uploadPericiaPdfPart,
   downloadPericiaPdf,
   deletePericiaPdfParts,
@@ -791,14 +795,30 @@ export async function preProcessarPericiaComSplit(
     return preProcessarPericia(periciaId, opts);
   }
 
-  if (!prevPdfNeedsSplit(blob)) {
+  // Probe rápido de pageCount (pdf-lib load, ~50-200ms). Ativa rebuild
+  // quando `size > 48MB` OU `pageCount > 90` (limite duro do GLM).
+  let pageCountProbe = 0;
+  try {
+    pageCountProbe = await probePdfPageCount(blob);
+  } catch (err) {
+    console.warn("[prev-rebuild] probePdfPageCount falhou; usando fallback só por tamanho:", err);
+  }
+  const needsSplitByBytes = prevPdfNeedsSplit(blob);
+  const needsSplitByPages = pageCountProbe > PREV_SPLIT_MAX_PAGES;
+
+  if (!needsSplitByBytes && !needsSplitByPages) {
     // Caminho rápido — zero alteração no comportamento.
     return preProcessarPericia(periciaId, opts);
   }
 
   const totalMB = (blob.size / 1024 / 1024).toFixed(1);
-  console.log(`[prev-rebuild] PDF ${totalMB}MB > 48MB → rasterizando e remontando limpo`);
-  opts.onJobProgress?.(`PDF grande (${totalMB}MB): rasterizando páginas...`);
+  const trigger = needsSplitByBytes && needsSplitByPages
+    ? `${totalMB}MB / ${pageCountProbe} págs`
+    : needsSplitByBytes
+      ? `${totalMB}MB > 48MB`
+      : `${pageCountProbe} págs > ${PREV_SPLIT_MAX_PAGES}`;
+  console.log(`[prev-rebuild] PDF ${trigger} → rasterizando e remontando limpo`);
+  opts.onJobProgress?.(`PDF grande (${trigger}): rasterizando páginas...`);
 
   const userIdFromPath = pdfPath.split("/")[0]; // path é `{userId}/{periciaId}.pdf`
   const started = Date.now();
@@ -834,83 +854,86 @@ export async function preProcessarPericiaComSplit(
     );
     cleanPath = path;
     const cleanMB = (sizeBytes / 1024 / 1024).toFixed(1);
-    console.log(`[prev-rebuild] PDF limpo: ${cleanMB}MB, ${pageCount} págs → ${path}`);
-    opts.onJobProgress?.(`PDF limpo gerado (${cleanMB}MB). Enviando para OCR...`);
+    const singleShot = sizeBytes <= PREV_SPLIT_MAX_BYTES && pageCount <= PREV_SPLIT_MAX_PAGES;
+    console.log(
+      `[prev-rebuild] limpo: ${cleanMB}MB / ${pageCount} págs → decisão: ${singleShot ? "single-shot" : "split por páginas"}`,
+    );
+    opts.onJobProgress?.(`PDF limpo gerado (${cleanMB}MB, ${pageCount} págs).`);
 
     if (opts.signal?.aborted) throwCanceled();
 
-    // Se o rebuild ainda ficou > 48MB (extremamente raro após 2 passadas),
-    // cai no split legado do PDF limpo (que agora não tem herança de /Resources).
-    if (sizeBytes > 48 * 1024 * 1024) {
-      console.warn("[prev-rebuild] PDF limpo ainda > 48MB — caindo no split legado");
-      // Restaura fluxo antigo baseado em split do blob limpo
-      const cleanBlob = await downloadPericiaPdf(cleanPath);
-      const parts = await splitPrevPdf(cleanBlob);
-      const collectedText: string[] = [];
-      let repProvider = "";
-      let repModel = "";
-      let sumPages = 0;
-      for (let i = 0; i < parts.length; i++) {
-        if (opts.signal?.aborted) throwCanceled();
-        const part = parts[i];
-        const label = `parte ${i + 1}/${parts.length} (págs ${part.startPage}-${part.endPage})`;
-        opts.onJobProgress?.(`OCR ${label}...`);
-        const partPath = await uploadPericiaPdfPart(userIdFromPath, periciaId, i + 1, part.blob);
-        const r = await ocrSinglePart(periciaId, part, partPath, {
-          onMinimaxProgress: (p) => {
-            opts.onMinimaxProgress?.(p);
-            opts.onJobProgress?.(`OCR ${label} · ${p.message ?? p.phase}`);
-          },
-          signal: opts.signal,
-        });
-        collectedText.push(
-          `=== CONTINUAÇÃO (parte ${i + 1}/${parts.length}, págs ${part.startPage}-${part.endPage}) ===\n${r.text}`,
-        );
-        sumPages += r.pageCount || (part.endPage - part.startPage + 1);
-        if (!repProvider) repProvider = r.provider;
-        if (!repModel) repModel = r.model;
-      }
-      const preExtractedText = collectedText.join("\n\n");
-      opts.onJobProgress?.("OCR concluído. Enviando para extração final...");
-      await ensureFreshSession();
-      const final = await withRetry(
-        "Extração final",
-        async () => {
-          const r = await supabase.functions.invoke("prev-pre-processar", {
-            body: {
-              periciaId,
-              preExtractedText,
-              preExtractedProvider: repProvider,
-              preExtractedModel: repModel,
-              preExtractedPageCount: sumPages,
-            },
-          });
-          if (r.error) {
-            const body = await readErrorBody(r.error);
-            const classified = classifyInvokeError(r.error, body);
-            if (isRetryable(classified)) throw classified;
-          }
-          return r;
-        },
-        { signal: opts.signal, onProgress: opts.onJobProgress },
-      );
-      if (final.error) {
-        const body = await readErrorBody(final.error);
-        throw classifyInvokeError(final.error, body);
-      }
-      if (isAsyncStart(final.data)) {
-        opts.onJobProgress?.("Processamento em segundo plano iniciado");
-        return await pollPreProcessarJob(final.data, opts.onJobProgress, opts.signal);
-      }
-      return await unwrap(final.data, null);
+    // Se o PDF limpo cabe em UMA chamada (bytes E páginas dentro do limite),
+    // aponta pdf_path da perícia pro limpo e chama o fluxo normal.
+    if (singleShot) {
+      await updatePericia(periciaId, { pdf_path: cleanPath });
+      pathSwapped = true;
+      opts.onJobProgress?.("Enviando para OCR (chamada única)...");
+      return await preProcessarPericia(periciaId, opts);
     }
 
-    // Caso feliz: PDF limpo ≤ 48MB → aponta pdf_path da perícia pro limpo,
-    // chama preProcessarPericia (que já tem retry universal), restaura no fim.
-    await updatePericia(periciaId, { pdf_path: cleanPath });
-    pathSwapped = true;
-    const result = await preProcessarPericia(periciaId, opts);
-    return result;
+    // Caso contrário: split sequencial por páginas do PDF LIMPO (que agora tem
+    // páginas independentes, sem inflação de /Resources). Cada parte respeita
+    // simultaneamente 48MB e 90 páginas.
+    const cleanBlob = await downloadPericiaPdf(cleanPath);
+    const parts = await splitCleanPdfByPages(cleanBlob, PREV_SPLIT_MAX_PAGES, PREV_SPLIT_MAX_BYTES);
+    console.log(`[prev-rebuild] split em ${parts.length} parte(s)`);
+    const collectedText: string[] = [];
+    let repProvider = "";
+    let repModel = "";
+    let sumPages = 0;
+    for (let i = 0; i < parts.length; i++) {
+      if (opts.signal?.aborted) throwCanceled();
+      const part = parts[i];
+      const label = `parte ${i + 1}/${parts.length} (págs ${part.startPage}-${part.endPage})`;
+      opts.onJobProgress?.(`OCR ${label}...`);
+      const partPath = await uploadPericiaPdfPart(userIdFromPath, periciaId, i + 1, part.blob);
+      const r = await ocrSinglePart(periciaId, part, partPath, {
+        onMinimaxProgress: (p) => {
+          opts.onMinimaxProgress?.(p);
+          opts.onJobProgress?.(`OCR ${label} · ${p.message ?? p.phase}`);
+        },
+        signal: opts.signal,
+      });
+      collectedText.push(
+        `=== CONTINUAÇÃO (parte ${i + 1}/${parts.length}, págs ${part.startPage}-${part.endPage}) ===\n${r.text}`,
+      );
+      sumPages += r.pageCount || (part.endPage - part.startPage + 1);
+      if (!repProvider) repProvider = r.provider;
+      if (!repModel) repModel = r.model;
+    }
+    const preExtractedText = collectedText.join("\n\n");
+    opts.onJobProgress?.("OCR concluído. Enviando para extração final...");
+    await ensureFreshSession();
+    const final = await withRetry(
+      "Extração final",
+      async () => {
+        const r = await supabase.functions.invoke("prev-pre-processar", {
+          body: {
+            periciaId,
+            preExtractedText,
+            preExtractedProvider: repProvider,
+            preExtractedModel: repModel,
+            preExtractedPageCount: sumPages,
+          },
+        });
+        if (r.error) {
+          const body = await readErrorBody(r.error);
+          const classified = classifyInvokeError(r.error, body);
+          if (isRetryable(classified)) throw classified;
+        }
+        return r;
+      },
+      { signal: opts.signal, onProgress: opts.onJobProgress },
+    );
+    if (final.error) {
+      const body = await readErrorBody(final.error);
+      throw classifyInvokeError(final.error, body);
+    }
+    if (isAsyncStart(final.data)) {
+      opts.onJobProgress?.("Processamento em segundo plano iniciado");
+      return await pollPreProcessarJob(final.data, opts.onJobProgress, opts.signal);
+    }
+    return await unwrap(final.data, null);
   } finally {
     // Restaura pdf_path original e apaga o -clean.pdf (best-effort).
     if (pathSwapped) {
