@@ -661,26 +661,52 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       networkErrorCountRef.current = 0;
       setIsReconnecting(false);
       
-      // NEW: Detect stale job (updated_at não muda)
+      // NEW: Detect stale job (updated_at não muda) + teto absoluto de wall-clock
+      const wallClockElapsed = processingStartTime.current > 0
+        ? Date.now() - processingStartTime.current
+        : 0;
+      if (wallClockElapsed > ABSOLUTE_TIMEOUT_MS) {
+        abortWithStaleError(
+          `Tempo total excedeu ${Math.round(ABSOLUTE_TIMEOUT_MS / 60000)} minutos.`,
+          data.currentStep || analysisStep,
+        );
+        return true;
+      }
+
       if (lastJobUpdateRef.current === data.updatedAt) {
         staleCheckCountRef.current++;
-        
+
+        // Primeira detecção: 5 min sem update → mostra alerta
         if (staleCheckCountRef.current >= STALE_THRESHOLD_POLLS && !isJobStale) {
           console.warn('[ImportarAutosDialog] Job appears stale - no updates for 5+ minutes');
           setIsJobStale(true);
-          
+
           // Check if the job has partial results we can recover
           if (data.result && data.result.partial && data.result.resumos_parciais) {
             console.log(`[ImportarAutosDialog] Found partial results: ${data.result.summariesGenerated} summaries`);
             setPartialResults(data.result);
           }
         }
+
+        // Se o usuário já clicou em "Continuar esperando" e passaram mais 5 min sem update: aborta.
+        if (
+          staleExtensionUsedRef.current &&
+          staleCheckCountRef.current >= STALE_THRESHOLD_POLLS * 2
+        ) {
+          abortWithStaleError(
+            'Sem sinais do servidor após 10 minutos totais.',
+            data.currentStep || analysisStep,
+          );
+          return true;
+        }
       } else {
         // Reset counter when we see an update
         lastJobUpdateRef.current = data.updatedAt;
         staleCheckCountRef.current = 0;
+        staleExtensionUsedRef.current = false;
         setIsJobStale(false);
       }
+
       
       // Update UI with current progress
       setAnalysisStep(data.currentStep || 'Processando...');
