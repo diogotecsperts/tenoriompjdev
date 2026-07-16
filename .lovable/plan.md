@@ -1,130 +1,110 @@
 
-# Fix: limite de 100 páginas do GLM-OCR em PDFs grandes
+## Diagnóstico do Módulo Trabalhista (estado atual)
 
-## Diagnóstico
+Fiz varredura em `supabase/functions/processar-autos/index.ts`, `_shared/ocr-router.ts` e `src/components/tools/ImportarAutosDialog.tsx`, cruzando com os logs da edge function que você mandou.
 
-O `rebuildPdfAsRasterClean` já resolve o problema de **bytes** (62MB → ~20MB). Mas o erro atual do GLM é outro:
+### 1. O GLM foi realmente usado?
 
+**Sim.** O log confirma:
 ```
-OCR only supports PDF, JPG, PNG, JPEG formats
-file size limit: images ≤ 10MB, PDF ≤ 50MB;
-PDF max 100 pages
-```
-
-O GLM tem **dois limites simultâneos**: 50MB **E** 100 páginas. O PDF limpo de 114 págs passa em bytes mas falha em páginas.
-
-## Regra de segurança crítica (invariante)
-
-- **PDFs que hoje funcionam continuam intocados.** A nova rota só é ativada quando `size > 48MB` **OU** `pageCount > 90`. Se nenhum limite for excedido, o fluxo é literalmente o caminho rápido atual (`preProcessarPericia`), zero mudança.
-- Zero mudança em `prev-ocr-part`, `prev-pre-processar`, `glm-ocr.ts`, DevPanel, `system_config`, config.toml, Trabalhista, Impugnação.
-- O PDF original nunca é sobrescrito. Tudo temporário vive em `-clean.pdf` e `parts/`.
-
-## O que muda
-
-### 1. Constante nova em `pautas.ts`
-
-```ts
-// Margem defensiva abaixo do limite real de 100 páginas do GLM.
-export const PREV_SPLIT_MAX_PAGES = 90;
+[processar-autos] Job … completed successfully with model: glm-ocr/glm-ocr
+[processar-autos] Timing - PDF Extraction: 120947ms, Summaries: 9929ms
 ```
 
-### 2. Nova função `splitCleanPdfByPages` em `pautas.ts`
+E o caminho single-pass pequeno (`<20MB`, `pdfBytes`) já chama `runOcrWithConfiguredProvider` (linha 3007), que lê `phase1_ocr_provider` do DevPanel e roteia para o GLM. O tempo (2 min) é normal para o GLM em PDF médio.
 
-Divisão **sequencial por páginas** (não halving) — só faz sentido no PDF limpo raster, onde cada página tem tamanho proporcional e independente (sem `/Resources` compartilhado).
+### 2. Split/Chunk client-side (>20MB) está integrado no Trabalhista?
 
-```ts
-export async function splitCleanPdfByPages(
-  cleanSource: Blob | Uint8Array,
-  maxPages: number = PREV_SPLIT_MAX_PAGES,
-  maxBytes: number = PREV_SPLIT_MAX_BYTES,
-): Promise<PrevPdfSplitPart[]>
+**Sim, e respeita o DevPanel.** `processarChunkedPDFBackground` (linhas 1584–1712) baixa cada parte do storage e chama `runOcrWithConfiguredProvider(partBytes, …)` por parte. GLM/Mistral/Gemini funcionam igual. MiniMax não roda em edge (é canônico, precisa rasterizar no browser).
+
+### 3. "1 de 2 resumos automáticos" com exclamação amarela
+
+**Não é bug — é o PDF de teste que não tem contestação.** O log é explícito:
+```
+[gerarResumosIA] Pulando resumo_contestacao - dados insuficientes
+[gerarResumosIA] Successfully generated resumo_peticao
 ```
 
-Fluxo:
-- Carrega com `pdf-lib`.
-- Percorre em janelas de `maxPages` (0..89, 90..179, ...).
-- Para cada janela: clona doc, remove tudo fora do range, salva.
-- Se a parte gerada ainda exceder `maxBytes` (raro no raster), reduz a janela pela metade e reserializa. Como o raster é proporcional, converge em 1-2 passos.
-- Retorna `PrevPdfSplitPart[]` — mesmo shape do `splitPrevPdf` (reusa `ocrSinglePart` sem mudanças).
+`gerarResumosIA` pula os campos sem dados. O contador `summariesGenerated=1` bate contra a constante fixa `EXPECTED_AUTO_SUMMARIES=2` no dialog, e o amarelo dispara. É falso-positivo quando o pulo foi legítimo (`contestacao` vazia).
 
-Não substitui `splitPrevPdf`; convive como função dedicada ao PDF **já limpo**.
+### 4. Pontos de risco encontrados (silent downgrade)
 
-### 3. Ajuste em `preProcessarPericiaComSplit` (`processar.ts`)
+Existem 3 branches em `processar-autos/index.ts` que **NÃO** passam pelo `ocr-router` e portanto **ignoram silenciosamente** a escolha de GLM no DevPanel (caem em Gemini/Mistral hardcoded):
 
-Ponto único de decisão após o rebuild:
+| # | Local | Comportamento hoje | Impacto p/ GLM |
+|---|---|---|---|
+| A | Two-phase, linha 2134 | `if (ocrProvider === 'mistral') else Gemini` | GLM → Gemini silencioso |
+| B | Single-pass mapping, linha 2456-2457 | `raw === 'mistral' ? 'mistral-ocr' : 'gemini'` | GLM → Gemini silencioso |
+| C | Single-pass PDF >45MB (linhas ~2700+) | Hardcoded Gemini Files API streaming | GLM → Gemini silencioso |
 
+**Impacto real hoje:** como o toggle padrão no seu ambiente é `single_pass` e o PDF testado era ≤45MB, o caminho C/A/B não foi exercitado — por isso o GLM apareceu no log. Mas em PDF >45MB single-pass, ou two-phase, o GLM some silenciosamente. Isso viola a regra `mem://architecture/devpanel-ai-config-global-scope`.
+
+### 5. Modal do Trabalhista — informação de OCR
+
+O dialog já tem `current_step` dinâmico e `currentOCRProvider` no estado, e os backends emitem mensagens úteis (`Extraindo parte X/N (págs A-B)…`). Falta só uma linha secundária mostrando **detalhes técnicos do provedor em uso** (ex: GLM em chunks, Mistral single-shot, Gemini streaming).
+
+---
+
+## Plano de correção — mínimo invasivo, sem tocar no Previdenciário
+
+**Regra:** nada muda em `prev-*`, `ocr-router.ts`, `glm-ocr.ts`, DevPanel, DB, storage, config.toml, Impugnação. Só o Trabalhista.
+
+### Alteração 1 — Fechar os 3 buracos de silent downgrade (`processar-autos/index.ts`)
+
+Substituir as chamadas hardcoded pelas do `runOcrWithConfiguredProvider`:
+
+- **Branch A (two-phase, ~L2130-2245):** substituir o `if (ocrProvider === 'mistral') … else Gemini` por uma única chamada a `runOcrWithConfiguredProvider(bytes ou {blob,size}, …)`. O router já sabe streaming Gemini >30MB, Mistral, GLM. Deixar o try/catch existente para o fallback single-pass intocado.
+- **Branch B (single-pass mapping, ~L2456-2463):** trocar o `pdfProvider = raw === 'mistral' ? 'mistral-ocr' : 'gemini'` por leitura direta do provider real. Se `raw === 'glm'`, ir direto para o mesmo caminho router-based que já existe para o path `< 20MB` (linhas 3007+) — extrair essa lógica de OCR-via-router para uma pequena helper local reutilizável.
+- **Branch C (single-pass PDF >45MB, ~L2700+):** antes de cair no Gemini Files API hardcoded, verificar `phase1_ocr_provider`. Se for `glm`/`mistral`, tentar o `runOcrWithConfiguredProvider` primeiro (o router já streama pro Gemini nesse range também). Só cair no Gemini hardcoded se o provider escolhido não suportar o tamanho e o DevPanel autorizar via `resolveSizeExceededFallback` (mecanismo já existente).
+
+Cada alteração é <30 linhas, cirúrgica, com `withRetry` já existente onde aplicável, e mantém o fluxo antigo intacto quando `phase1_ocr_provider === 'gemini'` (default).
+
+### Alteração 2 — Amenizar falso-positivo "1 de 2 resumos" (`ImportarAutosDialog.tsx`)
+
+O backend já retorna `partialFailures.failedSummaries` (linhas 3167-3171). Ajustar a UI para:
+
+- Se `summariesGenerated < EXPECTED` **E** `partialFailures?.failedSummaries?.length > 0` → mostrar aviso amarelo (erro real, com botão retry existente).
+- Se `summariesGenerated < EXPECTED` **E não há** falhas registradas → mostrar linha neutra: "N resumos gerados (demais campos não tinham conteúdo suficiente no PDF)". Sem exclamação amarela.
+
+Zero mudança no backend, só ~15 linhas no `renderPreview()` (L1454-1502).
+
+### Alteração 3 — Sub-linha dinâmica de OCR no modal (`ImportarAutosDialog.tsx`)
+
+Reaproveitar o bloco "analyzing" já existente (L2087+), sem redesenhar. Adicionar 1 linha secundária pequena logo abaixo do `current_step`, dirigida pelo provider ativo (`ocrConfig?.provider` + `currentOCRProvider`):
+
+```text
+Etapa atual: Extraindo parte 3/6 (págs 21-30)…
+└─ GLM-OCR · página a página · rasterização em curso
 ```
-rasterAndUploadCleanPdf(...) → { path, sizeBytes, pageCount }
 
-if (sizeBytes ≤ 48MB && pageCount ≤ 90):
-    swap pdf_path → cleanPath
-    preProcessarPericia(...)            // 1 chamada GLM
-else:
-    splitCleanPdfByPages(cleanBlob, 90, 48MB)
-    para cada parte: uploadPericiaPdfPart + ocrSinglePart (retry já embutido)
-    concatena texto + prev-pre-processar com preExtractedText
-```
+Regras dinâmicas (sem info inconsistente):
 
-Mudanças concretas na função:
-- Após `rasterAndUploadCleanPdf`, avalia `sizeBytes > 48MB || pageCount > PREV_SPLIT_MAX_PAGES`.
-- No ramo split: troca `splitPrevPdf(cleanBlob)` por `splitCleanPdfByPages(cleanBlob, PREV_SPLIT_MAX_PAGES, PREV_SPLIT_MAX_BYTES)`. Todo o resto (upload de parts, loop `ocrSinglePart`, concatenação, `prev-pre-processar` com `preExtractedText`, `withRetry`, `pollPreProcessarJob`, cleanup no `finally`) fica idêntico.
-- Log claro: `[prev-rebuild] limpo: X.XMB / N págs → decisão: single-shot | split N-partes`.
+- Se provedor for **GLM**: mostrar "GLM-OCR · página a página · rasterização em curso" quando o `current_step` contiver "parte" ou "extraindo".
+- Se **Mistral**: "Mistral OCR · documento inteiro em uma chamada" ou "Mistral OCR · parte X/N" quando chunkado.
+- Se **Gemini**: "Gemini Files API · streaming" (>30MB) ou "Gemini Vision · inline" (menor).
+- Se **MiniMax**: fluxo canônico é client-side, então "MiniMax · rasterização no navegador" (só quando esse caminho ativar).
+- Se provider desconhecido → não renderiza a sub-linha (nunca info falsa).
 
-### 4. Ativação do gatilho na entrada
+Implementação: helper puro `getOcrSubStepLabel(provider, currentStep, sizeBytes)` que retorna `string | null`, mais um `<p className="text-xs text-muted-foreground">…</p>` opcional. ~40 linhas, sem alterar layout, sem novos endpoints, sem impacto no Prev.
 
-Hoje o gatilho de rebuild é só `prevPdfNeedsSplit(blob)` (size > 48MB). Para casos de PDF ≤ 48MB **mas** > 90 págs (raros mas possíveis com muitas páginas leves de texto), precisamos ativar o rebuild também. Duas opções:
+### Ordem de execução e validação
 
-- **(a)** Fazer um `probe` rápido do pageCount antes de decidir (carregar com pdf-lib só para `getPageCount`, ~50-200ms). Se `> 90`, entra na rota de rebuild+split.
-- **(b)** Deixar o GLM falhar e cair num handler que aciona o rebuild retroativamente.
+1. Alteração 2 (amenizar aviso) → mais barata, elimina o falso-positivo que motivou a dúvida.
+2. Alteração 3 (sub-linha informativa) → só front-end, zero risco backend.
+3. Alteração 1 (fechar silent downgrade) → cirúrgico, uma branch por vez, cada uma seguida de `tsgo --noEmit` e leitura de log para confirmar que o Prev não foi tocado.
 
-**Recomendada: (a).** É determinística, custa milissegundos e evita queimar uma chamada de OCR sabidamente inválida. O `probe` já usa o `blob` que baixamos para checar tamanho.
+Após tudo: testar 1 PDF pequeno (<20MB) com GLM configurado, 1 PDF médio (20-45MB) chunked com GLM, e 1 PDF grande (>50MB) para confirmar que o caminho Gemini-streaming ainda existe como opção quando o DevPanel manda.
 
-Ajuste no início de `preProcessarPericiaComSplit`:
+### Detalhes técnicos (backend / expert only)
 
-```ts
-const pageCount = await probePdfPageCount(blob);  // pdf-lib load + getPageCount
-const needsSplitByBytes = prevPdfNeedsSplit(blob);
-const needsSplitByPages = pageCount > PREV_SPLIT_MAX_PAGES;
-if (!needsSplitByBytes && !needsSplitByPages) {
-    return preProcessarPericia(periciaId, opts);  // caminho rápido intocado
-}
-```
-
-`probePdfPageCount` é uma helper exportada de `pautas.ts` — 3 linhas com `pdf-lib`.
-
-## Arquivos alterados
-
-| Arquivo | Mudança |
-|---|---|
-| `src/modules/previdenciario/api/pautas.ts` | Add `PREV_SPLIT_MAX_PAGES`, `probePdfPageCount`, `splitCleanPdfByPages`. `splitPrevPdf` e `rebuildPdfAsRasterClean` intocados. |
-| `src/modules/previdenciario/api/processar.ts` | Gate de entrada considera `pageCount > 90`; ramo split usa `splitCleanPdfByPages` no PDF limpo. Retry, cleanup, cancelamento, callbacks — tudo idêntico. |
-| `.lovable/plan.md` | Atualiza o plano registrado. |
-
-**Zero mudança** em: edge functions (`prev-ocr-part`, `prev-pre-processar`, `glm-ocr`), DevPanel, DB, storage buckets, config.toml, módulos Trabalhista/Impugnação, hooks/UI/pages.
-
-## Cautelas explícitas
-
-1. **PDFs pequenos (≤ 48MB E ≤ 90 págs) seguem 100% o fluxo atual.** O `probePdfPageCount` só decide qual rota, não altera comportamento no caminho rápido.
-2. **`splitPrevPdf` legado permanece** — reservado só como fallback teórico (não usado no novo caminho). Não é removido para não regredir cenários não previstos.
-3. **`splitCleanPdfByPages` só opera sobre o PDF já rasterizado limpo**, onde as páginas são independentes. Nunca é chamado no PDF original (que sofre da inflação por `/Resources`).
-4. **Retry universal preservado.** Cada `ocrSinglePart` e a chamada final `prev-pre-processar` já rodam sob `withRetry` (3 tentativas).
-5. **Cancelamento (`signal.aborted`) tem precedência absoluta** — checado antes de cada janela de split e antes de cada upload.
-6. **Cleanup no `finally` já existente cobre `-clean.pdf` e `parts/`** — nada muda ali.
-
-## Impacto em tempo
-
-- 100 págs, ≤ 48MB, PDF texto: fluxo rápido antigo (sem mudança).
-- 114 págs, PDF original 63MB → clean ~20MB / 114 págs:
-  - Rasterização: ~1-2min (concorrência 4)
-  - Split por páginas: 2 partes (90 + 24), quase instantâneo (raster já é leve)
-  - 2 chamadas GLM sequenciais: ~1min cada → ~2min
-  - **Total: ~3-4min** contra as falhas atuais.
-- Overhead vs. hipotético "single-shot" (que o GLM não aceita): 1 chamada GLM extra (~60s). Preço aceitável dado o limite fixo do provider.
-
-## Validação pós-implementação
-
-1. PDF pequeno (30MB, 40 págs): confirma que segue o fluxo antigo (nenhum log `[prev-rebuild]`).
-2. PDF de 114 págs / 63MB: espera 2 partes de OCR (`OCR parte 1/2 págs 1-90`, `OCR parte 2/2 págs 91-114`), sem loops de 114 rasterizações unitárias.
-3. PDF de 45MB mas 120 págs: dispara rebuild + split por páginas mesmo estando abaixo do limite de bytes.
-4. Cancelar no meio do split: aborta em < 2s, restaura `pdf_path` original, limpa `parts/` e `-clean.pdf`.
-5. Forçar falha transitória (500) numa parte: `withRetry` retenta 3× antes de propagar.
+- Helper local em `processar-autos/index.ts`:
+  ```ts
+  async function ocrViaRouterWithFill(pdfInput, systemPrompt, promptType, userId) {
+    const ocrResult = await runOcrWithConfiguredProvider(pdfInput, {...});
+    const fillResult = await callAI(await getAIConfig(), systemPrompt, `…\n\n${ocrResult.text}`, {...});
+    return { visionResult: {...ocrResult, text: fillResult.text}, modelUsed: `${ocrResult.provider}/${ocrResult.model}` };
+  }
+  ```
+- Manter `MINIMAX_CLIENT_RASTERIZE_ERROR` handler já existente.
+- Nenhuma migração DB. Nenhuma alteração em `config.toml`. Nenhuma alteração em `_shared/*` além dos imports já usados.
+- `EXPECTED_AUTO_SUMMARIES=2` permanece; só muda a lógica de exibição do aviso.
