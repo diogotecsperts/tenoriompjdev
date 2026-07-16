@@ -1588,7 +1588,8 @@ async function processarChunkedPDFBackground(
   totalPages: number,
   fileName: string,
   supabaseAdmin: any,
-  userId: string
+  userId: string,
+  preExtractedText?: string,
 ) {
   let attemptId: string | null = null;
   let modelUsed = 'unknown';
