@@ -2692,7 +2692,7 @@ serve(async (req) => {
   }
 
   try {
-    const { fileName, filePath, retryFilePath, fileParts, pageRanges, totalPages, isChunkedUpload } = await req.json();
+    const { fileName, filePath, retryFilePath, fileParts, pageRanges, totalPages, isChunkedUpload, preExtractedText } = await req.json();
 
     // Create Supabase admin client
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
