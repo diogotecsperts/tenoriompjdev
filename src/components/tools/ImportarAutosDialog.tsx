@@ -469,6 +469,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       step.includes('ocr') ||
       step.includes('parte') ||
       step.includes('dividindo') ||
+      step.includes('rasteriz') ||
       step.includes('processando parte');
     if (!isExtractionPhase) return null;
 
