@@ -2789,9 +2789,13 @@ serve(async (req) => {
 
     // Start background processing using EdgeRuntime.waitUntil
     if (isChunked) {
-      // For chunked uploads, pass the parts info to background processor
+      // For chunked uploads or preExtractedText (MiniMax client-side OCR),
+      // pass the parts info to background processor
+      const effectiveFileParts = fileParts ?? [];
+      const effectivePageRanges = pageRanges ?? [];
+      const effectiveTotalPages = totalPages ?? 0;
       // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
-      EdgeRuntime.waitUntil(processarChunkedPDFBackground(jobId, fileParts, pageRanges, totalPages, fileName, supabaseAdmin, userId));
+      EdgeRuntime.waitUntil(processarChunkedPDFBackground(jobId, effectiveFileParts, effectivePageRanges, effectiveTotalPages, fileName, supabaseAdmin, userId, hasPreOcr ? preExtractedText : undefined));
     } else {
       // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
       EdgeRuntime.waitUntil(processarPDFBackground(jobId, finalFilePath, fileName, supabaseAdmin, isRetry, userId));
