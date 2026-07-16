@@ -1,0 +1,1 @@
+DELETE FROM public.system_config WHERE id = 'import_strategy';
