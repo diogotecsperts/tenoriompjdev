@@ -473,7 +473,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     if (!isExtractionPhase) return null;
 
     if (p === 'glm' || p === 'glm-ocr') {
-      return 'GLM-OCR · rasterização página a página no servidor';
+      if (step.includes('rasteriz')) {
+        return 'GLM-OCR · rasterizando PDF no navegador (raster+split)';
+      }
+      if (step.includes('parte') || step.includes('dividindo')) {
+        return 'GLM-OCR · enviando por partes (limite 100 págs / ~50MB por chamada)';
+      }
+      return 'GLM-OCR · processando documento no servidor';
     }
     if (p === 'mistral' || p === 'mistral-ocr') {
       if (step.includes('parte') || step.includes('dividindo')) {
