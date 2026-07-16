@@ -2085,17 +2085,19 @@ async function processarPDFBackground(
       console.log(`[processar-autos] Small PDF, loaded ${pdfBytes.byteLength} bytes into memory`);
     }
 
-    // Fetch import strategy configuration
+    // Fetch phase-2 configuration and unified OCR config
+    // NOTA: `import_strategy` foi removido do DevPanel — o pipeline agora é
+    // sempre two-phase (OCR do DevPanel + preenchimento pelo Provider Inventory).
     const { data: strategyData } = await supabaseAdmin
       .from('system_config')
       .select('id, value')
-      .in('id', ['import_strategy', 'text_fill_provider', 'text_fill_model', 'store_extracted_text', 'phase1_gemini_model', 'phase1_ocr_provider']);
+      .in('id', ['text_fill_provider', 'text_fill_model', 'store_extracted_text', 'phase1_gemini_model', 'phase1_ocr_provider']);
 
     const strategyMap: Record<string, any> = {};
     strategyData?.forEach((item: { id: string; value: any }) => { strategyMap[item.id] = item.value; });
 
-    const usesTwoPhase = strategyMap.import_strategy === 'two_phase';
-    console.log(`[processar-autos] Import strategy: ${usesTwoPhase ? 'two_phase' : 'single_pass'}`);
+    const usesTwoPhase = true; // Hardcoded: single-pass foi descontinuado
+    console.log(`[processar-autos] Import strategy: two_phase (forçado)`);
 
     let extractedData: any;
     let extractedContentPath: string | null = null;
