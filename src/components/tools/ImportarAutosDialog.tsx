@@ -259,6 +259,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const lastJobUpdateRef = useRef<string | null>(null);
   const staleCheckCountRef = useRef(0);
   const STALE_THRESHOLD_POLLS = 100; // 100 polls * 3s = 300 segundos (5 min) sem update = stale
+  const staleExtensionUsedRef = useRef(false); // "Continuar esperando" só pode ser usado uma vez
+  const ABSOLUTE_TIMEOUT_MS = 25 * 60 * 1000; // 25 min de wall-clock — teto absoluto
   
   // Partial results recovery state (for stale/crashed jobs)
   const [partialResults, setPartialResults] = useState<{
@@ -478,7 +480,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         return 'GLM-OCR · rasterizando PDF no navegador (raster+split)';
       }
       if (step.includes('parte') || step.includes('dividindo')) {
-        return 'GLM-OCR · enviando por partes (limite 100 págs / ~50MB por chamada)';
+        return 'GLM-OCR · enviando por partes (contornando limite de 100 págs / ~50 MB por chamada)';
       }
       return 'GLM-OCR · processando documento no servidor';
     }
@@ -643,6 +645,38 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const MAX_CONSECUTIVE_NETWORK_ERRORS = 10; // ~30s of failures before giving up
   const [isReconnecting, setIsReconnecting] = useState(false);
 
+  // Aborta polling e mostra erro rico ao operador quando o job trava (stale + teto absoluto).
+  const abortWithStaleError = (reason: string, lastStep: string | undefined) => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    const provider = currentOCRProvider || ocrConfig?.provider || 'desconhecido';
+    const lastLogs = backendLogs
+      .slice(-3)
+      .map(l => `• ${l.message}`)
+      .join('\n');
+    const description =
+      `${reason}\n` +
+      `Último passo: ${lastStep || '—'}\n` +
+      `Provider ativo: ${provider}` +
+      (lastLogs ? `\n\nÚltimos logs do servidor:\n${lastLogs}` : '') +
+      `\n\nSugestões: trocar o provider de OCR no DevPanel ou reduzir o tamanho do PDF.`;
+    console.error('[ImportarAutosDialog] Abortando por trava:', description);
+    toast({
+      variant: 'destructive',
+      title: 'Processamento parou de responder',
+      description,
+      duration: 20000,
+    });
+    setProcessingStep('idle');
+    setAnalysisStep('');
+    setIsJobStale(false);
+    staleExtensionUsedRef.current = false;
+    staleCheckCountRef.current = 0;
+  };
+
+
   const checkJobStatus = async (jobId: string): Promise<boolean> => {
     try {
       // Use supabase.functions.invoke instead of raw fetch for better auth handling
@@ -659,26 +693,52 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       networkErrorCountRef.current = 0;
       setIsReconnecting(false);
       
-      // NEW: Detect stale job (updated_at não muda)
+      // NEW: Detect stale job (updated_at não muda) + teto absoluto de wall-clock
+      const wallClockElapsed = processingStartTime.current > 0
+        ? Date.now() - processingStartTime.current
+        : 0;
+      if (wallClockElapsed > ABSOLUTE_TIMEOUT_MS) {
+        abortWithStaleError(
+          `Tempo total excedeu ${Math.round(ABSOLUTE_TIMEOUT_MS / 60000)} minutos.`,
+          data.currentStep || analysisStep,
+        );
+        return true;
+      }
+
       if (lastJobUpdateRef.current === data.updatedAt) {
         staleCheckCountRef.current++;
-        
+
+        // Primeira detecção: 5 min sem update → mostra alerta
         if (staleCheckCountRef.current >= STALE_THRESHOLD_POLLS && !isJobStale) {
           console.warn('[ImportarAutosDialog] Job appears stale - no updates for 5+ minutes');
           setIsJobStale(true);
-          
+
           // Check if the job has partial results we can recover
           if (data.result && data.result.partial && data.result.resumos_parciais) {
             console.log(`[ImportarAutosDialog] Found partial results: ${data.result.summariesGenerated} summaries`);
             setPartialResults(data.result);
           }
         }
+
+        // Se o usuário já clicou em "Continuar esperando" e passaram mais 5 min sem update: aborta.
+        if (
+          staleExtensionUsedRef.current &&
+          staleCheckCountRef.current >= STALE_THRESHOLD_POLLS * 2
+        ) {
+          abortWithStaleError(
+            'Sem sinais do servidor após 10 minutos totais.',
+            data.currentStep || analysisStep,
+          );
+          return true;
+        }
       } else {
         // Reset counter when we see an update
         lastJobUpdateRef.current = data.updatedAt;
         staleCheckCountRef.current = 0;
+        staleExtensionUsedRef.current = false;
         setIsJobStale(false);
       }
+
       
       // Update UI with current progress
       setAnalysisStep(data.currentStep || 'Processando...');
@@ -896,18 +956,65 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         setSplitProgress(0);
         setSplitMessage('Analisando PDF (contagem de páginas)...');
 
-        const probe = await pdfNeedsRasterSplit(selectedFile);
+        // Helper: timeout duro por sub-fase — evita espera infinita
+        // no navegador se pdfjs/pdf-lib travarem.
+        const withTimeout = async <T,>(
+          promise: Promise<T>,
+          ms: number,
+          stage: string,
+        ): Promise<T> => {
+          let timer: ReturnType<typeof setTimeout> | null = null;
+          try {
+            return await Promise.race([
+              promise,
+              new Promise<T>((_, reject) => {
+                timer = setTimeout(
+                  () => reject(new Error(`[GLM ${stage}] excedeu ${Math.round(ms / 1000)}s`)),
+                  ms,
+                );
+              }),
+            ]);
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        };
+
+        let probe: Awaited<ReturnType<typeof pdfNeedsRasterSplit>>;
+        try {
+          probe = await withTimeout(pdfNeedsRasterSplit(selectedFile), 60_000, 'probe');
+        } catch (e) {
+          setIsSplitting(false);
+          throw new Error(
+            `[GLM probe] Falha ao ler páginas do PDF: ${e instanceof Error ? e.message : String(e)}. ` +
+            `O arquivo pode estar corrompido ou protegido.`,
+          );
+        }
         console.log(`[ImportarAutosDialog][glm] probe: ${probe.pageCount} págs, ${(probe.sizeBytes / 1024 / 1024).toFixed(1)}MB, precisa raster=${probe.needs}`);
 
         if (probe.needs) {
           setSplitMessage(`Rasterizando página 0/${probe.pageCount}...`);
-          const rebuilt = await rebuildPdfAsRasterClean(selectedFile, RASTER_SPLIT_MAX_BYTES, {
-            parallelism: 4,
-            onPageProgress: (done, total) => {
-              setSplitMessage(`Rasterizando página ${done}/${total}...`);
-              setSplitProgress(Math.floor((done / total) * 60));
-            },
-          });
+          let rebuilt: Awaited<ReturnType<typeof rebuildPdfAsRasterClean>>;
+          try {
+            rebuilt = await withTimeout(
+              rebuildPdfAsRasterClean(selectedFile, RASTER_SPLIT_MAX_BYTES, {
+                parallelism: 4,
+                onPageProgress: (done, total) => {
+                  setSplitMessage(`Rasterizando página ${done}/${total}...`);
+                  setSplitProgress(Math.floor((done / total) * 60));
+                },
+              }),
+              8 * 60_000, // 8 min
+              'raster',
+            );
+          } catch (e) {
+            setIsSplitting(false);
+            const base = e instanceof Error ? e.message : String(e);
+            throw new Error(
+              `[GLM raster] Rasterização do PDF falhou (${base}). ` +
+              `Arquivo pode ser grande demais para o navegador ou estar corrompido. ` +
+              `Tente um PDF menor ou troque o provider de OCR no DevPanel.`,
+            );
+          }
           console.log(`[ImportarAutosDialog][glm] raster limpo: ${rebuilt.pageCount} págs @ ${rebuilt.dpiUsed}dpi q=${rebuilt.qualityUsed} → ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB`);
 
           const cleanBytes = new Uint8Array(await rebuilt.blob.arrayBuffer());
@@ -924,11 +1031,24 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           } else {
             setSplitMessage('Dividindo PDF limpo em partes...');
             setSplitProgress(70);
-            const cleanParts = await splitCleanPdfByPages(cleanBytes, RASTER_SPLIT_MAX_PAGES, RASTER_SPLIT_MAX_BYTES);
+            let cleanParts: Awaited<ReturnType<typeof splitCleanPdfByPages>>;
+            try {
+              cleanParts = await withTimeout(
+                splitCleanPdfByPages(cleanBytes, RASTER_SPLIT_MAX_PAGES, RASTER_SPLIT_MAX_BYTES),
+                3 * 60_000, // 3 min
+                'split',
+              );
+            } catch (e) {
+              setIsSplitting(false);
+              const base = e instanceof Error ? e.message : String(e);
+              throw new Error(
+                `[GLM split] Divisão do PDF em partes falhou (${base}). ` +
+                `Tente um PDF menor ou troque o provider de OCR no DevPanel.`,
+              );
+            }
             const parts = cleanParts.map(p => p.blob);
             const pageRanges = cleanParts.map(p => ({ start: p.startPage, end: p.endPage }));
             const totalPages = rebuilt.pageCount;
-            // Popula o estado visual usado pelo modal (splitParts) para consistência
             setSplitParts(cleanParts.map((p, idx) => ({
               partNumber: idx + 1,
               pageRange: { start: p.startPage, end: p.endPage },
@@ -944,6 +1064,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           setIsSplitting(false);
         }
       }
+
 
       // Para providers não-GLM mantém o split pdf-lib halving legado.
       const splitOptions = { maxSizeBytes: 20_000_000, maxPagesPerPart: 50 };
@@ -1488,6 +1609,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setIsJobStale(false);
     lastJobUpdateRef.current = null;
     staleCheckCountRef.current = 0;
+    staleExtensionUsedRef.current = false;
     setIsSlowAI(false);
     setSlowSteps([]);
     setStepsStatus(PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' })));
@@ -1528,6 +1650,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setIsJobStale(false);
     lastJobUpdateRef.current = null;
     staleCheckCountRef.current = 0;
+    staleExtensionUsedRef.current = false;
     setPartialResults(null);
     // Reset network error tracking
     networkErrorCountRef.current = 0;
@@ -2460,15 +2583,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                       </p>
                     )}
                     <p className="text-sm mt-1">
-                      {partialResults 
+                      {partialResults
                         ? 'Você pode usar os resumos já gerados ou continuar esperando.'
                         : 'Isso pode indicar que o servidor está sobrecarregado ou o modelo de IA está lento.'
                       }
                     </p>
+                    {staleExtensionUsedRef.current && (
+                      <p className="text-xs mt-1 text-orange-700 dark:text-orange-300">
+                        Já usada uma extensão de espera — se não houver atualização em ~5 min o processo será abortado com detalhes.
+                      </p>
+                    )}
                     <div className="flex gap-2 mt-3">
                       {partialResults && (
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           size="sm"
                           onClick={() => handleUsePartialResults(partialResults)}
                           className="text-xs border-green-500/50 bg-green-500/10 text-green-700 dark:text-green-400 hover:bg-green-500/20"
@@ -2477,18 +2605,21 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                           Usar {partialResults.summariesGenerated} resumos gerados
                         </Button>
                       )}
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         size="sm"
+                        disabled={staleExtensionUsedRef.current}
                         onClick={() => {
-                          staleCheckCountRef.current = 0;
+                          staleExtensionUsedRef.current = true;
+                          // Não zera o contador: se +5 min passarem sem update, aborta.
                           setIsJobStale(false);
                           setPartialResults(null);
                         }}
                         className="text-xs"
                       >
-                        Continuar esperando
+                        {staleExtensionUsedRef.current ? 'Aguardando (extensão usada)' : 'Continuar esperando (+5 min)'}
                       </Button>
+
                       <Button 
                         variant="destructive" 
                         size="sm"
