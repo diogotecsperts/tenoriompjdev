@@ -896,18 +896,65 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         setSplitProgress(0);
         setSplitMessage('Analisando PDF (contagem de páginas)...');
 
-        const probe = await pdfNeedsRasterSplit(selectedFile);
+        // Helper: timeout duro por sub-fase — evita espera infinita
+        // no navegador se pdfjs/pdf-lib travarem.
+        const withTimeout = async <T,>(
+          promise: Promise<T>,
+          ms: number,
+          stage: string,
+        ): Promise<T> => {
+          let timer: ReturnType<typeof setTimeout> | null = null;
+          try {
+            return await Promise.race([
+              promise,
+              new Promise<T>((_, reject) => {
+                timer = setTimeout(
+                  () => reject(new Error(`[GLM ${stage}] excedeu ${Math.round(ms / 1000)}s`)),
+                  ms,
+                );
+              }),
+            ]);
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        };
+
+        let probe: Awaited<ReturnType<typeof pdfNeedsRasterSplit>>;
+        try {
+          probe = await withTimeout(pdfNeedsRasterSplit(selectedFile), 60_000, 'probe');
+        } catch (e) {
+          setIsSplitting(false);
+          throw new Error(
+            `[GLM probe] Falha ao ler páginas do PDF: ${e instanceof Error ? e.message : String(e)}. ` +
+            `O arquivo pode estar corrompido ou protegido.`,
+          );
+        }
         console.log(`[ImportarAutosDialog][glm] probe: ${probe.pageCount} págs, ${(probe.sizeBytes / 1024 / 1024).toFixed(1)}MB, precisa raster=${probe.needs}`);
 
         if (probe.needs) {
           setSplitMessage(`Rasterizando página 0/${probe.pageCount}...`);
-          const rebuilt = await rebuildPdfAsRasterClean(selectedFile, RASTER_SPLIT_MAX_BYTES, {
-            parallelism: 4,
-            onPageProgress: (done, total) => {
-              setSplitMessage(`Rasterizando página ${done}/${total}...`);
-              setSplitProgress(Math.floor((done / total) * 60));
-            },
-          });
+          let rebuilt: Awaited<ReturnType<typeof rebuildPdfAsRasterClean>>;
+          try {
+            rebuilt = await withTimeout(
+              rebuildPdfAsRasterClean(selectedFile, RASTER_SPLIT_MAX_BYTES, {
+                parallelism: 4,
+                onPageProgress: (done, total) => {
+                  setSplitMessage(`Rasterizando página ${done}/${total}...`);
+                  setSplitProgress(Math.floor((done / total) * 60));
+                },
+              }),
+              8 * 60_000, // 8 min
+              'raster',
+            );
+          } catch (e) {
+            setIsSplitting(false);
+            const base = e instanceof Error ? e.message : String(e);
+            throw new Error(
+              `[GLM raster] Rasterização do PDF falhou (${base}). ` +
+              `Arquivo pode ser grande demais para o navegador ou estar corrompido. ` +
+              `Tente um PDF menor ou troque o provider de OCR no DevPanel.`,
+            );
+          }
           console.log(`[ImportarAutosDialog][glm] raster limpo: ${rebuilt.pageCount} págs @ ${rebuilt.dpiUsed}dpi q=${rebuilt.qualityUsed} → ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB`);
 
           const cleanBytes = new Uint8Array(await rebuilt.blob.arrayBuffer());
@@ -924,11 +971,24 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           } else {
             setSplitMessage('Dividindo PDF limpo em partes...');
             setSplitProgress(70);
-            const cleanParts = await splitCleanPdfByPages(cleanBytes, RASTER_SPLIT_MAX_PAGES, RASTER_SPLIT_MAX_BYTES);
+            let cleanParts: Awaited<ReturnType<typeof splitCleanPdfByPages>>;
+            try {
+              cleanParts = await withTimeout(
+                splitCleanPdfByPages(cleanBytes, RASTER_SPLIT_MAX_PAGES, RASTER_SPLIT_MAX_BYTES),
+                3 * 60_000, // 3 min
+                'split',
+              );
+            } catch (e) {
+              setIsSplitting(false);
+              const base = e instanceof Error ? e.message : String(e);
+              throw new Error(
+                `[GLM split] Divisão do PDF em partes falhou (${base}). ` +
+                `Tente um PDF menor ou troque o provider de OCR no DevPanel.`,
+              );
+            }
             const parts = cleanParts.map(p => p.blob);
             const pageRanges = cleanParts.map(p => ({ start: p.startPage, end: p.endPage }));
             const totalPages = rebuilt.pageCount;
-            // Popula o estado visual usado pelo modal (splitParts) para consistência
             setSplitParts(cleanParts.map((p, idx) => ({
               partNumber: idx + 1,
               pageRange: { start: p.startPage, end: p.endPage },
@@ -944,6 +1004,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           setIsSplitting(false);
         }
       }
+
 
       // Para providers não-GLM mantém o split pdf-lib halving legado.
       const splitOptions = { maxSizeBytes: 20_000_000, maxPagesPerPart: 50 };
