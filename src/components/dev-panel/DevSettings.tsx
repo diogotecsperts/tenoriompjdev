@@ -1890,66 +1890,28 @@ export function DevSettings() {
           dentro do card "Estratégia de Importação" abaixo. */}
 
 
-      {/* Section: Import Strategy (Two-Phase) */}
-      <Card className={cn(
-        config.import_strategy === "two_phase" && "border-primary/50"
-      )}>
+      {/* Section: OCR & Preenchimento (sempre two-phase) */}
+      <Card className="border-primary/50">
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
               <Zap className="h-5 w-5" />
-              Estratégia de Importação
+              OCR e Preenchimento
             </CardTitle>
-            {config.import_strategy === "two_phase" && (
-              <Badge className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
-                ATIVO
-              </Badge>
-            )}
+            <Badge className="bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300">
+              DUAS FASES
+            </Badge>
           </div>
           <CardDescription>
             <strong>Provedor de OCR</strong> abaixo vale para <strong>todos os módulos</strong>
-            (Previdenciário, Impugnação e Trabalhista). O toggle "Modo de Importação" afeta
-            apenas o Trabalhista: em Duas Fases, o OCR extrai o texto e um provider mais
-            barato preenche os campos (economia de ~60%).
+            (Previdenciário, Impugnação e Trabalhista). O pipeline agora é <strong>sempre em
+            duas fases</strong>: etapa 1 o OCR extrai o texto; etapa 2 o Provider Inventory
+            preenche os campos do laudo.
           </CardDescription>
 
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Import Strategy Mode */}
-          <div className="flex items-center justify-between">
-            <div className="max-w-2xl">
-              <Label>Modo de Importação</Label>
-              <div className="text-sm text-muted-foreground mt-1 space-y-1">
-                <p><strong>Passagem Única</strong> — Um único provedor faz OCR + preenchimento do laudo na mesma chamada. Mais rápido, porém limitado a PDFs pequenos (~20 MB) e exige um provedor multimodal robusto.</p>
-                <p><strong>Duas Fases (Recomendado)</strong> — Etapa 1: o provedor de OCR lê o PDF (Gemini suporta arquivos grandes, até 2 GB, e páginas escaneadas). Etapa 2: o provedor definido no <strong>Provider Inventory</strong> recebe só o texto e preenche o laudo. Mais barato e estável.</p>
-                <p className="text-amber-600 dark:text-amber-500">⚠️ Este toggle afeta <strong>apenas o Trabalhista</strong>. Previdenciário e Impugnação sempre usam Duas Fases.</p>
-              </div>
-            </div>
-            <Select value={config.import_strategy} onValueChange={value => setConfig({
-              ...config,
-              import_strategy: value
-            })}>
-              <SelectTrigger className="min-w-[20rem] w-auto h-auto py-2.5 [&>span]:line-clamp-none [&>span]:flex-1 [&>span]:flex [&>span]:flex-col [&>span]:items-center [&>span]:justify-center">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="min-w-[20rem]">
-                <SelectItem value="single_pass">
-                  <div className="flex flex-col items-center">
-                    <span>Passagem Única</span>
-                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">OCR + preenchimento num só request</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="two_phase">
-                  <div className="flex flex-col items-center">
-                    <span>Duas Fases (Recomendado)</span>
-                    <span className="text-[10px] text-muted-foreground whitespace-nowrap">OCR + Provider Inventory</span>
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
 
-          <Separator />
 
           {/* Provedor de OCR — ÚNICO campo de OCR do sistema (todos os módulos, todas as estratégias) */}
           <div className="space-y-4 p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
