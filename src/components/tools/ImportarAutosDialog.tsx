@@ -2581,15 +2581,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                       </p>
                     )}
                     <p className="text-sm mt-1">
-                      {partialResults 
+                      {partialResults
                         ? 'Você pode usar os resumos já gerados ou continuar esperando.'
                         : 'Isso pode indicar que o servidor está sobrecarregado ou o modelo de IA está lento.'
                       }
                     </p>
+                    {staleExtensionUsedRef.current && (
+                      <p className="text-xs mt-1 text-orange-700 dark:text-orange-300">
+                        Já usada uma extensão de espera — se não houver atualização em ~5 min o processo será abortado com detalhes.
+                      </p>
+                    )}
                     <div className="flex gap-2 mt-3">
                       {partialResults && (
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           size="sm"
                           onClick={() => handleUsePartialResults(partialResults)}
                           className="text-xs border-green-500/50 bg-green-500/10 text-green-700 dark:text-green-400 hover:bg-green-500/20"
@@ -2598,18 +2603,21 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                           Usar {partialResults.summariesGenerated} resumos gerados
                         </Button>
                       )}
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         size="sm"
+                        disabled={staleExtensionUsedRef.current}
                         onClick={() => {
-                          staleCheckCountRef.current = 0;
+                          staleExtensionUsedRef.current = true;
+                          // Não zera o contador: se +5 min passarem sem update, aborta.
                           setIsJobStale(false);
                           setPartialResults(null);
                         }}
                         className="text-xs"
                       >
-                        Continuar esperando
+                        {staleExtensionUsedRef.current ? 'Aguardando (extensão usada)' : 'Continuar esperando (+5 min)'}
                       </Button>
+
                       <Button 
                         variant="destructive" 
                         size="sm"
