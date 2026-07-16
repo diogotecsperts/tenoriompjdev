@@ -256,6 +256,7 @@ const DEFAULT_CONFIG: SystemConfig = {
   max_pdf_size_mb: 50,
 
   retry_enabled: true,
+  retry_max_attempts: 3,
   retry_base_delay_ms: 1000,
   // Two-phase import strategy defaults (single-pass foi descontinuado)
   text_fill_provider: "openrouter",
