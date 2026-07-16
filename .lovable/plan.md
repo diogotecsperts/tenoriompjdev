@@ -1,61 +1,65 @@
+## Depuração do travamento em "Extração de dados (Vision)" no Trabalhista
 
-## Contexto
+### Diagnóstico
 
-Duas lacunas ficaram do plano anterior, ambas contra a regra de "Trabalhista = paridade com Prev":
+O modal trava em "Extração de dados (Vision)" e, ao clicar em **Continuar**, nada evolui nem falha. Três causas independentes contribuem:
 
-1. **Card "Estratégia de Importação" ainda no DevPanel** e edge function ainda lendo `system_config.import_strategy`. O plano aprovado adiou isso — foi decisão minha e não deveria ter sido, já que você já tinha decidido "sempre two-phase".
-2. **MiniMax no Trabalhista continua caindo em fallback para Lovable/Gemini** dentro da edge function. O Prev nunca teve esse problema porque rasteriza cada página no browser (`minimax-ocr-client.ts`) e manda página-por-página ao endpoint `minimax-ocr-chunk`. O Trabalhista nunca implantou esse mesmo caminho.
+1. **Fase client-side do GLM não emite estado.** No branch `ocrConfig.provider === 'glm'` do `ImportarAutosDialog.processFile`, o dialog roda `rebuildPdfAsRasterClean` + `splitCleanPdfByPages` **antes de criar o `import_job`**. Enquanto isso o step `extraction` já ficou marcado como "processing", mas ainda não existe `jobId` para o polling puxar `updated_at`. Se um passo do raster crashar (OOM, worker do pdf.js, `toBlob` null), o `.catch()` externo pode não estar re-arremessando com mensagem clara.
+2. **"Continuar esperando" apenas zera o contador stale.** Em `staleCheckCountRef.current = 0` (linha 2484) o app volta a esperar do zero por 5 minutos, sem verificar se o backend ainda está vivo. Se o edge function morreu (WORKER_LIMIT / OOM / crash silencioso), o dialog fica em loop eterno de "5 min sem update → clicar Continuar → 5 min sem update".
+3. **A mensagem do GLM está mal formulada.** "GLM-OCR · enviando por partes (limite 100 págs / ~50MB por chamada)" sugere ao operador que PDFs >100 págs vão falhar, quando na verdade o pipeline raster+split **contorna** esse limite dividindo em partes.
 
-Este plano fecha os dois, sem tocar em nenhum arquivo do Previdenciário.
+### Correções propostas
 
-## Alterações
+Escopo restrito a `src/components/tools/ImportarAutosDialog.tsx`, sem tocar em edge functions nem no Previdenciário.
 
-### 1. Remover o toggle "Estratégia de Importação"
+**1. Mensagem GLM mais precisa** (linhas 476-484 do dialog)
 
-**a) `src/components/dev-panel/DevSettings.tsx`** — remover o card do seletor, o estado local associado, o handler de save, e qualquer texto/badge/tooltip referente a "single-pass vs two-phase". Manter todos os outros controles do DevPanel (OCR provider, phase1 gemini model, provider inventory, etc.) intactos.
+```
+GLM-OCR · rasterizando PDF no navegador (raster+split)
+GLM-OCR · enviando por partes (contornando limite de 100 págs / ~50 MB por chamada)
+GLM-OCR · processando documento no servidor
+```
 
-**b) `supabase/functions/processar-autos/index.ts`** — no início do processamento, remover a leitura de `import_strategy` do `system_config` e forçar `usesTwoPhase = true`. Excluir o ramo single-pass inteiro (`else if (pdfSizeBytes > GEMINI_PROCESSING_LIMIT)`, `else if (pdfStream)`, `else if (pdfBytes)` no bloco single-pass, incluindo o legacy `processLargePDFWithSplit`). Manter só o pipeline two-phase (`processarChunkedPDFBackground` para arquivos chunked + o fluxo two-phase normal para arquivo único). O fallback de two-phase-failure → single-pass também é removido porque não faz mais sentido.
+**2. Envelopar o pipeline client-side do GLM com telemetria fina**
 
-**c) Migration SQL:** `DELETE FROM public.system_config WHERE id = 'import_strategy';` — idempotente.
+Dentro do branch GLM em `processFile`:
 
-**d) Memória `mem://import-autos/gerenciamento-de-estrategias-de-importacao`** — reescrever para dizer "two-phase é o único caminho; single-pass foi removido em [data]".
+- Marcar sub-fases explícitas no `setStepsStatus`/`setAnalysisStep` antes de cada passo pesado: `probePdfPageCount` → `rebuildPdfAsRasterClean` (com `onPageProgress` já disponível) → `splitCleanPdfByPages` → upload das partes.
+- Try/catch por sub-fase, cada catch reemite com prefixo (`[GLM raster]`, `[GLM split]`, `[GLM upload]`) para o `errorLogger` e para o toast do usuário.
+- Timeout duro por sub-fase (ex.: 8 min para raster, 3 min para split); se estourar, aborta com mensagem "Rasterização do PDF excedeu 8 min — arquivo pode ser grande demais para o navegador. Tente PDF menor ou trocar o provider de OCR no DevPanel."
 
-### 2. Paridade MiniMax no Trabalhista
+**3. Detecção robusta de trava em qualquer fase**
 
-**a) `src/components/tools/ImportarAutosDialog.tsx`** — adicionar branch para `ocrConfig.provider === 'minimax'` no `processFile()`, análogo ao que fiz para GLM:
-- Importar `runMinimaxClientOcr` de `src/lib/minimax-ocr-client.ts` (mesmo módulo que o Prev usa; é agnóstico de domínio, verificar antes de importar).
-- Rasterizar páginas no browser e chamar `minimax-ocr-chunk` (edge function que o Prev já usa) para cada página, coletando o texto.
-- Subir apenas o **texto extraído** como um "pré-OCR" ao invocar `processar-autos`, ou subir o PDF original mais o texto e passar um flag `preExtractedText`. **Preferido:** adicionar campo `preExtractedText` no body de `processar-autos` (paralelo ao que `prev-pre-processar` já faz), pulando a fase 1 quando presente.
+Substituir o comportamento atual do botão **Continuar esperando** (linhas ~2453-2490):
 
-**b) `supabase/functions/processar-autos/index.ts`** — aceitar `preExtractedText?: string` no body. Quando presente, pular fase 1 (OCR) e alimentar direto o `callAI` de estruturação (fase 2). Log claro: `[processar-autos] Recebido preExtractedText (N chars) — pulando fase 1 OCR`.
+- Ao clicar, iniciar um "modo tolerante" que dá **mais 5 min** e nada além disso. Se `updated_at` não avançar nesse segundo intervalo, forçar `handleError` com mensagem final:
+  > "Processamento parou de responder após 10 minutos sem sinais do servidor. Último passo: `<current_step>`. Provider ativo: `<currentOCRProvider>`. Sugestões: trocar provider no DevPanel ou reduzir o PDF."
+- Manter o botão "Usar resumos parciais" que já existe.
 
-**c) Verificação prévia (antes de escrever código):** confirmar que `src/lib/minimax-ocr-client.ts` e a edge function `minimax-ocr-chunk` são módulo-agnósticos (não têm `pericia_id`/`prev_*` hardcoded). Se tiverem acoplamento com Prev, duplicar o cliente em `src/lib/minimax-ocr-shared.ts` seguindo o mesmo princípio de "duplicação em vez de extração" que usei para `pdf-preprocess.ts`.
+Adicionar também um **teto absoluto** (25 min de wall-clock desde o `handleFileUpload`) que dispara `handleError` mesmo antes do stale contar, para eliminar espera infinita.
 
-**d) Modal de progresso** — reusar os slots existentes (`splitMessage`/`splitProgress`) para mostrar "MiniMax · rasterizando página X/Y" e "MiniMax · OCR página X/Y". O `getOcrSubStepLabel` já cobre MiniMax; ajustar se necessário.
+**4. Mostrar o último log de backend na tela de erro**
 
-### 3. Fora de escopo (mantido intocado)
+Já existe `backendLogs` (linha 239) sendo alimentado. Quando `handleError` for chamado por stale/timeout, incluir os 2-3 últimos `backendLogs` na mensagem/toast — isso dá ao operador contexto imediato (ex.: "OCR: enviando parte 4/12" cortado indica falha na parte 4).
 
-- Todo `src/modules/previdenciario/**`, `supabase/functions/prev-*`, `_shared/ocr-router.ts`, `_shared/glm-ocr.ts`, `_shared/mistral-ocr.ts`, `_shared/ai-config.ts`.
-- Pipeline pós-OCR (estruturação em campos, preview, criação do laudo).
-- Buckets, RLS, colunas.
+### Fluxo pós-OCR — confirmação
 
-## Validação
+**Nada muda.** Uma vez que o OCR entregou texto (via `preExtractedText` no MiniMax, ou via `runOcrWithConfiguredProvider` para GLM/Mistral/Gemini), o pipeline segue idêntico ao que já funcionava:
 
-1. `tsgo --noEmit` passa.
-2. **DevPanel:** card "Estratégia de Importação" some. Nenhum outro card se move. `SELECT * FROM system_config WHERE id='import_strategy'` retorna 0 linhas.
-3. **Trabalhista + GLM (pequeno e grande):** sem regressão do plano anterior.
-4. **Trabalhista + Mistral:** sem regressão.
-5. **Trabalhista + Gemini:** sem 404; provider e modelo vindos do DevPanel.
-6. **Trabalhista + MiniMax:** modal mostra "MiniMax · rasterizando página X/Y" e "MiniMax · OCR página X/Y". Nenhum log de fallback para Lovable/Gemini. Extração populando os campos do laudo corretamente.
-7. **Previdenciário:** smoke test em pauta grande. Zero alteração de tempo/comportamento.
+1. `callAI` lê `default_ai_provider`/`default_ai_model` do DevPanel.
+2. Prompt montado por `prompt-manager` + `build-import-prompt` (ambos intocados).
+3. JSON estruturado, validado por `ensureValidStructure`, gravado em `import_jobs.result`.
+4. Polling do dialog puxa o resultado, mostra preview, e o botão "Criar Laudo" cria o registro em `laudos` com os mesmos mapeamentos do `laudo-structure.ts`.
 
-## Riscos
+Nenhum arquivo dessa cadeia é tocado neste patch. Os prompts, campos e comportamentos de IA por módulo (Trabalhista/Prev/Impugnação) continuam completamente isolados.
 
-- **Risco:** `minimax-ocr-client.ts` pode ter alguma dependência de `pericia_id` ou tabela do Prev. **Mitigação:** verificação prévia (item 2c). Se houver, duplico o cliente em vez de compartilhar. Prev fica intocado nos dois cenários.
-- **Risco:** remover o ramo single-pass da edge function é uma cirurgia grande (~400 linhas). **Mitigação:** o two-phase já é o caminho testado; remover código morto reduz superfície de bug. Uso `tsgo` + smoke test dos quatro providers antes de considerar pronto.
-- **Risco a Prev:** nulo. Nenhum arquivo do Prev é editado. `minimax-ocr-chunk` é reutilizado como serviço, não modificado.
+### Escopo técnico
 
-## Confirmações que preciso antes do build
+- **Arquivo alterado:** `src/components/tools/ImportarAutosDialog.tsx` (mensagens, telemetria client-side GLM, política de stale/timeout, exibição de logs no erro).
+- **Não alterado:** edge functions, `_shared/*`, Previdenciário, prompts, `laudo-structure.ts`.
+- **Validação:** `tsgo --noEmit` + teste manual com PDF grande GLM (>100 págs), PDF pequeno Mistral, e simulação de crash (matar rede no meio da fase 1) para confirmar que o erro aparece com contexto ao invés de travar.
 
-1. **Confirma a remoção do card + toggle + código single-pass da edge function?** (Você já sinalizou "sempre two-phase" antes, mas quero confirmar explicitamente porque é destrutivo.)
-2. **Confirma a paridade MiniMax via `preExtractedText`** (Trabalhista rasteriza no browser + manda texto pronto para a edge function)?
+### Perguntas para confirmar antes de implementar
+
+1. Tetos ok: 5 min stale → "Continuar" adiciona +5 min → 25 min absoluto máximo?
+2. Quer que o toast de erro inclua os últimos logs de backend, ou prefere só o `current_step` + provider?
