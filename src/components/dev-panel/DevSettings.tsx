@@ -681,8 +681,7 @@ export function DevSettings() {
           retry_enabled: configMap.retry_enabled ?? DEFAULT_CONFIG.retry_enabled,
           retry_max_attempts: configMap.retry_max_attempts ?? DEFAULT_CONFIG.retry_max_attempts,
           retry_base_delay_ms: configMap.retry_base_delay_ms ?? DEFAULT_CONFIG.retry_base_delay_ms,
-          // Two-phase import strategy
-          import_strategy: configMap.import_strategy || DEFAULT_CONFIG.import_strategy,
+          // Two-phase import strategy (single-pass foi descontinuado)
           text_fill_provider: configMap.text_fill_provider || DEFAULT_CONFIG.text_fill_provider,
           text_fill_model: configMap.text_fill_model || DEFAULT_CONFIG.text_fill_model,
           store_extracted_text: configMap.store_extracted_text ?? DEFAULT_CONFIG.store_extracted_text,
