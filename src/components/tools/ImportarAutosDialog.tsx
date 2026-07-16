@@ -645,6 +645,38 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const MAX_CONSECUTIVE_NETWORK_ERRORS = 10; // ~30s of failures before giving up
   const [isReconnecting, setIsReconnecting] = useState(false);
 
+  // Aborta polling e mostra erro rico ao operador quando o job trava (stale + teto absoluto).
+  const abortWithStaleError = (reason: string, lastStep: string | undefined) => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    const provider = currentOCRProvider || ocrConfig?.provider || 'desconhecido';
+    const lastLogs = backendLogs
+      .slice(-3)
+      .map(l => `• ${l.message}`)
+      .join('\n');
+    const description =
+      `${reason}\n` +
+      `Último passo: ${lastStep || '—'}\n` +
+      `Provider ativo: ${provider}` +
+      (lastLogs ? `\n\nÚltimos logs do servidor:\n${lastLogs}` : '') +
+      `\n\nSugestões: trocar o provider de OCR no DevPanel ou reduzir o tamanho do PDF.`;
+    console.error('[ImportarAutosDialog] Abortando por trava:', description);
+    toast({
+      variant: 'destructive',
+      title: 'Processamento parou de responder',
+      description,
+      duration: 20000,
+    });
+    setProcessingStep('idle');
+    setAnalysisStep('');
+    setIsJobStale(false);
+    staleExtensionUsedRef.current = false;
+    staleCheckCountRef.current = 0;
+  };
+
+
   const checkJobStatus = async (jobId: string): Promise<boolean> => {
     try {
       // Use supabase.functions.invoke instead of raw fetch for better auth handling
