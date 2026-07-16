@@ -437,6 +437,62 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     // Remove prefixes like "google/" for cleaner display
     return model.replace('google/', '').replace('openai/', '');
   };
+
+  // Nome curto e correto do provedor de OCR configurado no DevPanel.
+  // Suporta gemini / mistral / glm / minimax. Sem fallback silencioso pra Gemini
+  // (informação inconsistente é pior que ausência).
+  const formatOcrProviderLabel = (provider: string | null | undefined, model?: string): string | null => {
+    if (!provider) return null;
+    const p = provider.toLowerCase();
+    if (p === 'glm' || p === 'glm-ocr') return 'GLM-OCR';
+    if (p === 'mistral' || p === 'mistral-ocr') return 'Mistral OCR';
+    if (p === 'minimax') return 'MiniMax';
+    if (p === 'gemini' || p.startsWith('gemini-')) {
+      return model ? `Gemini ${formatModelName(model)}` : 'Gemini Vision';
+    }
+    return provider;
+  };
+
+  // Sub-linha dinâmica com detalhe técnico do OCR em curso.
+  // Só retorna string se a combinação (provider × etapa) for coerente; caso
+  // contrário null (nunca renderizar info que possa estar errada).
+  const getOcrSubStepLabel = (
+    provider: string | null | undefined,
+    currentStep: string,
+    fileSizeMB: number | null,
+  ): string | null => {
+    if (!provider) return null;
+    const p = provider.toLowerCase();
+    const step = (currentStep || '').toLowerCase();
+    const isExtractionPhase =
+      step.includes('extrai') ||
+      step.includes('ocr') ||
+      step.includes('parte') ||
+      step.includes('dividindo') ||
+      step.includes('processando parte');
+    if (!isExtractionPhase) return null;
+
+    if (p === 'glm' || p === 'glm-ocr') {
+      return 'GLM-OCR · rasterização página a página no servidor';
+    }
+    if (p === 'mistral' || p === 'mistral-ocr') {
+      if (step.includes('parte') || step.includes('dividindo')) {
+        return 'Mistral OCR · processando por partes (limite de 50MB por chamada)';
+      }
+      return 'Mistral OCR · documento inteiro em uma chamada';
+    }
+    if (p === 'minimax') {
+      return 'MiniMax · rasterização no navegador (fluxo canônico)';
+    }
+    if (p === 'gemini' || p.startsWith('gemini-')) {
+      if (fileSizeMB !== null && fileSizeMB > 30) {
+        return 'Gemini Files API · streaming direto (sem carregar em memória)';
+      }
+      return 'Gemini Vision · envio inline';
+    }
+    return null;
+  };
+
   
   // NEW: Format summary type name for display
   const formatSummaryTypeName = (tipo: string) => {
