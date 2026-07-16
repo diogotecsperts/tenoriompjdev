@@ -2394,8 +2394,7 @@ export function DevSettings() {
                   })} 
                 />
               </div>
-            </>
-          )}
+          </>
 
           {/* Info box */}
           <div className="p-3 bg-muted/50 rounded-lg text-xs text-muted-foreground space-y-1">
