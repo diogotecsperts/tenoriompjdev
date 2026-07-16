@@ -880,9 +880,6 @@ export function DevSettings() {
         id: "retry_base_delay_ms",
         value: config.retry_base_delay_ms
       }, {
-        id: "import_strategy",
-        value: config.import_strategy
-      }, {
         id: "text_fill_provider",
         value: config.text_fill_provider
       }, {
