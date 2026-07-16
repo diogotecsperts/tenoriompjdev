@@ -1589,24 +1589,46 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                     {formatDuration(aiUsage.summaries.durationMs)}
                   </div>
                 )}
-                {aiUsage.summaries.count > 0 ? (
-                  <div className={cn(
-                    "text-xs flex items-center gap-1 mt-1",
-                    aiUsage.summaries.count >= EXPECTED_AUTO_SUMMARIES ? "text-green-500" : "text-yellow-500"
-                  )}>
-                    {aiUsage.summaries.count >= EXPECTED_AUTO_SUMMARIES ? (
-                      <CheckCircle2 className="h-3 w-3" />
-                    ) : (
-                      <AlertTriangle className="h-3 w-3" />
-                    )}
-                    {aiUsage.summaries.count} de {EXPECTED_AUTO_SUMMARIES} resumos automáticos
-                  </div>
-                ) : (
-                  <div className="text-xs text-yellow-500 flex items-center gap-1 mt-1">
-                    <AlertTriangle className="h-3 w-3" />
-                    Nenhum resumo gerado
-                  </div>
-                )}
+                {(() => {
+                  // Distingue falha real (partialFailures) de "pulo legítimo" (contestação vazia).
+                  const hasRealFailure =
+                    !!partialFailures && partialFailures.failedSummaries.length > 0;
+                  const count = aiUsage.summaries.count;
+                  const complete = count >= EXPECTED_AUTO_SUMMARIES;
+
+                  if (count === 0) {
+                    return (
+                      <div className="text-xs text-yellow-500 flex items-center gap-1 mt-1">
+                        <AlertTriangle className="h-3 w-3" />
+                        Nenhum resumo gerado
+                      </div>
+                    );
+                  }
+                  if (complete) {
+                    return (
+                      <div className="text-xs text-green-500 flex items-center gap-1 mt-1">
+                        <CheckCircle2 className="h-3 w-3" />
+                        {count} de {EXPECTED_AUTO_SUMMARIES} resumos automáticos
+                      </div>
+                    );
+                  }
+                  if (hasRealFailure) {
+                    return (
+                      <div className="text-xs text-yellow-500 flex items-center gap-1 mt-1">
+                        <AlertTriangle className="h-3 w-3" />
+                        {count} de {EXPECTED_AUTO_SUMMARIES} resumos automáticos
+                      </div>
+                    );
+                  }
+                  // Pulo legítimo (ex.: PDF sem contestação) — sem alarme.
+                  return (
+                    <div className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+                      <CheckCircle2 className="h-3 w-3 text-green-500" />
+                      {count} de {EXPECTED_AUTO_SUMMARIES} resumos automáticos
+                      <span className="ml-1 opacity-80">(demais seções sem conteúdo no PDF)</span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             
