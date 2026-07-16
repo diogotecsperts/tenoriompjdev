@@ -1650,6 +1650,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setIsJobStale(false);
     lastJobUpdateRef.current = null;
     staleCheckCountRef.current = 0;
+    staleExtensionUsedRef.current = false;
     setPartialResults(null);
     // Reset network error tracking
     networkErrorCountRef.current = 0;
