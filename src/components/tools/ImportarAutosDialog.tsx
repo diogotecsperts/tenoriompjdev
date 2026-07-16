@@ -478,7 +478,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         return 'GLM-OCR · rasterizando PDF no navegador (raster+split)';
       }
       if (step.includes('parte') || step.includes('dividindo')) {
-        return 'GLM-OCR · enviando por partes (limite 100 págs / ~50MB por chamada)';
+        return 'GLM-OCR · enviando por partes (contornando limite de 100 págs / ~50 MB por chamada)';
       }
       return 'GLM-OCR · processando documento no servidor';
     }
