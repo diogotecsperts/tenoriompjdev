@@ -1609,6 +1609,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setIsJobStale(false);
     lastJobUpdateRef.current = null;
     staleCheckCountRef.current = 0;
+    staleExtensionUsedRef.current = false;
     setIsSlowAI(false);
     setSlowSteps([]);
     setStepsStatus(PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' })));
