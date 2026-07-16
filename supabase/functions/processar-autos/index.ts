@@ -2222,27 +2222,50 @@ async function processarPDFBackground(
           pdfBytes = null;
           
         } else {
-          // Use Gemini (default)
-          if (pdfStream) {
-            // STREAMING MODE: For large files, stream directly to Files API
-            console.log('[processar-autos] Using STREAMING mode for Phase 1...');
-            extracted = await extractVisualContent(
-              { stream: pdfStream, size: pdfSizeBytes }, 
-              { model: phase1Model }
-            );
-            pdfStream = null; // Stream is consumed
-          } else if (pdfBytes) {
-            // BYTES MODE: Use existing logic
-            extracted = await extractVisualContent(pdfBytes, { 
-              useFilesAPI,
-              model: phase1Model 
-            });
-            // MEMORY OPTIMIZATION: Clear PDF bytes after Phase 1 extraction
-            pdfBytes = null;
-          } else {
-            throw new Error('No PDF input available (bytes or stream)');
+          // Provedor de OCR configurado no DevPanel (gemini | glm | mistral já tratado
+          // acima). Antes: else caía em Gemini hardcoded, ignorando GLM silenciosamente
+          // (viola mem://architecture/devpanel-ai-config-global-scope). Agora roteia via
+          // ocr-router, que respeita phase1_ocr_provider e streama Gemini >30MB sem OOM.
+          console.log(`[processar-autos] Two-phase OCR via router (provider=${ocrProvider}, phase1Model=${phase1Model})...`);
+          try {
+            let routerResult;
+            if (pdfStream) {
+              // Router aceita { blob, size } — encapsula o stream num Blob leve
+              // para preservar o caminho de streaming direto ao Files API do Gemini.
+              const blob = await new Response(pdfStream).blob();
+              pdfStream = null;
+              routerResult = await runOcrWithConfiguredProvider(
+                { blob, size: pdfSizeBytes },
+                { logPrefix: '[processar-autos/two-phase]' },
+              );
+            } else if (pdfBytes) {
+              routerResult = await runOcrWithConfiguredProvider(pdfBytes, {
+                logPrefix: '[processar-autos/two-phase]',
+              });
+              pdfBytes = null;
+            } else {
+              throw new Error('No PDF input available (bytes or stream)');
+            }
+            extracted = {
+              rawText: routerResult.text,
+              pageCount: routerResult.pageCount,
+              estimatedSections: ['ocr-router'],
+              extractedAt: new Date().toISOString(),
+              provider: routerResult.provider,
+              model: routerResult.model,
+            };
+          } catch (routerErr) {
+            const msg = routerErr instanceof Error ? routerErr.message : String(routerErr);
+            if (msg.includes(MINIMAX_CLIENT_RASTERIZE_ERROR)) {
+              // MiniMax exige rasterização client-side; no fluxo two-phase da edge
+              // não temos como orquestrar isso — propaga p/ o outer catch fazer o
+              // fallback single-pass (que trata o mesmo erro via callPDFProvider legado).
+              throw routerErr;
+            }
+            throw routerErr;
           }
         }
+
         
         console.log('[processar-autos] MEMORY: Cleared PDF input after Phase 1 extraction');
         

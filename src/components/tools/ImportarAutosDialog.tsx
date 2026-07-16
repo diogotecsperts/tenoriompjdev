@@ -437,6 +437,62 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     // Remove prefixes like "google/" for cleaner display
     return model.replace('google/', '').replace('openai/', '');
   };
+
+  // Nome curto e correto do provedor de OCR configurado no DevPanel.
+  // Suporta gemini / mistral / glm / minimax. Sem fallback silencioso pra Gemini
+  // (informação inconsistente é pior que ausência).
+  const formatOcrProviderLabel = (provider: string | null | undefined, model?: string): string | null => {
+    if (!provider) return null;
+    const p = provider.toLowerCase();
+    if (p === 'glm' || p === 'glm-ocr') return 'GLM-OCR';
+    if (p === 'mistral' || p === 'mistral-ocr') return 'Mistral OCR';
+    if (p === 'minimax') return 'MiniMax';
+    if (p === 'gemini' || p.startsWith('gemini-')) {
+      return model ? `Gemini ${formatModelName(model)}` : 'Gemini Vision';
+    }
+    return provider;
+  };
+
+  // Sub-linha dinâmica com detalhe técnico do OCR em curso.
+  // Só retorna string se a combinação (provider × etapa) for coerente; caso
+  // contrário null (nunca renderizar info que possa estar errada).
+  const getOcrSubStepLabel = (
+    provider: string | null | undefined,
+    currentStep: string,
+    fileSizeMB: number | null,
+  ): string | null => {
+    if (!provider) return null;
+    const p = provider.toLowerCase();
+    const step = (currentStep || '').toLowerCase();
+    const isExtractionPhase =
+      step.includes('extrai') ||
+      step.includes('ocr') ||
+      step.includes('parte') ||
+      step.includes('dividindo') ||
+      step.includes('processando parte');
+    if (!isExtractionPhase) return null;
+
+    if (p === 'glm' || p === 'glm-ocr') {
+      return 'GLM-OCR · rasterização página a página no servidor';
+    }
+    if (p === 'mistral' || p === 'mistral-ocr') {
+      if (step.includes('parte') || step.includes('dividindo')) {
+        return 'Mistral OCR · processando por partes (limite de 50MB por chamada)';
+      }
+      return 'Mistral OCR · documento inteiro em uma chamada';
+    }
+    if (p === 'minimax') {
+      return 'MiniMax · rasterização no navegador (fluxo canônico)';
+    }
+    if (p === 'gemini' || p.startsWith('gemini-')) {
+      if (fileSizeMB !== null && fileSizeMB > 30) {
+        return 'Gemini Files API · streaming direto (sem carregar em memória)';
+      }
+      return 'Gemini Vision · envio inline';
+    }
+    return null;
+  };
+
   
   // NEW: Format summary type name for display
   const formatSummaryTypeName = (tipo: string) => {
@@ -1589,24 +1645,46 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                     {formatDuration(aiUsage.summaries.durationMs)}
                   </div>
                 )}
-                {aiUsage.summaries.count > 0 ? (
-                  <div className={cn(
-                    "text-xs flex items-center gap-1 mt-1",
-                    aiUsage.summaries.count >= EXPECTED_AUTO_SUMMARIES ? "text-green-500" : "text-yellow-500"
-                  )}>
-                    {aiUsage.summaries.count >= EXPECTED_AUTO_SUMMARIES ? (
-                      <CheckCircle2 className="h-3 w-3" />
-                    ) : (
-                      <AlertTriangle className="h-3 w-3" />
-                    )}
-                    {aiUsage.summaries.count} de {EXPECTED_AUTO_SUMMARIES} resumos automáticos
-                  </div>
-                ) : (
-                  <div className="text-xs text-yellow-500 flex items-center gap-1 mt-1">
-                    <AlertTriangle className="h-3 w-3" />
-                    Nenhum resumo gerado
-                  </div>
-                )}
+                {(() => {
+                  // Distingue falha real (partialFailures) de "pulo legítimo" (contestação vazia).
+                  const hasRealFailure =
+                    !!partialFailures && partialFailures.failedSummaries.length > 0;
+                  const count = aiUsage.summaries.count;
+                  const complete = count >= EXPECTED_AUTO_SUMMARIES;
+
+                  if (count === 0) {
+                    return (
+                      <div className="text-xs text-yellow-500 flex items-center gap-1 mt-1">
+                        <AlertTriangle className="h-3 w-3" />
+                        Nenhum resumo gerado
+                      </div>
+                    );
+                  }
+                  if (complete) {
+                    return (
+                      <div className="text-xs text-green-500 flex items-center gap-1 mt-1">
+                        <CheckCircle2 className="h-3 w-3" />
+                        {count} de {EXPECTED_AUTO_SUMMARIES} resumos automáticos
+                      </div>
+                    );
+                  }
+                  if (hasRealFailure) {
+                    return (
+                      <div className="text-xs text-yellow-500 flex items-center gap-1 mt-1">
+                        <AlertTriangle className="h-3 w-3" />
+                        {count} de {EXPECTED_AUTO_SUMMARIES} resumos automáticos
+                      </div>
+                    );
+                  }
+                  // Pulo legítimo (ex.: PDF sem contestação) — sem alarme.
+                  return (
+                    <div className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+                      <CheckCircle2 className="h-3 w-3 text-green-500" />
+                      {count} de {EXPECTED_AUTO_SUMMARIES} resumos automáticos
+                      <span className="ml-1 opacity-80">(demais seções sem conteúdo no PDF)</span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             
@@ -1899,7 +1977,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                             <Eye className="h-3 w-3" />
                             <span className="text-muted-foreground">OCR:</span>
                             <span className="font-medium">
-                              {ocrConfig.provider === 'mistral' || ocrConfig.provider === 'mistral-ocr' ? 'Mistral OCR' : `Gemini ${formatModelName(ocrConfig.model)}`}
+                              {formatOcrProviderLabel(ocrConfig.provider, ocrConfig.model) || ocrConfig.provider}
                             </span>
                           </Badge>
                         )}
@@ -2097,15 +2175,35 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   Tempo decorrido: {formatDuration(elapsedTime)}
                 </p>
                 {/* OCR Provider Indicator - GLOBAL for ALL users during extraction */}
-                {currentOCRProvider && stepsStatus.find(s => s.id === 'extraction')?.status === 'processing' && (
-                  <Badge 
-                    variant="outline" 
-                    className="mt-2 text-xs flex items-center gap-1.5 border-border bg-muted/50 text-foreground"
-                  >
-                    <Eye className="h-3 w-3 text-primary" />
-                    {currentOCRProvider === 'mistral-ocr' ? 'Mistral OCR' : 'Gemini Vision'}
-                  </Badge>
-                )}
+                {(() => {
+                  const isExtracting =
+                    stepsStatus.find(s => s.id === 'extraction')?.status === 'processing';
+                  if (!isExtracting) return null;
+                  // Preferir o provider real vindo do backend (currentOCRProvider),
+                  // caindo pra config do DevPanel (ocrConfig.provider) até o polling
+                  // trazer o valor efetivo. Nunca inventa Gemini.
+                  const effectiveProvider = currentOCRProvider || ocrConfig?.provider || null;
+                  const label = formatOcrProviderLabel(effectiveProvider, ocrConfig?.model);
+                  if (!label) return null;
+                  const fileSizeMB = selectedFile ? selectedFile.size / (1024 * 1024) : null;
+                  const subStep = getOcrSubStepLabel(effectiveProvider, analysisStep, fileSizeMB);
+                  return (
+                    <>
+                      <Badge
+                        variant="outline"
+                        className="mt-2 text-xs flex items-center gap-1.5 border-border bg-muted/50 text-foreground"
+                      >
+                        <Eye className="h-3 w-3 text-primary" />
+                        {label}
+                      </Badge>
+                      {subStep && (
+                        <p className="mt-1.5 text-[11px] text-muted-foreground italic">
+                          └─ {subStep}
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
                 
                 {/* Main AI Indicator - GLOBAL for ALL users after OCR completes */}
                 {stepsStatus.find(s => s.id === 'extraction')?.status === 'completed' && 
