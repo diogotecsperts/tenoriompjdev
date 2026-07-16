@@ -2175,15 +2175,35 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   Tempo decorrido: {formatDuration(elapsedTime)}
                 </p>
                 {/* OCR Provider Indicator - GLOBAL for ALL users during extraction */}
-                {currentOCRProvider && stepsStatus.find(s => s.id === 'extraction')?.status === 'processing' && (
-                  <Badge 
-                    variant="outline" 
-                    className="mt-2 text-xs flex items-center gap-1.5 border-border bg-muted/50 text-foreground"
-                  >
-                    <Eye className="h-3 w-3 text-primary" />
-                    {currentOCRProvider === 'mistral-ocr' ? 'Mistral OCR' : 'Gemini Vision'}
-                  </Badge>
-                )}
+                {(() => {
+                  const isExtracting =
+                    stepsStatus.find(s => s.id === 'extraction')?.status === 'processing';
+                  if (!isExtracting) return null;
+                  // Preferir o provider real vindo do backend (currentOCRProvider),
+                  // caindo pra config do DevPanel (ocrConfig.provider) até o polling
+                  // trazer o valor efetivo. Nunca inventa Gemini.
+                  const effectiveProvider = currentOCRProvider || ocrConfig?.provider || null;
+                  const label = formatOcrProviderLabel(effectiveProvider, ocrConfig?.model);
+                  if (!label) return null;
+                  const fileSizeMB = selectedFile ? selectedFile.size / (1024 * 1024) : null;
+                  const subStep = getOcrSubStepLabel(effectiveProvider, analysisStep, fileSizeMB);
+                  return (
+                    <>
+                      <Badge
+                        variant="outline"
+                        className="mt-2 text-xs flex items-center gap-1.5 border-border bg-muted/50 text-foreground"
+                      >
+                        <Eye className="h-3 w-3 text-primary" />
+                        {label}
+                      </Badge>
+                      {subStep && (
+                        <p className="mt-1.5 text-[11px] text-muted-foreground italic">
+                          └─ {subStep}
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
                 
                 {/* Main AI Indicator - GLOBAL for ALL users after OCR completes */}
                 {stepsStatus.find(s => s.id === 'extraction')?.status === 'completed' && 
