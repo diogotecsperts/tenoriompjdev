@@ -2997,32 +2997,60 @@ async function processarPDFBackground(
           };
           
         } else if (pdfStream) {
-          // STREAMING MODE: For medium-large files (20-45MB), stream directly to Files API
-          console.log(`[processar-autos] Medium-large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), using STREAMING for single-pass...`);
-          
-          // Use extractVisualContent with stream input
-          const extracted = await extractVisualContent(
-            { stream: pdfStream, size: pdfSizeBytes }, 
-            { model: 'gemini-2.0-flash' }
-          );
-          pdfStream = null; // Stream is consumed
-          console.log('[processar-autos] MEMORY: Stream consumed, no bytes in memory');
-          
-          // The extracted text serves as input for structured parsing
-          const fillResult = await callAI(
-            await getAIConfig(),
-            systemPrompt,
-            `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${extracted.rawText}`,
-            { promptType: 'single_pass_large', userId, maxOutputTokens: 65536, jsonMode: true }
-          );
-          
-          visionResult = {
-            provider: 'gemini-streaming',
-            model: extracted.model,
-            text: fillResult.text,
-            finishReason: 'STOP',
-            usedFallback: false
-          };
+          // MEDIUM-LARGE MODE (20-45MB): OCR via router configurado no DevPanel
+          // (respeita glm/mistral/minimax/gemini). Antes chamávamos direto o
+          // Gemini com modelo hardcoded ('gemini-2.0-flash' → 404). Agora
+          // encapsulamos o stream num Blob e delegamos ao router — o próprio
+          // router decide se streama direto ao Files API (Gemini >30 MB) ou
+          // materializa em bytes (Mistral/GLM).
+          console.log(`[processar-autos] Medium-large PDF detected (${(pdfSizeBytes / 1024 / 1024).toFixed(2)}MB), routing to configured OCR provider...`);
+
+          const pdfBlob = await new Response(pdfStream).blob();
+          pdfStream = null;
+
+          try {
+            const ocrResult = await runOcrWithConfiguredProvider(
+              { blob: pdfBlob, size: pdfSizeBytes },
+              {
+                logPrefix: '[processar-autos/single-pass-stream]',
+                onHeartbeat: async (_stage, pct) => {
+                  await supabaseAdmin.from('import_jobs').update({
+                    current_step: `OCR em andamento (${pct}%)...`,
+                    updated_at: new Date().toISOString(),
+                  }).eq('id', jobId);
+                },
+              },
+            );
+            console.log(`[processar-autos] OCR ${ocrResult.provider}/${ocrResult.model} → ${ocrResult.text.length} chars`);
+
+            const fillResult = await callAI(
+              await getAIConfig(),
+              systemPrompt,
+              `Analise o seguinte texto extraído de um PDF de processo trabalhista e retorne os dados estruturados em JSON conforme o schema esperado:\n\n${ocrResult.text}`,
+              { promptType: 'single_pass_large', userId, maxOutputTokens: 65536, jsonMode: true }
+            );
+
+            visionResult = {
+              provider: ocrResult.provider,
+              model: ocrResult.model,
+              text: fillResult.text,
+              finishReason: 'STOP',
+              usedFallback: false,
+            };
+          } catch (routerError) {
+            const msg = routerError instanceof Error ? routerError.message : String(routerError);
+            if (msg.includes(MINIMAX_CLIENT_RASTERIZE_ERROR)) {
+              await logWarn('processar-autos', `MiniMax OCR não suportado em stream single-pass; usando fallback legado (Lovable/Gemini).`, jobId);
+              const bytes = new Uint8Array(await pdfBlob.arrayBuffer());
+              const pdfBase64 = btoa(String.fromCharCode(...bytes));
+              visionResult = await callPDFProvider(pdfBase64, systemPrompt, {
+                promptType: 'pdf_extraction',
+                userId: userId,
+              });
+            } else {
+              throw routerError;
+            }
+          }
         } else if (pdfBytes) {
           // Small PDFs (<20MB): OCR via router (respeita DevPanel: glm/mistral/minimax/gemini)
           // + IA generalista via getAIConfig para extração estruturada.
