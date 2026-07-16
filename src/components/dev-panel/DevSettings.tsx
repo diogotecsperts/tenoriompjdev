@@ -53,8 +53,7 @@ interface SystemConfig {
   retry_enabled: boolean;
   retry_max_attempts: number;
   retry_base_delay_ms: number;
-  // Two-phase import strategy
-  import_strategy: string;
+  // Two-phase import strategy (single-pass foi descontinuado; agora sempre two-phase)
   text_fill_provider: string;
   text_fill_model: string;
   store_extracted_text: boolean;
