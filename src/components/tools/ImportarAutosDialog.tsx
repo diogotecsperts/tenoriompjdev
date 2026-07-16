@@ -259,6 +259,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const lastJobUpdateRef = useRef<string | null>(null);
   const staleCheckCountRef = useRef(0);
   const STALE_THRESHOLD_POLLS = 100; // 100 polls * 3s = 300 segundos (5 min) sem update = stale
+  const staleExtensionUsedRef = useRef(false); // "Continuar esperando" só pode ser usado uma vez
+  const ABSOLUTE_TIMEOUT_MS = 25 * 60 * 1000; // 25 min de wall-clock — teto absoluto
   
   // Partial results recovery state (for stale/crashed jobs)
   const [partialResults, setPartialResults] = useState<{
