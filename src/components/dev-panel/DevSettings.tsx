@@ -2197,8 +2197,10 @@ export function DevSettings() {
                 )}
           </div>
 
-          {config.import_strategy === "two_phase" && (
-            <>
+          {/* Phase 2 — sempre visível (two-phase é o único modo) */}
+          <>
+            <Separator />
+
               <Separator />
 
               {/* Phase 2 Provider Configuration */}
