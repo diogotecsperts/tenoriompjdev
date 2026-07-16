@@ -760,94 +760,118 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       
       const fileSizeMB = selectedFile.size / (1024 * 1024);
 
-      // GLM-OCR tem limite mais rígido (50MB / 30 páginas por chamada). Divide antes
-      // de subir usando margem de segurança (38MB / 26 páginas). Para outros providers
-      // mantém o comportamento atual (20MB / 50 páginas).
+      // GLM tem limite duro de ~50 MB E ≤100 páginas por chamada. Para atender
+      // ambos os limites usamos o mesmo pipeline "raster+clean+split" que o
+      // Previdenciário: rasteriza cada página em JPEG, remonta um PDF só-imagens
+      // (elimina bug do copyPages/pdf-lib) e divide por páginas quando preciso.
+      // Providers não-GLM continuam com o split pdf-lib halving legado (mais
+      // rápido e sem regressão para quem já usa).
       const isGlm = ocrConfig?.provider === 'glm';
-      const splitOptions = isGlm
-        ? { maxSizeBytes: 38_000_000, maxPagesPerPart: 26 }
-        : { maxSizeBytes: 20_000_000, maxPagesPerPart: 50 };
-      const splitThresholdMB = isGlm ? 38 : 20;
-      const shouldSplit = isGlm ? fileSizeMB > splitThresholdMB : needsClientSplit(fileSizeMB);
+
+      let glmRasterResult:
+        | { parts: Blob[]; pageRanges: Array<{ start: number; end: number }>; totalPages: number }
+        | null = null;
+
+      if (isGlm) {
+        // Probe rápido de páginas (~50-200ms) — decide se precisa raster
+        const { probePdfPageCount, pdfNeedsRasterSplit, rebuildPdfAsRasterClean, splitCleanPdfByPages, RASTER_SPLIT_MAX_BYTES, RASTER_SPLIT_MAX_PAGES } = await import('@/lib/pdf-preprocess');
+
+        setIsSplitting(true);
+        setSplitProgress(0);
+        setSplitMessage('Analisando PDF (contagem de páginas)...');
+
+        const probe = await pdfNeedsRasterSplit(selectedFile);
+        console.log(`[ImportarAutosDialog][glm] probe: ${probe.pageCount} págs, ${(probe.sizeBytes / 1024 / 1024).toFixed(1)}MB, precisa raster=${probe.needs}`);
+
+        if (probe.needs) {
+          setSplitMessage(`Rasterizando página 0/${probe.pageCount}...`);
+          const rebuilt = await rebuildPdfAsRasterClean(selectedFile, RASTER_SPLIT_MAX_BYTES, {
+            parallelism: 4,
+            onPageProgress: (done, total) => {
+              setSplitMessage(`Rasterizando página ${done}/${total}...`);
+              setSplitProgress(Math.floor((done / total) * 60));
+            },
+          });
+          console.log(`[ImportarAutosDialog][glm] raster limpo: ${rebuilt.pageCount} págs @ ${rebuilt.dpiUsed}dpi q=${rebuilt.qualityUsed} → ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB`);
+
+          const cleanBytes = new Uint8Array(await rebuilt.blob.arrayBuffer());
+          const cleanFitsSingle =
+            rebuilt.blob.size <= RASTER_SPLIT_MAX_BYTES && rebuilt.pageCount <= RASTER_SPLIT_MAX_PAGES;
+
+          if (cleanFitsSingle) {
+            setSplitMessage(`PDF limpo cabe em chamada única (${rebuilt.pageCount} págs, ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB)`);
+            glmRasterResult = {
+              parts: [rebuilt.blob],
+              pageRanges: [{ start: 1, end: rebuilt.pageCount }],
+              totalPages: rebuilt.pageCount,
+            };
+          } else {
+            setSplitMessage('Dividindo PDF limpo em partes...');
+            setSplitProgress(70);
+            const cleanParts = await splitCleanPdfByPages(cleanBytes, RASTER_SPLIT_MAX_PAGES, RASTER_SPLIT_MAX_BYTES);
+            const parts = cleanParts.map(p => p.blob);
+            const pageRanges = cleanParts.map(p => ({ start: p.startPage, end: p.endPage }));
+            const totalPages = rebuilt.pageCount;
+            // Popula o estado visual usado pelo modal (splitParts) para consistência
+            setSplitParts(cleanParts.map((p, idx) => ({
+              partNumber: idx + 1,
+              pageRange: { start: p.startPage, end: p.endPage },
+              sizeMB: Number((p.blob.size / 1024 / 1024).toFixed(1)),
+            })));
+            setSplitProgress(90);
+            setSplitMessage(`Dividido em ${parts.length} parte(s)`);
+            glmRasterResult = { parts, pageRanges, totalPages };
+          }
+        } else {
+          // GLM aceita o PDF original tal como está — não precisa raster nem split.
+          console.log('[ImportarAutosDialog][glm] PDF dentro dos limites; upload direto');
+          setIsSplitting(false);
+        }
+      }
+
+      // Para providers não-GLM mantém o split pdf-lib halving legado.
+      const splitOptions = { maxSizeBytes: 20_000_000, maxPagesPerPart: 50 };
+      const shouldSplit = isGlm
+        ? glmRasterResult !== null
+        : needsClientSplit(fileSizeMB);
 
       // === CHECK IF CLIENT-SIDE SPLIT IS NEEDED ===
       if (shouldSplit) {
-        console.log(`[ImportarAutosDialog] Large PDF detected (${fileSizeMB.toFixed(2)}MB, provider=${ocrConfig?.provider}), starting client-side split with params:`, splitOptions);
-        
+        console.log(`[ImportarAutosDialog] Large PDF detected (${fileSizeMB.toFixed(2)}MB, provider=${ocrConfig?.provider}), starting client-side split`);
+
         // === CHUNKED UPLOAD MODE ===
-        setIsSplitting(true);
-        setSplitProgress(0);
-        setSplitMessage('Preparando divisão do PDF...');
-        setSplitParts([]); // Reset parts
-        setCurrentUploadingPart(0);
-        
+        if (!isGlm) {
+          setIsSplitting(true);
+          setSplitProgress(0);
+          setSplitMessage('Preparando divisão do PDF...');
+          setSplitParts([]);
+          setCurrentUploadingPart(0);
+        }
+
         try {
-          // Split PDF in browser
-          let { parts, pageRanges, totalPages } = await splitPDFClientSide(
-            selectedFile,
-            splitOptions,
-            (progress, message) => {
-              setSplitProgress(progress);
-              setSplitMessage(message);
-            },
-            (partInfo) => {
-              // Add each part as it's created
-              setSplitParts(prev => [...prev, partInfo]);
-            }
-          );
+          let parts: Blob[];
+          let pageRanges: Array<{ start: number; end: number }>;
+          let totalPages: number;
 
-          // GLM: verificação pós-split contra o bug conhecido do pdf-lib
-          // (copyPages pode inflar imagens não usadas). Re-divide qualquer parte
-          // que ainda tenha passado do limite, máximo 2 níveis de recursão.
-          if (isGlm) {
-            const MAX_PART_BYTES = splitOptions.maxSizeBytes;
-            const rescueSplit = async (
-              blob: Blob,
-              pagesPerPart: number,
-              depth: number,
-              parentRange: { start: number; end: number }
-            ): Promise<{ blobs: Blob[]; ranges: { start: number; end: number }[] }> => {
-              if (blob.size <= MAX_PART_BYTES || depth >= 2) {
-                return { blobs: [blob], ranges: [parentRange] };
-              }
-              console.warn(`[ImportarAutosDialog][glm-rescue depth=${depth}] parte ${parentRange.start}-${parentRange.end} ficou com ${(blob.size / 1024 / 1024).toFixed(2)}MB (>${(MAX_PART_BYTES / 1024 / 1024).toFixed(0)}MB), re-dividindo…`);
-              const file = new File([blob], `rescue_${parentRange.start}-${parentRange.end}.pdf`, { type: 'application/pdf' });
-              const res = await splitPDFClientSide(
-                file,
-                { maxSizeBytes: MAX_PART_BYTES, maxPagesPerPart: Math.max(4, Math.floor(pagesPerPart / 2)) }
-              );
-              const outBlobs: Blob[] = [];
-              const outRanges: { start: number; end: number }[] = [];
-              for (let i = 0; i < res.parts.length; i++) {
-                const relStart = res.pageRanges[i].start;
-                const relEnd = res.pageRanges[i].end;
-                // remapeia ranges relativos ao pai
-                const absStart = parentRange.start + (relStart - 1);
-                const absEnd = parentRange.start + (relEnd - 1);
-                const inner = await rescueSplit(res.parts[i], Math.max(4, Math.floor(pagesPerPart / 2)), depth + 1, { start: absStart, end: absEnd });
-                outBlobs.push(...inner.blobs);
-                outRanges.push(...inner.ranges);
-              }
-              return { blobs: outBlobs, ranges: outRanges };
-            };
-
-            const rescuedParts: Blob[] = [];
-            const rescuedRanges: { start: number; end: number }[] = [];
-            for (let i = 0; i < parts.length; i++) {
-              const rescued = await rescueSplit(parts[i], splitOptions.maxPagesPerPart, 0, pageRanges[i]);
-              rescuedParts.push(...rescued.blobs);
-              rescuedRanges.push(...rescued.ranges);
-            }
-            const oversized = rescuedParts.filter(p => p.size > MAX_PART_BYTES);
-            if (oversized.length > 0) {
-              throw new Error(
-                `Após duas rodadas de divisão, ${oversized.length} parte(s) ainda ficaram acima do limite do GLM (${(MAX_PART_BYTES / 1024 / 1024).toFixed(0)}MB). ` +
-                `Reduza o PDF manualmente ou troque o provider de OCR no DevPanel.`
-              );
-            }
-            parts = rescuedParts;
-            pageRanges = rescuedRanges;
-            console.log(`[ImportarAutosDialog] GLM post-split verification OK: ${parts.length} partes finais`);
+          if (isGlm && glmRasterResult) {
+            parts = glmRasterResult.parts;
+            pageRanges = glmRasterResult.pageRanges;
+            totalPages = glmRasterResult.totalPages;
+          } else {
+            const legacy = await splitPDFClientSide(
+              selectedFile,
+              splitOptions,
+              (progress, message) => {
+                setSplitProgress(progress);
+                setSplitMessage(message);
+              },
+              (partInfo) => {
+                setSplitParts(prev => [...prev, partInfo]);
+              },
+            );
+            parts = legacy.parts;
+            pageRanges = legacy.pageRanges;
+            totalPages = legacy.totalPages;
           }
 
           console.log(`[ImportarAutosDialog] Split complete: ${parts.length} parts, ${totalPages} pages`);
