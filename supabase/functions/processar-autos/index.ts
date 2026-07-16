@@ -2744,12 +2744,19 @@ serve(async (req) => {
 
     // Validate required fields
     const isRetry = !!retryFilePath;
-    const isChunked = isChunkedUpload && fileParts?.length > 0;
-    const finalFilePath = filePath || retryFilePath || (isChunked ? fileParts[0] : null);
-    
-    if (!finalFilePath || !fileName) {
+    const hasPreOcr = typeof preExtractedText === 'string' && preExtractedText.trim().length > 0;
+    const isChunked = (isChunkedUpload && fileParts?.length > 0) || hasPreOcr;
+    const finalFilePath = filePath || retryFilePath || (fileParts?.[0] ?? null);
+
+    if (!fileName) {
       return new Response(
-        JSON.stringify({ error: "filePath e fileName são obrigatórios" }),
+        JSON.stringify({ error: "fileName é obrigatório" }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    if (!hasPreOcr && !finalFilePath) {
+      return new Response(
+        JSON.stringify({ error: "filePath ou preExtractedText são obrigatórios" }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
