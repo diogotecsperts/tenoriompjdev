@@ -636,6 +636,7 @@ serve(async (req) => {
     const meta = FIELD_TO_PROMPT[body.campo];
     const ctx = buildContext(laudo, body);
 
+    console.log(`[gerar-justificativa-medica] campo=${body.campo} → carregando prompt ${meta.id}`);
     const interpolatedPrompt = await getPrompt(
       meta.id,
       DEFAULT_PROMPTS[body.campo],
@@ -647,6 +648,7 @@ serve(async (req) => {
         sectionId: meta.sectionId,
       }
     );
+    console.log(`[gerar-justificativa-medica] campo=${body.campo} prompt pronto (${interpolatedPrompt.length} chars)`);
 
     const aiConfig = await getAIConfig();
     if (!aiConfig.apiKey) {
@@ -655,12 +657,50 @@ serve(async (req) => {
       });
     }
 
-    const result = await callAI(
-      aiConfig,
-      SYSTEM_PROMPT,
-      interpolatedPrompt,
-      { promptType: `gen_${body.campo}`, userId: user.id }
-    );
+    // Parâmetros específicos por campo — evita que o wall-clock da edge mate a função
+    // silenciosamente em campos que produzem respostas longas (ex.: referências ABNT).
+    const callOptions: {
+      promptType: string;
+      userId: string;
+      maxOutputTokens?: number;
+      requestTimeoutMs?: number;
+    } = { promptType: `gen_${body.campo}`, userId: user.id };
+
+    if (body.campo === 'referencias') {
+      callOptions.maxOutputTokens = 2200;
+      callOptions.requestTimeoutMs = 90_000;
+    }
+
+    console.log(`[gerar-justificativa-medica] campo=${body.campo} → callAI (provider=${aiConfig.provider}, model=${aiConfig.model}, maxOutputTokens=${callOptions.maxOutputTokens ?? 'default'}, timeout=${callOptions.requestTimeoutMs ?? 'default'})`);
+
+    let result;
+    try {
+      result = await callAI(aiConfig, SYSTEM_PROMPT, interpolatedPrompt, callOptions);
+    } catch (aiErr) {
+      const anyErr = aiErr as any;
+      const rawMsg = anyErr?.technicalDetail || anyErr?.message || String(aiErr);
+      const code = anyErr?.code;
+      console.error(`[gerar-justificativa-medica] callAI falhou em campo=${body.campo} — code=${code ?? 'n/a'} msg=${rawMsg}`);
+
+      const isTimeout =
+        typeof rawMsg === 'string' &&
+        /timeout|timed out|aborted|deadline/i.test(rawMsg);
+
+      if (isTimeout) {
+        const friendly = body.campo === 'referencias'
+          ? 'A IA demorou demais ao gerar as referências. Tente novamente em instantes.'
+          : 'A IA demorou demais ao responder. Tente novamente em instantes.';
+        return new Response(JSON.stringify({ error: friendly, code: code ?? 'timeout' }), {
+          status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      return new Response(JSON.stringify({ error: rawMsg, code: code ?? 'ai_error' }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    console.log(`[gerar-justificativa-medica] campo=${body.campo} OK (${result.text?.length ?? 0} chars)`);
 
     return new Response(
       JSON.stringify({ texto: result.text, provider: result.provider, model: result.model }),
@@ -674,3 +714,4 @@ serve(async (req) => {
     );
   }
 });
+
