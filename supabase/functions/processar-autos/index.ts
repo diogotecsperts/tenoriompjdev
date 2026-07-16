@@ -1670,44 +1670,57 @@ async function processarChunkedPDFBackground(
     const extractedTexts: string[] = [];
     let processedPageCount = 0;
 
-    for (let i = 0; i < fileParts.length; i++) {
-      const partPath = fileParts[i];
-      const range = pageRanges[i];
-
+    if (preExtractedText && preExtractedText.trim().length > 0) {
+      // MiniMax client-side OCR já entregou o texto pronto. Pula fase 1.
+      console.log(`[processar-autos-chunked] preExtractedText recebido (${preExtractedText.length} chars) — pulando fase 1 OCR`);
       await supabaseAdmin.from('import_jobs').update({
-        current_step: `Extraindo parte ${i + 1}/${fileParts.length} (págs ${range.start}-${range.end})...`,
-        progress: Math.round(5 + (i / fileParts.length) * 35),
+        current_step: `Texto já extraído pelo cliente (${preExtractedText.length} chars) — pulando fase 1`,
+        progress: 40,
         step_id: 'extraction',
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       }).eq('id', jobId);
+      extractedTexts.push(preExtractedText);
+      processedPageCount = totalPages;
+    } else {
+      for (let i = 0; i < fileParts.length; i++) {
+        const partPath = fileParts[i];
+        const range = pageRanges[i];
 
-      console.log(`[processar-autos-chunked] Downloading part ${i + 1}/${fileParts.length}: ${partPath}`);
+        await supabaseAdmin.from('import_jobs').update({
+          current_step: `Extraindo parte ${i + 1}/${fileParts.length} (págs ${range.start}-${range.end})...`,
+          progress: Math.round(5 + (i / fileParts.length) * 35),
+          step_id: 'extraction',
+          updated_at: new Date().toISOString()
+        }).eq('id', jobId);
 
-      // Download part from storage
-      const { data: partData, error: downloadError } = await supabaseAdmin.storage
-        .from('processos-pdf')
-        .download(partPath);
+        console.log(`[processar-autos-chunked] Downloading part ${i + 1}/${fileParts.length}: ${partPath}`);
 
-      if (downloadError || !partData) {
-        throw new Error(`Falha ao baixar parte ${i + 1}: ${downloadError?.message || 'Dados vazios'}`);
-      }
+        // Download part from storage
+        const { data: partData, error: downloadError } = await supabaseAdmin.storage
+          .from('processos-pdf')
+          .download(partPath);
 
-      const partBytes = new Uint8Array(await partData.arrayBuffer());
-      const partSizeMB = (partBytes.byteLength / 1024 / 1024).toFixed(2);
-      console.log(`[processar-autos-chunked] Part ${i + 1} downloaded: ${partSizeMB}MB`);
+        if (downloadError || !partData) {
+          throw new Error(`Falha ao baixar parte ${i + 1}: ${downloadError?.message || 'Dados vazios'}`);
+        }
 
-      // OCR via router — respeita o provider escolhido no DevPanel.
-      try {
-        const ocrResult = await runOcrWithConfiguredProvider(partBytes, {
-          logPrefix: `[processar-autos-chunked/part-${i + 1}]`,
-        });
-        const pageCount = range.end - range.start + 1;
-        extractedTexts.push(`\n=== PARTE ${i + 1} (Páginas ${range.start}-${range.end}) [${ocrResult.provider}] ===\n${ocrResult.text}`);
-        processedPageCount += pageCount;
-        console.log(`[processar-autos-chunked] Part ${i + 1} OCR complete (${ocrResult.provider}): ${ocrResult.text.length} chars, ${pageCount} pages`);
-      } catch (ocrError) {
-        console.error(`[processar-autos-chunked] OCR failed for part ${i + 1}:`, ocrError);
-        throw new Error(`Falha no OCR da parte ${i + 1}: ${ocrError instanceof Error ? ocrError.message : 'Erro desconhecido'}`);
+        const partBytes = new Uint8Array(await partData.arrayBuffer());
+        const partSizeMB = (partBytes.byteLength / 1024 / 1024).toFixed(2);
+        console.log(`[processar-autos-chunked] Part ${i + 1} downloaded: ${partSizeMB}MB`);
+
+        // OCR via router — respeita o provider escolhido no DevPanel.
+        try {
+          const ocrResult = await runOcrWithConfiguredProvider(partBytes, {
+            logPrefix: `[processar-autos-chunked/part-${i + 1}]`,
+          });
+          const pageCount = range.end - range.start + 1;
+          extractedTexts.push(`\n=== PARTE ${i + 1} (Páginas ${range.start}-${range.end}) [${ocrResult.provider}] ===\n${ocrResult.text}`);
+          processedPageCount += pageCount;
+          console.log(`[processar-autos-chunked] Part ${i + 1} OCR complete (${ocrResult.provider}): ${ocrResult.text.length} chars, ${pageCount} pages`);
+        } catch (ocrError) {
+          console.error(`[processar-autos-chunked] OCR failed for part ${i + 1}:`, ocrError);
+          throw new Error(`Falha no OCR da parte ${i + 1}: ${ocrError instanceof Error ? ocrError.message : 'Erro desconhecido'}`);
+        }
       }
     }
     
