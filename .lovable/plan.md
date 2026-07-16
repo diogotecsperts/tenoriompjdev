@@ -1,86 +1,61 @@
 
 ## Contexto
 
-O Trabalhista **não tem** o mesmo pipeline "raster+clean+split por páginas" que o Previdenciário usa há tempos para nunca bater no limite duro do GLM (90 págs, 48 MB por chamada). Hoje o Trabalhista tenta se virar com um split pdf-lib "halving" (`splitPDFClientSide`) que sofre do bug de inflação do `copyPages` — daí o "rescue loop" gambiarra que ainda existe em `ImportarAutosDialog.tsx:799-851`. Além disso, o ramo `else if (pdfStream)` do `processar-autos` (20-45 MB single-pass) hardcoda `gemini-2.0-flash` (descontinuado) → é a origem do 404 do print.
+Duas lacunas ficaram do plano anterior, ambas contra a regra de "Trabalhista = paridade com Prev":
 
-O Prev, ao contrário, tem 4 funções puras (browser-only, sem tocar em bucket/tabela do Prev) em `src/modules/previdenciario/api/pautas.ts` que fazem o trabalho corretamente: rasterizam cada página em canvas, remontam um PDF limpo e quebram em partes que respeitam simultaneamente 48 MB e 90 págs.
+1. **Card "Estratégia de Importação" ainda no DevPanel** e edge function ainda lendo `system_config.import_strategy`. O plano aprovado adiou isso — foi decisão minha e não deveria ter sido, já que você já tinha decidido "sempre two-phase".
+2. **MiniMax no Trabalhista continua caindo em fallback para Lovable/Gemini** dentro da edge function. O Prev nunca teve esse problema porque rasteriza cada página no browser (`minimax-ocr-client.ts`) e manda página-por-página ao endpoint `minimax-ocr-chunk`. O Trabalhista nunca implantou esse mesmo caminho.
 
-Como Prev é prioridade, a estratégia é **duplicar** (não mover) essas funções para uma lib compartilhada, deixando o Prev 100% intocado. Trabalhista passa a usar a cópia da lib compartilhada. Zero risco para o Prev.
-
-## Objetivos
-
-1. Trabalhista aceita OCR + IA do DevPanel em **todos** os tamanhos de PDF (não só <20 MB).
-2. Trabalhista respeita o limite duro do GLM (90 págs / 48 MB por parte) usando o mesmo padrão do Prev.
-3. Modal do Trabalhista mostra as etapas granulares (rasterização, split, OCR parte X/N) nos slots que já existem, sem redesenho.
-4. Zero mudança de comportamento e zero edição de arquivo no Previdenciário.
+Este plano fecha os dois, sem tocar em nenhum arquivo do Previdenciário.
 
 ## Alterações
 
-### 1. Nova lib compartilhada: `src/lib/pdf-preprocess.ts` (novo arquivo)
+### 1. Remover o toggle "Estratégia de Importação"
 
-Duplicar do Prev (`src/modules/previdenciario/api/pautas.ts`) as 4 funções puras, renomeando de forma genérica e trocando constantes Prev-flavored por nomes neutros:
+**a) `src/components/dev-panel/DevSettings.tsx`** — remover o card do seletor, o estado local associado, o handler de save, e qualquer texto/badge/tooltip referente a "single-pass vs two-phase". Manter todos os outros controles do DevPanel (OCR provider, phase1 gemini model, provider inventory, etc.) intactos.
 
-- `rebuildPdfAsRasterClean(source, maxBytes, opts)` — igual ao original (linhas 177-292). Depende de `pdf-lib` e `pdfjs-dist` (worker via `?url`), roda **só no browser** (usa `document.createElement('canvas')`). Fallback 2-pass DPI/qualidade preservado.
-- `probePdfPageCount(source)` — igual (linhas 345-353).
-- `splitCleanPdfByPages(cleanSource, maxPages, maxBytes)` — igual (linhas 365-432). Recursivo, respeita bytes E páginas.
-- `pdfNeedsRasterSplit(source, maxBytes)` — versão genérica do `prevPdfNeedsSplit`, aceita `maxBytes` por parâmetro.
-- Constantes: `RASTER_SPLIT_MAX_BYTES = 48 * 1024 * 1024`, `RASTER_SPLIT_MAX_PAGES = 90`.
-- Interface `PdfSplitPart` (versão genérica da `PrevPdfSplitPart`).
+**b) `supabase/functions/processar-autos/index.ts`** — no início do processamento, remover a leitura de `import_strategy` do `system_config` e forçar `usesTwoPhase = true`. Excluir o ramo single-pass inteiro (`else if (pdfSizeBytes > GEMINI_PROCESSING_LIMIT)`, `else if (pdfStream)`, `else if (pdfBytes)` no bloco single-pass, incluindo o legacy `processLargePDFWithSplit`). Manter só o pipeline two-phase (`processarChunkedPDFBackground` para arquivos chunked + o fluxo two-phase normal para arquivo único). O fallback de two-phase-failure → single-pass também é removido porque não faz mais sentido.
 
-**Duplicação, não extração**: o código do Prev fica exatamente como está. Se em algum bug futuro precisarmos consolidar, vira uma refatoração isolada com sign-off explícito.
+**c) Migration SQL:** `DELETE FROM public.system_config WHERE id = 'import_strategy';` — idempotente.
 
-### 2. `src/components/tools/ImportarAutosDialog.tsx` — pipeline raster+clean+split para GLM
+**d) Memória `mem://import-autos/gerenciamento-de-estrategias-de-importacao`** — reescrever para dizer "two-phase é o único caminho; single-pass foi removido em [data]".
 
-- No topo do `processFile()` (antes da checagem `shouldSplit` em `:774`), adicionar uma nova branch: `if (ocrConfig.provider === 'glm')`, sempre passar pelo raster+clean+split (não só quando o tamanho passa do threshold — o limite de 90 págs pode ser atingido com PDFs pequenos).
-  1. `probePdfPageCount(selectedFile)` (barato, ~50-200ms).
-  2. Se `pageCount > 90` **OU** `size > 48 MB`: chamar `rebuildPdfAsRasterClean(selectedFile, RASTER_SPLIT_MAX_BYTES, { parallelism, onPageProgress })` alimentando `setSplitMessage("Rasterizando página X/Y...")` + `setSplitProgress((done/total)*40)` no slot `:2050`.
-  3. Se o limpo cabe em single-shot (`sizeBytes <= 48 MB && pageCount <= 90`): sobe **só o limpo** e chama `processar-autos` como PDF único (fluxo `filePath` normal). Segue o padrão do Prev de "path swap" mas **sem** deletar o original (o Trabalhista precisa manter o original para auditoria — abordagem: sobe original + limpo em paths distintos, `filePath` aponta para o limpo).
-  4. Senão: `splitCleanPdfByPages(cleanBlob, 90, 48MB)` → sobe cada parte a `${user.id}/${timestamp}-${baseName}_raster_part_${i+1}.pdf` no bucket `processos-pdf` (mesmo bucket já usado, evita mudança de RLS).
-  5. Invocar `processar-autos` com `{ fileName, fileParts: partPaths, pageRanges, totalPages, isChunkedUpload: true }` — **shape já aceita**, zero mudança no backend para esta feature.
-- Manter o fluxo antigo (`splitPDFClientSide` pdf-lib halving + rescue loop) para provedores **não-GLM** (Mistral/Gemini/MiniMax) — não é regressão; apenas GLM é bloqueado pelo limite de páginas. Isso preserva 100% do comportamento atual de quem não usa GLM.
-- Ajustar `getOcrSubStepLabel()` (`:459-494`) para reconhecer as novas mensagens vindas do backend/frontend e mostrar sub-labels apropriadas ("Rasterizando página X/Y", "OCR parte X/N (págs A-B)").
+### 2. Paridade MiniMax no Trabalhista
 
-### 3. `supabase/functions/processar-autos/index.ts` — corrigir o ramo `else if (pdfStream)` e melhorar `current_step`
+**a) `src/components/tools/ImportarAutosDialog.tsx`** — adicionar branch para `ocrConfig.provider === 'minimax'` no `processFile()`, análogo ao que fiz para GLM:
+- Importar `runMinimaxClientOcr` de `src/lib/minimax-ocr-client.ts` (mesmo módulo que o Prev usa; é agnóstico de domínio, verificar antes de importar).
+- Rasterizar páginas no browser e chamar `minimax-ocr-chunk` (edge function que o Prev já usa) para cada página, coletando o texto.
+- Subir apenas o **texto extraído** como um "pré-OCR" ao invocar `processar-autos`, ou subir o PDF original mais o texto e passar um flag `preExtractedText`. **Preferido:** adicionar campo `preExtractedText` no body de `processar-autos` (paralelo ao que `prev-pre-processar` já faz), pulando a fase 1 quando presente.
 
-- **Corrigir o 404 do print**: no ramo single-pass `else if (pdfStream)` (linhas 2999-3025) e no ramo split legacy (linhas 2933-2997), substituir os hardcodes `'gemini-2.0-flash'` e `'gemini-2.5-flash'` por chamadas ao `runOcrWithConfiguredProvider` (com input `{ blob, size }` para o stream). Mesmo padrão que apliquei no two-phase. Isso encerra o silent-downgrade e o 404.
-- **Melhorar sub-steps do modal**: no loop de partes chunked (`processarChunkedPDFBackground` a partir de `:1672`), o `import_jobs.update({ current_step })` já existe — expandir a mensagem para incluir provider e faixa de páginas: `"OCR ${provider} · parte i/N · págs A-B"`. Essa string chega crua no frontend como `analysisStep` e alimenta o sub-label do badge sem mudar layout.
-- Adicionar `onHeartbeat` do `ocr-router` como escreva-de-progresso em `import_jobs.current_step` para GLM, para que o modal do Trabalhista veja algo se movendo mesmo dentro de uma parte grande (Prev já faz isso via `onJobProgress`).
+**b) `supabase/functions/processar-autos/index.ts`** — aceitar `preExtractedText?: string` no body. Quando presente, pular fase 1 (OCR) e alimentar direto o `callAI` de estruturação (fase 2). Log claro: `[processar-autos] Recebido preExtractedText (N chars) — pulando fase 1 OCR`.
 
-**Não altero**: schema de request/response da edge function, tabela `import_jobs` (sem colunas novas), nenhum outro branch da function, prompts, providers, DevPanel.
+**c) Verificação prévia (antes de escrever código):** confirmar que `src/lib/minimax-ocr-client.ts` e a edge function `minimax-ocr-chunk` são módulo-agnósticos (não têm `pericia_id`/`prev_*` hardcoded). Se tiverem acoplamento com Prev, duplicar o cliente em `src/lib/minimax-ocr-shared.ts` seguindo o mesmo princípio de "duplicação em vez de extração" que usei para `pdf-preprocess.ts`.
 
-### 4. Toggle `import_strategy` — parado por enquanto
+**d) Modal de progresso** — reusar os slots existentes (`splitMessage`/`splitProgress`) para mostrar "MiniMax · rasterizando página X/Y" e "MiniMax · OCR página X/Y". O `getOcrSubStepLabel` já cobre MiniMax; ajustar se necessário.
 
-Deixo o toggle **como está**. O usuário perguntou se pode remover, mas neste plano o foco é resolver o GLM-safe pipeline. Remoção do toggle vira um plano separado após esse rodar bem em produção — evita empacotar duas mudanças de risco distinto numa só entrega. Se quiser embutir aqui, avise antes do build.
+### 3. Fora de escopo (mantido intocado)
 
-### 5. Nenhuma outra alteração
-
-- `src/modules/previdenciario/**` — **intocado**, incluindo `pautas.ts`, `processar.ts` e todo o pipeline. As 4 funções ficam duplicadas na nova lib; o Prev continua importando as próprias de `pautas.ts`.
-- `supabase/functions/prev-*` — intocado.
-- `supabase/functions/_shared/ocr-router.ts`, `glm-ocr.ts`, `mistral-ocr.ts`, `ai-config.ts` — intocado.
-- Bucket `processos-pdf` já existe; sem migration.
-- Nenhuma nova secret, nenhuma nova RLS, nenhuma coluna nova.
+- Todo `src/modules/previdenciario/**`, `supabase/functions/prev-*`, `_shared/ocr-router.ts`, `_shared/glm-ocr.ts`, `_shared/mistral-ocr.ts`, `_shared/ai-config.ts`.
+- Pipeline pós-OCR (estruturação em campos, preview, criação do laudo).
+- Buckets, RLS, colunas.
 
 ## Validação
 
-1. `tsgo --noEmit` deve passar.
-2. **Trabalhista com PDF pequeno (<20 MB) + GLM**: sem regressão, badge "GLM-OCR", sub-step vazio ou "documento em uma chamada".
-3. **Trabalhista com PDF 30 MB / 120 págs + GLM**: modal mostra "Rasterizando página X/120..." (0-40%), "Dividindo PDF limpo em 2 partes", "OCR GLM-OCR · parte 1/2 · págs 1-90", "OCR GLM-OCR · parte 2/2 · págs 91-120", conclusão sem 404 e sem erro de página do GLM.
-4. **Trabalhista com PDF 30 MB + Mistral**: fluxo atual preservado (não passa pelo raster novo).
-5. **Trabalhista com PDF 25 MB + Gemini**: sem 404 (ramo corrigido usa router com `phase1_gemini_model` do DevPanel).
-6. **Previdenciário — smoke test**: uma pauta antiga com PDF grande (>90 págs), tempo de execução e logs (`prev-rebuild`, `prev-pre-processar`) **idênticos** aos de antes. Nenhum arquivo do Prev editado, então esperamos zero diferença.
-7. Modal Trabalhista visualmente idêntico ao atual — só o texto do sub-step muda; layout preservado.
+1. `tsgo --noEmit` passa.
+2. **DevPanel:** card "Estratégia de Importação" some. Nenhum outro card se move. `SELECT * FROM system_config WHERE id='import_strategy'` retorna 0 linhas.
+3. **Trabalhista + GLM (pequeno e grande):** sem regressão do plano anterior.
+4. **Trabalhista + Mistral:** sem regressão.
+5. **Trabalhista + Gemini:** sem 404; provider e modelo vindos do DevPanel.
+6. **Trabalhista + MiniMax:** modal mostra "MiniMax · rasterizando página X/Y" e "MiniMax · OCR página X/Y". Nenhum log de fallback para Lovable/Gemini. Extração populando os campos do laudo corretamente.
+7. **Previdenciário:** smoke test em pauta grande. Zero alteração de tempo/comportamento.
 
-## Riscos e mitigação
+## Riscos
 
-- **Risco:** `pdfjs-dist` worker path pode conflitar entre Prev e Trabalhista se ambos importarem lado a lado. **Mitigação:** duplicação usa `?url` import (Vite bundling), cada consumer resolve o próprio worker; testar carregando o Prev primeiro e depois abrindo o dialog do Trabalhista sem reload.
-- **Risco:** rasterização pesada travar UI. **Mitigação:** mesmo comportamento do Prev — user já usa isso em produção; `parallelism` lido da mesma chave `minimax_render_concurrency` para consistência.
-- **Risco:** partes ficarem >48 MB mesmo após raster (PDFs com muitas ilustrações). **Mitigação:** `splitCleanPdfByPages` já halves recursivamente até caber.
-- **Risco:** algum PDF que hoje passa pelo pdf-lib halving deixa de passar. **Mitigação:** o raster novo só é ativado para provider = GLM. Mistral/Gemini/MiniMax mantêm o fluxo antigo.
-- **Risco a Prev:** nulo. Nenhum arquivo do Prev é aberto, nenhuma tabela/bucket do Prev tocada, o Prev continua importando exclusivamente do próprio `pautas.ts` sem qualquer redirecionamento.
+- **Risco:** `minimax-ocr-client.ts` pode ter alguma dependência de `pericia_id` ou tabela do Prev. **Mitigação:** verificação prévia (item 2c). Se houver, duplico o cliente em vez de compartilhar. Prev fica intocado nos dois cenários.
+- **Risco:** remover o ramo single-pass da edge function é uma cirurgia grande (~400 linhas). **Mitigação:** o two-phase já é o caminho testado; remover código morto reduz superfície de bug. Uso `tsgo` + smoke test dos quatro providers antes de considerar pronto.
+- **Risco a Prev:** nulo. Nenhum arquivo do Prev é editado. `minimax-ocr-chunk` é reutilizado como serviço, não modificado.
 
-## Decisões que assumi (avise se quiser mudar antes do build)
+## Confirmações que preciso antes do build
 
-- **Raster só para GLM** (não para outros providers). Se quiser universalizar, ampliamos.
-- **Duplicação** das funções em vez de extração — Prev intocado. Se quiser consolidar mais tarde, é uma refatoração isolada.
-- **Original + limpo mantidos no storage**. Se preferir apagar o original (economizar espaço), aviso — mas Trabalhista costuma auditar, então mantive por default.
-- **Toggle `import_strategy` fica** neste plano; remoção em plano separado.
+1. **Confirma a remoção do card + toggle + código single-pass da edge function?** (Você já sinalizou "sempre two-phase" antes, mas quero confirmar explicitamente porque é destrutivo.)
+2. **Confirma a paridade MiniMax via `preExtractedText`** (Trabalhista rasteriza no browser + manda texto pronto para a edge function)?

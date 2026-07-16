@@ -767,6 +767,115 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       
       const fileSizeMB = selectedFile.size / (1024 * 1024);
 
+      // === MiniMax OCR client-side (paridade com Previdenciário) ===
+      // MiniMax não roda em edge function (limite CPU do worker Deno). Portanto
+      // rasteriza no navegador via pdfjs, chunks de 10 páginas, chamando o
+      // endpoint fino `minimax-ocr-chunk`. Devolve texto pronto que é passado
+      // ao `processar-autos` como `preExtractedText` — pipeline pula fase 1.
+      const isMinimax = ocrConfig?.provider === 'minimax';
+      if (isMinimax) {
+        try {
+          setIsSplitting(true);
+          setSplitProgress(0);
+          setSplitMessage('MiniMax · preparando rasterização no navegador...');
+
+          const { runMinimaxClientOcr } = await import('@/lib/minimax-ocr-client');
+
+          // Lê concurrency configurada no DevPanel (mesma chave do Prev)
+          let parallelism = 3;
+          try {
+            const { data } = await supabase.from('system_config').select('value').eq('id', 'minimax_render_concurrency').maybeSingle();
+            const raw = data?.value;
+            const n = typeof raw === 'string' ? parseInt(raw, 10) : raw;
+            if (typeof n === 'number' && n > 0 && n <= 8) parallelism = n;
+          } catch { /* usa default */ }
+
+          const ocrResult = await runMinimaxClientOcr(selectedFile, {
+            parallelism,
+            onProgress: (p) => {
+              const phaseLabel = p.phase === 'rasterizing'
+                ? `MiniMax · rasterizando página ${p.currentPage}/${p.totalPages}`
+                : p.phase === 'extracting'
+                  ? `MiniMax · OCR chunk ${p.currentChunk}/${p.totalChunks} (págs até ${p.currentPage}/${p.totalPages})`
+                  : 'MiniMax · concluído';
+              setSplitMessage(p.message || phaseLabel);
+              // Progresso: 0-50% rasterização, 50-95% OCR
+              const pct = p.phase === 'rasterizing'
+                ? Math.min(50, Math.floor((p.currentPage / Math.max(1, p.totalPages)) * 50))
+                : p.phase === 'extracting'
+                  ? 50 + Math.floor((p.currentChunk / Math.max(1, p.totalChunks)) * 45)
+                  : 95;
+              setSplitProgress(pct);
+            },
+          });
+
+          console.log(`[ImportarAutosDialog][minimax] OCR client-side: ${ocrResult.pageCount} págs, ${ocrResult.chunkCount} chunks, ${ocrResult.text.length} chars, ${ocrResult.failedChunks.length} falhas`);
+
+          if (!ocrResult.text || ocrResult.text.length < 50) {
+            throw new Error('MiniMax OCR retornou texto muito curto ou vazio.');
+          }
+
+          setIsSplitting(false);
+          setProcessingStep('analyzing');
+          setAnalysisStep('Texto extraído · estruturando com IA...');
+          setAnalysisProgress(0);
+          setStepsStatus(PROCESSING_STEPS.map(step => ({
+            ...step,
+            status: step.id === 'upload' ? 'completed' as const : 'pending' as const,
+          })));
+          lastStepIdRef.current = null;
+
+          const { data: invokeData, error: invokeError } = await supabase.functions.invoke('processar-autos', {
+            body: {
+              fileName: selectedFile.name,
+              preExtractedText: ocrResult.text,
+              totalPages: ocrResult.pageCount,
+              isChunkedUpload: true,
+            },
+          });
+
+          if (invokeError) {
+            console.error('[ImportarAutosDialog][minimax] Function error:', invokeError);
+            throw new Error('Falha ao iniciar processamento com texto pré-extraído');
+          }
+
+          const jobId = invokeData.jobId;
+          console.log('[ImportarAutosDialog][minimax] Job started with preExtractedText:', jobId);
+          setCurrentJobId(jobId);
+
+          pollingRef.current = setInterval(async () => {
+            try {
+              const isDone = await checkJobStatus(jobId);
+              if (isDone && pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+              }
+            } catch (error) {
+              if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+              }
+              console.error('Processing error:', error);
+              toast({
+                variant: 'destructive',
+                title: 'Erro no processamento',
+                description: error instanceof Error ? error.message : 'Erro desconhecido',
+              });
+              setProcessingStep('idle');
+              setAnalysisStep('');
+            }
+          }, 3000);
+
+          return; // MiniMax path done
+        } catch (minimaxError) {
+          setIsSplitting(false);
+          console.error('[ImportarAutosDialog][minimax] Erro:', minimaxError);
+          throw minimaxError;
+        }
+      }
+
+
+
       // GLM tem limite duro de ~50 MB E ≤100 páginas por chamada. Para atender
       // ambos os limites usamos o mesmo pipeline "raster+clean+split" que o
       // Previdenciário: rasteriza cada página em JPEG, remonta um PDF só-imagens
