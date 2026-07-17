@@ -2003,7 +2003,9 @@ async function processarChunkedPDFBackground(
       .update({ 
         status: 'failed',
         error: errorMessage,
-        current_step: `${chunkedOcrProvider === 'glm' ? 'GLM-OCR' : 'Erro no processamento'}: ${errorMessage.slice(0, 180)}`,
+        current_step: chunkedOcrProvider === 'glm'
+          ? `GLM-OCR: ${errorMessage.slice(0, 180)}`
+          : 'Erro no processamento',
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
