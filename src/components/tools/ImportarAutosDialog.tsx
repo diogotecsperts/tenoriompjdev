@@ -2624,6 +2624,14 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               
               <Progress value={splitProgress} />
               <p className="text-sm text-muted-foreground text-center">{splitMessage}</p>
+              {isGlmActive() && (
+                <div className="flex justify-center">
+                  <Button variant="outline" size="sm" onClick={downloadGlmDiagnosticReport} className="text-xs gap-1.5">
+                    <Download className="h-3.5 w-3.5" />
+                    Baixar diagnóstico GLM
+                  </Button>
+                </div>
+              )}
               
               {/* Parts grid - shows each part as it's created */}
               {splitParts.length > 0 && (
@@ -2808,6 +2816,58 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   </Badge>
                 )}
               </div>
+
+              {/* GLM-only diagnostics timeline */}
+              {isGlmActive() && (
+                <div className="max-w-md mx-auto rounded-lg border border-border/70 bg-muted/30 p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Diagnóstico GLM-OCR</p>
+                      <p className="text-xs text-muted-foreground">
+                        {glmAbortReason || glmLastSignal?.currentStep || 'Aguardando sinais do pipeline GLM...'}
+                      </p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={downloadGlmDiagnosticReport} className="text-xs gap-1.5 shrink-0">
+                      <Download className="h-3.5 w-3.5" />
+                      Diagnóstico
+                    </Button>
+                  </div>
+
+                  {(glmNoAdvanceAlert || glmAbortReason) && (
+                    <Alert className="bg-orange-500/10 border-orange-500/30 py-2">
+                      <AlertTriangle className="h-4 w-4 text-orange-500" />
+                      <AlertDescription className="text-xs text-orange-700 dark:text-orange-300">
+                        {glmAbortReason || 'GLM sem avanço real: o servidor responde heartbeat, mas etapa/progresso não mudam.'}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  <div className="space-y-1.5">
+                    {glmDiagnostics.map((stage) => {
+                      const duration = stage.startedAt
+                        ? formatDuration((stage.completedAt || Date.now()) - stage.startedAt)
+                        : '—';
+                      return (
+                        <div key={stage.id} className="flex items-start gap-2 text-xs">
+                          <div className="w-4 h-4 mt-0.5 flex items-center justify-center shrink-0">
+                            {stage.status === 'completed' && <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />}
+                            {stage.status === 'processing' && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
+                            {stage.status === 'error' && <XCircle className="h-3.5 w-3.5 text-destructive" />}
+                            {stage.status === 'pending' && <div className="h-3 w-3 rounded-full border border-muted-foreground/30" />}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className={cn("font-medium", stage.status === 'pending' && "text-muted-foreground")}>{stage.label}</span>
+                              <span className="text-muted-foreground ml-auto shrink-0">{duration}</span>
+                            </div>
+                            {stage.message && <p className="text-muted-foreground truncate">{stage.message}</p>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               
               {/* Lista de etapas */}
               <div className="space-y-1.5 max-w-md mx-auto">
