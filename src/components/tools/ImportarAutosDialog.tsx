@@ -811,6 +811,19 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       (lastLogs ? `\n\nÚltimos logs do servidor:\n${lastLogs}` : '') +
       `\n\nSugestões: trocar o provider de OCR no DevPanel ou reduzir o tamanho do PDF.`;
     console.error('[ImportarAutosDialog] Abortando por trava:', description);
+    setGlmAbortReason(reason);
+    if (isGlmActive()) {
+      const inferred = inferGlmStageFromStep(lastStep, glmLastSignal?.stepId) || 'ocr_part';
+      updateGlmStage(inferred, {
+        status: 'error',
+        message: reason,
+        meta: {
+          lastStep: lastStep || null,
+          provider,
+          progress: glmLastSignal?.progress ?? null,
+        },
+      });
+    }
     toast({
       variant: 'destructive',
       title: 'Processamento parou de responder',
