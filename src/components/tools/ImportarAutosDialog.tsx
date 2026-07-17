@@ -2303,22 +2303,35 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           <Alert variant="destructive" className="border-yellow-500/50 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400">
             <AlertTriangle className="h-4 w-4" />
             <div className="flex-1">
-              <AlertTitle className="flex items-center justify-between">
+              <AlertTitle className="flex items-center justify-between gap-2 flex-wrap">
                 <span>Extração parcial</span>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handleRetry}
-                  disabled={isRetrying || !currentFilePath}
-                  className="h-7 text-xs border-yellow-500/50 hover:bg-yellow-500/20"
-                >
-                  {isRetrying ? (
-                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3 w-3 mr-1" />
+                <div className="flex items-center gap-2">
+                  {isGlmActive() && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={downloadGlmDiagnosticReport}
+                      className="h-7 text-xs border-yellow-500/50 hover:bg-yellow-500/20"
+                    >
+                      <Download className="h-3 w-3 mr-1" />
+                      Baixar diagnóstico
+                    </Button>
                   )}
-                  Tentar novamente
-                </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRetry}
+                    disabled={isRetrying || !currentFilePath}
+                    className="h-7 text-xs border-yellow-500/50 hover:bg-yellow-500/20"
+                  >
+                    {isRetrying ? (
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                    )}
+                    Tentar novamente
+                  </Button>
+                </div>
               </AlertTitle>
               <AlertDescription>
                 Alguns campos não puderam ser extraídos automaticamente. 
