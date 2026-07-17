@@ -308,6 +308,17 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   }>>([]);
   const [currentUploadingPart, setCurrentUploadingPart] = useState(0);
 
+  // GLM-only diagnostics (Trabalhista). Isolado de Mistral/Previdenciário.
+  const [glmDiagnostics, setGlmDiagnostics] = useState<GlmDiagnosticEntry[]>(createGlmDiagnosticState);
+  const [glmLastSignal, setGlmLastSignal] = useState<{ currentStep?: string; progress?: number; stepId?: string | null; updatedAt?: string } | null>(null);
+  const [glmAbortReason, setGlmAbortReason] = useState<string | null>(null);
+  const [glmNoAdvanceAlert, setGlmNoAdvanceAlert] = useState(false);
+  const lastMeaningfulJobSignalRef = useRef<string | null>(null);
+  const noMeaningfulAdvanceCountRef = useRef(0);
+  const GLM_NO_ADVANCE_THRESHOLD_POLLS = 100; // 5 min em polling de 3s
+  const GLM_NO_ADVANCE_ABORT_POLLS = 200; // +5 min após extensão única
+  const activeOcrProviderRef = useRef<string | null>(null);
+
   // Cancel confirmation state
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
