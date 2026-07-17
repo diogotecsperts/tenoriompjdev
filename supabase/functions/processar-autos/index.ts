@@ -1794,45 +1794,48 @@ async function processarChunkedPDFBackground(
 
           const partStartedAt = Date.now();
           let timeoutId: number | null = null;
-          const ocrPromise = runOcrWithConfiguredProvider(partBytes, {
-            logPrefix: `[processar-autos-chunked/part-${i + 1}]`,
-            onHeartbeat: async (stage, providerProgress) => {
-              const normalizedProgress = Math.max(0, Math.min(100, Number(providerProgress) || 0));
-              const overallProgress = Math.round(5 + ((i + normalizedProgress / 100) / Math.max(1, fileParts.length)) * 35);
-              const stageLabel = typeof stage === 'string' && stage.startsWith('GLM-OCR')
-                ? stage
-                : `${isGlmChunked ? 'GLM-OCR' : ocrConfig.provider}: ${stage}`;
-              await supabaseAdmin.from('import_jobs').update({
-                current_step: `${stageLabel} · parte ${i + 1}/${fileParts.length} (págs ${range.start}-${range.end})`,
-                progress: overallProgress,
-                step_id: 'extraction',
-                updated_at: new Date().toISOString(),
-              }).eq('id', jobId);
-            },
-          });
+          let ocrResult: Awaited<ReturnType<typeof runOcrWithConfiguredProvider>>;
+          try {
+            const ocrPromise = runOcrWithConfiguredProvider(partBytes, {
+              logPrefix: `[processar-autos-chunked/part-${i + 1}]`,
+              onHeartbeat: async (stage, providerProgress) => {
+                const normalizedProgress = Math.max(0, Math.min(100, Number(providerProgress) || 0));
+                const overallProgress = Math.round(5 + ((i + normalizedProgress / 100) / Math.max(1, fileParts.length)) * 35);
+                const stageLabel = typeof stage === 'string' && stage.startsWith('GLM-OCR')
+                  ? stage
+                  : `${isGlmChunked ? 'GLM-OCR' : ocrConfig.provider}: ${stage}`;
+                await supabaseAdmin.from('import_jobs').update({
+                  current_step: `${stageLabel} · parte ${i + 1}/${fileParts.length} (págs ${range.start}-${range.end})`,
+                  progress: overallProgress,
+                  step_id: 'extraction',
+                  updated_at: new Date().toISOString(),
+                }).eq('id', jobId);
+              },
+            });
 
-          const ocrResult = isGlmChunked
-            ? await Promise.race([
-                ocrPromise,
-                new Promise<never>((_, reject) => {
-                  timeoutId = setTimeout(async () => {
-                    try {
-                      const persisted = await failGlmPart(
-                        i,
-                        range,
-                        `timeout operacional de ${Math.round(GLM_CHUNK_PART_TIMEOUT_MS / 60000)} min sem conclusão`,
-                        partStartedAt,
-                      );
-                      reject(new Error(persisted));
-                    } catch (timeoutError) {
-                      reject(timeoutError instanceof Error ? timeoutError : new Error(String(timeoutError)));
-                    }
-                  }, GLM_CHUNK_PART_TIMEOUT_MS) as unknown as number;
-                }),
-              ])
-            : await ocrPromise;
-
-          if (timeoutId) clearTimeout(timeoutId);
+            ocrResult = isGlmChunked
+              ? await Promise.race([
+                  ocrPromise,
+                  new Promise<never>((_, reject) => {
+                    timeoutId = setTimeout(async () => {
+                      try {
+                        const persisted = await failGlmPart(
+                          i,
+                          range,
+                          `timeout operacional de ${Math.round(GLM_CHUNK_PART_TIMEOUT_MS / 60000)} min sem conclusão`,
+                          partStartedAt,
+                        );
+                        reject(new Error(persisted));
+                      } catch (timeoutError) {
+                        reject(timeoutError instanceof Error ? timeoutError : new Error(String(timeoutError)));
+                      }
+                    }, GLM_CHUNK_PART_TIMEOUT_MS) as unknown as number;
+                  }),
+                ])
+              : await ocrPromise;
+          } finally {
+            if (timeoutId) clearTimeout(timeoutId);
+          }
 
           ocrProviderUsed = ocrResult.provider;
           ocrModelUsed = ocrResult.model;

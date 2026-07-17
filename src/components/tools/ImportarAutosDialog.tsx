@@ -319,6 +319,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const GLM_NO_ADVANCE_ABORT_POLLS = 200; // +5 min após extensão única
   const activeOcrProviderRef = useRef<string | null>(null);
   const failedJobPersistedRef = useRef(false);
+  const currentJobIdRef = useRef<string | null>(null);
 
   // Cancel confirmation state
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -795,12 +796,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const [isReconnecting, setIsReconnecting] = useState(false);
 
   const markCurrentJobFailed = async (reason: string, lastStep: string | undefined) => {
-    if (!currentJobId || failedJobPersistedRef.current) return;
+    const jobId = currentJobIdRef.current || currentJobId;
+    if (!jobId || failedJobPersistedRef.current) return;
     failedJobPersistedRef.current = true;
     const provider = currentOCRProvider || activeOcrProviderRef.current || ocrConfig?.provider || 'desconhecido';
     const { error } = await supabase.functions.invoke('mark-import-job-failed', {
       body: {
-        jobId: currentJobId,
+        jobId,
         reason,
         currentStep: lastStep || analysisStep || glmLastSignal?.currentStep || '—',
         provider,
@@ -1166,6 +1168,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
           const jobId = invokeData.jobId;
           console.log('[ImportarAutosDialog][minimax] Job started with preExtractedText:', jobId);
+          currentJobIdRef.current = jobId;
           setCurrentJobId(jobId);
 
           pollingRef.current = setInterval(async () => {
@@ -1525,6 +1528,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           
           const jobId = invokeData.jobId;
           console.log('[ImportarAutosDialog] Chunked job started:', jobId);
+          currentJobIdRef.current = jobId;
           setCurrentJobId(jobId);
           if (isGlm) {
             updateGlmStage('job_start', { status: 'completed', progress: 100, message: `Job iniciado: ${jobId}`, meta: { jobId } });
@@ -1627,6 +1631,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
       const jobId = invokeData.jobId;
       console.log('Job started:', jobId);
+      currentJobIdRef.current = jobId;
       setCurrentJobId(jobId);
 
       // Start polling for status
@@ -1990,6 +1995,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setAnalysisProgress(0);
     setIsRetrying(false);
     setCurrentFilePath(null);
+    currentJobIdRef.current = null;
     setCurrentJobId(null);
     setCurrentOCRProvider(null);
     setAttempts([]);
@@ -2066,6 +2072,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
       const jobId = invokeData.jobId;
       console.log('Retry job started:', jobId);
+      currentJobIdRef.current = jobId;
       setCurrentJobId(jobId); // Update to new jobId for fetching attempts
 
       // Start polling for status
