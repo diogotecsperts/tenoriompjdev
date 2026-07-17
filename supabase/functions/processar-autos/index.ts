@@ -1996,6 +1996,7 @@ async function processarChunkedPDFBackground(
     console.log('[processar-autos-chunked] MEMORY: Freed extraction text before summaries');
 
     // PHASE 3: Generate AI summaries
+    currentPhase = 'summaries';
     timings.summaries.start = Date.now();
     
     await supabaseAdmin.from('import_jobs').update({ 
@@ -2008,6 +2009,7 @@ async function processarChunkedPDFBackground(
     startHeartbeat('AI summary generation (chunked)');
     const resumosResult = await gerarResumosIA(extractedData, supabaseAdmin, jobId, userId, timings.total.start);
     stopHeartbeat();
+    currentPhase = 'finalizing';
     
     timings.summaries.end = Date.now();
     
