@@ -1986,6 +1986,39 @@ async function processarChunkedPDFBackground(
     let extractedData = ensureValidStructure(parsedResult);
     console.log('[processar-autos-chunked] Data structured successfully');
 
+    // Detecta estruturação vazia (MiniMax/GLM truncou o JSON e devolveu esqueleto).
+    // Sintoma real: textos_brutos.peticao_inicial e .contestacao vazios após 190k chars de input.
+    // Sem esse fail-fast o job termina "completed" com aiUsage.summaries.count=0 e o usuário
+    // vê "Extração parcial" enganosa sem entender que o problema é da estruturação, não do OCR.
+    {
+      const anyData = extractedData as any;
+      const peticao = String(anyData?.textos_brutos?.peticao_inicial || '').trim();
+      const contestacao = String(anyData?.textos_brutos?.contestacao || '').trim();
+      const sourceLen = combinedText.length;
+      const structuringLooksEmpty =
+        peticao.length < 50 && contestacao.length < 50 && sourceLen > 20_000;
+      const responseLen = fillResult.text?.length || 0;
+      const structuringLikelyTruncated = responseLen > 60_000; // 65536 max tokens hit
+      if (structuringLooksEmpty) {
+        const detail = structuringLikelyTruncated
+          ? `A resposta da IA foi truncada em ~${responseLen} caracteres (limite de tokens de saída atingido).`
+          : `A IA retornou JSON com campos essenciais vazios apesar de ${sourceLen} caracteres de texto extraído.`;
+        const msg = `Estruturação falhou: ${detail} Provider: ${aiConfig.provider}/${aiConfig.model}.`;
+        console.error(`[processar-autos-chunked] EMPTY STRUCTURING DETECTED: ${msg}`);
+        await logError('processar-autos', msg, jobId, {
+          phase: 'structuring',
+          provider: aiConfig.provider,
+          model: aiConfig.model,
+          sourceLen,
+          responseLen,
+          peticaoLen: peticao.length,
+          contestacaoLen: contestacao.length,
+          truncated: structuringLikelyTruncated,
+        });
+        throw new Error(msg);
+      }
+    }
+
     // Preservar texto integral para busca de quesitos (sem fatiamento)
     if (textForFilling && textForFilling.length > 0) {
       (extractedData as any)._rawTextTail = textForFilling;
