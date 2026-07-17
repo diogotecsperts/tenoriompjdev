@@ -1427,10 +1427,13 @@ const results: Record<string, string> = {
       });
       
       // Race between AI call and timeout
+      // The inner callAI timeout must be < outer race timeout so the outer message wins
+      // and the retry path can pick it up as an explicit "Timeout".
       const result = await Promise.race([
         callAI(aiConfig, summarySystemPrompt, promptComRegra, {
           promptType: tipo,
-          userId: userId
+          userId: userId,
+          requestTimeoutMs: SUMMARY_INNER_TIMEOUT_MS,
         }),
         timeoutPromise
       ]);
