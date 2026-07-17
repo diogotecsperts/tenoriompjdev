@@ -2052,6 +2052,19 @@ async function processarChunkedPDFBackground(
     
     console.log('[processar-autos-chunked] AI summaries generated');
 
+    // Fail-fast: 0 resumos gerados E 0 falhas reais → estruturação devolveu contexto vazio.
+    // Sem isso o job termina "completed" com "0 de 2 resumos" e o usuário fica sem diagnóstico.
+    if (resumosResult.aiInfo.summariesGenerated === 0 && resumosResult.aiInfo.summariesFailed.length === 0) {
+      const msg = `Nenhum resumo pôde ser gerado — a estruturação anterior não produziu texto suficiente (petição/contestação vazias). Provider de estruturação: ${aiConfig.provider}/${aiConfig.model}.`;
+      console.error(`[processar-autos-chunked] ${msg}`);
+      await logError('processar-autos', msg, jobId, {
+        phase: 'summaries',
+        provider: aiConfig.provider,
+        model: aiConfig.model,
+      });
+      throw new Error(msg);
+    }
+
     // Add resumos to extracted data
     (extractedData as any).resumos_ia = resumosResult.resumos;
 
