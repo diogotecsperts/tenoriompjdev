@@ -2485,6 +2485,71 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     );
   };
 
+  const renderGlmErrorDiagnostic = () => (
+    <div className="space-y-4 py-4">
+      <Alert variant="destructive" className="border-destructive/50 bg-destructive/10">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Processamento GLM-OCR interrompido</AlertTitle>
+        <AlertDescription className="space-y-2">
+          <p>{glmAbortReason || 'O GLM-OCR parou de responder antes de concluir a extração.'}</p>
+          <div className="text-xs space-y-1 rounded-md border border-destructive/20 bg-background/60 p-2">
+            <p><span className="font-medium">Job:</span> {currentJobId || '—'}</p>
+            <p><span className="font-medium">Última etapa:</span> {glmLastSignal?.currentStep || analysisStep || '—'}</p>
+            <p><span className="font-medium">Progresso:</span> {glmLastSignal?.progress ?? analysisProgress ?? 0}%</p>
+            <p><span className="font-medium">Último sinal:</span> {glmLastSignal?.updatedAt || '—'}</p>
+          </div>
+        </AlertDescription>
+      </Alert>
+
+      <div className="rounded-lg border border-border/70 bg-muted/30 p-3 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-medium text-foreground">Diagnóstico preservado</p>
+            <p className="text-xs text-muted-foreground">Baixe este relatório antes de iniciar uma nova importação.</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={downloadGlmDiagnosticReport} className="text-xs gap-1.5 shrink-0">
+            <Download className="h-3.5 w-3.5" />
+            Baixar diagnóstico
+          </Button>
+        </div>
+
+        <div className="space-y-1.5">
+          {glmDiagnostics.map((stage) => {
+            const duration = stage.startedAt
+              ? formatDuration((stage.completedAt || Date.now()) - stage.startedAt)
+              : '—';
+            return (
+              <div key={stage.id} className="flex items-start gap-2 text-xs">
+                <div className="w-4 h-4 mt-0.5 flex items-center justify-center shrink-0">
+                  {stage.status === 'completed' && <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />}
+                  {stage.status === 'processing' && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
+                  {stage.status === 'error' && <XCircle className="h-3.5 w-3.5 text-destructive" />}
+                  {stage.status === 'pending' && <div className="h-3 w-3 rounded-full border border-muted-foreground/30" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className={cn("font-medium", stage.status === 'pending' && "text-muted-foreground")}>{stage.label}</span>
+                    <span className="text-muted-foreground ml-auto shrink-0">{duration}</span>
+                  </div>
+                  {stage.message && <p className="text-muted-foreground truncate">{stage.message}</p>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <Button variant="outline" onClick={handleClose} className="flex-1">
+          Fechar
+        </Button>
+        <Button onClick={handleForcedCancel} className="flex-1">
+          Nova importação
+        </Button>
+      </div>
+    </div>
+  );
+
   // Check if processing is active (should block closing)
   const isProcessingActive = processingStep === 'uploading' || processingStep === 'analyzing';
   
@@ -3057,21 +3122,15 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                       <Button 
                         variant="destructive" 
                         size="sm"
-                        onClick={() => {
-                          if (pollingRef.current) {
-                            clearInterval(pollingRef.current);
-                            pollingRef.current = null;
-                          }
-                          setProcessingStep("idle");
-                          toast({
-                            variant: "destructive",
-                            title: "Processamento cancelado",
-                            description: "Você pode tentar novamente com outro arquivo ou configuração."
-                          });
+                        onClick={async () => {
+                          await abortWithStaleError(
+                            glmAbortReason || 'Processamento encerrado manualmente após alerta de travamento.',
+                            glmLastSignal?.currentStep || analysisStep,
+                          );
                         }}
                         className="text-xs"
                       >
-                        Cancelar
+                        Encerrar e salvar diagnóstico
                       </Button>
                     </div>
                   </AlertDescription>
@@ -3157,6 +3216,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               </div>
             </>
           )}
+
+          {processingStep === "error" && renderGlmErrorDiagnostic()}
 
           {processingStep === "creating" && (
             <div className="space-y-4 py-8">
