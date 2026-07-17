@@ -1906,8 +1906,8 @@ async function processarChunkedPDFBackground(
       } : null,
       aiUsage: {
         pdfExtraction: {
-          provider: 'mistral',
-          model: 'mistral-ocr-latest',
+          provider: ocrProviderUsed,
+          model: ocrModelUsed,
           durationMs: pdfExtractionDuration,
           usedFallback: false,
           strategy: 'client_side_split',
