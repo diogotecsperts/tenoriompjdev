@@ -900,7 +900,15 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     console.error('[ImportarAutosDialog] Abortando por trava:', description);
     setGlmAbortReason(reason);
     if (isGlmActive()) {
-      const inferred = inferGlmStageFromStep(lastStep, glmLastSignal?.stepId) || 'ocr_part';
+      let inferred = inferGlmStageFromStep(lastStep, glmLastSignal?.stepId);
+      if (!inferred) {
+        const ocrStage = glmDiagnostics.find(s => s.id === 'ocr_part');
+        inferred = ocrStage?.status === 'completed' ? 'backend_processing' : 'ocr_part';
+      }
+      const targetStage = glmDiagnostics.find(s => s.id === inferred);
+      if (targetStage?.status === 'completed' && inferred === 'ocr_part') {
+        inferred = 'backend_processing';
+      }
       updateGlmStage(inferred, {
         status: 'error',
         message: reason,
