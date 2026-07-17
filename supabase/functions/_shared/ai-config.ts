@@ -625,7 +625,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
       generationConfig,
       safetySettings,
     })
-  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000, retryOnServerError: options?.retryOnServerError });
 
   if (!response.ok) {
     const error = await response.text();
