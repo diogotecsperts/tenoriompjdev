@@ -1036,6 +1036,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       // Start timing
       processingStartTime.current = Date.now();
       setBackendLogs([]);
+      activeOcrProviderRef.current = ocrConfig?.provider || null;
+      setGlmDiagnostics(createGlmDiagnosticState());
+      setGlmLastSignal(null);
+      setGlmAbortReason(null);
+      setGlmNoAdvanceAlert(false);
+      lastMeaningfulJobSignalRef.current = null;
+      noMeaningfulAdvanceCountRef.current = 0;
       
       const fileSizeMB = selectedFile.size / (1024 * 1024);
 
