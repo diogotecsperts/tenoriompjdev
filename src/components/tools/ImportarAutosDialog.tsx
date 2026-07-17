@@ -1168,12 +1168,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         | null = null;
 
       if (isGlm) {
+        activeOcrProviderRef.current = 'glm';
+        setCurrentOCRProvider('glm');
         // Probe rápido de páginas (~50-200ms) — decide se precisa raster
         const { probePdfPageCount, pdfNeedsRasterSplit, rebuildPdfAsRasterClean, splitCleanPdfByPages, RASTER_SPLIT_MAX_BYTES, RASTER_SPLIT_MAX_PAGES } = await import('@/lib/pdf-preprocess');
 
         setIsSplitting(true);
         setSplitProgress(0);
         setSplitMessage('Analisando PDF (contagem de páginas)...');
+        updateGlmStage('probe', {
+          status: 'processing',
+          progress: 5,
+          message: 'Analisando PDF (contagem de páginas e tamanho)...',
+          meta: { originalSizeMB: Number(fileSizeMB.toFixed(1)) },
+        });
 
         // Helper: timeout duro por sub-fase — evita espera infinita
         // no navegador se pdfjs/pdf-lib travarem.
@@ -1203,15 +1211,28 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           probe = await withTimeout(pdfNeedsRasterSplit(selectedFile), 60_000, 'probe');
         } catch (e) {
           setIsSplitting(false);
+          updateGlmStage('probe', { status: 'error', message: e instanceof Error ? e.message : String(e) });
           throw new Error(
             `[GLM probe] Falha ao ler páginas do PDF: ${e instanceof Error ? e.message : String(e)}. ` +
             `O arquivo pode estar corrompido ou protegido.`,
           );
         }
         console.log(`[ImportarAutosDialog][glm] probe: ${probe.pageCount} págs, ${(probe.sizeBytes / 1024 / 1024).toFixed(1)}MB, precisa raster=${probe.needs}`);
+        updateGlmStage('probe', {
+          status: 'completed',
+          progress: 100,
+          message: `${probe.pageCount} páginas · ${formatFileSize(probe.sizeBytes)} · ${probe.needs ? 'precisa raster/split' : 'cabe direto'}`,
+          meta: { pageCount: probe.pageCount, sizeMB: Number((probe.sizeBytes / 1024 / 1024).toFixed(1)), needsRasterSplit: probe.needs },
+        });
 
         if (probe.needs) {
           setSplitMessage(`Rasterizando página 0/${probe.pageCount}...`);
+          updateGlmStage('raster', {
+            status: 'processing',
+            progress: 0,
+            message: `Rasterizando página 0/${probe.pageCount}...`,
+            meta: { totalPages: probe.pageCount },
+          });
           let rebuilt: Awaited<ReturnType<typeof rebuildPdfAsRasterClean>>;
           try {
             rebuilt = await withTimeout(
@@ -1220,6 +1241,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                 onPageProgress: (done, total) => {
                   setSplitMessage(`Rasterizando página ${done}/${total}...`);
                   setSplitProgress(Math.floor((done / total) * 60));
+                  updateGlmStage('raster', {
+                    status: 'processing',
+                    progress: Math.floor((done / Math.max(1, total)) * 100),
+                    message: `Rasterizando página ${done}/${total}...`,
+                    meta: { donePages: done, totalPages: total },
+                  });
                 },
               }),
               8 * 60_000, // 8 min
@@ -1228,6 +1255,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           } catch (e) {
             setIsSplitting(false);
             const base = e instanceof Error ? e.message : String(e);
+            updateGlmStage('raster', { status: 'error', message: base });
             throw new Error(
               `[GLM raster] Rasterização do PDF falhou (${base}). ` +
               `Arquivo pode ser grande demais para o navegador ou estar corrompido. ` +
@@ -1235,6 +1263,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             );
           }
           console.log(`[ImportarAutosDialog][glm] raster limpo: ${rebuilt.pageCount} págs @ ${rebuilt.dpiUsed}dpi q=${rebuilt.qualityUsed} → ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB`);
+          updateGlmStage('raster', {
+            status: 'completed',
+            progress: 100,
+            message: `PDF rasterizado: ${rebuilt.pageCount} págs · ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB`,
+            meta: { pageCount: rebuilt.pageCount, rasterSizeMB: Number((rebuilt.blob.size / 1024 / 1024).toFixed(1)), dpi: rebuilt.dpiUsed, quality: rebuilt.qualityUsed },
+          });
 
           const cleanBytes = new Uint8Array(await rebuilt.blob.arrayBuffer());
           const cleanFitsSingle =
@@ -1242,6 +1276,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
           if (cleanFitsSingle) {
             setSplitMessage(`PDF limpo cabe em chamada única (${rebuilt.pageCount} págs, ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB)`);
+            updateGlmStage('split', {
+              status: 'completed',
+              progress: 100,
+              message: `Sem divisão: 1 parte (${rebuilt.pageCount} págs, ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB)`,
+              meta: { parts: 1, totalPages: rebuilt.pageCount },
+            });
             glmRasterResult = {
               parts: [rebuilt.blob],
               pageRanges: [{ start: 1, end: rebuilt.pageCount }],
@@ -1250,6 +1290,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           } else {
             setSplitMessage('Dividindo PDF limpo em partes...');
             setSplitProgress(70);
+            updateGlmStage('split', { status: 'processing', progress: 20, message: 'Dividindo PDF limpo em partes...' });
             let cleanParts: Awaited<ReturnType<typeof splitCleanPdfByPages>>;
             try {
               cleanParts = await withTimeout(
@@ -1260,6 +1301,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             } catch (e) {
               setIsSplitting(false);
               const base = e instanceof Error ? e.message : String(e);
+              updateGlmStage('split', { status: 'error', message: base });
               throw new Error(
                 `[GLM split] Divisão do PDF em partes falhou (${base}). ` +
                 `Tente um PDF menor ou troque o provider de OCR no DevPanel.`,
@@ -1275,12 +1317,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             })));
             setSplitProgress(90);
             setSplitMessage(`Dividido em ${parts.length} parte(s)`);
+            updateGlmStage('split', {
+              status: 'completed',
+              progress: 100,
+              message: `Dividido em ${parts.length} parte(s)`,
+              meta: { parts: parts.length, totalPages, largestPartMB: Number(Math.max(...parts.map(p => p.size / 1024 / 1024)).toFixed(1)) },
+            });
             glmRasterResult = { parts, pageRanges, totalPages };
           }
         } else {
           // GLM aceita o PDF original tal como está — não precisa raster nem split.
           console.log('[ImportarAutosDialog][glm] PDF dentro dos limites; upload direto');
           setIsSplitting(false);
+          updateGlmStage('raster', { status: 'completed', progress: 100, message: 'Ignorada: PDF já dentro dos limites GLM.' });
+          updateGlmStage('split', { status: 'completed', progress: 100, message: 'Ignorada: upload direto.' });
         }
       }
 
