@@ -700,7 +700,7 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000, retryOnServerError: options?.retryOnServerError });
 
   if (!response.ok) {
     const error = await response.text();
