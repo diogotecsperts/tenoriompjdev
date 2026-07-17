@@ -166,7 +166,7 @@ interface ImportAttempt {
   completed_at: string | null;
 }
 
-type ProcessingStep = "idle" | "uploading" | "analyzing" | "preview" | "creating";
+type ProcessingStep = "idle" | "uploading" | "analyzing" | "preview" | "creating" | "error";
 
 // Maximum processing time before showing timeout warning (25 minutes)
 const MAX_PROCESSING_TIME_MS = 25 * 60 * 1000;
@@ -318,6 +318,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const GLM_NO_ADVANCE_THRESHOLD_POLLS = 100; // 5 min em polling de 3s
   const GLM_NO_ADVANCE_ABORT_POLLS = 200; // +5 min após extensão única
   const activeOcrProviderRef = useRef<string | null>(null);
+  const failedJobPersistedRef = useRef(false);
+  const currentJobIdRef = useRef<string | null>(null);
 
   // Cancel confirmation state
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -388,12 +390,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     let timer: NodeJS.Timeout | null = null;
     
     if (processingStep === 'analyzing' && processingStartTime.current > 0) {
-      timer = setInterval(() => {
+      timer = setInterval(async () => {
         const elapsed = Date.now() - processingStartTime.current;
         setElapsedTime(elapsed);
         
         // Check for global timeout
         if (elapsed > MAX_PROCESSING_TIME_MS) {
+          if (isGlmActive()) {
+            await abortWithStaleError(
+              `Tempo total excedeu ${Math.round(MAX_PROCESSING_TIME_MS / 60000)} minutos.`,
+              analysisStep || glmLastSignal?.currentStep,
+            );
+            return;
+          }
+
           if (pollingRef.current) {
             clearInterval(pollingRef.current);
             pollingRef.current = null;
@@ -793,8 +803,28 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const MAX_CONSECUTIVE_NETWORK_ERRORS = 10; // ~30s of failures before giving up
   const [isReconnecting, setIsReconnecting] = useState(false);
 
+  const markCurrentJobFailed = async (reason: string, lastStep: string | undefined) => {
+    const jobId = currentJobIdRef.current || currentJobId;
+    if (!jobId || failedJobPersistedRef.current) return;
+    failedJobPersistedRef.current = true;
+    const provider = currentOCRProvider || activeOcrProviderRef.current || ocrConfig?.provider || 'desconhecido';
+    const { error } = await supabase.functions.invoke('mark-import-job-failed', {
+      body: {
+        jobId,
+        reason,
+        currentStep: lastStep || analysisStep || glmLastSignal?.currentStep || '—',
+        provider,
+        progress: glmLastSignal?.progress ?? analysisProgress,
+      },
+    });
+    if (error) {
+      console.warn('[ImportarAutosDialog] Falha ao persistir erro do job:', error);
+      failedJobPersistedRef.current = false;
+    }
+  };
+
   // Aborta polling e mostra erro rico ao operador quando o job trava (stale + teto absoluto).
-  const abortWithStaleError = (reason: string, lastStep: string | undefined) => {
+  const abortWithStaleError = async (reason: string, lastStep: string | undefined) => {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
@@ -824,14 +854,15 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         },
       });
     }
+    await markCurrentJobFailed(reason, lastStep);
     toast({
       variant: 'destructive',
       title: 'Processamento parou de responder',
       description,
       duration: 20000,
     });
-    setProcessingStep('idle');
-    setAnalysisStep('');
+    setProcessingStep('error');
+    setAnalysisStep(lastStep || analysisStep || 'Processamento GLM interrompido');
     setIsJobStale(false);
     staleExtensionUsedRef.current = false;
     staleCheckCountRef.current = 0;
@@ -859,7 +890,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         ? Date.now() - processingStartTime.current
         : 0;
       if (wallClockElapsed > ABSOLUTE_TIMEOUT_MS) {
-        abortWithStaleError(
+        await abortWithStaleError(
           `Tempo total excedeu ${Math.round(ABSOLUTE_TIMEOUT_MS / 60000)} minutos.`,
           data.currentStep || analysisStep,
         );
@@ -904,7 +935,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             setGlmAbortReason(`GLM sem avanço real há ~${Math.round((GLM_NO_ADVANCE_THRESHOLD_POLLS * 3) / 60)} min.`);
           }
           if (staleExtensionUsedRef.current && noMeaningfulAdvanceCountRef.current >= GLM_NO_ADVANCE_ABORT_POLLS) {
-            abortWithStaleError(
+            await abortWithStaleError(
               `GLM permaneceu na mesma etapa/progresso por ~${Math.round((GLM_NO_ADVANCE_ABORT_POLLS * 3) / 60)} minutos, apesar do heartbeat do servidor.`,
               data.currentStep || analysisStep,
             );
@@ -937,7 +968,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           staleExtensionUsedRef.current &&
           staleCheckCountRef.current >= STALE_THRESHOLD_POLLS * 2
         ) {
-          abortWithStaleError(
+          await abortWithStaleError(
             'Sem sinais do servidor após 10 minutos totais.',
             data.currentStep || analysisStep,
           );
@@ -949,6 +980,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         staleCheckCountRef.current = 0;
         staleExtensionUsedRef.current = false;
         setIsJobStale(false);
+      }
+
+      if (data.stale && statusIsGlm) {
+        setIsJobStale(true);
+        setGlmNoAdvanceAlert(true);
+        setGlmAbortReason(data.staleReason || 'GLM-OCR sem atualização recente do backend.');
       }
 
       
@@ -988,6 +1025,23 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       }
 
       if (data.status === 'failed') {
+        if (statusIsGlm) {
+          const reason = data.error || 'Erro no processamento GLM-OCR';
+          setGlmAbortReason(reason);
+          const inferred = inferGlmStageFromStep(data.currentStep, data.stepId) || 'ocr_part';
+          updateGlmStage(inferred, {
+            status: 'error',
+            message: reason,
+            meta: {
+              stepId: data.stepId || null,
+              progress: data.progress ?? null,
+            },
+          });
+          setAnalysisStep(data.currentStep || reason);
+          setAnalysisProgress(data.progress || 0);
+          setProcessingStep('error');
+          return true;
+        }
         throw new Error(data.error || 'Erro no processamento');
       }
 
@@ -1038,6 +1092,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       setBackendLogs([]);
       setCurrentOCRProvider(null);
       activeOcrProviderRef.current = ocrConfig?.provider || null;
+      failedJobPersistedRef.current = false;
       setGlmDiagnostics(createGlmDiagnosticState());
       setGlmLastSignal(null);
       setGlmAbortReason(null);
@@ -1121,6 +1176,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
           const jobId = invokeData.jobId;
           console.log('[ImportarAutosDialog][minimax] Job started with preExtractedText:', jobId);
+          currentJobIdRef.current = jobId;
           setCurrentJobId(jobId);
 
           pollingRef.current = setInterval(async () => {
@@ -1480,6 +1536,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           
           const jobId = invokeData.jobId;
           console.log('[ImportarAutosDialog] Chunked job started:', jobId);
+          currentJobIdRef.current = jobId;
           setCurrentJobId(jobId);
           if (isGlm) {
             updateGlmStage('job_start', { status: 'completed', progress: 100, message: `Job iniciado: ${jobId}`, meta: { jobId } });
@@ -1582,6 +1639,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
       const jobId = invokeData.jobId;
       console.log('Job started:', jobId);
+      currentJobIdRef.current = jobId;
       setCurrentJobId(jobId);
 
       // Start polling for status
@@ -1908,6 +1966,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setIsReconnecting(false);
     setIsJobStale(false);
     setCurrentOCRProvider(null);
+    setCurrentFilePath(null);
+    currentJobIdRef.current = null;
+    setCurrentJobId(null);
     lastJobUpdateRef.current = null;
     staleCheckCountRef.current = 0;
     staleExtensionUsedRef.current = false;
@@ -1918,6 +1979,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     lastMeaningfulJobSignalRef.current = null;
     noMeaningfulAdvanceCountRef.current = 0;
     activeOcrProviderRef.current = null;
+    failedJobPersistedRef.current = false;
     setIsSlowAI(false);
     setSlowSteps([]);
     setStepsStatus(PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' })));
@@ -1944,6 +2006,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setAnalysisProgress(0);
     setIsRetrying(false);
     setCurrentFilePath(null);
+    currentJobIdRef.current = null;
     setCurrentJobId(null);
     setCurrentOCRProvider(null);
     setAttempts([]);
@@ -1968,6 +2031,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     lastMeaningfulJobSignalRef.current = null;
     noMeaningfulAdvanceCountRef.current = 0;
     activeOcrProviderRef.current = null;
+    failedJobPersistedRef.current = false;
     // Reset network error tracking
     networkErrorCountRef.current = 0;
     setIsReconnecting(false);
@@ -2019,6 +2083,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
       const jobId = invokeData.jobId;
       console.log('Retry job started:', jobId);
+      currentJobIdRef.current = jobId;
       setCurrentJobId(jobId); // Update to new jobId for fetching attempts
 
       // Start polling for status
@@ -2437,6 +2502,71 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       </div>
     );
   };
+
+  const renderGlmErrorDiagnostic = () => (
+    <div className="space-y-4 py-4">
+      <Alert variant="destructive" className="border-destructive/50 bg-destructive/10">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Processamento GLM-OCR interrompido</AlertTitle>
+        <AlertDescription className="space-y-2">
+          <p>{glmAbortReason || 'O GLM-OCR parou de responder antes de concluir a extração.'}</p>
+          <div className="text-xs space-y-1 rounded-md border border-destructive/20 bg-background/60 p-2">
+            <p><span className="font-medium">Job:</span> {currentJobId || '—'}</p>
+            <p><span className="font-medium">Última etapa:</span> {glmLastSignal?.currentStep || analysisStep || '—'}</p>
+            <p><span className="font-medium">Progresso:</span> {glmLastSignal?.progress ?? analysisProgress ?? 0}%</p>
+            <p><span className="font-medium">Último sinal:</span> {glmLastSignal?.updatedAt || '—'}</p>
+          </div>
+        </AlertDescription>
+      </Alert>
+
+      <div className="rounded-lg border border-border/70 bg-muted/30 p-3 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-medium text-foreground">Diagnóstico preservado</p>
+            <p className="text-xs text-muted-foreground">Baixe este relatório antes de iniciar uma nova importação.</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={downloadGlmDiagnosticReport} className="text-xs gap-1.5 shrink-0">
+            <Download className="h-3.5 w-3.5" />
+            Baixar diagnóstico
+          </Button>
+        </div>
+
+        <div className="space-y-1.5">
+          {glmDiagnostics.map((stage) => {
+            const duration = stage.startedAt
+              ? formatDuration((stage.completedAt || Date.now()) - stage.startedAt)
+              : '—';
+            return (
+              <div key={stage.id} className="flex items-start gap-2 text-xs">
+                <div className="w-4 h-4 mt-0.5 flex items-center justify-center shrink-0">
+                  {stage.status === 'completed' && <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />}
+                  {stage.status === 'processing' && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
+                  {stage.status === 'error' && <XCircle className="h-3.5 w-3.5 text-destructive" />}
+                  {stage.status === 'pending' && <div className="h-3 w-3 rounded-full border border-muted-foreground/30" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className={cn("font-medium", stage.status === 'pending' && "text-muted-foreground")}>{stage.label}</span>
+                    <span className="text-muted-foreground ml-auto shrink-0">{duration}</span>
+                  </div>
+                  {stage.message && <p className="text-muted-foreground truncate">{stage.message}</p>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <Button variant="outline" onClick={handleClose} className="flex-1">
+          Fechar
+        </Button>
+        <Button onClick={handleForcedCancel} className="flex-1">
+          Nova importação
+        </Button>
+      </div>
+    </div>
+  );
 
   // Check if processing is active (should block closing)
   const isProcessingActive = processingStep === 'uploading' || processingStep === 'analyzing';
@@ -3010,21 +3140,15 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                       <Button 
                         variant="destructive" 
                         size="sm"
-                        onClick={() => {
-                          if (pollingRef.current) {
-                            clearInterval(pollingRef.current);
-                            pollingRef.current = null;
-                          }
-                          setProcessingStep("idle");
-                          toast({
-                            variant: "destructive",
-                            title: "Processamento cancelado",
-                            description: "Você pode tentar novamente com outro arquivo ou configuração."
-                          });
+                        onClick={async () => {
+                          await abortWithStaleError(
+                            glmAbortReason || 'Processamento encerrado manualmente após alerta de travamento.',
+                            glmLastSignal?.currentStep || analysisStep,
+                          );
                         }}
                         className="text-xs"
                       >
-                        Cancelar
+                        Encerrar e salvar diagnóstico
                       </Button>
                     </div>
                   </AlertDescription>
@@ -3110,6 +3234,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               </div>
             </>
           )}
+
+          {processingStep === "error" && renderGlmErrorDiagnostic()}
 
           {processingStep === "creating" && (
             <div className="space-y-4 py-8">

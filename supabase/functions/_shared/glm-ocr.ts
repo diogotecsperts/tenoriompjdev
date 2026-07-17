@@ -177,7 +177,7 @@ function toBase64DataUrl(pdfBytes: Uint8Array): string {
 export async function extractWithGlmOCR(
   pdfBytes: Uint8Array,
   apiKey: string,
-  opts: { onHeartbeat?: (stage: string, progress: number) => Promise<void> | void } = {},
+  opts: { onHeartbeat?: (stage: string, progress: number) => Promise<void> | void; pageCount?: number } = {},
 ): Promise<GlmOcrResult> {
   const startTime = Date.now();
   const sizeMB = (pdfBytes.byteLength / 1024 / 1024).toFixed(2);
@@ -192,24 +192,29 @@ export async function extractWithGlmOCR(
   console.log(`[glm-ocr] iniciando extração (${sizeMB}MB)…`);
   const fileDataUrl = toBase64DataUrl(pdfBytes);
 
-  // 1ª chamada: primeiras 30 páginas + descobre num_pages total.
-  await opts.onHeartbeat?.(`GLM-OCR: enviando páginas 1-${GLM_PAGES_PER_REQUEST}`, 28);
+  const knownPageCount = typeof opts.pageCount === "number" && opts.pageCount > 0
+    ? Math.floor(opts.pageCount)
+    : null;
+  const firstEndPage = Math.min(GLM_PAGES_PER_REQUEST, knownPageCount || GLM_PAGES_PER_REQUEST);
+
+  // 1ª chamada: primeiras páginas + descobre num_pages total quando não informado pelo caller.
+  await opts.onHeartbeat?.(`GLM-OCR: enviando páginas 1-${firstEndPage}`, 28);
   const first = await callGlmLayoutParsing(fileDataUrl, apiKey, {
     startPage: 1,
-    endPage: GLM_PAGES_PER_REQUEST,
+    endPage: firstEndPage,
   });
-  await opts.onHeartbeat?.(`GLM-OCR: páginas 1-${GLM_PAGES_PER_REQUEST} concluídas`, 35);
+  await opts.onHeartbeat?.(`GLM-OCR: páginas 1-${firstEndPage} concluídas`, 35);
 
-  const totalPages = first.totalPages || GLM_PAGES_PER_REQUEST;
+  const totalPages = knownPageCount || first.totalPages || firstEndPage;
   const parts: string[] = [];
   if (first.markdown.trim().length > 0) {
-    parts.push(`=== PÁGINAS 1-${Math.min(GLM_PAGES_PER_REQUEST, totalPages)} ===\n${first.markdown.trim()}`);
+    parts.push(`=== PÁGINAS 1-${Math.min(firstEndPage, totalPages)} ===\n${first.markdown.trim()}`);
   }
 
   // Se houver mais páginas, itera em blocos de 30.
-  if (totalPages > GLM_PAGES_PER_REQUEST) {
+  if (totalPages > firstEndPage) {
     console.log(`[glm-ocr] PDF tem ${totalPages} páginas → paginando em blocos de ${GLM_PAGES_PER_REQUEST}`);
-    for (let start = GLM_PAGES_PER_REQUEST + 1; start <= totalPages; start += GLM_PAGES_PER_REQUEST) {
+    for (let start = firstEndPage + 1; start <= totalPages; start += GLM_PAGES_PER_REQUEST) {
       const end = Math.min(start + GLM_PAGES_PER_REQUEST - 1, totalPages);
       const progressBefore = 35 + Math.floor(((start - 1) / Math.max(1, totalPages)) * 18);
       await opts.onHeartbeat?.(`GLM-OCR: enviando páginas ${start}-${end}`, progressBefore);

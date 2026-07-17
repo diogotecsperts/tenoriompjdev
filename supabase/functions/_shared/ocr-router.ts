@@ -86,7 +86,7 @@ export async function getOcrRouterConfig(): Promise<OcrRouterConfig> {
  */
 export async function runOcrWithConfiguredProvider(
   pdfInput: Uint8Array | { blob: Blob; size: number },
-  opts: { logPrefix?: string; onHeartbeat?: OcrHeartbeat } = {},
+  opts: { logPrefix?: string; onHeartbeat?: OcrHeartbeat; pageCount?: number } = {},
 ): Promise<OcrRouterResult> {
   const cfg = await getOcrRouterConfig();
   const prefix = opts.logPrefix || "[ocr-router]";
@@ -139,7 +139,7 @@ export async function runOcrWithConfiguredProvider(
     if (cfg.provider === "glm") {
       const bytes = await materializeBytes();
       await opts.onHeartbeat?.("ocr_processing", 25);
-      const r = await extractWithGlmOCR(bytes, glmKey!, { onHeartbeat: opts.onHeartbeat });
+      const r = await extractWithGlmOCR(bytes, glmKey!, { onHeartbeat: opts.onHeartbeat, pageCount: opts.pageCount });
       await opts.onHeartbeat?.("ocr_processing", 55);
       return { text: r.text, pageCount: r.pageCount, provider: r.provider, model: r.model };
     }
@@ -247,7 +247,7 @@ export async function runOcrWithConfiguredProvider(
         );
       }
       const bytes = await materializeBytes();
-      const r = await extractWithGlmOCR(bytes, glmKey, { onHeartbeat: opts.onHeartbeat });
+      const r = await extractWithGlmOCR(bytes, glmKey, { onHeartbeat: opts.onHeartbeat, pageCount: opts.pageCount });
       return { text: r.text, pageCount: r.pageCount, provider: `${r.provider}-fallback`, model: r.model };
     }
     // Não deveria chegar aqui (restrictTo filtrou), mas por segurança:

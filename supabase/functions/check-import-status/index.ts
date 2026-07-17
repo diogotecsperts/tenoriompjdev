@@ -72,6 +72,7 @@ serve(async (req) => {
     const resultProvider = typeof job.result === 'object' && job.result && !Array.isArray(job.result)
       ? ((job.result as Record<string, unknown>).ocrProvider as string | undefined)
       : undefined;
+    const effectiveOcrProvider = detectOCRProvider(job.current_step) || resultProvider || null;
 
     let backendLogs: Array<{ level: string; message: string; created_at: string | null }> = [];
     try {
@@ -90,6 +91,10 @@ serve(async (req) => {
       console.warn('[check-import-status] Failed to fetch backend logs:', logError);
     }
 
+    const updatedAtMs = job.updated_at ? new Date(job.updated_at).getTime() : 0;
+    const staleMs = updatedAtMs > 0 ? Date.now() - updatedAtMs : 0;
+    const isGlmStale = job.status === 'processing' && effectiveOcrProvider === 'glm' && staleMs > 5 * 60 * 1000;
+
     // Build response based on status
     const response: any = {
       status: job.status,
@@ -98,7 +103,12 @@ serve(async (req) => {
       stepId: job.step_id || null,
       updatedAt: job.updated_at,  // Para detecção de stale job no frontend
       // OCR Provider indicator for frontend
-      ocrProvider: detectOCRProvider(job.current_step) || resultProvider || null,
+      ocrProvider: effectiveOcrProvider,
+      stale: isGlmStale,
+      staleReason: isGlmStale
+        ? `GLM-OCR sem atualização do backend há ${Math.round(staleMs / 60000)} min.`
+        : null,
+      staleMs,
       backendLogs,
       // Add retry info for UI indicator
       retryInfo: {

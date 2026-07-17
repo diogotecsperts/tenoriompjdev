@@ -18,8 +18,8 @@
 /** Limite defensivo de bytes por parte (GLM aceita ~50 MB por request). */
 export const RASTER_SPLIT_MAX_BYTES = 48 * 1024 * 1024;
 
-/** Limite defensivo de páginas por parte (GLM aceita ≤ 100 págs). */
-export const RASTER_SPLIT_MAX_PAGES = 90;
+/** Limite defensivo de páginas por parte. Mantém 1 parte = 1 chamada GLM real. */
+export const RASTER_SPLIT_MAX_PAGES = 30;
 
 export interface RebuildRasterOptions {
   /** DPI base (default 150). O fallback usa 120 se o PDF ainda ficar grande. */
