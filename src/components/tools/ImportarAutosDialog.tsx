@@ -1787,7 +1787,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         const message = error instanceof Error ? error.message : String(error);
         setGlmAbortReason(message);
         setAnalysisStep(message);
-        updateGlmStage(inferGlmStageFromStep(analysisStep, glmLastSignal?.stepId) || 'ocr_part', {
+        let clientInferred = inferGlmStageFromStep(analysisStep, glmLastSignal?.stepId);
+        if (!clientInferred) {
+          const ocrStage = glmDiagnostics.find(s => s.id === 'ocr_part');
+          clientInferred = ocrStage?.status === 'completed' ? 'backend_processing' : 'ocr_part';
+        }
+        updateGlmStage(clientInferred, {
           status: 'error',
           message,
         });
