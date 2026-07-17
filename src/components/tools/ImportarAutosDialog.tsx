@@ -1389,11 +1389,21 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           });
           glmRasterResult = { parts, pageRanges, totalPages };
         } else {
-          // GLM aceita o PDF original tal como está — não precisa raster nem split.
-          console.log('[ImportarAutosDialog][glm] PDF dentro dos limites; upload direto');
-          setIsSplitting(false);
+          // GLM aceita o PDF original tal como está — não precisa raster/split,
+          // mas ainda segue o fluxo seguro de função curta por parte única.
+          console.log('[ImportarAutosDialog][glm] PDF dentro dos limites; usando OCR por função curta em parte única');
           updateGlmStage('raster', { status: 'completed', progress: 100, message: 'Ignorada: PDF já dentro dos limites GLM.' });
-          updateGlmStage('split', { status: 'completed', progress: 100, message: 'Ignorada: upload direto.' });
+          updateGlmStage('split', { status: 'completed', progress: 100, message: `Sem divisão: 1 parte (${probe.pageCount} págs, ${(probe.sizeBytes / 1024 / 1024).toFixed(1)}MB)` });
+          setSplitParts([{
+            partNumber: 1,
+            pageRange: { start: 1, end: probe.pageCount },
+            sizeMB: Number((probe.sizeBytes / 1024 / 1024).toFixed(1)),
+          }]);
+          glmRasterResult = {
+            parts: [selectedFile],
+            pageRanges: [{ start: 1, end: probe.pageCount }],
+            totalPages: probe.pageCount,
+          };
         }
       }
 
