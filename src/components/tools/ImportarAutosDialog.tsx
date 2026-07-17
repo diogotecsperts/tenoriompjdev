@@ -223,8 +223,8 @@ const GLM_STAGES: Array<{ id: GlmStageId; label: string }> = [
   { id: 'raster', label: 'Rasterização no navegador' },
   { id: 'split', label: 'Divisão em partes' },
   { id: 'upload', label: 'Upload das partes' },
-  { id: 'job_start', label: 'Início do job' },
   { id: 'ocr_part', label: 'OCR GLM por parte' },
+  { id: 'job_start', label: 'Início da estruturação final' },
   { id: 'backend_processing', label: 'Estruturação pós-OCR' },
 ];
 
