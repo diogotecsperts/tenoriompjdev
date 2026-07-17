@@ -1591,6 +1591,9 @@ async function processarChunkedPDFBackground(
   supabaseAdmin: any,
   userId: string,
   preExtractedText?: string,
+  preExtractedProvider?: string,
+  preExtractedModel?: string,
+  preExtractedPageCount?: number,
 ) {
   let attemptId: string | null = null;
   let modelUsed = 'unknown';
@@ -1733,16 +1736,19 @@ async function processarChunkedPDFBackground(
     };
 
     if (preExtractedText && preExtractedText.trim().length > 0) {
-      // MiniMax client-side OCR já entregou o texto pronto. Pula fase 1.
-      console.log(`[processar-autos-chunked] preExtractedText recebido (${preExtractedText.length} chars) — pulando fase 1 OCR`);
+      // OCR client-side / funções curtas já entregou o texto pronto. Pula fase 1.
+      ocrProviderUsed = preExtractedProvider || ocrProviderUsed;
+      ocrModelUsed = preExtractedModel || ocrModelUsed;
+      console.log(`[processar-autos-chunked] preExtractedText recebido (${preExtractedText.length} chars, provider=${ocrProviderUsed}) — pulando fase 1 OCR`);
       await supabaseAdmin.from('import_jobs').update({
-        current_step: `Texto já extraído pelo cliente (${preExtractedText.length} chars) — pulando fase 1`,
+        current_step: `Texto OCR já extraído (${preExtractedText.length} chars) — estruturando dados`,
         progress: 40,
         step_id: 'extraction',
+        result: { route: 'chunked_large', partsCount: fileParts.length, totalPages, ocrProvider: ocrProviderUsed, startedAt: new Date().toISOString(), preExtracted: true },
         updated_at: new Date().toISOString(),
       }).eq('id', jobId);
       extractedTexts.push(preExtractedText);
-      processedPageCount = totalPages;
+      processedPageCount = preExtractedPageCount || totalPages;
     } else {
       for (let i = 0; i < fileParts.length; i++) {
         const partPath = fileParts[i];
@@ -2840,7 +2846,7 @@ serve(async (req) => {
   }
 
   try {
-    const { fileName, filePath, retryFilePath, fileParts, pageRanges, totalPages, isChunkedUpload, preExtractedText } = await req.json();
+    const { fileName, filePath, retryFilePath, fileParts, pageRanges, totalPages, isChunkedUpload, preExtractedText, preExtractedProvider, preExtractedModel, preExtractedPageCount } = await req.json();
 
     // Create Supabase admin client
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -2943,7 +2949,19 @@ serve(async (req) => {
       const effectivePageRanges = pageRanges ?? [];
       const effectiveTotalPages = totalPages ?? 0;
       // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
-      EdgeRuntime.waitUntil(processarChunkedPDFBackground(jobId, effectiveFileParts, effectivePageRanges, effectiveTotalPages, fileName, supabaseAdmin, userId, hasPreOcr ? preExtractedText : undefined));
+      EdgeRuntime.waitUntil(processarChunkedPDFBackground(
+        jobId,
+        effectiveFileParts,
+        effectivePageRanges,
+        effectiveTotalPages,
+        fileName,
+        supabaseAdmin,
+        userId,
+        hasPreOcr ? preExtractedText : undefined,
+        hasPreOcr ? preExtractedProvider : undefined,
+        hasPreOcr ? preExtractedModel : undefined,
+        hasPreOcr ? preExtractedPageCount : undefined,
+      ));
     } else {
       // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
       EdgeRuntime.waitUntil(processarPDFBackground(jobId, finalFilePath, fileName, supabaseAdmin, isRetry, userId));
