@@ -649,7 +649,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
   };
 }
 
-async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number }) {
+async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number; retryOnServerError?: boolean }) {
   const isDeepSeek = config.provider === 'deepseek';
   const isDeepSeekReasoner = isDeepSeek && config.model.includes('reasoner');
   const isMinimax = config.provider === 'minimax';
