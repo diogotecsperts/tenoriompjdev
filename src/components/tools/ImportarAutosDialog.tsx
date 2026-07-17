@@ -563,6 +563,116 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     return `${minutes}m ${seconds}s`;
   };
 
+  const isGlmProvider = (provider: string | null | undefined) => {
+    const p = provider?.toLowerCase();
+    return p === 'glm' || p === 'glm-ocr';
+  };
+
+  const isGlmActive = () => isGlmProvider(currentOCRProvider || activeOcrProviderRef.current || ocrConfig?.provider);
+
+  const updateGlmStage = (
+    id: GlmStageId,
+    updates: Partial<Omit<GlmDiagnosticEntry, 'id' | 'label'>>,
+  ) => {
+    if (!isGlmActive()) return;
+    setGlmDiagnostics(prev => prev.map(stage => {
+      if (stage.id !== id) return stage;
+      const next: GlmDiagnosticEntry = { ...stage, ...updates };
+      if (updates.status === 'processing' && !next.startedAt) next.startedAt = Date.now();
+      if ((updates.status === 'completed' || updates.status === 'error') && !next.completedAt) next.completedAt = Date.now();
+      return next;
+    }));
+  };
+
+  const completePreviousGlmStages = (currentId: GlmStageId) => {
+    if (!isGlmActive()) return;
+    const currentIndex = GLM_STAGES.findIndex(stage => stage.id === currentId);
+    if (currentIndex <= 0) return;
+    setGlmDiagnostics(prev => prev.map(stage => {
+      const stageIndex = GLM_STAGES.findIndex(s => s.id === stage.id);
+      if (stageIndex >= 0 && stageIndex < currentIndex && stage.status === 'processing') {
+        return { ...stage, status: 'completed', completedAt: stage.completedAt || Date.now(), progress: 100 };
+      }
+      return stage;
+    }));
+  };
+
+  const inferGlmStageFromStep = (step: string | null | undefined, stepId?: string | null): GlmStageId | null => {
+    const normalized = (step || '').toLowerCase();
+    if (!normalized) return null;
+    if (normalized.includes('glm') && (normalized.includes('parte') || normalized.includes('ocr'))) return 'ocr_part';
+    if (normalized.includes('extraindo parte') || normalized.includes('processando parte')) return 'ocr_part';
+    if (stepId === 'processing' || normalized.includes('estruturando') || normalized.includes('fase 2')) return 'backend_processing';
+    if (normalized.includes('gerando resumo') || normalized.includes('finalizando')) return 'backend_processing';
+    return null;
+  };
+
+  const buildGlmDiagnosticReport = () => {
+    const lines: string[] = [];
+    lines.push('Relatório de diagnóstico GLM-OCR — Trabalhista');
+    lines.push(`Gerado em: ${new Date().toLocaleString('pt-BR')}`);
+    lines.push('');
+    lines.push('Contexto');
+    lines.push(`- Job ID: ${currentJobId || '—'}`);
+    lines.push(`- Provider OCR: ${currentOCRProvider || activeOcrProviderRef.current || ocrConfig?.provider || '—'}`);
+    lines.push(`- Arquivo: ${selectedFile?.name || '—'}`);
+    lines.push(`- Tamanho original: ${selectedFile ? formatFileSize(selectedFile.size) : '—'}`);
+    lines.push(`- Tempo decorrido: ${formatDuration(elapsedTime)}`);
+    lines.push(`- Etapa atual: ${analysisStep || splitMessage || '—'}`);
+    lines.push(`- Progresso atual: ${analysisProgress || splitProgress || 0}%`);
+    if (glmAbortReason) lines.push(`- Motivo de alerta/abort: ${glmAbortReason}`);
+    lines.push('');
+    lines.push('Último sinal do backend');
+    lines.push(`- current_step: ${glmLastSignal?.currentStep || '—'}`);
+    lines.push(`- progress: ${glmLastSignal?.progress ?? '—'}`);
+    lines.push(`- step_id: ${glmLastSignal?.stepId || '—'}`);
+    lines.push(`- updated_at: ${glmLastSignal?.updatedAt || '—'}`);
+    lines.push('');
+    lines.push('Etapas GLM');
+    glmDiagnostics.forEach(stage => {
+      const duration = stage.startedAt
+        ? formatDuration((stage.completedAt || Date.now()) - stage.startedAt)
+        : '—';
+      lines.push(`- ${stage.label}: ${stage.status} · ${duration} · ${stage.progress ?? 0}% · ${stage.message || ''}`.trim());
+      if (stage.meta) {
+        lines.push(`  meta: ${JSON.stringify(stage.meta)}`);
+      }
+    });
+    lines.push('');
+    lines.push('Partes geradas');
+    if (splitParts.length === 0) {
+      lines.push('- Nenhuma parte registrada no navegador.');
+    } else {
+      splitParts.forEach(part => {
+        lines.push(`- Parte ${part.partNumber}: págs ${part.pageRange.start}-${part.pageRange.end}, ${part.sizeMB.toFixed(1)}MB`);
+      });
+    }
+    lines.push('');
+    lines.push('Últimos logs de backend disponíveis no modal');
+    if (backendLogs.length === 0) {
+      lines.push('- Nenhum log carregado no modal.');
+    } else {
+      backendLogs.slice(-20).forEach(log => {
+        lines.push(`- [${log.created_at}] ${log.level}: ${log.message}`);
+      });
+    }
+    return lines.join('\n');
+  };
+
+  const downloadGlmDiagnosticReport = () => {
+    const report = buildGlmDiagnosticReport();
+    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    a.href = url;
+    a.download = `diagnostico-glm-trabalhista-${stamp}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
