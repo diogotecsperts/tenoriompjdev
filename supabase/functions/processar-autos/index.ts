@@ -2054,36 +2054,18 @@ async function processarChunkedPDFBackground(
     
     // Get AI config
     const aiConfig = await getAIConfig();
-    
-    // Smart truncation to prevent MAX_TOKENS
-    let textForFilling = combinedText;
-    const MAX_INPUT_CHARS = 200_000;
 
-    if (textForFilling.length > MAX_INPUT_CHARS) {
-      console.warn(`[processar-autos-chunked] Text too long (${textForFilling.length} chars), applying smart truncation`);
-      
-      const headChars = Math.floor(MAX_INPUT_CHARS * 0.6);
-      const tailChars = Math.floor(MAX_INPUT_CHARS * 0.35);
-      const separator = '\n\n[... conteúdo intermediário omitido para processamento ...]\n\n';
-      
-      textForFilling = textForFilling.substring(0, headChars) + 
-                       separator + 
-                       textForFilling.substring(textForFilling.length - tailChars);
-      
-      console.log(`[processar-autos-chunked] Truncated to ${textForFilling.length} chars`);
-    }
-    
-    // Call AI with the combined text.
-    // NOTE: default callAI internal timeout is 75s (see _shared/ai-config.ts). Large JSON
-    // structuring on providers like MiniMax-M3/GLM chat routinely takes 2-5 min, so we
-    // pass an explicit STRUCTURING_TIMEOUT_MS and turn on a heartbeat so the client-side
-    // stale-job watchdog does not false-kill an alive request.
+    // Structuring uses a cascade of shrinking payloads + provider fallback.
+    // See `runStructuringWithCascade` for the rationale — this replaces the
+    // former single-shot 200k/65k call that was 504'ing on MiniMax M3 for
+    // large processes and eating ~1m20s on blind fetch-layer retries.
     const structuringStartedAt = Date.now();
     await startHeartbeat('AI structuring (chunked phase 2)');
     let fillResult: Awaited<ReturnType<typeof callAI>>;
+    let structuringProviderUsed = `${aiConfig.provider}/${aiConfig.model}`;
+    let structuringAttempts: any[] = [];
     try {
-      // Periodic progress ping in current_step so the UI shows the elapsed time
-      // for the structuring wait (updated_at is already refreshed by startHeartbeat).
+      // Periodic progress ping in current_step so the UI shows the elapsed time.
       const structuringProgressInterval = setInterval(async () => {
         try {
           const elapsedSec = Math.round((Date.now() - structuringStartedAt) / 1000);
@@ -2095,12 +2077,27 @@ async function processarChunkedPDFBackground(
         } catch (_e) { /* ignore */ }
       }, STRUCTURING_HEARTBEAT_MS) as unknown as number;
       try {
-        fillResult = await callAI(
-          aiConfig,
+        const cascade = await runStructuringWithCascade(aiConfig, {
+          supabaseAdmin,
+          jobId,
+          userId,
           systemPrompt,
-          `Analise o seguinte texto extraído de ${partCountForDisplay} partes de um documento de processo trabalhista (${totalPages} páginas) e retorne o JSON estruturado:\n\n${textForFilling}`,
-          { promptType: 'chunked_import', userId, maxOutputTokens: 65536, jsonMode: true, requestTimeoutMs: STRUCTURING_TIMEOUT_MS }
-        );
+          userPromptBuilder: (text) =>
+            `Analise o seguinte texto extraído de ${partCountForDisplay} partes de um documento de processo trabalhista (${totalPages} páginas) e retorne o JSON estruturado:\n\n${text}`,
+          fullText: combinedText,
+          promptType: 'chunked_import',
+          requestTimeoutMs: STRUCTURING_TIMEOUT_MS,
+        });
+        fillResult = cascade.fillResult;
+        structuringProviderUsed = `${cascade.provider}/${cascade.model}`;
+        structuringAttempts = cascade.attemptsLog;
+        if (cascade.cascadeUsed) {
+          await logInfo('processar-autos', `Estruturação salva por cascata (${cascade.attemptsLog.length} tentativas)`, jobId, {
+            attempts: cascade.attemptsLog,
+            finalProvider: cascade.provider,
+            finalModel: cascade.model,
+          });
+        }
       } finally {
         clearInterval(structuringProgressInterval);
       }
@@ -2108,7 +2105,10 @@ async function processarChunkedPDFBackground(
       stopHeartbeat();
     }
 
-    modelUsed = `${aiConfig.provider}/${aiConfig.model}`;
+    // Bind textForFilling for the downstream _rawTextTail preservation logic below.
+    let textForFilling: string | null = truncateForStructuring(combinedText, 200_000);
+    modelUsed = structuringProviderUsed;
+
 
     // Parse the structured response
     let parsedResult = tryFixTruncatedJson(fillResult.text);
