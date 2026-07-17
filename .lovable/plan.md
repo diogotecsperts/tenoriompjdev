@@ -1,127 +1,169 @@
-## Diagnóstico encontrado
+## Diagnóstico fechado
 
-O job informado parou exatamente aqui:
+O problema não é “a GLM não processa arquivo grande” de forma genérica. O problema está na forma como o Trabalhista está orquestrando a GLM hoje.
 
-- Job: `39a231ef-4320-4d8a-9856-86cada7e6e0e`
-- Status no banco: `processing`
-- Etapa: `GLM-OCR: ocr_processing · parte 2/2 (págs 91-114)`
-- Progresso: `27%`
-- Último update: `2026-07-17T00:34:23Z`
-- Logs de backend:
-  - iniciou chunked com 2 partes / 114 páginas
-  - iniciou OCR parte 1/2
-  - parte 1/2 concluiu com 56.897 caracteres
-  - iniciou OCR parte 2/2
-  - depois disso não houve mais log de conclusão nem erro
+### Onde exatamente parou
 
-Conclusão técnica: a parte 2 ficou presa dentro da chamada GLM no backend. O `import_jobs.updated_at` parou em `00:34:23`, então nem o heartbeat interno continuou. O job e a tentativa (`import_attempts`) ficaram em `processing`, sem erro persistido.
+Pelo diagnóstico enviado e pelos registros persistidos no backend:
 
-## Causa provável
+- Job: `0803f949-3d2c-4064-a0b8-1a85c375bf90`
+- Status atual no banco: `processing`
+- Última etapa: `GLM-OCR: enviando páginas 1-30 · parte 2/4 (págs 31-60)`
+- Última atualização: `2026-07-17 01:06:17`
+- Logs gravados:
+  - `01:04:46` iniciou chunked: 4 partes / 114 páginas
+  - `01:04:50` iniciou OCR parte 1/4
+  - `01:06:10` concluiu parte 1/4 com 56.941 caracteres
+  - `01:06:14` iniciou OCR parte 2/4
+  - depois disso: nenhum log, nenhuma falha persistida, attempt ainda `processing`
 
-Há dois problemas combinados:
+Isso indica que o worker morreu ou foi interrompido no meio da chamada da parte 2, antes de conseguir executar o `catch`/timeout que marcaria o job como falho.
 
-1. **A função em background pode morrer sem executar o `catch` final.**
-   O fluxo usa `EdgeRuntime.waitUntil(...)` para processar OCR longo após devolver o `jobId`. Se a runtime encerra por limite/timeout/recurso durante a chamada GLM, o código não chega ao `catch`, não marca `import_jobs.status = failed`, e não grava erro. Isso explica o estado atual: parado em `processing`, sem log de falha.
+## Causas prováveis
 
-2. **O GLM está recebendo partes de até 90 páginas, mas o helper GLM ainda pagina internamente em chamadas de 30 páginas.**
-   A parte 1 tinha páginas 1-90 e concluiu. A parte 2 tinha páginas 91-114, mas dentro do helper ela é tratada como um PDF independente e ainda chama `start_page_id: 1, end_page_id: 30`. Isso não é necessariamente fatal, mas torna a telemetria confusa e deixa menos claro qual subjanela GLM travou. O frontend mostra apenas “parte 2/2”, sem “subchamada GLM 1-24”.
+### 1. O split físico ainda não está realmente físico
 
-3. **O diagnóstico desaparece porque o frontend muda para `processingStep = idle` ao abortar por trava.**
-   O botão “Baixar diagnóstico” só existe enquanto `processingStep === analyzing` ou `isSplitting`. Quando a detecção de trava chama `abortWithStaleError`, ela limpa a tela de análise. Resultado: o modal volta para a tela inicial e o usuário perde o relatório exatamente quando mais precisa dele.
+O seu relatório mostra uma evidência crítica:
+
+```text
+PDF rasterizado: 114 págs · 20.2MB
+Parte 1: págs 1-30, 20.2MB
+Parte 2: págs 31-60, 20.2MB
+Parte 3: págs 61-90, 20.2MB
+Parte 4: págs 91-114, 20.2MB
+```
+
+Isso não está correto para um split físico real. Se o PDF limpo inteiro tem 20.2MB, cada parte deveria ficar proporcionalmente menor. O fato de todas as partes ficarem com o tamanho do PDF inteiro indica que o método atual de “remover páginas fora do range” ainda está salvando recursos/imagens do PDF inteiro dentro de cada parte.
+
+Resultado prático: o app mostra 4 partes, mas cada parte carrega praticamente o PDF rasterizado completo. Isso aumenta tempo, payload, memória e chance de a GLM ou a edge function travarem.
+
+### 2. O Trabalhista processa todas as partes dentro de um único background worker
+
+Hoje o Trabalhista faz:
+
+```text
+frontend rasteriza/splita/upload
+→ processar-autos cria um job
+→ EdgeRuntime.waitUntil processa parte 1, parte 2, parte 3, parte 4
+→ depois estrutura os dados
+```
+
+Esse modelo é frágil para GLM porque uma única edge function fica viva por tempo demais. A parte 1 levou cerca de 80s. Ao iniciar a parte 2, o worker já estava próximo do limite operacional e morreu sem gravar erro.
+
+Isso explica por que o timeout de 5 minutos por parte não apareceu no banco: o processo provavelmente não ficou vivo até o timer disparar.
+
+### 3. O Previdenciário é mais resiliente por arquitetura
+
+O Previdenciário não depende da mesma forma de um único worker longo para todo o fluxo. Ele tem um padrão mais seguro:
+
+```text
+browser orquestra
+→ chama OCR de uma parte por vez
+→ cada parte roda em uma função menor
+→ junta o texto no client
+→ chama a extração final com texto pré-extraído
+→ status endpoint tem watchdog que marca zombie como failed
+```
+
+A lógica correta para a GLM no Trabalhista deve seguir esse padrão: OCR por partes controlado pelo navegador, não um background worker tentando processar tudo sozinho.
 
 ## Plano de correção
 
-### 1. Persistir falhas de GLM no banco mesmo quando o frontend detecta travamento
+### 1. Corrigir o split GLM no Trabalhista
 
-No botão/fluxo de aborto por trava no Trabalhista:
+Substituir o fluxo atual:
 
-- Manter o estado visual em uma nova tela/estado de erro, em vez de voltar para `idle` imediatamente.
-- Gravar no job, via nova edge function pequena ou endpoint existente seguro, um status `failed` com erro claro quando o frontend detecta stale real:
-  - “GLM sem avanço real há X minutos”
-  - último `current_step`
-  - último `progress`
-  - últimos logs disponíveis
-- Marcar também a tentativa (`import_attempts`) como `failed` quando possível.
+```text
+rasteriza PDF inteiro → salva PDF limpo inteiro → remove páginas para gerar partes
+```
 
-Isso evita jobs eternos em `processing` e preserva a causa.
+por:
 
-### 2. Manter o diagnóstico visível após erro
+```text
+rasteriza páginas → monta PDFs de partes diretamente → cada parte contém somente suas páginas
+```
 
-No `ImportarAutosDialog.tsx`:
+Critério esperado:
 
-- Criar estado dedicado, por exemplo `processingStep = 'error'` ou estado `glmFailedDiagnostic`.
-- Quando o GLM abortar por trava:
-  - parar polling;
-  - manter `selectedFile`, `currentJobId`, `glmDiagnostics`, `glmLastSignal`, `backendLogs` e `splitParts`;
-  - renderizar uma tela de erro com:
-    - resumo do ponto exato onde parou;
-    - botão “Baixar diagnóstico GLM”;
-    - botão “Fechar”;
-    - botão “Nova importação”.
-- Não chamar `handleClose()` nem resetar diagnóstico automaticamente.
+- PDF rasterizado inteiro 20MB não deve gerar 4 partes de 20MB.
+- As partes devem ficar fisicamente menores e proporcionais.
+- Cada parte GLM deve respeitar:
+  - no máximo 30 páginas, preferencialmente 20 páginas por segurança operacional;
+  - tamanho bem abaixo de 50MB;
+  - sem recursos órfãos do PDF inteiro.
 
-### 3. Corrigir a estratégia de partes do GLM para não depender de subpaginação interna
+### 2. Replicar o padrão seguro do Previdenciário sem tocar nele
 
-Para o caminho GLM no Trabalhista:
+Criar um fluxo GLM específico para o Trabalhista:
 
-- Ajustar `RASTER_SPLIT_MAX_PAGES` de 90 para 30 ou criar constante específica para GLM chunked, gerando partes já no tamanho real de chamada do GLM.
-- Cada parte enviada ao backend terá no máximo 30 páginas.
-- No backend, quando `isChunkedUpload` + provider `glm`, chamar GLM sem precisar paginar internamente por `start_page_id/end_page_id` ou, se mantiver o helper, registrar subchamadas explicitamente.
+```text
+frontend Trabalhista
+→ gera partes reais
+→ sobe partes
+→ chama uma função OCR por parte
+→ recebe texto da parte
+→ concatena texto
+→ chama processar-autos somente para estruturação final/resumos
+```
 
-Benefício: se travar, saberemos “parte 4/4, páginas 91-114”, e cada chamada GLM será menor e mais previsível.
+Isso evita que um único `EdgeRuntime.waitUntil` fique tentando processar todas as partes da GLM.
 
-### 4. Adicionar timeout de parte no backend, não apenas dentro do fetch GLM
+### 3. Criar função isolada para OCR de uma parte trabalhista
 
-Hoje existe timeout por `fetch` GLM, mas o caso real mostra que a execução pode morrer sem atualizar o job. Vou envolver cada OCR de parte em `Promise.race` com timeout operacional, por exemplo:
+Adicionar uma função equivalente ao padrão do Prev, mas isolada para o bucket/paths do Trabalhista:
 
-- GLM parte de até 30 páginas: 4 a 5 minutos;
-- ao exceder:
-  - gravar log `GLM-OCR: timeout da parte N/M`;
-  - atualizar `import_jobs.status = failed`;
-  - atualizar `import_attempts.status = failed`;
-  - lançar erro claro.
+```text
+trabalhista-ocr-part
+```
 
-Isso não altera Mistral, Gemini, MiniMax nem Previdenciário.
+Responsabilidades:
 
-### 5. Melhorar logs e status granulares da GLM
+- validar autenticação;
+- validar que o path da parte pertence ao usuário;
+- baixar somente aquela parte;
+- chamar `runOcrWithConfiguredProvider` respeitando o DevPanel;
+- retornar `{ text, pageCount, provider, model, durationMs }`;
+- sem alterar Previdenciário;
+- sem alterar Mistral.
 
-No backend GLM chunked:
+### 4. Endurecer o watchdog do Trabalhista
 
-- Antes de cada chamada GLM, gravar:
-  - parte N/M;
-  - páginas reais;
-  - tamanho MB;
-  - timeout configurado.
-- Durante o GLM, gravar heartbeat com etapa sem depender só de `updated_at`:
-  - `GLM-OCR: parte N/M enviada ao provedor`
-  - `GLM-OCR: aguardando resposta da parte N/M`
-- No erro, incluir:
-  - parte;
-  - páginas;
-  - provider;
-  - duração;
-  - mensagem técnica resumida.
+Hoje o `check-import-status` apenas informa que o GLM está stale. Vou alinhar ao padrão do Prev:
 
-### 6. Recuperação/limpeza de jobs antigos presos
+- se um job GLM ficar sem update real por tempo definido, marcar como `failed` no banco;
+- atualizar `import_attempts`;
+- registrar `backend_logs` com parte, páginas e último passo;
+- manter o diagnóstico disponível no modal.
 
-Adicionar uma rotina defensiva no `check-import-status`:
+Isso elimina jobs zumbis eternos em `processing`.
 
-- Se um job GLM está em `processing`, `updated_at` antigo e sem logs novos, retornar ao frontend um campo como `stale: true` e `staleReason`.
-- Opcionalmente, marcar como failed por função dedicada quando o usuário clicar em “Encerrar e baixar diagnóstico”.
+### 5. Preservar Mistral e Previdenciário
 
-### 7. Isolamento garantido
+Escopo estrito:
 
-- Não tocar no fluxo Mistral do Trabalhista.
-- Não tocar no Previdenciário.
-- Não alterar o pós-OCR / preenchimento dos campos do Trabalhista.
-- As mudanças ficam condicionadas a provider GLM ou ao fluxo de diagnóstico do modal.
+- alterações de OCR por partes somente quando `provider === 'glm'` no módulo Trabalhista;
+- Mistral Trabalhista segue no fluxo atual;
+- Previdenciário não será alterado;
+- helpers compartilhados só serão tocados se a mudança for compatível e sem regressão.
+
+### 6. Ajustar a UI de diagnóstico
+
+No relatório e na tela, exibir claramente:
+
+- tamanho original;
+- tamanho rasterizado;
+- tamanho real de cada parte;
+- parte atual;
+- tempo da parte atual;
+- última resposta do backend;
+- se a falha foi timeout, worker zombie ou erro do provider.
 
 ## Resultado esperado
 
-Depois da correção:
+Depois da correção, esse caso de 114 páginas não deve ficar preso em “parte 2/4” sem conclusão. O sistema deve:
 
-- O GLM não ficará 10-15 minutos sem uma conclusão visível.
-- Se travar, a tela não fecha nem volta para a importação inicial.
-- O relatório de diagnóstico ficará disponível após o erro.
-- O job no banco ficará como `failed`, não eternamente `processing`.
-- O erro dirá exatamente qual parte/páginas travaram e qual foi o último sinal do backend.
+1. gerar partes fisicamente menores;
+2. processar cada parte em uma chamada curta e rastreável;
+3. se uma parte falhar, mostrar exatamente qual parte/páginas falharam;
+4. nunca deixar o job indefinidamente em `processing`;
+5. preservar Mistral e Previdenciário intactos.
