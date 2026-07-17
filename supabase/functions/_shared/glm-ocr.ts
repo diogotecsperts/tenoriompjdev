@@ -27,6 +27,7 @@ const GLM_MODEL = "glm-ocr";
 const GLM_PAGES_PER_REQUEST = 30;
 const GLM_MAX_PDF_BYTES = 50_000_000; // 50 MB por request
 const GLM_MAX_RETRIES = 3;
+const GLM_REQUEST_TIMEOUT_MS = 4 * 60 * 1000; // evita chamada GLM pendurada indefinidamente
 
 export interface GlmOcrResult {
   text: string;
@@ -92,6 +93,8 @@ async function callGlmLayoutParsing(
   let lastErr = "";
   for (let attempt = 1; attempt <= GLM_MAX_RETRIES; attempt++) {
     let res: Response;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), GLM_REQUEST_TIMEOUT_MS);
     try {
       res = await fetch(GLM_LAYOUT_URL, {
         method: "POST",
@@ -100,9 +103,13 @@ async function callGlmLayoutParsing(
           "Content-Type": "application/json",
         },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
     } catch (e) {
-      lastErr = `network error: ${(e as Error).message}`;
+      const message = (e as Error).name === "AbortError"
+        ? `timeout após ${Math.round(GLM_REQUEST_TIMEOUT_MS / 1000)}s`
+        : `network error: ${(e as Error).message}`;
+      lastErr = message;
       if (attempt < GLM_MAX_RETRIES) {
         const wait = 500 * Math.pow(3, attempt - 1);
         console.warn(`[glm-ocr] tentativa ${attempt}/${GLM_MAX_RETRIES} falhou (${lastErr}); retry em ${wait}ms`);
@@ -110,6 +117,8 @@ async function callGlmLayoutParsing(
         continue;
       }
       throw new Error(`GLM-OCR request failed: ${lastErr}`);
+    } finally {
+      clearTimeout(timeout);
     }
 
     if (res.ok) {
@@ -168,6 +177,7 @@ function toBase64DataUrl(pdfBytes: Uint8Array): string {
 export async function extractWithGlmOCR(
   pdfBytes: Uint8Array,
   apiKey: string,
+  opts: { onHeartbeat?: (stage: string, progress: number) => Promise<void> | void } = {},
 ): Promise<GlmOcrResult> {
   const startTime = Date.now();
   const sizeMB = (pdfBytes.byteLength / 1024 / 1024).toFixed(2);
@@ -183,10 +193,12 @@ export async function extractWithGlmOCR(
   const fileDataUrl = toBase64DataUrl(pdfBytes);
 
   // 1ª chamada: primeiras 30 páginas + descobre num_pages total.
+  await opts.onHeartbeat?.(`GLM-OCR: enviando páginas 1-${GLM_PAGES_PER_REQUEST}`, 28);
   const first = await callGlmLayoutParsing(fileDataUrl, apiKey, {
     startPage: 1,
     endPage: GLM_PAGES_PER_REQUEST,
   });
+  await opts.onHeartbeat?.(`GLM-OCR: páginas 1-${GLM_PAGES_PER_REQUEST} concluídas`, 35);
 
   const totalPages = first.totalPages || GLM_PAGES_PER_REQUEST;
   const parts: string[] = [];
@@ -199,10 +211,14 @@ export async function extractWithGlmOCR(
     console.log(`[glm-ocr] PDF tem ${totalPages} páginas → paginando em blocos de ${GLM_PAGES_PER_REQUEST}`);
     for (let start = GLM_PAGES_PER_REQUEST + 1; start <= totalPages; start += GLM_PAGES_PER_REQUEST) {
       const end = Math.min(start + GLM_PAGES_PER_REQUEST - 1, totalPages);
+      const progressBefore = 35 + Math.floor(((start - 1) / Math.max(1, totalPages)) * 18);
+      await opts.onHeartbeat?.(`GLM-OCR: enviando páginas ${start}-${end}`, progressBefore);
       const chunk = await callGlmLayoutParsing(fileDataUrl, apiKey, {
         startPage: start,
         endPage: end,
       });
+      const progressAfter = 35 + Math.floor((end / Math.max(1, totalPages)) * 18);
+      await opts.onHeartbeat?.(`GLM-OCR: páginas ${start}-${end} concluídas`, progressAfter);
       if (chunk.markdown.trim().length > 0) {
         parts.push(`=== PÁGINAS ${start}-${end} ===\n${chunk.markdown.trim()}`);
       }

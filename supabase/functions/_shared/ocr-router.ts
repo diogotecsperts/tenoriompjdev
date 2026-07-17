@@ -139,7 +139,7 @@ export async function runOcrWithConfiguredProvider(
     if (cfg.provider === "glm") {
       const bytes = await materializeBytes();
       await opts.onHeartbeat?.("ocr_processing", 25);
-      const r = await extractWithGlmOCR(bytes, glmKey!);
+      const r = await extractWithGlmOCR(bytes, glmKey!, { onHeartbeat: opts.onHeartbeat });
       await opts.onHeartbeat?.("ocr_processing", 55);
       return { text: r.text, pageCount: r.pageCount, provider: r.provider, model: r.model };
     }
@@ -247,7 +247,7 @@ export async function runOcrWithConfiguredProvider(
         );
       }
       const bytes = await materializeBytes();
-      const r = await extractWithGlmOCR(bytes, glmKey);
+      const r = await extractWithGlmOCR(bytes, glmKey, { onHeartbeat: opts.onHeartbeat });
       return { text: r.text, pageCount: r.pageCount, provider: `${r.provider}-fallback`, model: r.model };
     }
     // Não deveria chegar aqui (restrictTo filtrou), mas por segurança:

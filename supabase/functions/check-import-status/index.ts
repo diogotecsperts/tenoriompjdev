@@ -63,10 +63,32 @@ serve(async (req) => {
     const detectOCRProvider = (step: string | null): string | null => {
       if (!step) return null;
       const lowerStep = step.toLowerCase();
+      if (lowerStep.includes('glm') || lowerStep.includes('z.ai') || lowerStep.includes('zai')) return 'glm';
       if (lowerStep.includes('mistral')) return 'mistral-ocr';
       if (lowerStep.includes('gemini') || lowerStep.includes('vision')) return 'gemini';
       return null;
     };
+
+    const resultProvider = typeof job.result === 'object' && job.result && !Array.isArray(job.result)
+      ? ((job.result as Record<string, unknown>).ocrProvider as string | undefined)
+      : undefined;
+
+    let backendLogs: Array<{ level: string; message: string; created_at: string | null }> = [];
+    try {
+      const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      if (serviceKey) {
+        const supabaseAdmin = createClient(supabaseUrl, serviceKey);
+        const { data: logs } = await supabaseAdmin
+          .from('backend_logs')
+          .select('level, message, created_at')
+          .eq('job_id', jobId)
+          .order('created_at', { ascending: false })
+          .limit(20);
+        backendLogs = (logs || []).reverse();
+      }
+    } catch (logError) {
+      console.warn('[check-import-status] Failed to fetch backend logs:', logError);
+    }
 
     // Build response based on status
     const response: any = {
@@ -76,7 +98,8 @@ serve(async (req) => {
       stepId: job.step_id || null,
       updatedAt: job.updated_at,  // Para detecção de stale job no frontend
       // OCR Provider indicator for frontend
-      ocrProvider: detectOCRProvider(job.current_step),
+      ocrProvider: detectOCRProvider(job.current_step) || resultProvider || null,
+      backendLogs,
       // Add retry info for UI indicator
       retryInfo: {
         isRetrying: (job.current_step?.toLowerCase().includes('retry') || 

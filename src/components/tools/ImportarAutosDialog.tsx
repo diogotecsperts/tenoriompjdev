@@ -30,7 +30,8 @@ import {
   XCircle,
   Turtle,
   Layers,
-  Scissors
+  Scissors,
+  Download
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -196,6 +197,32 @@ interface StepStatus {
   duration?: number;
 }
 
+type GlmStageId = 'probe' | 'raster' | 'split' | 'upload' | 'job_start' | 'ocr_part' | 'backend_processing';
+
+interface GlmDiagnosticEntry {
+  id: GlmStageId;
+  label: string;
+  status: 'pending' | 'processing' | 'completed' | 'error';
+  startedAt?: number;
+  completedAt?: number;
+  progress?: number;
+  message?: string;
+  meta?: Record<string, string | number | boolean | null>;
+}
+
+const GLM_STAGES: Array<{ id: GlmStageId; label: string }> = [
+  { id: 'probe', label: 'Probe do PDF' },
+  { id: 'raster', label: 'Rasterização no navegador' },
+  { id: 'split', label: 'Divisão em partes' },
+  { id: 'upload', label: 'Upload das partes' },
+  { id: 'job_start', label: 'Início do job' },
+  { id: 'ocr_part', label: 'OCR GLM por parte' },
+  { id: 'backend_processing', label: 'Estruturação pós-OCR' },
+];
+
+const createGlmDiagnosticState = (): GlmDiagnosticEntry[] =>
+  GLM_STAGES.map((stage) => ({ ...stage, status: 'pending' }));
+
 const PROCESSING_STEPS: Array<{ id: string; label: string }> = [
   { id: 'upload', label: 'Upload do PDF' },
   { id: 'extraction', label: 'Extração de dados (Vision)' },
@@ -280,6 +307,17 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     sizeMB: number;
   }>>([]);
   const [currentUploadingPart, setCurrentUploadingPart] = useState(0);
+
+  // GLM-only diagnostics (Trabalhista). Isolado de Mistral/Previdenciário.
+  const [glmDiagnostics, setGlmDiagnostics] = useState<GlmDiagnosticEntry[]>(createGlmDiagnosticState);
+  const [glmLastSignal, setGlmLastSignal] = useState<{ currentStep?: string; progress?: number; stepId?: string | null; updatedAt?: string } | null>(null);
+  const [glmAbortReason, setGlmAbortReason] = useState<string | null>(null);
+  const [glmNoAdvanceAlert, setGlmNoAdvanceAlert] = useState(false);
+  const lastMeaningfulJobSignalRef = useRef<string | null>(null);
+  const noMeaningfulAdvanceCountRef = useRef(0);
+  const GLM_NO_ADVANCE_THRESHOLD_POLLS = 100; // 5 min em polling de 3s
+  const GLM_NO_ADVANCE_ABORT_POLLS = 200; // +5 min após extensão única
+  const activeOcrProviderRef = useRef<string | null>(null);
 
   // Cancel confirmation state
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -525,6 +563,116 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     return `${minutes}m ${seconds}s`;
   };
 
+  const isGlmProvider = (provider: string | null | undefined) => {
+    const p = provider?.toLowerCase();
+    return p === 'glm' || p === 'glm-ocr';
+  };
+
+  const isGlmActive = () => isGlmProvider(currentOCRProvider || activeOcrProviderRef.current || ocrConfig?.provider);
+
+  const updateGlmStage = (
+    id: GlmStageId,
+    updates: Partial<Omit<GlmDiagnosticEntry, 'id' | 'label'>>,
+  ) => {
+    if (!isGlmActive()) return;
+    setGlmDiagnostics(prev => prev.map(stage => {
+      if (stage.id !== id) return stage;
+      const next: GlmDiagnosticEntry = { ...stage, ...updates };
+      if (updates.status === 'processing' && !next.startedAt) next.startedAt = Date.now();
+      if ((updates.status === 'completed' || updates.status === 'error') && !next.completedAt) next.completedAt = Date.now();
+      return next;
+    }));
+  };
+
+  const completePreviousGlmStages = (currentId: GlmStageId) => {
+    if (!isGlmActive()) return;
+    const currentIndex = GLM_STAGES.findIndex(stage => stage.id === currentId);
+    if (currentIndex <= 0) return;
+    setGlmDiagnostics(prev => prev.map(stage => {
+      const stageIndex = GLM_STAGES.findIndex(s => s.id === stage.id);
+      if (stageIndex >= 0 && stageIndex < currentIndex && stage.status === 'processing') {
+        return { ...stage, status: 'completed', completedAt: stage.completedAt || Date.now(), progress: 100 };
+      }
+      return stage;
+    }));
+  };
+
+  const inferGlmStageFromStep = (step: string | null | undefined, stepId?: string | null): GlmStageId | null => {
+    const normalized = (step || '').toLowerCase();
+    if (!normalized) return null;
+    if (normalized.includes('glm') && (normalized.includes('parte') || normalized.includes('ocr'))) return 'ocr_part';
+    if (normalized.includes('extraindo parte') || normalized.includes('processando parte')) return 'ocr_part';
+    if (stepId === 'processing' || normalized.includes('estruturando') || normalized.includes('fase 2')) return 'backend_processing';
+    if (normalized.includes('gerando resumo') || normalized.includes('finalizando')) return 'backend_processing';
+    return null;
+  };
+
+  const buildGlmDiagnosticReport = () => {
+    const lines: string[] = [];
+    lines.push('Relatório de diagnóstico GLM-OCR — Trabalhista');
+    lines.push(`Gerado em: ${new Date().toLocaleString('pt-BR')}`);
+    lines.push('');
+    lines.push('Contexto');
+    lines.push(`- Job ID: ${currentJobId || '—'}`);
+    lines.push(`- Provider OCR: ${currentOCRProvider || activeOcrProviderRef.current || ocrConfig?.provider || '—'}`);
+    lines.push(`- Arquivo: ${selectedFile?.name || '—'}`);
+    lines.push(`- Tamanho original: ${selectedFile ? formatFileSize(selectedFile.size) : '—'}`);
+    lines.push(`- Tempo decorrido: ${formatDuration(elapsedTime)}`);
+    lines.push(`- Etapa atual: ${analysisStep || splitMessage || '—'}`);
+    lines.push(`- Progresso atual: ${analysisProgress || splitProgress || 0}%`);
+    if (glmAbortReason) lines.push(`- Motivo de alerta/abort: ${glmAbortReason}`);
+    lines.push('');
+    lines.push('Último sinal do backend');
+    lines.push(`- current_step: ${glmLastSignal?.currentStep || '—'}`);
+    lines.push(`- progress: ${glmLastSignal?.progress ?? '—'}`);
+    lines.push(`- step_id: ${glmLastSignal?.stepId || '—'}`);
+    lines.push(`- updated_at: ${glmLastSignal?.updatedAt || '—'}`);
+    lines.push('');
+    lines.push('Etapas GLM');
+    glmDiagnostics.forEach(stage => {
+      const duration = stage.startedAt
+        ? formatDuration((stage.completedAt || Date.now()) - stage.startedAt)
+        : '—';
+      lines.push(`- ${stage.label}: ${stage.status} · ${duration} · ${stage.progress ?? 0}% · ${stage.message || ''}`.trim());
+      if (stage.meta) {
+        lines.push(`  meta: ${JSON.stringify(stage.meta)}`);
+      }
+    });
+    lines.push('');
+    lines.push('Partes geradas');
+    if (splitParts.length === 0) {
+      lines.push('- Nenhuma parte registrada no navegador.');
+    } else {
+      splitParts.forEach(part => {
+        lines.push(`- Parte ${part.partNumber}: págs ${part.pageRange.start}-${part.pageRange.end}, ${part.sizeMB.toFixed(1)}MB`);
+      });
+    }
+    lines.push('');
+    lines.push('Últimos logs de backend disponíveis no modal');
+    if (backendLogs.length === 0) {
+      lines.push('- Nenhum log carregado no modal.');
+    } else {
+      backendLogs.slice(-20).forEach(log => {
+        lines.push(`- [${log.created_at}] ${log.level}: ${log.message}`);
+      });
+    }
+    return lines.join('\n');
+  };
+
+  const downloadGlmDiagnosticReport = () => {
+    const report = buildGlmDiagnosticReport();
+    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    a.href = url;
+    a.download = `diagnostico-glm-trabalhista-${stamp}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -663,6 +811,19 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       (lastLogs ? `\n\nÚltimos logs do servidor:\n${lastLogs}` : '') +
       `\n\nSugestões: trocar o provider de OCR no DevPanel ou reduzir o tamanho do PDF.`;
     console.error('[ImportarAutosDialog] Abortando por trava:', description);
+    setGlmAbortReason(reason);
+    if (isGlmActive()) {
+      const inferred = inferGlmStageFromStep(lastStep, glmLastSignal?.stepId) || 'ocr_part';
+      updateGlmStage(inferred, {
+        status: 'error',
+        message: reason,
+        meta: {
+          lastStep: lastStep || null,
+          provider,
+          progress: glmLastSignal?.progress ?? null,
+        },
+      });
+    }
     toast({
       variant: 'destructive',
       title: 'Processamento parou de responder',
@@ -703,6 +864,57 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           data.currentStep || analysisStep,
         );
         return true;
+      }
+
+      if (Array.isArray(data.backendLogs)) {
+        setBackendLogs(data.backendLogs);
+      }
+
+      setGlmLastSignal({
+        currentStep: data.currentStep,
+        progress: data.progress,
+        stepId: data.stepId || null,
+        updatedAt: data.updatedAt,
+      });
+
+      const effectiveProviderFromStatus = data.ocrProvider || currentOCRProvider || activeOcrProviderRef.current || ocrConfig?.provider;
+      const statusIsGlm = isGlmProvider(effectiveProviderFromStatus);
+      if (statusIsGlm) {
+        activeOcrProviderRef.current = 'glm';
+        const inferredStage = inferGlmStageFromStep(data.currentStep, data.stepId);
+        if (inferredStage) {
+          completePreviousGlmStages(inferredStage);
+          updateGlmStage(inferredStage, {
+            status: 'processing',
+            progress: data.progress || 0,
+            message: data.currentStep || 'Aguardando sinal do GLM...',
+            meta: {
+              stepId: data.stepId || null,
+              updatedAt: data.updatedAt || null,
+            },
+          });
+        }
+
+        const meaningfulSignal = [data.status, data.currentStep || '', data.progress ?? '', data.stepId || ''].join('|');
+        if (lastMeaningfulJobSignalRef.current === meaningfulSignal && data.status === 'processing') {
+          noMeaningfulAdvanceCountRef.current++;
+          if (noMeaningfulAdvanceCountRef.current >= GLM_NO_ADVANCE_THRESHOLD_POLLS && !glmNoAdvanceAlert) {
+            setGlmNoAdvanceAlert(true);
+            setIsJobStale(true);
+            setGlmAbortReason(`GLM sem avanço real há ~${Math.round((GLM_NO_ADVANCE_THRESHOLD_POLLS * 3) / 60)} min.`);
+          }
+          if (staleExtensionUsedRef.current && noMeaningfulAdvanceCountRef.current >= GLM_NO_ADVANCE_ABORT_POLLS) {
+            abortWithStaleError(
+              `GLM permaneceu na mesma etapa/progresso por ~${Math.round((GLM_NO_ADVANCE_ABORT_POLLS * 3) / 60)} minutos, apesar do heartbeat do servidor.`,
+              data.currentStep || analysisStep,
+            );
+            return true;
+          }
+        } else {
+          lastMeaningfulJobSignalRef.current = meaningfulSignal;
+          noMeaningfulAdvanceCountRef.current = 0;
+          setGlmNoAdvanceAlert(false);
+        }
       }
 
       if (lastJobUpdateRef.current === data.updatedAt) {
@@ -824,6 +1036,14 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       // Start timing
       processingStartTime.current = Date.now();
       setBackendLogs([]);
+      setCurrentOCRProvider(null);
+      activeOcrProviderRef.current = ocrConfig?.provider || null;
+      setGlmDiagnostics(createGlmDiagnosticState());
+      setGlmLastSignal(null);
+      setGlmAbortReason(null);
+      setGlmNoAdvanceAlert(false);
+      lastMeaningfulJobSignalRef.current = null;
+      noMeaningfulAdvanceCountRef.current = 0;
       
       const fileSizeMB = selectedFile.size / (1024 * 1024);
 
@@ -949,12 +1169,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         | null = null;
 
       if (isGlm) {
+        activeOcrProviderRef.current = 'glm';
+        setCurrentOCRProvider('glm');
         // Probe rápido de páginas (~50-200ms) — decide se precisa raster
         const { probePdfPageCount, pdfNeedsRasterSplit, rebuildPdfAsRasterClean, splitCleanPdfByPages, RASTER_SPLIT_MAX_BYTES, RASTER_SPLIT_MAX_PAGES } = await import('@/lib/pdf-preprocess');
 
         setIsSplitting(true);
         setSplitProgress(0);
         setSplitMessage('Analisando PDF (contagem de páginas)...');
+        updateGlmStage('probe', {
+          status: 'processing',
+          progress: 5,
+          message: 'Analisando PDF (contagem de páginas e tamanho)...',
+          meta: { originalSizeMB: Number(fileSizeMB.toFixed(1)) },
+        });
 
         // Helper: timeout duro por sub-fase — evita espera infinita
         // no navegador se pdfjs/pdf-lib travarem.
@@ -984,15 +1212,28 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           probe = await withTimeout(pdfNeedsRasterSplit(selectedFile), 60_000, 'probe');
         } catch (e) {
           setIsSplitting(false);
+          updateGlmStage('probe', { status: 'error', message: e instanceof Error ? e.message : String(e) });
           throw new Error(
             `[GLM probe] Falha ao ler páginas do PDF: ${e instanceof Error ? e.message : String(e)}. ` +
             `O arquivo pode estar corrompido ou protegido.`,
           );
         }
         console.log(`[ImportarAutosDialog][glm] probe: ${probe.pageCount} págs, ${(probe.sizeBytes / 1024 / 1024).toFixed(1)}MB, precisa raster=${probe.needs}`);
+        updateGlmStage('probe', {
+          status: 'completed',
+          progress: 100,
+          message: `${probe.pageCount} páginas · ${formatFileSize(probe.sizeBytes)} · ${probe.needs ? 'precisa raster/split' : 'cabe direto'}`,
+          meta: { pageCount: probe.pageCount, sizeMB: Number((probe.sizeBytes / 1024 / 1024).toFixed(1)), needsRasterSplit: probe.needs },
+        });
 
         if (probe.needs) {
           setSplitMessage(`Rasterizando página 0/${probe.pageCount}...`);
+          updateGlmStage('raster', {
+            status: 'processing',
+            progress: 0,
+            message: `Rasterizando página 0/${probe.pageCount}...`,
+            meta: { totalPages: probe.pageCount },
+          });
           let rebuilt: Awaited<ReturnType<typeof rebuildPdfAsRasterClean>>;
           try {
             rebuilt = await withTimeout(
@@ -1001,6 +1242,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                 onPageProgress: (done, total) => {
                   setSplitMessage(`Rasterizando página ${done}/${total}...`);
                   setSplitProgress(Math.floor((done / total) * 60));
+                  updateGlmStage('raster', {
+                    status: 'processing',
+                    progress: Math.floor((done / Math.max(1, total)) * 100),
+                    message: `Rasterizando página ${done}/${total}...`,
+                    meta: { donePages: done, totalPages: total },
+                  });
                 },
               }),
               8 * 60_000, // 8 min
@@ -1009,6 +1256,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           } catch (e) {
             setIsSplitting(false);
             const base = e instanceof Error ? e.message : String(e);
+            updateGlmStage('raster', { status: 'error', message: base });
             throw new Error(
               `[GLM raster] Rasterização do PDF falhou (${base}). ` +
               `Arquivo pode ser grande demais para o navegador ou estar corrompido. ` +
@@ -1016,6 +1264,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             );
           }
           console.log(`[ImportarAutosDialog][glm] raster limpo: ${rebuilt.pageCount} págs @ ${rebuilt.dpiUsed}dpi q=${rebuilt.qualityUsed} → ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB`);
+          updateGlmStage('raster', {
+            status: 'completed',
+            progress: 100,
+            message: `PDF rasterizado: ${rebuilt.pageCount} págs · ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB`,
+            meta: { pageCount: rebuilt.pageCount, rasterSizeMB: Number((rebuilt.blob.size / 1024 / 1024).toFixed(1)), dpi: rebuilt.dpiUsed, quality: rebuilt.qualityUsed },
+          });
 
           const cleanBytes = new Uint8Array(await rebuilt.blob.arrayBuffer());
           const cleanFitsSingle =
@@ -1023,6 +1277,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
           if (cleanFitsSingle) {
             setSplitMessage(`PDF limpo cabe em chamada única (${rebuilt.pageCount} págs, ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB)`);
+            updateGlmStage('split', {
+              status: 'completed',
+              progress: 100,
+              message: `Sem divisão: 1 parte (${rebuilt.pageCount} págs, ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB)`,
+              meta: { parts: 1, totalPages: rebuilt.pageCount },
+            });
             glmRasterResult = {
               parts: [rebuilt.blob],
               pageRanges: [{ start: 1, end: rebuilt.pageCount }],
@@ -1031,6 +1291,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           } else {
             setSplitMessage('Dividindo PDF limpo em partes...');
             setSplitProgress(70);
+            updateGlmStage('split', { status: 'processing', progress: 20, message: 'Dividindo PDF limpo em partes...' });
             let cleanParts: Awaited<ReturnType<typeof splitCleanPdfByPages>>;
             try {
               cleanParts = await withTimeout(
@@ -1041,6 +1302,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             } catch (e) {
               setIsSplitting(false);
               const base = e instanceof Error ? e.message : String(e);
+              updateGlmStage('split', { status: 'error', message: base });
               throw new Error(
                 `[GLM split] Divisão do PDF em partes falhou (${base}). ` +
                 `Tente um PDF menor ou troque o provider de OCR no DevPanel.`,
@@ -1056,12 +1318,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             })));
             setSplitProgress(90);
             setSplitMessage(`Dividido em ${parts.length} parte(s)`);
+            updateGlmStage('split', {
+              status: 'completed',
+              progress: 100,
+              message: `Dividido em ${parts.length} parte(s)`,
+              meta: { parts: parts.length, totalPages, largestPartMB: Number(Math.max(...parts.map(p => p.size / 1024 / 1024)).toFixed(1)) },
+            });
             glmRasterResult = { parts, pageRanges, totalPages };
           }
         } else {
           // GLM aceita o PDF original tal como está — não precisa raster nem split.
           console.log('[ImportarAutosDialog][glm] PDF dentro dos limites; upload direto');
           setIsSplitting(false);
+          updateGlmStage('raster', { status: 'completed', progress: 100, message: 'Ignorada: PDF já dentro dos limites GLM.' });
+          updateGlmStage('split', { status: 'completed', progress: 100, message: 'Ignorada: upload direto.' });
         }
       }
 
@@ -1116,6 +1386,14 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           setIsSplitting(false);
           setProcessingStep("uploading");
           setUploadProgress(0);
+          if (isGlm) {
+            updateGlmStage('upload', {
+              status: 'processing',
+              progress: 0,
+              message: `Enviando ${parts.length} parte(s) para armazenamento...`,
+              meta: { parts: parts.length, totalPages },
+            });
+          }
           
           // Upload each part
           const partPaths: string[] = [];
@@ -1126,6 +1404,14 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             setCurrentUploadingPart(i);
             const uploadPercent = Math.floor((i / parts.length) * 90);
             setUploadProgress(uploadPercent);
+            if (isGlm) {
+              updateGlmStage('upload', {
+                status: 'processing',
+                progress: uploadPercent,
+                message: `Enviando parte ${i + 1}/${parts.length} (${(parts[i].size / 1024 / 1024).toFixed(1)}MB)...`,
+                meta: { currentPart: i + 1, totalParts: parts.length },
+              });
+            }
             
             const partPath = `${user.id}/${timestamp}-${baseName}_part_${i + 1}.pdf`;
             console.log(`[ImportarAutosDialog] Uploading part ${i + 1}/${parts.length}: ${partPath}`);
@@ -1136,6 +1422,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             
             if (uploadError) {
               console.error(`[ImportarAutosDialog] Upload failed for part ${i + 1}:`, uploadError);
+              if (isGlm) {
+                updateGlmStage('upload', { status: 'error', message: `Falha no upload da parte ${i + 1}: ${uploadError.message}` });
+              }
               throw new Error(`Falha no upload da parte ${i + 1}: ${uploadError.message}`);
             }
             
@@ -1145,6 +1434,10 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           setCurrentUploadingPart(parts.length); // Mark all as done
           setUploadProgress(100);
           console.log(`[ImportarAutosDialog] All ${parts.length} parts uploaded`);
+          if (isGlm) {
+            updateGlmStage('upload', { status: 'completed', progress: 100, message: `${parts.length} parte(s) enviada(s).` });
+            updateGlmStage('job_start', { status: 'processing', progress: 10, message: 'Iniciando job no servidor...' });
+          }
           
           // Store first part as file path for reference
           setCurrentFilePath(partPaths[0]);
@@ -1179,12 +1472,19 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           
           if (invokeError) {
             console.error('Function error:', invokeError);
+            if (isGlm) {
+              updateGlmStage('job_start', { status: 'error', message: 'Falha ao iniciar processamento no servidor.' });
+            }
             throw new Error('Falha ao iniciar processamento');
           }
           
           const jobId = invokeData.jobId;
           console.log('[ImportarAutosDialog] Chunked job started:', jobId);
           setCurrentJobId(jobId);
+          if (isGlm) {
+            updateGlmStage('job_start', { status: 'completed', progress: 100, message: `Job iniciado: ${jobId}`, meta: { jobId } });
+            updateGlmStage('ocr_part', { status: 'processing', progress: 0, message: 'Aguardando primeiro sinal do GLM-OCR...' });
+          }
           
           // Start polling for status
           setAnalysisStep("Processando partes com IA...");
@@ -1607,9 +1907,17 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     networkErrorCountRef.current = 0;
     setIsReconnecting(false);
     setIsJobStale(false);
+    setCurrentOCRProvider(null);
     lastJobUpdateRef.current = null;
     staleCheckCountRef.current = 0;
     staleExtensionUsedRef.current = false;
+    setGlmDiagnostics(createGlmDiagnosticState());
+    setGlmLastSignal(null);
+    setGlmAbortReason(null);
+    setGlmNoAdvanceAlert(false);
+    lastMeaningfulJobSignalRef.current = null;
+    noMeaningfulAdvanceCountRef.current = 0;
+    activeOcrProviderRef.current = null;
     setIsSlowAI(false);
     setSlowSteps([]);
     setStepsStatus(PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' })));
@@ -1637,6 +1945,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setIsRetrying(false);
     setCurrentFilePath(null);
     setCurrentJobId(null);
+    setCurrentOCRProvider(null);
     setAttempts([]);
     // Reset steps status
     setStepsStatus(PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' })));
@@ -1652,6 +1961,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     staleCheckCountRef.current = 0;
     staleExtensionUsedRef.current = false;
     setPartialResults(null);
+    setGlmDiagnostics(createGlmDiagnosticState());
+    setGlmLastSignal(null);
+    setGlmAbortReason(null);
+    setGlmNoAdvanceAlert(false);
+    lastMeaningfulJobSignalRef.current = null;
+    noMeaningfulAdvanceCountRef.current = 0;
+    activeOcrProviderRef.current = null;
     // Reset network error tracking
     networkErrorCountRef.current = 0;
     setIsReconnecting(false);
@@ -2311,6 +2627,14 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               
               <Progress value={splitProgress} />
               <p className="text-sm text-muted-foreground text-center">{splitMessage}</p>
+              {isGlmActive() && (
+                <div className="flex justify-center">
+                  <Button variant="outline" size="sm" onClick={downloadGlmDiagnosticReport} className="text-xs gap-1.5">
+                    <Download className="h-3.5 w-3.5" />
+                    Baixar diagnóstico GLM
+                  </Button>
+                </div>
+              )}
               
               {/* Parts grid - shows each part as it's created */}
               {splitParts.length > 0 && (
@@ -2495,6 +2819,58 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   </Badge>
                 )}
               </div>
+
+              {/* GLM-only diagnostics timeline */}
+              {isGlmActive() && (
+                <div className="max-w-md mx-auto rounded-lg border border-border/70 bg-muted/30 p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Diagnóstico GLM-OCR</p>
+                      <p className="text-xs text-muted-foreground">
+                        {glmAbortReason || glmLastSignal?.currentStep || 'Aguardando sinais do pipeline GLM...'}
+                      </p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={downloadGlmDiagnosticReport} className="text-xs gap-1.5 shrink-0">
+                      <Download className="h-3.5 w-3.5" />
+                      Diagnóstico
+                    </Button>
+                  </div>
+
+                  {(glmNoAdvanceAlert || glmAbortReason) && (
+                    <Alert className="bg-orange-500/10 border-orange-500/30 py-2">
+                      <AlertTriangle className="h-4 w-4 text-orange-500" />
+                      <AlertDescription className="text-xs text-orange-700 dark:text-orange-300">
+                        {glmAbortReason || 'GLM sem avanço real: o servidor responde heartbeat, mas etapa/progresso não mudam.'}
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  <div className="space-y-1.5">
+                    {glmDiagnostics.map((stage) => {
+                      const duration = stage.startedAt
+                        ? formatDuration((stage.completedAt || Date.now()) - stage.startedAt)
+                        : '—';
+                      return (
+                        <div key={stage.id} className="flex items-start gap-2 text-xs">
+                          <div className="w-4 h-4 mt-0.5 flex items-center justify-center shrink-0">
+                            {stage.status === 'completed' && <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />}
+                            {stage.status === 'processing' && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
+                            {stage.status === 'error' && <XCircle className="h-3.5 w-3.5 text-destructive" />}
+                            {stage.status === 'pending' && <div className="h-3 w-3 rounded-full border border-muted-foreground/30" />}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className={cn("font-medium", stage.status === 'pending' && "text-muted-foreground")}>{stage.label}</span>
+                              <span className="text-muted-foreground ml-auto shrink-0">{duration}</span>
+                            </div>
+                            {stage.message && <p className="text-muted-foreground truncate">{stage.message}</p>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               
               {/* Lista de etapas */}
               <div className="space-y-1.5 max-w-md mx-auto">
@@ -2594,6 +2970,17 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                       </p>
                     )}
                     <div className="flex gap-2 mt-3">
+                      {isGlmActive() && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={downloadGlmDiagnosticReport}
+                          className="text-xs gap-1.5"
+                        >
+                          <Download className="h-3 w-3" />
+                          Baixar diagnóstico
+                        </Button>
+                      )}
                       {partialResults && (
                         <Button
                           variant="outline"
