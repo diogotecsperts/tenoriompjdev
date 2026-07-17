@@ -527,7 +527,7 @@ async function callProvider(
   systemPrompt: string, 
   userPrompt: string,
   maxOutputTokens?: number,
-  options?: { jsonMode?: boolean; requestTimeoutMs?: number }
+  options?: { jsonMode?: boolean; requestTimeoutMs?: number; retryOnServerError?: boolean }
 ): Promise<{ text: string; provider: string; model: string }> {
   switch (config.provider) {
     case 'lovable':
