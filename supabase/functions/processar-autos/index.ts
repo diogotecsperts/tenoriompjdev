@@ -1926,7 +1926,9 @@ async function processarChunkedPDFBackground(
       chunkedInfo: {
         partsCount: fileParts.length,
         totalPages,
-        originalFileName: fileName
+        originalFileName: fileName,
+        ocrProvider: ocrProviderUsed,
+        ocrModel: ocrModelUsed
       }
     };
 
@@ -1999,7 +2001,7 @@ async function processarChunkedPDFBackground(
       .update({ 
         status: 'failed',
         error: errorMessage,
-        current_step: 'Erro no processamento',
+        current_step: `${ocrConfig?.provider === 'glm' ? 'GLM-OCR' : 'Erro no processamento'}: ${errorMessage.slice(0, 180)}`,
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
