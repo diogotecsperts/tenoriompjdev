@@ -84,9 +84,11 @@ export function ReferenciasBibliograficas() {
         });
       } catch (invokeErr) {
         console.warn('[ReferenciasBibliograficas] invoke lançou erro:', invokeErr);
-        toast.error(extractErrorMessage(invokeErr, 'Erro ao gerar referências. Tente novamente.'));
+        const realMsg = await extractErrorFromInvokeError(invokeErr, 'Erro ao gerar referências. Tente novamente.');
+        toast.error(realMsg);
         return;
       }
+
 
       if (response?.error) {
         toast.error(extractErrorMessage(response.error, 'Erro ao gerar referências.'));
