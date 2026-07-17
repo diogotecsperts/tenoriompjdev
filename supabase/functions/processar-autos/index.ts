@@ -2119,7 +2119,8 @@ async function processarChunkedPDFBackground(
     await logError('processar-autos', `Job chunked falhou: ${errorMessage}`, jobId, {
       errorMessage,
       errorStack,
-      partsCount: partCountForDisplay
+      partsCount: partCountForDisplay,
+      phase: currentPhase,
     });
     
     // Update attempt record with failure
@@ -2134,15 +2135,35 @@ async function processarChunkedPDFBackground(
         .eq('id', attemptId);
     }
     
+    // Attribute the failure to the correct pipeline phase so the UI does not
+    // mark a completed OCR as errored when the post-OCR AI structuring times out.
+    // Only prefix with "GLM-OCR:" if we actually failed inside the OCR phase.
+    let failureStepLabel: string;
+    let failureStepId: string;
+    if (currentPhase === 'extraction') {
+      failureStepLabel = chunkedOcrProvider === 'glm'
+        ? `GLM-OCR: ${errorMessage.slice(0, 180)}`
+        : `Erro no OCR: ${errorMessage.slice(0, 180)}`;
+      failureStepId = 'extraction';
+    } else if (currentPhase === 'structuring') {
+      failureStepLabel = `Estruturação pós-OCR falhou: ${errorMessage.slice(0, 180)}`;
+      failureStepId = 'processing';
+    } else if (currentPhase === 'summaries') {
+      failureStepLabel = `Geração de resumos falhou: ${errorMessage.slice(0, 180)}`;
+      failureStepId = 'resumo_peticao';
+    } else {
+      failureStepLabel = `Erro ao finalizar: ${errorMessage.slice(0, 180)}`;
+      failureStepId = 'finalizing';
+    }
+
     // Save error
     await supabaseAdmin
       .from('import_jobs')
       .update({ 
         status: 'failed',
         error: errorMessage,
-        current_step: chunkedOcrProvider === 'glm'
-          ? `GLM-OCR: ${errorMessage.slice(0, 180)}`
-          : 'Erro no processamento',
+        current_step: failureStepLabel,
+        step_id: failureStepId,
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
