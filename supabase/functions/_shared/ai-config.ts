@@ -590,7 +590,7 @@ async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt:
   };
 }
 
-async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number }) {
+async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number; retryOnServerError?: boolean }) {
   const url = `${config.endpoint}/${config.model}:generateContent?key=${config.apiKey}`;
   
   const generationConfig: any = {
