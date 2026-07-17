@@ -1604,6 +1604,10 @@ async function processarChunkedPDFBackground(
   let attemptId: string | null = null;
   let modelUsed = 'unknown';
   let chunkedOcrProvider = 'unknown';
+  // Track current phase so the catch handler can attribute the failure to the correct
+  // pipeline stage (OCR vs post-OCR structuring vs summaries) — the UI relies on this
+  // to avoid marking a completed OCR as failed when the AI structuring times out.
+  let currentPhase: 'extraction' | 'structuring' | 'summaries' | 'finalizing' = 'extraction';
   
   // Heartbeat interval for long-running operations
   let heartbeatInterval: number | null = null;
