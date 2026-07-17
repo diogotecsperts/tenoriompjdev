@@ -2967,6 +2967,17 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                       </p>
                     )}
                     <div className="flex gap-2 mt-3">
+                      {isGlmActive() && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={downloadGlmDiagnosticReport}
+                          className="text-xs gap-1.5"
+                        >
+                          <Download className="h-3 w-3" />
+                          Baixar diagnóstico
+                        </Button>
+                      )}
                       {partialResults && (
                         <Button
                           variant="outline"
