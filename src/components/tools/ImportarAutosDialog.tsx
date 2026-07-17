@@ -30,7 +30,8 @@ import {
   XCircle,
   Turtle,
   Layers,
-  Scissors
+  Scissors,
+  Download
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -195,6 +196,32 @@ interface StepStatus {
   startTime?: number;
   duration?: number;
 }
+
+type GlmStageId = 'probe' | 'raster' | 'split' | 'upload' | 'job_start' | 'ocr_part' | 'backend_processing';
+
+interface GlmDiagnosticEntry {
+  id: GlmStageId;
+  label: string;
+  status: 'pending' | 'processing' | 'completed' | 'error';
+  startedAt?: number;
+  completedAt?: number;
+  progress?: number;
+  message?: string;
+  meta?: Record<string, string | number | boolean | null>;
+}
+
+const GLM_STAGES: Array<{ id: GlmStageId; label: string }> = [
+  { id: 'probe', label: 'Probe do PDF' },
+  { id: 'raster', label: 'Rasterização no navegador' },
+  { id: 'split', label: 'Divisão em partes' },
+  { id: 'upload', label: 'Upload das partes' },
+  { id: 'job_start', label: 'Início do job' },
+  { id: 'ocr_part', label: 'OCR GLM por parte' },
+  { id: 'backend_processing', label: 'Estruturação pós-OCR' },
+];
+
+const createGlmDiagnosticState = (): GlmDiagnosticEntry[] =>
+  GLM_STAGES.map((stage) => ({ ...stage, status: 'pending' }));
 
 const PROCESSING_STEPS: Array<{ id: string; label: string }> = [
   { id: 'upload', label: 'Upload do PDF' },
