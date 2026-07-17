@@ -1,63 +1,76 @@
+## O que está acontecendo (diagnóstico honesto)
 
-## Diagnóstico
+O OCR terminou bem: 6 partes, 114 páginas, 5m11s. O que quebrou é a **fase 2 — Estruturação pós-OCR**, que hoje é feita em UMA única chamada:
 
-Observado no print + código:
+- Provider: `minimax/MiniMax-M3` (o que está configurado no DevPanel)
+- Input: ~200 000 caracteres de OCR concatenado (todo o processo)
+- Output pedido: `max_tokens = 65 536` em `response_format: json_object`
+- Timeout do nosso lado: 6 minutos
 
-- OCR client-side (GLM por partes) completou (6 partes / 114 págs).
-- Backend `processar-autos` foi chamado com `preExtractedText`, pulou a fase 1 e entrou direto na **fase 2 (estruturação)**.
-- A UI mostra `Extração do PDF · glm-ocr · 966ms` e `Resumos · MiniMax-M3 · 203ms · 0 resumos`. Esses números são impossíveis para o trabalho real e revelam a causa:
-  - `pdfExtraction.durationMs` mede só o overhead do branch `preExtractedText` (não o OCR real, que rodou no cliente).
-  - `summaries.durationMs = 203ms` = o loop de resumos **saiu no primeiro `break`** por causa da checagem de orçamento de tempo em `gerarResumosIA` (`processar-autos/index.ts` ~1371-1387): quando `remaining < 30_000ms`, ele pula **todos** os resumos.
-- Ou seja: a **estruturação (callAI) consumiu quase todos os 600 s** de wall-clock da edge function (STRUCTURING_TIMEOUT_MS=6 min), e quando chegou a hora de gerar os 2 resumos automáticos (`resumo_peticao`, `resumo_contestacao`), o budget já era < 30 s → `summariesGenerated = 0` → job termina com `status:'completed'` mas `summaries.count=0` → UI cai na branch "Extração parcial" **sem botão de baixar diagnóstico** (esse botão só existe no bloco de erro).
+O log mostra a etapa "Estruturação pós-OCR" morrendo em **1m 20s** com `provider_timeout`. Isso NÃO é o nosso timeout de 6 min. É o servidor da MiniMax (ou o gateway) devolvendo 504/erro em ~20-25s por tentativa; o `fetchWithRetry` está com `maxRetries=3` e faz 3 tentativas com backoff 1s → 2s → 4s. Somando as tentativas + backoff dá exatamente o ~1m 20s observado. Ou seja: **a MiniMax está recusando/derrubando o request grande, e a gente re-tenta 3× sem mudar nada, então falha do mesmo jeito**.
 
-Problema secundário: `background processing` empacota estruturação + resumos na mesma invocação. Qualquer chamada de IA lenta na fase 2 canibaliza o orçamento da fase 3 — mesmo com OCR já feito no cliente.
+Por que a MiniMax derruba:
+- Um único prompt com ~200k chars + pedido de JSON estruturado de até 65k tokens é fora do envelope prático da M3 para chat completions. Ela costuma cortar/504 quando a geração excede ~60-90s server-side.
+- No Previdenciário isso não acontece porque lá a extração é **modular** (várias chamadas menores por seção/campo), como já registrado em `mem/import-autos/modular-extraction-architecture` e `modular-prompt-assembly-and-fallback`.
 
-Escopo isolado: apenas import Trabalhista via `glm` (branch `processarChunkedPDFBackground` com `preExtractedText`). Mistral e Previdenciário intocados.
+Comparação: no Trabalhista ainda usamos a estratégia "one-shot" para o preenchimento. É esse o gargalo. Não adianta aumentar timeout — a M3 encerra do lado dela.
 
-## Plano de correção
+E além disso, hoje o `fetchWithRetry` re-tenta 504 SEM alterar o payload — 3 tentativas com o mesmo prompt gigante caem no mesmo erro.
 
-### 1. Desacoplar resumos da mesma invocação da estruturação (GLM/Trabalhista)
+---
 
-Na branch `preExtractedText`, após a estruturação bem-sucedida:
+## Correção proposta (segura, cirúrgica, sem tocar Previdenciário)
 
-- Salvar `extractedData` no job (`result.partial=true`, `resumos_parciais={}`, `step_id='structuring_done'`, `progress: 60`) e **retornar / encerrar a background function**, marcando `status='awaiting_summaries'`.
-- O frontend, ao ver `status='awaiting_summaries'`, dispara uma nova edge function fina — `trabalhista-gerar-resumo` — **uma chamada por tipo de resumo** (`resumo_peticao`, `resumo_contestacao`). Igual ao padrão que já usamos para OCR por parte via `trabalhista-ocr-part`.
-- Cada chamada é curta (< 3 min), tem seu próprio timeout, e falhas individuais não afetam as outras.
-- Ao final da última chamada, o frontend marca o job como `completed` (ou o backend faz isso na última chamada de resumo, quando `todosGerados === true`).
+Objetivo: fazer a estruturação sobreviver a documentos grandes usando a MiniMax M3 (ou GLM/Lovable), sem alterar nada da fase OCR nem de outros módulos.
 
-Vantagem: elimina a corrida por budget entre estruturação e resumos, que é a raiz do "0/2".
+### 1. Cascata de mitigação para a chamada única de estruturação
+Em `supabase/functions/processar-autos/index.ts`, envolver o `callAI` da estruturação (linha ~1959) numa cascata de tentativas com **payloads progressivamente menores**, na mesma lógica que já usamos no OCR/import (`gemini-payload-cascading-retry-strategy`):
 
-### 2. Rotular corretamente o `aiUsage` na preview
+- **Tentativa 1:** payload atual (até 200k chars, `max_tokens: 65536`).
+- **Tentativa 2 (se timeout/504/response_truncated):** reduzir `max_tokens` para 32 768 e cortar o input para 140k chars (mantendo head 60% / tail 40%).
+- **Tentativa 3 (se ainda falhar):** cair para 90k chars, `max_tokens: 24 576`.
+- **Tentativa 4 (último recurso):** fallback de **provider**: se `aiConfig.provider === 'minimax'` (ou provider "premium" que estourou), refazer a mesma chamada via Lovable Gateway (`google/gemini-2.5-flash` ou o modelo configurado como fallback global no DevPanel). Isso NÃO muda a configuração global do usuário — é fallback só para esta operação, exatamente como já é feito no OCR.
 
-Em `processar-autos` (branch preExtractedText):
+Cada tentativa registra fase (`structuring_attempt_1..4`) no `import_jobs.current_step` para o diagnóstico mostrar exatamente onde caiu.
 
-- `aiUsage.pdfExtraction.durationMs` **não** deve refletir o overhead do branch. Aceitar `preExtractedDurationMs` do payload (já enviado pelo cliente com o total real do OCR client-side) e usar esse valor. Se ausente, mostrar `—` na UI em vez de "966 ms".
-- `aiUsage.summaries.durationMs` só é calculado no fluxo antigo. Na nova arquitetura, é agregado no cliente a partir das durações de cada chamada `trabalhista-gerar-resumo`.
+### 2. Desativar o retry cego dentro do `fetchWithRetry` para chamadas com `requestTimeoutMs` grande
+Hoje, um 504 vira 3 retries automáticos com o mesmo body — puro desperdício de wall-clock e a causa do "1m 20s exatos". Passar uma flag `retryOnServerError: false` na chamada de estruturação, deixando o retry só na camada da cascata acima (que muda o payload). Isso é escopo local — outras chamadas (OCR, resumos, previdenciário) mantêm o comportamento atual.
 
-### 3. Botão "Baixar diagnóstico" também no estado de preview parcial
+### 3. Classificação correta na UI
+Já temos `phase: 'structuring'` no log de erro. Reforçar no `ImportarAutosDialog.tsx` que quando o erro vier com `phase === 'structuring'`, a UI mostre "**Estruturação pós-OCR falhou**" (não "GLM-OCR:" como no print). O prefixo "GLM-OCR:" está sendo colado no `current_step` porque a fase anterior deixou esse prefixo — corrigir para limpar o prefixo ao entrar em `structuring`.
 
-Em `ImportarAutosDialog.tsx`, no bloco `isIncompleteExtraction` (linhas ~2302-2335), acrescentar um botão "Baixar diagnóstico" ao lado de "Tentar novamente", chamando o mesmo `downloadGlmDiagnostic()` já existente. Assim o usuário nunca fica sem log — hoje o botão só aparece no bloco de erro fatal.
+### 4. Botão "Baixar diagnóstico" persistente
+Confirmar que o botão já foi adicionado no bloco de erro atual (`Processamento GLM-OCR interrompido`) — o print mostra que sim. Manter.
 
-Também acrescentar o mesmo botão no bloco `partialFailures` (linhas ~2338-2361).
+### 5. Telemetria
+- Loggar tempo real de cada tentativa da cascata.
+- Loggar `input_chars` e `max_tokens` de cada tentativa.
+- Loggar o provider efetivo usado (para diferenciar "MiniMax caiu → Gemini fallback assumiu").
 
-### 4. Watchdog: não marcar como `completed` com 0 resumos
-
-No fim de `processarChunkedPDFBackground` (~2043-2106): se `resumosResult.aiInfo.summariesGenerated === 0` **e** havia resumos esperados (`summariesToGenerate.filter(s => s.shouldGenerate).length > 0`), marcar `status='failed'` com `step_id='summaries_timeout'` e `error='Orçamento de tempo esgotado antes dos resumos. Estruturação demorou X min.'`. Isso garante que o dialog cai na branch de erro (com diagnóstico) em vez da preview enganosa.
-
-### 5. Telemetria adicional
-
-`logInfo` marcando quanto tempo a estruturação levou e quanto sobrou de budget quando entrou nos resumos. Facilita depurar próximos casos.
+---
 
 ## Arquivos afetados
 
-- `supabase/functions/processar-autos/index.ts` — desacoplar resumos, corrigir duração reportada, marcar `failed` quando `count=0`.
-- `supabase/functions/trabalhista-gerar-resumo/index.ts` — **novo**: gera um único tipo de resumo por chamada.
-- `src/components/tools/ImportarAutosDialog.tsx` — orquestrar chamadas de resumo, agregar `aiUsage`, adicionar botão "Baixar diagnóstico" nos estados parciais.
-- `src/lib/pdf-preprocess.ts` — enviar `preExtractedDurationMs` para o backend.
-- Nenhuma migração de banco. RLS/tabelas inalteradas. Nenhuma alteração no Previdenciário nem no fluxo Mistral.
+- `supabase/functions/processar-autos/index.ts` — cascata de estruturação (~linhas 1937-1970 e 2600-2700 para o path não-chunked).
+- `supabase/functions/_shared/ai-config.ts` — adicionar opção `retryOnServerError` no `fetchWithRetry` (default `true` para não quebrar callers existentes).
+- `src/components/tools/ImportarAutosDialog.tsx` — texto do banner de erro quando `phase='structuring'` e sanitização do prefixo "GLM-OCR:".
 
-## Validação
+Nenhuma alteração em: Previdenciário, Impugnação, prompts globais, OCR client-side, edge functions de OCR.
 
-- Rodar mesmo PDF que quebrou (114 págs / 6 partes GLM). Esperado: OCR completa, estruturação completa, 2 chamadas separadas de resumo geram peticao + contestacao, UI mostra "2 de 2 resumos gerados" e `aiUsage` reflete tempos reais.
-- Se qualquer resumo individual falhar, cai em `partialFailures` (não em "Extração parcial"), e o botão "Baixar diagnóstico" está disponível.
-- Se a estruturação estourar 6 min, job termina com `status='failed'` visível e diagnóstico baixável — não mais "Extração parcial 0/2".
+---
+
+## Nota técnica (para revisão)
+
+O motivo real do "1m 20s" no diagnóstico:
+
+```text
+Tentativa 1 → 504 do MiniMax em ~20s
+   backoff 1s
+Tentativa 2 → 504 em ~20s
+   backoff 2s
+Tentativa 3 → 504 em ~20s
+   backoff 4s
+Total ≈ 20+1+20+2+20+4 = 67s + overhead ≈ 80s → aborta
+```
+
+Se removermos o retry cego, cada tentativa da cascata usa payload diferente e temos chance real de sucesso já na tentativa 2 ou 3.

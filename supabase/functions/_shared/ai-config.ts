@@ -204,11 +204,15 @@ export function invalidateRetryConfigCache(): void {
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
-  configOverride?: Partial<RetryConfig> & { requestTimeoutMs?: number }
+  configOverride?: Partial<RetryConfig> & { requestTimeoutMs?: number; retryOnServerError?: boolean }
 ): Promise<Response> {
   // Load config from database (cached)
   const baseConfig = await getRetryConfig();
   const config = { ...baseConfig, ...configOverride };
+  // When retryOnServerError === false, the caller (e.g. the structuring cascade)
+  // owns retry semantics itself — re-sending the same huge payload against a 504
+  // just burns wall-clock. We still retry pure network errors, but skip status-code retries.
+  const retryOnServerError = configOverride?.retryOnServerError !== false;
   let lastResponse: Response | null = null;
   let lastError: Error | null = null;
 
@@ -236,7 +240,7 @@ async function fetchWithRetry(
       lastResponse = response;
 
       // Check if error is retryable and we have attempts left
-      if (config.retryableStatuses.includes(response.status) && attempt < config.maxRetries) {
+      if (retryOnServerError && config.retryableStatuses.includes(response.status) && attempt < config.maxRetries) {
         const delay = config.baseDelayMs * Math.pow(2, attempt); // Exponential: 1s, 2s, 4s
         console.log(`[Retry] ⏳ Status ${response.status} (rate limit), waiting ${delay}ms (attempt ${attempt + 1}/${config.maxRetries})`);
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -466,7 +470,7 @@ export async function callAI(
   config: AIConfig, 
   systemPrompt: string, 
   userPrompt: string,
-  options?: { userId?: string; promptType?: string; maxOutputTokens?: number; jsonMode?: boolean; requestTimeoutMs?: number }
+  options?: { userId?: string; promptType?: string; maxOutputTokens?: number; jsonMode?: boolean; requestTimeoutMs?: number; retryOnServerError?: boolean }
 ): Promise<{ text: string; provider: string; model: string; usedFallback: boolean }> {
   console.log(`[AI Call] Provider: ${config.provider}, Model: ${config.model}${options?.maxOutputTokens ? `, maxOutputTokens: ${options.maxOutputTokens}` : ''}${options?.jsonMode ? ', jsonMode: true' : ''}`);
   const startTime = Date.now();
@@ -478,7 +482,7 @@ export async function callAI(
   const primaryTimeoutMs = options?.requestTimeoutMs;
 
   try {
-    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: primaryTimeoutMs });
+    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: primaryTimeoutMs, retryOnServerError: options?.retryOnServerError });
     const latencyMs = Date.now() - startTime;
 
     // Log successful call
@@ -523,7 +527,7 @@ async function callProvider(
   systemPrompt: string, 
   userPrompt: string,
   maxOutputTokens?: number,
-  options?: { jsonMode?: boolean; requestTimeoutMs?: number }
+  options?: { jsonMode?: boolean; requestTimeoutMs?: number; retryOnServerError?: boolean }
 ): Promise<{ text: string; provider: string; model: string }> {
   switch (config.provider) {
     case 'lovable':
@@ -544,7 +548,7 @@ async function callProvider(
   }
 }
 
-async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number }) {
+async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number; retryOnServerError?: boolean }) {
   const body: any = {
     model: config.model,
     messages: [
@@ -571,7 +575,7 @@ async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt:
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000, retryOnServerError: options?.retryOnServerError });
 
   if (!response.ok) {
     const error = await response.text();
@@ -586,7 +590,7 @@ async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt:
   };
 }
 
-async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number }) {
+async function callGeminiDirect(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number; retryOnServerError?: boolean }) {
   const url = `${config.endpoint}/${config.model}:generateContent?key=${config.apiKey}`;
   
   const generationConfig: any = {
@@ -621,7 +625,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
       generationConfig,
       safetySettings,
     })
-  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000, retryOnServerError: options?.retryOnServerError });
 
   if (!response.ok) {
     const error = await response.text();
@@ -645,7 +649,7 @@ async function callGeminiDirect(config: AIConfig, systemPrompt: string, userProm
   };
 }
 
-async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number }) {
+async function callOpenAICompatible(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number; retryOnServerError?: boolean }) {
   const isDeepSeek = config.provider === 'deepseek';
   const isDeepSeekReasoner = isDeepSeek && config.model.includes('reasoner');
   const isMinimax = config.provider === 'minimax';
@@ -696,7 +700,7 @@ async function callOpenAICompatible(config: AIConfig, systemPrompt: string, user
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000, retryOnServerError: options?.retryOnServerError });
 
   if (!response.ok) {
     const error = await response.text();

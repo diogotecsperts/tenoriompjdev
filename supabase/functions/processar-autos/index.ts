@@ -1588,6 +1588,145 @@ const results: Record<string, string> = {
 }
 
 /**
+ * Cascata de mitigação para a chamada única de estruturação pós-OCR.
+ *
+ * A M3 (e outros modelos de chat com contexto longo) frequentemente responde
+ * 504/gateway timeout quando recebe ~200k chars de input pedindo JSON de 65k
+ * tokens — o `fetchWithRetry` re-tenta 3× com o mesmo payload e falha exatamente
+ * no mesmo ponto, queimando ~80s (foi essa a assinatura vista no diagnóstico do
+ * Trabalhista). Aqui reduzimos progressivamente `input chars` e `max_tokens`
+ * a cada tentativa e, na última, caímos para o gateway Lovable como fallback
+ * de provider — sem alterar a configuração global do usuário.
+ */
+interface StructuringCascadeOpts {
+  supabaseAdmin: any;
+  jobId: string;
+  userId?: string;
+  systemPrompt: string;
+  userPromptBuilder: (text: string) => string;
+  fullText: string;
+  promptType: string;
+  requestTimeoutMs: number;
+}
+
+interface StructuringCascadeResult {
+  fillResult: { text: string; provider: string; model: string; usedFallback: boolean };
+  attemptsLog: Array<{ attempt: number; inputChars: number; maxTokens: number; provider: string; model: string; durationMs: number; ok: boolean; errorCode?: string }>;
+  provider: string;
+  model: string;
+  cascadeUsed: boolean;
+}
+
+function truncateForStructuring(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const headChars = Math.floor(maxChars * 0.6);
+  const tailChars = Math.floor(maxChars * 0.35);
+  const separator = '\n\n[... conteúdo intermediário omitido para processamento ...]\n\n';
+  return text.substring(0, headChars) + separator + text.substring(text.length - tailChars);
+}
+
+async function runStructuringWithCascade(
+  primaryConfig: { provider: string; model: string; endpoint: string; apiKey: string; displayModel?: string },
+  opts: StructuringCascadeOpts
+): Promise<StructuringCascadeResult> {
+  // Escalonamento de payloads (input chars × max_tokens).
+  // Tentativa 1 = payload atual. Tentativas 2-3 reduzem input/output.
+  // Tentativa 4 = fallback de provider para Lovable Gateway.
+  const rungs: Array<{ maxChars: number; maxTokens: number; label: string; useLovableFallback?: boolean }> = [
+    { maxChars: 200_000, maxTokens: 65_536, label: 'attempt_1_full' },
+    { maxChars: 140_000, maxTokens: 32_768, label: 'attempt_2_shrink' },
+    { maxChars: 90_000,  maxTokens: 24_576, label: 'attempt_3_smaller' },
+    { maxChars: 90_000,  maxTokens: 24_576, label: 'attempt_4_lovable_fallback', useLovableFallback: true },
+  ];
+
+  const attemptsLog: StructuringCascadeResult['attemptsLog'] = [];
+  let lastError: any = null;
+
+  const retryableCodes = new Set(['provider_timeout', 'provider_unavailable', 'response_truncated', 'rate_limited']);
+
+  for (let i = 0; i < rungs.length; i++) {
+    const rung = rungs[i];
+    const attempt = i + 1;
+
+    let configForAttempt = primaryConfig;
+    if (rung.useLovableFallback) {
+      // Só tenta o fallback do Gateway se a LOVABLE_API_KEY existir no ambiente.
+      const lovableKey = Deno.env.get('LOVABLE_API_KEY');
+      if (!lovableKey) {
+        console.warn('[structuring-cascade] Attempt 4 pulado: LOVABLE_API_KEY ausente.');
+        break;
+      }
+      // Não sobrescreve config global — construção pontual para esta tentativa.
+      configForAttempt = {
+        provider: 'lovable',
+        model: 'google/gemini-2.5-flash',
+        endpoint: 'https://ai.gateway.lovable.dev/v1/chat/completions',
+        apiKey: lovableKey,
+        displayModel: 'google/gemini-2.5-flash',
+      };
+    }
+
+    const truncated = truncateForStructuring(opts.fullText, rung.maxChars);
+    const userPrompt = opts.userPromptBuilder(truncated);
+
+    try {
+      await opts.supabaseAdmin.from('import_jobs').update({
+        current_step: `Estruturação pós-OCR · tentativa ${attempt}/${rungs.length} · ${configForAttempt.provider}/${configForAttempt.model} (${truncated.length} chars, max_tokens=${rung.maxTokens})`,
+        step_id: 'processing',
+        updated_at: new Date().toISOString(),
+      }).eq('id', opts.jobId);
+    } catch (_e) { /* ignore */ }
+
+    console.log(`[structuring-cascade] ${rung.label}: provider=${configForAttempt.provider} model=${configForAttempt.model} inputChars=${truncated.length} maxTokens=${rung.maxTokens}`);
+    const started = Date.now();
+    try {
+      const fillResult = await callAI(
+        configForAttempt as any,
+        opts.systemPrompt,
+        userPrompt,
+        {
+          promptType: opts.promptType,
+          userId: opts.userId,
+          maxOutputTokens: rung.maxTokens,
+          jsonMode: true,
+          requestTimeoutMs: opts.requestTimeoutMs,
+          // A cascata é o "retry" agora — não re-tentar o mesmo payload no fetch layer.
+          retryOnServerError: false,
+        }
+      );
+      const durationMs = Date.now() - started;
+      attemptsLog.push({ attempt, inputChars: truncated.length, maxTokens: rung.maxTokens, provider: configForAttempt.provider, model: configForAttempt.model, durationMs, ok: true });
+      console.log(`[structuring-cascade] ✅ ${rung.label} success in ${durationMs}ms`);
+      return {
+        fillResult,
+        attemptsLog,
+        provider: configForAttempt.provider,
+        model: configForAttempt.model,
+        cascadeUsed: attempt > 1,
+      };
+    } catch (err: any) {
+      const durationMs = Date.now() - started;
+      const code = err?.code || err?.name || 'unknown';
+      const errMsg = err?.message || String(err);
+      attemptsLog.push({ attempt, inputChars: truncated.length, maxTokens: rung.maxTokens, provider: configForAttempt.provider, model: configForAttempt.model, durationMs, ok: false, errorCode: code });
+      console.warn(`[structuring-cascade] ❌ ${rung.label} failed in ${durationMs}ms: [${code}] ${errMsg.slice(0, 200)}`);
+      lastError = err;
+
+      // Só desce a cascata para erros de timeout/truncamento/504/429.
+      // Erros terminais (401/402/400) abortam imediatamente.
+      const isRetryable = retryableCodes.has(code) ||
+        /timeout|timed out|504|502|503|gateway|truncat|max_tokens|too large|context length/i.test(errMsg);
+      if (!isRetryable) {
+        console.error(`[structuring-cascade] Erro não-recuperável — abortando cascata.`);
+        throw err;
+      }
+    }
+  }
+
+  throw lastError || new Error('Estruturação pós-OCR falhou em todas as tentativas da cascata.');
+}
+
+/**
  * Process chunked PDF upload (client-side split)
  * Each part is already < 20MB and uploaded to storage
  * This processes each part with OCR, combines results, then structures with AI
@@ -1915,36 +2054,18 @@ async function processarChunkedPDFBackground(
     
     // Get AI config
     const aiConfig = await getAIConfig();
-    
-    // Smart truncation to prevent MAX_TOKENS
-    let textForFilling = combinedText;
-    const MAX_INPUT_CHARS = 200_000;
 
-    if (textForFilling.length > MAX_INPUT_CHARS) {
-      console.warn(`[processar-autos-chunked] Text too long (${textForFilling.length} chars), applying smart truncation`);
-      
-      const headChars = Math.floor(MAX_INPUT_CHARS * 0.6);
-      const tailChars = Math.floor(MAX_INPUT_CHARS * 0.35);
-      const separator = '\n\n[... conteúdo intermediário omitido para processamento ...]\n\n';
-      
-      textForFilling = textForFilling.substring(0, headChars) + 
-                       separator + 
-                       textForFilling.substring(textForFilling.length - tailChars);
-      
-      console.log(`[processar-autos-chunked] Truncated to ${textForFilling.length} chars`);
-    }
-    
-    // Call AI with the combined text.
-    // NOTE: default callAI internal timeout is 75s (see _shared/ai-config.ts). Large JSON
-    // structuring on providers like MiniMax-M3/GLM chat routinely takes 2-5 min, so we
-    // pass an explicit STRUCTURING_TIMEOUT_MS and turn on a heartbeat so the client-side
-    // stale-job watchdog does not false-kill an alive request.
+    // Structuring uses a cascade of shrinking payloads + provider fallback.
+    // See `runStructuringWithCascade` for the rationale — this replaces the
+    // former single-shot 200k/65k call that was 504'ing on MiniMax M3 for
+    // large processes and eating ~1m20s on blind fetch-layer retries.
     const structuringStartedAt = Date.now();
     await startHeartbeat('AI structuring (chunked phase 2)');
     let fillResult: Awaited<ReturnType<typeof callAI>>;
+    let structuringProviderUsed = `${aiConfig.provider}/${aiConfig.model}`;
+    let structuringAttempts: any[] = [];
     try {
-      // Periodic progress ping in current_step so the UI shows the elapsed time
-      // for the structuring wait (updated_at is already refreshed by startHeartbeat).
+      // Periodic progress ping in current_step so the UI shows the elapsed time.
       const structuringProgressInterval = setInterval(async () => {
         try {
           const elapsedSec = Math.round((Date.now() - structuringStartedAt) / 1000);
@@ -1956,12 +2077,27 @@ async function processarChunkedPDFBackground(
         } catch (_e) { /* ignore */ }
       }, STRUCTURING_HEARTBEAT_MS) as unknown as number;
       try {
-        fillResult = await callAI(
-          aiConfig,
+        const cascade = await runStructuringWithCascade(aiConfig, {
+          supabaseAdmin,
+          jobId,
+          userId,
           systemPrompt,
-          `Analise o seguinte texto extraído de ${partCountForDisplay} partes de um documento de processo trabalhista (${totalPages} páginas) e retorne o JSON estruturado:\n\n${textForFilling}`,
-          { promptType: 'chunked_import', userId, maxOutputTokens: 65536, jsonMode: true, requestTimeoutMs: STRUCTURING_TIMEOUT_MS }
-        );
+          userPromptBuilder: (text) =>
+            `Analise o seguinte texto extraído de ${partCountForDisplay} partes de um documento de processo trabalhista (${totalPages} páginas) e retorne o JSON estruturado:\n\n${text}`,
+          fullText: combinedText,
+          promptType: 'chunked_import',
+          requestTimeoutMs: STRUCTURING_TIMEOUT_MS,
+        });
+        fillResult = cascade.fillResult;
+        structuringProviderUsed = `${cascade.provider}/${cascade.model}`;
+        structuringAttempts = cascade.attemptsLog;
+        if (cascade.cascadeUsed) {
+          await logInfo('processar-autos', `Estruturação salva por cascata (${cascade.attemptsLog.length} tentativas)`, jobId, {
+            attempts: cascade.attemptsLog,
+            finalProvider: cascade.provider,
+            finalModel: cascade.model,
+          });
+        }
       } finally {
         clearInterval(structuringProgressInterval);
       }
@@ -1969,7 +2105,10 @@ async function processarChunkedPDFBackground(
       stopHeartbeat();
     }
 
-    modelUsed = `${aiConfig.provider}/${aiConfig.model}`;
+    // Bind textForFilling for the downstream _rawTextTail preservation logic below.
+    let textForFilling: string | null = truncateForStructuring(combinedText, 200_000);
+    modelUsed = structuringProviderUsed;
+
 
     // Parse the structured response
     let parsedResult = tryFixTruncatedJson(fillResult.text);
@@ -2588,35 +2727,27 @@ async function processarPDFBackground(
         // Use the existing AI config for field filling (text only, no PDF)
         const aiConfig = await getAIConfig();
         
-        // Smart truncation to prevent MAX_TOKENS in Phase 2 response
+        // Structuring goes through the cascade (input shrink + Lovable fallback)
+        // so 504s on huge payloads don't kill the two-phase path.
         let textForFilling = extracted.rawText;
-        const MAX_INPUT_CHARS = 200_000; // ~50k tokens para entrada
-
-        if (textForFilling.length > MAX_INPUT_CHARS) {
-          console.warn(`[processar-autos] Text too long (${textForFilling.length} chars), applying smart truncation`);
-          
-          // Preservar início (dados do processo, petição) e fim (quesitos)
-          const headChars = Math.floor(MAX_INPUT_CHARS * 0.6); // 60% início
-          const tailChars = Math.floor(MAX_INPUT_CHARS * 0.35); // 35% fim
-          const separator = '\n\n[... conteúdo intermediário omitido para processamento - seções detectadas preservadas ...]\n\n';
-          
-          textForFilling = textForFilling.substring(0, headChars) + 
-                           separator + 
-                           textForFilling.substring(textForFilling.length - tailChars);
-          
-          console.log(`[processar-autos] Truncated to ${textForFilling.length} chars (head: ${headChars}, tail: ${tailChars})`);
-        }
-        
-        // Call AI with the extracted raw text (no binary PDF!)
-        // Use high maxOutputTokens to prevent JSON truncation
-        const fillResult = await callAI(
-          { ...aiConfig, provider: fillProvider, model: fillModel },
-          systemPrompt,
-          `Analise o seguinte texto extraído de um documento de processo trabalhista e retorne o JSON estruturado:\n\n${textForFilling}`,
-          { promptType: 'two_phase_fill', userId, maxOutputTokens: 65536, jsonMode: true }
+        const cascade = await runStructuringWithCascade(
+          { ...aiConfig, provider: fillProvider, model: fillModel } as any,
+          {
+            supabaseAdmin,
+            jobId,
+            userId,
+            systemPrompt,
+            userPromptBuilder: (text) =>
+              `Analise o seguinte texto extraído de um documento de processo trabalhista e retorne o JSON estruturado:\n\n${text}`,
+            fullText: textForFilling,
+            promptType: 'two_phase_fill',
+            requestTimeoutMs: STRUCTURING_TIMEOUT_MS,
+          }
         );
+        const fillResult = cascade.fillResult;
+        textForFilling = truncateForStructuring(textForFilling, 200_000);
 
-        modelUsed = `${fillProvider}/${fillModel}`;
+        modelUsed = `${cascade.provider}/${cascade.model}`;
 
         // Parse the structured response
         let parsedResult = tryFixTruncatedJson(fillResult.text);
