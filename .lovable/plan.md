@@ -1,65 +1,63 @@
 
 ## Diagnóstico
 
-O log e o relatório mostram que o OCR **não** foi quem travou. O que aconteceu:
+Observado no print + código:
 
-1. **Split ok e completo** — 6 partes cobrindo exatamente as 114 páginas do PDF (1-20, 21-40, 41-60, 61-80, 81-100, 101-114). Nenhuma página ficou de fora.
-2. **OCR GLM concluiu com sucesso** — o próprio backend registrou `"OCR chunked concluído: 6 partes processadas"` em `01:34:38`. Todas as 6 chamadas GLM retornaram.
-3. **Falha real:** fase seguinte — **estruturação pós-OCR com IA** (MiniMax-M3). A mensagem `"Tempo excedido no provider minimax/MiniMax-M3"` é gerada em `supabase/functions/_shared/ai-config.ts:123` (função `mapAIError` → código `provider_timeout`), disparada dentro de `callAI` no bloco de estruturação/resumos do `processar-autos`, **não** dentro do GLM-OCR.
-4. **Por que a UI atribuiu isso ao OCR:** o modal deriva o status das etapas a partir da substring de `current_step` e do último `step_id`. Como o `failGlmPart` / fluxo de erro final sobrescreveu `current_step` com a mensagem "GLM-OCR: Tempo excedido no provider minimax/…" mesmo em falha da fase seguinte, a linha "OCR GLM por parte" foi marcada como erro retroativamente, apesar do OCR já ter concluído (5m 8s corresponde ao somatório real das 6 partes GLM, não a um timeout).
-5. **Timeout observado (≈5 min na etapa de estruturação):** a chamada principal `callAI(...)` em `processar-autos/index.ts:1923` **não tem wrapper de timeout explícito**; e a fase de resumos usa `SUMMARY_TIMEOUT_MS = 90s` + retry 180s (soma ≈ 270s = ~4m30s) por resumo. Sem heartbeat durante essa espera, o watchdog `check-import-status` (>5min sem update) marca o job como zumbi/`failed` enquanto a IA ainda pode estar respondendo — foi exatamente isso que a impressão do usuário registrou ("só fechou pq bateu no tempo limite, sem verificar se estava rodando").
+- OCR client-side (GLM por partes) completou (6 partes / 114 págs).
+- Backend `processar-autos` foi chamado com `preExtractedText`, pulou a fase 1 e entrou direto na **fase 2 (estruturação)**.
+- A UI mostra `Extração do PDF · glm-ocr · 966ms` e `Resumos · MiniMax-M3 · 203ms · 0 resumos`. Esses números são impossíveis para o trabalho real e revelam a causa:
+  - `pdfExtraction.durationMs` mede só o overhead do branch `preExtractedText` (não o OCR real, que rodou no cliente).
+  - `summaries.durationMs = 203ms` = o loop de resumos **saiu no primeiro `break`** por causa da checagem de orçamento de tempo em `gerarResumosIA` (`processar-autos/index.ts` ~1371-1387): quando `remaining < 30_000ms`, ele pula **todos** os resumos.
+- Ou seja: a **estruturação (callAI) consumiu quase todos os 600 s** de wall-clock da edge function (STRUCTURING_TIMEOUT_MS=6 min), e quando chegou a hora de gerar os 2 resumos automáticos (`resumo_peticao`, `resumo_contestacao`), o budget já era < 30 s → `summariesGenerated = 0` → job termina com `status:'completed'` mas `summaries.count=0` → UI cai na branch "Extração parcial" **sem botão de baixar diagnóstico** (esse botão só existe no bloco de erro).
 
-Ou seja: **não é problema do GLM/split**; é (a) rotulagem incorreta na UI e (b) ausência de heartbeat/timeout claro na fase de estruturação, o que faz o watchdog abortar uma chamada que ainda podia estar viva.
+Problema secundário: `background processing` empacota estruturação + resumos na mesma invocação. Qualquer chamada de IA lenta na fase 2 canibaliza o orçamento da fase 3 — mesmo com OCR já feito no cliente.
 
-## Escopo e não-objetivos
+Escopo isolado: apenas import Trabalhista via `glm` (branch `processarChunkedPDFBackground` com `preExtractedText`). Mistral e Previdenciário intocados.
 
-- Alterações limitadas ao **provider GLM no Trabalhista** e à UI do `ImportarAutosDialog`.
-- **Não** alterar Previdenciário, Mistral, MiniMax OCR client-side, nem lógica de split/rasterização (que provaram funcionar).
-- **Não** trocar o provider de IA nem seus prompts; apenas proteger e rotular a espera.
+## Plano de correção
 
-## Correções propostas
+### 1. Desacoplar resumos da mesma invocação da estruturação (GLM/Trabalhista)
 
-### 1. Rotulagem correta da falha na UI (`src/components/tools/ImportarAutosDialog.tsx`)
-- Detectar o `step_id` real reportado pelo backend na última atualização e usá-lo como fonte primária de qual etapa falhou. Quando `step_id === 'processing'` (estruturação) e `status === 'failed'`, marcar como erro a linha **"Estruturação pós-OCR"** — mantendo "OCR GLM por parte" como `completed`.
-- Ignorar substrings enganosas de `current_step` quando o `step_id` já indica fase posterior. Isso preserva o diagnóstico correto no relatório baixado.
-- Ajustar o texto do banner de erro para citar o provider real da fase falhada (ex.: "IA de estruturação `minimax/MiniMax-M3` excedeu o tempo"), não mais "GLM-OCR: …".
+Na branch `preExtractedText`, após a estruturação bem-sucedida:
 
-### 2. Heartbeat ativo na estruturação pós-OCR (`supabase/functions/processar-autos/index.ts`)
-- Antes de `callAI` na linha 1923 e durante `gerarResumosIA`, ligar um `setInterval` que a cada ~20s faz `UPDATE import_jobs SET current_step = 'Estruturando dados com IA · Xs decorridos', updated_at = now()` para o job atual. Encerrar no `finally`.
-- Isso impede que o watchdog de 5min do `check-import-status` marque o job como stale enquanto a IA ainda está respondendo, e dá visibilidade real ao usuário.
+- Salvar `extractedData` no job (`result.partial=true`, `resumos_parciais={}`, `step_id='structuring_done'`, `progress: 60`) e **retornar / encerrar a background function**, marcando `status='awaiting_summaries'`.
+- O frontend, ao ver `status='awaiting_summaries'`, dispara uma nova edge function fina — `trabalhista-gerar-resumo` — **uma chamada por tipo de resumo** (`resumo_peticao`, `resumo_contestacao`). Igual ao padrão que já usamos para OCR por parte via `trabalhista-ocr-part`.
+- Cada chamada é curta (< 3 min), tem seu próprio timeout, e falhas individuais não afetam as outras.
+- Ao final da última chamada, o frontend marca o job como `completed` (ou o backend faz isso na última chamada de resumo, quando `todosGerados === true`).
 
-### 3. Timeout explícito e claro na estruturação principal
-- Envolver a chamada `callAI` da fase 2 (linha 1923) num `Promise.race` com timeout dedicado (`STRUCTURING_TIMEOUT_MS`, ex.: 6 min, configurável), semelhante ao usado em `gerarResumosIA`.
-- Ao atingir o timeout, marcar o job como `failed` com `step_id: 'processing'` e `current_step` explícito: "Estruturação pós-OCR: IA `<provider>/<modelo>` não respondeu em Xmin". Sem sobrescrever mensagens da fase de OCR.
+Vantagem: elimina a corrida por budget entre estruturação e resumos, que é a raiz do "0/2".
 
-### 4. Diagnóstico persistente após erro (UI)
-- Garantir que, quando `status === 'failed'`, o modal permaneça aberto com o bloco "Diagnóstico preservado" e o botão "Baixar diagnóstico" (comportamento atual da imagem) — apenas ajustar as legendas para refletir a etapa correta. O botão "Nova importação" continua limpando `currentJobId` e `selectedFile`.
+### 2. Rotular corretamente o `aiUsage` na preview
 
-### 5. Telemetria complementar (sem custo funcional)
-- Adicionar `logInfo`/`logError` com `phase: 'structuring'` ou `phase: 'summaries'` para separar falhas de OCR das falhas de IA nos relatórios do DevPanel.
+Em `processar-autos` (branch preExtractedText):
 
-## Verificação após aplicação
+- `aiUsage.pdfExtraction.durationMs` **não** deve refletir o overhead do branch. Aceitar `preExtractedDurationMs` do payload (já enviado pelo cliente com o total real do OCR client-side) e usar esse valor. Se ausente, mostrar `—` na UI em vez de "966 ms".
+- `aiUsage.summaries.durationMs` só é calculado no fluxo antigo. Na nova arquitetura, é agregado no cliente a partir das durações de cada chamada `trabalhista-gerar-resumo`.
 
-1. Rodar novamente o mesmo PDF de 63MB/114 págs:
-   - OCR GLM: 6/6 partes concluídas (esperado, sem regressão).
-   - Fase de estruturação: heartbeat visível no modal (contador de segundos avançando), watchdog não dispara antes do timeout dedicado.
-2. Forçar timeout de estruturação (ex.: prompt gigante ou modelo lento): validar que o modal marca **"Estruturação pós-OCR"** como erro, "OCR GLM por parte" permanece verde, e o diagnóstico baixado descreve corretamente a fase.
-3. Confirmar que módulo Previdenciário e provider Mistral não sofrem qualquer mudança (grep/lint nos arquivos tocados; nenhum arquivo `prev-*` alterado).
+### 3. Botão "Baixar diagnóstico" também no estado de preview parcial
 
-## Detalhes técnicos
+Em `ImportarAutosDialog.tsx`, no bloco `isIncompleteExtraction` (linhas ~2302-2335), acrescentar um botão "Baixar diagnóstico" ao lado de "Tentar novamente", chamando o mesmo `downloadGlmDiagnostic()` já existente. Assim o usuário nunca fica sem log — hoje o botão só aparece no bloco de erro fatal.
 
-- `processar-autos/index.ts`:
-  - novo `STRUCTURING_TIMEOUT_MS` (const local, default 6 min);
-  - helper `startStructuringHeartbeat(jobId, label)` / `stopStructuringHeartbeat()` reutilizável em fase 2 e 3;
-  - novo bloco `Promise.race` em torno de `callAI` da linha 1923;
-  - `failGlmPart` continua responsável somente pela fase 1; criar `failStructuringPhase` análogo para fase 2/3, que **preserva** as mensagens de fase 1 na UI.
-- `check-import-status/index.ts`: nenhum ajuste na regra de "stale > 5 min", pois o heartbeat da fase 2 vai passar a atualizar `updated_at` regularmente. Opcional: aumentar tolerância para 8 min só quando `step_id === 'processing'` e provider AI ativo, como cinto de segurança.
-- `ImportarAutosDialog.tsx`:
-  - função `mapErrorToStep(job)` que prioriza `step_id`;
-  - textos das linhas da timeline dependem do `step_id` da última atualização, não mais de substrings.
+Também acrescentar o mesmo botão no bloco `partialFailures` (linhas ~2338-2361).
 
-## Riscos e mitigação
+### 4. Watchdog: não marcar como `completed` com 0 resumos
 
-- **Risco:** interval de heartbeat vazando (não limpo em erro). **Mitigação:** `try/finally` obrigatório em ambos os pontos.
-- **Risco:** timeout maior mascarar travas reais. **Mitigação:** heartbeat + limite explícito (6 min); watchdog do `check-import-status` continua ativo como segunda linha.
-- **Risco:** confundir mensagens antigas de jobs em execução. **Mitigação:** mudanças só afetam jobs novos; jobs em andamento seguem com labels legados até concluírem.
+No fim de `processarChunkedPDFBackground` (~2043-2106): se `resumosResult.aiInfo.summariesGenerated === 0` **e** havia resumos esperados (`summariesToGenerate.filter(s => s.shouldGenerate).length > 0`), marcar `status='failed'` com `step_id='summaries_timeout'` e `error='Orçamento de tempo esgotado antes dos resumos. Estruturação demorou X min.'`. Isso garante que o dialog cai na branch de erro (com diagnóstico) em vez da preview enganosa.
+
+### 5. Telemetria adicional
+
+`logInfo` marcando quanto tempo a estruturação levou e quanto sobrou de budget quando entrou nos resumos. Facilita depurar próximos casos.
+
+## Arquivos afetados
+
+- `supabase/functions/processar-autos/index.ts` — desacoplar resumos, corrigir duração reportada, marcar `failed` quando `count=0`.
+- `supabase/functions/trabalhista-gerar-resumo/index.ts` — **novo**: gera um único tipo de resumo por chamada.
+- `src/components/tools/ImportarAutosDialog.tsx` — orquestrar chamadas de resumo, agregar `aiUsage`, adicionar botão "Baixar diagnóstico" nos estados parciais.
+- `src/lib/pdf-preprocess.ts` — enviar `preExtractedDurationMs` para o backend.
+- Nenhuma migração de banco. RLS/tabelas inalteradas. Nenhuma alteração no Previdenciário nem no fluxo Mistral.
+
+## Validação
+
+- Rodar mesmo PDF que quebrou (114 págs / 6 partes GLM). Esperado: OCR completa, estruturação completa, 2 chamadas separadas de resumo geram peticao + contestacao, UI mostra "2 de 2 resumos gerados" e `aiUsage` reflete tempos reais.
+- Se qualquer resumo individual falhar, cai em `partialFailures` (não em "Extração parcial"), e o botão "Baixar diagnóstico" está disponível.
+- Se a estruturação estourar 6 min, job termina com `status='failed'` visível e diagnóstico baixável — não mais "Extração parcial 0/2".
