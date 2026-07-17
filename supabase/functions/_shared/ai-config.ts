@@ -470,7 +470,7 @@ export async function callAI(
   config: AIConfig, 
   systemPrompt: string, 
   userPrompt: string,
-  options?: { userId?: string; promptType?: string; maxOutputTokens?: number; jsonMode?: boolean; requestTimeoutMs?: number }
+  options?: { userId?: string; promptType?: string; maxOutputTokens?: number; jsonMode?: boolean; requestTimeoutMs?: number; retryOnServerError?: boolean }
 ): Promise<{ text: string; provider: string; model: string; usedFallback: boolean }> {
   console.log(`[AI Call] Provider: ${config.provider}, Model: ${config.model}${options?.maxOutputTokens ? `, maxOutputTokens: ${options.maxOutputTokens}` : ''}${options?.jsonMode ? ', jsonMode: true' : ''}`);
   const startTime = Date.now();
@@ -482,7 +482,7 @@ export async function callAI(
   const primaryTimeoutMs = options?.requestTimeoutMs;
 
   try {
-    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: primaryTimeoutMs });
+    const result = await callProvider(config, systemPrompt, userPrompt, options?.maxOutputTokens, { jsonMode: options?.jsonMode, requestTimeoutMs: primaryTimeoutMs, retryOnServerError: options?.retryOnServerError });
     const latencyMs = Date.now() - startTime;
 
     // Log successful call
