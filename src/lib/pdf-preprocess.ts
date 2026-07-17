@@ -4,7 +4,7 @@
  * Utilitário compartilhado (browser-only) para preparar PDFs grandes antes do
  * OCR: rasteriza cada página em JPEG e remonta um PDF novo, só-imagens, sem
  * herança de recursos. Também expõe split por páginas para respeitar o limite
- * duro do GLM-OCR (100 páginas, ~50 MB por chamada).
+ * duro do GLM-OCR (30 páginas, ~50 MB por chamada; usamos 20 por segurança).
  *
  * Este módulo é uma **duplicação intencional** das funções puras equivalentes
  * em `src/modules/previdenciario/api/pautas.ts`. O Prev continua com sua cópia
