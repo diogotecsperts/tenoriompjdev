@@ -1593,6 +1593,7 @@ async function processarChunkedPDFBackground(
 ) {
   let attemptId: string | null = null;
   let modelUsed = 'unknown';
+  let chunkedOcrProvider = 'unknown';
   
   // Heartbeat interval for long-running operations
   let heartbeatInterval: number | null = null;
@@ -1665,6 +1666,7 @@ async function processarChunkedPDFBackground(
     
     // OCR provider vem do DevPanel (system_config.phase1_ocr_provider) — nada de hardcode.
     const ocrConfig = await getOcrRouterConfig();
+    chunkedOcrProvider = ocrConfig.provider;
     const isGlmChunked = ocrConfig.provider === 'glm';
     let ocrProviderUsed = ocrConfig.provider;
     let ocrModelUsed = ocrConfig.geminiModel;
@@ -2001,7 +2003,7 @@ async function processarChunkedPDFBackground(
       .update({ 
         status: 'failed',
         error: errorMessage,
-        current_step: `${ocrConfig?.provider === 'glm' ? 'GLM-OCR' : 'Erro no processamento'}: ${errorMessage.slice(0, 180)}`,
+        current_step: `${chunkedOcrProvider === 'glm' ? 'GLM-OCR' : 'Erro no processamento'}: ${errorMessage.slice(0, 180)}`,
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
