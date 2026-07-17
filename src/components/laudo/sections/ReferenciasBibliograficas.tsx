@@ -22,7 +22,6 @@ export function ReferenciasBibliograficas() {
       const anyErr = err as any;
       msg = anyErr?.context?.error || anyErr?.error || anyErr?.message || fallback;
     }
-    // A mensagem pode conter JSON embutido vindo da Edge Function (ex: 'Edge function returned 400: {"error":"..."}')
     try {
       const match = typeof msg === 'string' ? msg.match(/\{[\s\S]*\}/) : null;
       if (match) {
@@ -32,6 +31,28 @@ export function ReferenciasBibliograficas() {
     } catch { /* ignora falha de parse */ }
     return msg || fallback;
   };
+
+  // supabase-js v2 lança FunctionsHttpError com `context: Response`.
+  // A mensagem real do backend só aparece se lermos o corpo do Response.
+  const extractErrorFromInvokeError = async (err: unknown, fallback: string): Promise<string> => {
+    try {
+      const anyErr = err as any;
+      const ctx = anyErr?.context;
+      if (ctx && typeof ctx.clone === 'function') {
+        const cloned = ctx.clone();
+        const text = await cloned.text();
+        if (text) {
+          try {
+            const parsed = JSON.parse(text);
+            if (parsed?.error) return String(parsed.error);
+          } catch { /* não é JSON */ }
+          if (text.length < 500) return text;
+        }
+      }
+    } catch { /* ignora */ }
+    return extractErrorMessage(err, fallback);
+  };
+
 
   const handleGerarReferencias = async () => {
     if (!currentLaudo.id) {
@@ -63,14 +84,18 @@ export function ReferenciasBibliograficas() {
         });
       } catch (invokeErr) {
         console.warn('[ReferenciasBibliograficas] invoke lançou erro:', invokeErr);
-        toast.error(extractErrorMessage(invokeErr, 'Erro ao gerar referências. Tente novamente.'));
+        const realMsg = await extractErrorFromInvokeError(invokeErr, 'Erro ao gerar referências. Tente novamente.');
+        toast.error(realMsg);
         return;
       }
 
+
       if (response?.error) {
-        toast.error(extractErrorMessage(response.error, 'Erro ao gerar referências.'));
+        const realMsg = await extractErrorFromInvokeError(response.error, 'Erro ao gerar referências.');
+        toast.error(realMsg);
         return;
       }
+
 
       if (response?.data?.error) {
         toast.error(extractErrorMessage(response.data.error, 'Erro ao gerar referências.'));
