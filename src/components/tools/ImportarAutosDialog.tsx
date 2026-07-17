@@ -390,12 +390,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     let timer: NodeJS.Timeout | null = null;
     
     if (processingStep === 'analyzing' && processingStartTime.current > 0) {
-      timer = setInterval(() => {
+      timer = setInterval(async () => {
         const elapsed = Date.now() - processingStartTime.current;
         setElapsedTime(elapsed);
         
         // Check for global timeout
         if (elapsed > MAX_PROCESSING_TIME_MS) {
+          if (isGlmActive()) {
+            await abortWithStaleError(
+              `Tempo total excedeu ${Math.round(MAX_PROCESSING_TIME_MS / 60000)} minutos.`,
+              analysisStep || glmLastSignal?.currentStep,
+            );
+            return;
+          }
+
           if (pollingRef.current) {
             clearInterval(pollingRef.current);
             pollingRef.current = null;
