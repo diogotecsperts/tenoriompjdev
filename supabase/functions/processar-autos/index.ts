@@ -1588,6 +1588,145 @@ const results: Record<string, string> = {
 }
 
 /**
+ * Cascata de mitigação para a chamada única de estruturação pós-OCR.
+ *
+ * A M3 (e outros modelos de chat com contexto longo) frequentemente responde
+ * 504/gateway timeout quando recebe ~200k chars de input pedindo JSON de 65k
+ * tokens — o `fetchWithRetry` re-tenta 3× com o mesmo payload e falha exatamente
+ * no mesmo ponto, queimando ~80s (foi essa a assinatura vista no diagnóstico do
+ * Trabalhista). Aqui reduzimos progressivamente `input chars` e `max_tokens`
+ * a cada tentativa e, na última, caímos para o gateway Lovable como fallback
+ * de provider — sem alterar a configuração global do usuário.
+ */
+interface StructuringCascadeOpts {
+  supabaseAdmin: any;
+  jobId: string;
+  userId?: string;
+  systemPrompt: string;
+  userPromptBuilder: (text: string) => string;
+  fullText: string;
+  promptType: string;
+  requestTimeoutMs: number;
+}
+
+interface StructuringCascadeResult {
+  fillResult: { text: string; provider: string; model: string; usedFallback: boolean };
+  attemptsLog: Array<{ attempt: number; inputChars: number; maxTokens: number; provider: string; model: string; durationMs: number; ok: boolean; errorCode?: string }>;
+  provider: string;
+  model: string;
+  cascadeUsed: boolean;
+}
+
+function truncateForStructuring(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const headChars = Math.floor(maxChars * 0.6);
+  const tailChars = Math.floor(maxChars * 0.35);
+  const separator = '\n\n[... conteúdo intermediário omitido para processamento ...]\n\n';
+  return text.substring(0, headChars) + separator + text.substring(text.length - tailChars);
+}
+
+async function runStructuringWithCascade(
+  primaryConfig: { provider: string; model: string; endpoint: string; apiKey: string; displayModel?: string },
+  opts: StructuringCascadeOpts
+): Promise<StructuringCascadeResult> {
+  // Escalonamento de payloads (input chars × max_tokens).
+  // Tentativa 1 = payload atual. Tentativas 2-3 reduzem input/output.
+  // Tentativa 4 = fallback de provider para Lovable Gateway.
+  const rungs: Array<{ maxChars: number; maxTokens: number; label: string; useLovableFallback?: boolean }> = [
+    { maxChars: 200_000, maxTokens: 65_536, label: 'attempt_1_full' },
+    { maxChars: 140_000, maxTokens: 32_768, label: 'attempt_2_shrink' },
+    { maxChars: 90_000,  maxTokens: 24_576, label: 'attempt_3_smaller' },
+    { maxChars: 90_000,  maxTokens: 24_576, label: 'attempt_4_lovable_fallback', useLovableFallback: true },
+  ];
+
+  const attemptsLog: StructuringCascadeResult['attemptsLog'] = [];
+  let lastError: any = null;
+
+  const retryableCodes = new Set(['provider_timeout', 'provider_unavailable', 'response_truncated', 'rate_limited']);
+
+  for (let i = 0; i < rungs.length; i++) {
+    const rung = rungs[i];
+    const attempt = i + 1;
+
+    let configForAttempt = primaryConfig;
+    if (rung.useLovableFallback) {
+      // Só tenta o fallback do Gateway se a LOVABLE_API_KEY existir no ambiente.
+      const lovableKey = Deno.env.get('LOVABLE_API_KEY');
+      if (!lovableKey) {
+        console.warn('[structuring-cascade] Attempt 4 pulado: LOVABLE_API_KEY ausente.');
+        break;
+      }
+      // Não sobrescreve config global — construção pontual para esta tentativa.
+      configForAttempt = {
+        provider: 'lovable',
+        model: 'google/gemini-2.5-flash',
+        endpoint: 'https://ai.gateway.lovable.dev/v1/chat/completions',
+        apiKey: lovableKey,
+        displayModel: 'google/gemini-2.5-flash',
+      };
+    }
+
+    const truncated = truncateForStructuring(opts.fullText, rung.maxChars);
+    const userPrompt = opts.userPromptBuilder(truncated);
+
+    try {
+      await opts.supabaseAdmin.from('import_jobs').update({
+        current_step: `Estruturação pós-OCR · tentativa ${attempt}/${rungs.length} · ${configForAttempt.provider}/${configForAttempt.model} (${truncated.length} chars, max_tokens=${rung.maxTokens})`,
+        step_id: 'processing',
+        updated_at: new Date().toISOString(),
+      }).eq('id', opts.jobId);
+    } catch (_e) { /* ignore */ }
+
+    console.log(`[structuring-cascade] ${rung.label}: provider=${configForAttempt.provider} model=${configForAttempt.model} inputChars=${truncated.length} maxTokens=${rung.maxTokens}`);
+    const started = Date.now();
+    try {
+      const fillResult = await callAI(
+        configForAttempt as any,
+        opts.systemPrompt,
+        userPrompt,
+        {
+          promptType: opts.promptType,
+          userId: opts.userId,
+          maxOutputTokens: rung.maxTokens,
+          jsonMode: true,
+          requestTimeoutMs: opts.requestTimeoutMs,
+          // A cascata é o "retry" agora — não re-tentar o mesmo payload no fetch layer.
+          retryOnServerError: false,
+        }
+      );
+      const durationMs = Date.now() - started;
+      attemptsLog.push({ attempt, inputChars: truncated.length, maxTokens: rung.maxTokens, provider: configForAttempt.provider, model: configForAttempt.model, durationMs, ok: true });
+      console.log(`[structuring-cascade] ✅ ${rung.label} success in ${durationMs}ms`);
+      return {
+        fillResult,
+        attemptsLog,
+        provider: configForAttempt.provider,
+        model: configForAttempt.model,
+        cascadeUsed: attempt > 1,
+      };
+    } catch (err: any) {
+      const durationMs = Date.now() - started;
+      const code = err?.code || err?.name || 'unknown';
+      const errMsg = err?.message || String(err);
+      attemptsLog.push({ attempt, inputChars: truncated.length, maxTokens: rung.maxTokens, provider: configForAttempt.provider, model: configForAttempt.model, durationMs, ok: false, errorCode: code });
+      console.warn(`[structuring-cascade] ❌ ${rung.label} failed in ${durationMs}ms: [${code}] ${errMsg.slice(0, 200)}`);
+      lastError = err;
+
+      // Só desce a cascata para erros de timeout/truncamento/504/429.
+      // Erros terminais (401/402/400) abortam imediatamente.
+      const isRetryable = retryableCodes.has(code) ||
+        /timeout|timed out|504|502|503|gateway|truncat|max_tokens|too large|context length/i.test(errMsg);
+      if (!isRetryable) {
+        console.error(`[structuring-cascade] Erro não-recuperável — abortando cascata.`);
+        throw err;
+      }
+    }
+  }
+
+  throw lastError || new Error('Estruturação pós-OCR falhou em todas as tentativas da cascata.');
+}
+
+/**
  * Process chunked PDF upload (client-side split)
  * Each part is already < 20MB and uploaded to storage
  * This processes each part with OCR, combines results, then structures with AI
