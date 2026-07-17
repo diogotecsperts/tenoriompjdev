@@ -1,65 +1,69 @@
-## Depuração do travamento em "Extração de dados (Vision)" no Trabalhista
+## Plano: depurar e tornar o GLM do Trabalhista observável e finito
 
-### Diagnóstico
+### Objetivo
+Eliminar a espera infinita em “Extração de dados (Vision)” quando o OCR principal é GLM, sem alterar o fluxo da Mistral, sem mexer no Previdenciário e sem mudar a lógica pós-OCR do Trabalhista.
 
-O modal trava em "Extração de dados (Vision)" e, ao clicar em **Continuar**, nada evolui nem falha. Três causas independentes contribuem:
+### O que encontrei
+- O Trabalhista já tem raster/split client-side para GLM, mas a telemetria ainda é insuficiente após o envio das partes.
+- O backend atualiza `updated_at` por heartbeat, então o alerta de “sem update” pode não disparar mesmo se o GLM estiver preso dentro da chamada OCR.
+- O `check-import-status` não reconhece GLM como provider quando o passo diz “Extraindo parte...”; isso pode deixar a UI sem contexto correto.
+- O relatório de diagnóstico ainda não existe.
 
-1. **Fase client-side do GLM não emite estado.** No branch `ocrConfig.provider === 'glm'` do `ImportarAutosDialog.processFile`, o dialog roda `rebuildPdfAsRasterClean` + `splitCleanPdfByPages` **antes de criar o `import_job`**. Enquanto isso o step `extraction` já ficou marcado como "processing", mas ainda não existe `jobId` para o polling puxar `updated_at`. Se um passo do raster crashar (OOM, worker do pdf.js, `toBlob` null), o `.catch()` externo pode não estar re-arremessando com mensagem clara.
-2. **"Continuar esperando" apenas zera o contador stale.** Em `staleCheckCountRef.current = 0` (linha 2484) o app volta a esperar do zero por 5 minutos, sem verificar se o backend ainda está vivo. Se o edge function morreu (WORKER_LIMIT / OOM / crash silencioso), o dialog fica em loop eterno de "5 min sem update → clicar Continuar → 5 min sem update".
-3. **A mensagem do GLM está mal formulada.** "GLM-OCR · enviando por partes (limite 100 págs / ~50MB por chamada)" sugere ao operador que PDFs >100 págs vão falhar, quando na verdade o pipeline raster+split **contorna** esse limite dividindo em partes.
+### Mudanças propostas
 
-### Correções propostas
+1. **Criar estado dinâmico só para GLM no Trabalhista**
+   - Adicionar uma timeline específica para GLM, visível apenas quando `phase1_ocr_provider = glm`.
+   - Etapas: `probe`, `raster`, `split`, `upload`, `job_start`, `ocr_part`, `backend_processing`.
+   - Mostrar etapa atual, tempo decorrido da etapa, progresso quando disponível e estimativa simples quando houver total de páginas/partes.
 
-Escopo restrito a `src/components/tools/ImportarAutosDialog.tsx`, sem tocar em edge functions nem no Previdenciário.
+2. **Tornar o travamento detectável mesmo com heartbeat**
+   - Além de observar `updated_at`, comparar também `current_step`, `progress` e `step_id`.
+   - Se `updated_at` muda mas `current_step/progress` ficam iguais por tempo demais, tratar como “sem avanço real”.
+   - Para GLM, usar limites mais curtos por fase:
+     - raster client-side: até 8 min;
+     - split client-side: até 3 min;
+     - upload de cada parte: erro claro se falhar;
+     - OCR de uma mesma parte sem avanço real: alerta em ~4–5 min e aborto controlado após uma extensão única.
+   - Isso evita aguardar 15+ minutos sem informação útil.
 
-**1. Mensagem GLM mais precisa** (linhas 476-484 do dialog)
+3. **Melhorar backend do chunked GLM sem tocar Mistral**
+   - No `processar-autos`, durante `processarChunkedPDFBackground`, registrar logs estruturados antes/depois de cada parte GLM.
+   - Passar `onHeartbeat` ao `runOcrWithConfiguredProvider` para atualizar `current_step` com mensagens como:
+     - `GLM-OCR: preparando parte 1/2...`
+     - `GLM-OCR: aguardando OCR da parte 1/2...`
+     - `GLM-OCR: parte 1/2 concluída...`
+   - Preservar Mistral: nenhum raster/split novo, nenhum comportamento novo fora do branch GLM; Mistral continua usando o caminho original via router.
 
-```
-GLM-OCR · rasterizando PDF no navegador (raster+split)
-GLM-OCR · enviando por partes (contornando limite de 100 págs / ~50 MB por chamada)
-GLM-OCR · processando documento no servidor
-```
+4. **Corrigir identificação do provider no status**
+   - Atualizar `check-import-status` para detectar `glm` em passos contendo `glm`, `z.ai` ou quando o job chunked tiver metadado do provider.
+   - Assim a UI mostra o painel GLM correto e não cai em mensagem genérica.
 
-**2. Envelopar o pipeline client-side do GLM com telemetria fina**
+5. **Adicionar botão “Baixar diagnóstico” só no GLM**
+   - Gerar um `.txt` local no navegador com:
+     - job id;
+     - provider OCR ativo;
+     - arquivo original e tamanho;
+     - etapas GLM registradas com horário/duração;
+     - partes geradas, páginas e tamanho;
+     - último `current_step`, `progress`, `step_id`;
+     - últimos logs de backend já disponíveis no modal;
+     - motivo de alerta/trava/abort quando existir.
+   - O botão aparece durante processamento GLM e em alerta/erro de trava.
 
-Dentro do branch GLM em `processFile`:
+6. **Mensagens de erro mais objetivas**
+   - Trocar erro genérico por mensagens com causa provável e último ponto observado:
+     - “GLM parou na parte 1/2 após X min sem avanço real.”
+     - “Último sinal do servidor: ...”
+     - “Ação recomendada: tentar Mistral como backup ou reduzir PDF.”
 
-- Marcar sub-fases explícitas no `setStepsStatus`/`setAnalysisStep` antes de cada passo pesado: `probePdfPageCount` → `rebuildPdfAsRasterClean` (com `onPageProgress` já disponível) → `splitCleanPdfByPages` → upload das partes.
-- Try/catch por sub-fase, cada catch reemite com prefixo (`[GLM raster]`, `[GLM split]`, `[GLM upload]`) para o `errorLogger` e para o toast do usuário.
-- Timeout duro por sub-fase (ex.: 8 min para raster, 3 min para split); se estourar, aborta com mensagem "Rasterização do PDF excedeu 8 min — arquivo pode ser grande demais para o navegador. Tente PDF menor ou trocar o provider de OCR no DevPanel."
+7. **Garantias de isolamento**
+   - Não alterar Previdenciário.
+   - Não alterar prompts, campos, `laudo-structure`, criação de laudo ou fluxo pós-OCR.
+   - Não padronizar split para todos os providers.
+   - Não alterar o caminho Mistral, exceto se for necessário apenas para não afetá-lo por condicionais explícitas.
 
-**3. Detecção robusta de trava em qualquer fase**
-
-Substituir o comportamento atual do botão **Continuar esperando** (linhas ~2453-2490):
-
-- Ao clicar, iniciar um "modo tolerante" que dá **mais 5 min** e nada além disso. Se `updated_at` não avançar nesse segundo intervalo, forçar `handleError` com mensagem final:
-  > "Processamento parou de responder após 10 minutos sem sinais do servidor. Último passo: `<current_step>`. Provider ativo: `<currentOCRProvider>`. Sugestões: trocar provider no DevPanel ou reduzir o PDF."
-- Manter o botão "Usar resumos parciais" que já existe.
-
-Adicionar também um **teto absoluto** (25 min de wall-clock desde o `handleFileUpload`) que dispara `handleError` mesmo antes do stale contar, para eliminar espera infinita.
-
-**4. Mostrar o último log de backend na tela de erro**
-
-Já existe `backendLogs` (linha 239) sendo alimentado. Quando `handleError` for chamado por stale/timeout, incluir os 2-3 últimos `backendLogs` na mensagem/toast — isso dá ao operador contexto imediato (ex.: "OCR: enviando parte 4/12" cortado indica falha na parte 4).
-
-### Fluxo pós-OCR — confirmação
-
-**Nada muda.** Uma vez que o OCR entregou texto (via `preExtractedText` no MiniMax, ou via `runOcrWithConfiguredProvider` para GLM/Mistral/Gemini), o pipeline segue idêntico ao que já funcionava:
-
-1. `callAI` lê `default_ai_provider`/`default_ai_model` do DevPanel.
-2. Prompt montado por `prompt-manager` + `build-import-prompt` (ambos intocados).
-3. JSON estruturado, validado por `ensureValidStructure`, gravado em `import_jobs.result`.
-4. Polling do dialog puxa o resultado, mostra preview, e o botão "Criar Laudo" cria o registro em `laudos` com os mesmos mapeamentos do `laudo-structure.ts`.
-
-Nenhum arquivo dessa cadeia é tocado neste patch. Os prompts, campos e comportamentos de IA por módulo (Trabalhista/Prev/Impugnação) continuam completamente isolados.
-
-### Escopo técnico
-
-- **Arquivo alterado:** `src/components/tools/ImportarAutosDialog.tsx` (mensagens, telemetria client-side GLM, política de stale/timeout, exibição de logs no erro).
-- **Não alterado:** edge functions, `_shared/*`, Previdenciário, prompts, `laudo-structure.ts`.
-- **Validação:** `tsgo --noEmit` + teste manual com PDF grande GLM (>100 págs), PDF pequeno Mistral, e simulação de crash (matar rede no meio da fase 1) para confirmar que o erro aparece com contexto ao invés de travar.
-
-### Perguntas para confirmar antes de implementar
-
-1. Tetos ok: 5 min stale → "Continuar" adiciona +5 min → 25 min absoluto máximo?
-2. Quer que o toast de erro inclua os últimos logs de backend, ou prefere só o `current_step` + provider?
+### Validação
+- Conferir typecheck automático do projeto.
+- Verificar no código que o painel/diagnóstico só aparece para GLM.
+- Confirmar que Mistral continua usando o fluxo original do router, sem rasterização/split GLM.
+- Simular mentalmente os pontos de trava: probe, raster, split, upload, início do job, OCR parte N, estruturação pós-OCR.
