@@ -548,7 +548,7 @@ async function callProvider(
   }
 }
 
-async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number }) {
+async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt: string, maxOutputTokens?: number, options?: { jsonMode?: boolean; requestTimeoutMs?: number; retryOnServerError?: boolean }) {
   const body: any = {
     model: config.model,
     messages: [
@@ -575,7 +575,7 @@ async function callLovableAI(config: AIConfig, systemPrompt: string, userPrompt:
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000 });
+  }, { requestTimeoutMs: options?.requestTimeoutMs || 75_000, retryOnServerError: options?.retryOnServerError });
 
   if (!response.ok) {
     const error = await response.text();
