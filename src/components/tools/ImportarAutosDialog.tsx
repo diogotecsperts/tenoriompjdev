@@ -1909,6 +1909,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     lastJobUpdateRef.current = null;
     staleCheckCountRef.current = 0;
     staleExtensionUsedRef.current = false;
+    setGlmDiagnostics(createGlmDiagnosticState());
+    setGlmLastSignal(null);
+    setGlmAbortReason(null);
+    setGlmNoAdvanceAlert(false);
+    lastMeaningfulJobSignalRef.current = null;
+    noMeaningfulAdvanceCountRef.current = 0;
+    activeOcrProviderRef.current = null;
     setIsSlowAI(false);
     setSlowSteps([]);
     setStepsStatus(PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' })));
@@ -1951,6 +1958,13 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     staleCheckCountRef.current = 0;
     staleExtensionUsedRef.current = false;
     setPartialResults(null);
+    setGlmDiagnostics(createGlmDiagnosticState());
+    setGlmLastSignal(null);
+    setGlmAbortReason(null);
+    setGlmNoAdvanceAlert(false);
+    lastMeaningfulJobSignalRef.current = null;
+    noMeaningfulAdvanceCountRef.current = 0;
+    activeOcrProviderRef.current = null;
     // Reset network error tracking
     networkErrorCountRef.current = 0;
     setIsReconnecting(false);
