@@ -26,6 +26,7 @@ const SUMMARY_TIMEOUT_MS = 90000;
 const GEMINI_PROCESSING_LIMIT = 45_000_000; // 45MB - max size for single Gemini call
 const MAX_SPLIT_PARTS = 4; // Maximum parts for split PDFs (~180MB total)
 const SPLIT_TARGET_SIZE = 40_000_000; // 40MB per part target
+const GLM_CHUNK_PART_TIMEOUT_MS = 5 * 60 * 1000; // fail a browser-split GLM part clearly after 5 min
 
 // O system prompt principal foi movido para uma constante para servir como fallback
 // O prompt real é buscado via prompt-manager para permitir edição via DevPanel
@@ -1685,6 +1686,52 @@ async function processarChunkedPDFBackground(
     const extractedTexts: string[] = [];
     let processedPageCount = 0;
 
+    const failGlmPart = async (
+      partIndex: number,
+      range: { start: number; end: number },
+      message: string,
+      startedAt: number,
+    ) => {
+      const durationMs = Date.now() - startedAt;
+      const richMessage =
+        `GLM-OCR travou na parte ${partIndex + 1}/${fileParts.length} ` +
+        `(págs ${range.start}-${range.end}) após ${Math.round(durationMs / 1000)}s: ${message}`;
+
+      await logError('processar-autos', richMessage, jobId, {
+        provider: 'glm',
+        part: partIndex + 1,
+        totalParts: fileParts.length,
+        startPage: range.start,
+        endPage: range.end,
+        durationMs,
+        timeoutMs: GLM_CHUNK_PART_TIMEOUT_MS,
+      });
+
+      if (attemptId) {
+        await supabaseAdmin
+          .from('import_attempts')
+          .update({
+            status: 'failed',
+            error: richMessage,
+            completed_at: new Date().toISOString(),
+          })
+          .eq('id', attemptId);
+      }
+
+      await supabaseAdmin
+        .from('import_jobs')
+        .update({
+          status: 'failed',
+          error: richMessage,
+          current_step: richMessage.slice(0, 220),
+          step_id: 'extraction',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', jobId);
+
+      return richMessage;
+    };
+
     if (preExtractedText && preExtractedText.trim().length > 0) {
       // MiniMax client-side OCR já entregou o texto pronto. Pula fase 1.
       console.log(`[processar-autos-chunked] preExtractedText recebido (${preExtractedText.length} chars) — pulando fase 1 OCR`);
@@ -1731,11 +1778,23 @@ async function processarChunkedPDFBackground(
           startPage: range.start,
           endPage: range.end,
           partSizeMB,
+          timeoutMs: isGlmChunked ? GLM_CHUNK_PART_TIMEOUT_MS : null,
         });
 
         // OCR via router — respeita o provider escolhido no DevPanel.
         try {
-          const ocrResult = await runOcrWithConfiguredProvider(partBytes, {
+          if (isGlmChunked) {
+            await supabaseAdmin.from('import_jobs').update({
+              current_step: `GLM-OCR: aguardando resposta da parte ${i + 1}/${fileParts.length} (págs ${range.start}-${range.end})`,
+              progress: Math.round(5 + (i / Math.max(1, fileParts.length)) * 35),
+              step_id: 'extraction',
+              updated_at: new Date().toISOString(),
+            }).eq('id', jobId);
+          }
+
+          const partStartedAt = Date.now();
+          let timeoutId: number | null = null;
+          const ocrPromise = runOcrWithConfiguredProvider(partBytes, {
             logPrefix: `[processar-autos-chunked/part-${i + 1}]`,
             onHeartbeat: async (stage, providerProgress) => {
               const normalizedProgress = Math.max(0, Math.min(100, Number(providerProgress) || 0));
@@ -1751,6 +1810,30 @@ async function processarChunkedPDFBackground(
               }).eq('id', jobId);
             },
           });
+
+          const ocrResult = isGlmChunked
+            ? await Promise.race([
+                ocrPromise,
+                new Promise<never>((_, reject) => {
+                  timeoutId = setTimeout(async () => {
+                    try {
+                      const persisted = await failGlmPart(
+                        i,
+                        range,
+                        `timeout operacional de ${Math.round(GLM_CHUNK_PART_TIMEOUT_MS / 60000)} min sem conclusão`,
+                        partStartedAt,
+                      );
+                      reject(new Error(persisted));
+                    } catch (timeoutError) {
+                      reject(timeoutError instanceof Error ? timeoutError : new Error(String(timeoutError)));
+                    }
+                  }, GLM_CHUNK_PART_TIMEOUT_MS) as unknown as number;
+                }),
+              ])
+            : await ocrPromise;
+
+          if (timeoutId) clearTimeout(timeoutId);
+
           ocrProviderUsed = ocrResult.provider;
           ocrModelUsed = ocrResult.model;
           const pageCount = range.end - range.start + 1;
