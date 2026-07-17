@@ -617,10 +617,23 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
   const inferGlmStageFromStep = (step: string | null | undefined, stepId?: string | null): GlmStageId | null => {
     const normalized = (step || '').toLowerCase();
+    // Prioridade 1: stepId oficial do backend — evita que uma mensagem legada
+    // "GLM-OCR: ..." no current_step arraste a falha para a etapa de OCR quando
+    // na verdade a falha aconteceu na fase de estruturação/resumos pós-OCR.
+    if (stepId) {
+      if (stepId === 'processing') return 'backend_processing';
+      if (stepId === 'finalizing') return 'backend_processing';
+      if (stepId.startsWith('resumo_') || stepId === 'descricao_doencas' || stepId === 'nexo_causal' || stepId === 'incapacidade' || stepId === 'referencias_bibliograficas') return 'backend_processing';
+      if (stepId === 'extraction') {
+        // fase 1 (OCR). Confirma pelo texto quando disponível.
+        return 'ocr_part';
+      }
+    }
     if (!normalized) return null;
+    if (normalized.includes('estruturação pós-ocr') || normalized.includes('estruturacao pos-ocr') || normalized.includes('geração de resumos') || normalized.includes('geracao de resumos')) return 'backend_processing';
     if (normalized.includes('glm') && (normalized.includes('parte') || normalized.includes('ocr'))) return 'ocr_part';
     if (normalized.includes('extraindo parte') || normalized.includes('processando parte')) return 'ocr_part';
-    if (stepId === 'processing' || normalized.includes('estruturando') || normalized.includes('fase 2')) return 'backend_processing';
+    if (normalized.includes('estruturando') || normalized.includes('fase 2')) return 'backend_processing';
     if (normalized.includes('gerando resumo') || normalized.includes('finalizando')) return 'backend_processing';
     return null;
   };
