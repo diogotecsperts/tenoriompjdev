@@ -1,69 +1,127 @@
-## Plano: depurar e tornar o GLM do Trabalhista observável e finito
+## Diagnóstico encontrado
 
-### Objetivo
-Eliminar a espera infinita em “Extração de dados (Vision)” quando o OCR principal é GLM, sem alterar o fluxo da Mistral, sem mexer no Previdenciário e sem mudar a lógica pós-OCR do Trabalhista.
+O job informado parou exatamente aqui:
 
-### O que encontrei
-- O Trabalhista já tem raster/split client-side para GLM, mas a telemetria ainda é insuficiente após o envio das partes.
-- O backend atualiza `updated_at` por heartbeat, então o alerta de “sem update” pode não disparar mesmo se o GLM estiver preso dentro da chamada OCR.
-- O `check-import-status` não reconhece GLM como provider quando o passo diz “Extraindo parte...”; isso pode deixar a UI sem contexto correto.
-- O relatório de diagnóstico ainda não existe.
+- Job: `39a231ef-4320-4d8a-9856-86cada7e6e0e`
+- Status no banco: `processing`
+- Etapa: `GLM-OCR: ocr_processing · parte 2/2 (págs 91-114)`
+- Progresso: `27%`
+- Último update: `2026-07-17T00:34:23Z`
+- Logs de backend:
+  - iniciou chunked com 2 partes / 114 páginas
+  - iniciou OCR parte 1/2
+  - parte 1/2 concluiu com 56.897 caracteres
+  - iniciou OCR parte 2/2
+  - depois disso não houve mais log de conclusão nem erro
 
-### Mudanças propostas
+Conclusão técnica: a parte 2 ficou presa dentro da chamada GLM no backend. O `import_jobs.updated_at` parou em `00:34:23`, então nem o heartbeat interno continuou. O job e a tentativa (`import_attempts`) ficaram em `processing`, sem erro persistido.
 
-1. **Criar estado dinâmico só para GLM no Trabalhista**
-   - Adicionar uma timeline específica para GLM, visível apenas quando `phase1_ocr_provider = glm`.
-   - Etapas: `probe`, `raster`, `split`, `upload`, `job_start`, `ocr_part`, `backend_processing`.
-   - Mostrar etapa atual, tempo decorrido da etapa, progresso quando disponível e estimativa simples quando houver total de páginas/partes.
+## Causa provável
 
-2. **Tornar o travamento detectável mesmo com heartbeat**
-   - Além de observar `updated_at`, comparar também `current_step`, `progress` e `step_id`.
-   - Se `updated_at` muda mas `current_step/progress` ficam iguais por tempo demais, tratar como “sem avanço real”.
-   - Para GLM, usar limites mais curtos por fase:
-     - raster client-side: até 8 min;
-     - split client-side: até 3 min;
-     - upload de cada parte: erro claro se falhar;
-     - OCR de uma mesma parte sem avanço real: alerta em ~4–5 min e aborto controlado após uma extensão única.
-   - Isso evita aguardar 15+ minutos sem informação útil.
+Há dois problemas combinados:
 
-3. **Melhorar backend do chunked GLM sem tocar Mistral**
-   - No `processar-autos`, durante `processarChunkedPDFBackground`, registrar logs estruturados antes/depois de cada parte GLM.
-   - Passar `onHeartbeat` ao `runOcrWithConfiguredProvider` para atualizar `current_step` com mensagens como:
-     - `GLM-OCR: preparando parte 1/2...`
-     - `GLM-OCR: aguardando OCR da parte 1/2...`
-     - `GLM-OCR: parte 1/2 concluída...`
-   - Preservar Mistral: nenhum raster/split novo, nenhum comportamento novo fora do branch GLM; Mistral continua usando o caminho original via router.
+1. **A função em background pode morrer sem executar o `catch` final.**
+   O fluxo usa `EdgeRuntime.waitUntil(...)` para processar OCR longo após devolver o `jobId`. Se a runtime encerra por limite/timeout/recurso durante a chamada GLM, o código não chega ao `catch`, não marca `import_jobs.status = failed`, e não grava erro. Isso explica o estado atual: parado em `processing`, sem log de falha.
 
-4. **Corrigir identificação do provider no status**
-   - Atualizar `check-import-status` para detectar `glm` em passos contendo `glm`, `z.ai` ou quando o job chunked tiver metadado do provider.
-   - Assim a UI mostra o painel GLM correto e não cai em mensagem genérica.
+2. **O GLM está recebendo partes de até 90 páginas, mas o helper GLM ainda pagina internamente em chamadas de 30 páginas.**
+   A parte 1 tinha páginas 1-90 e concluiu. A parte 2 tinha páginas 91-114, mas dentro do helper ela é tratada como um PDF independente e ainda chama `start_page_id: 1, end_page_id: 30`. Isso não é necessariamente fatal, mas torna a telemetria confusa e deixa menos claro qual subjanela GLM travou. O frontend mostra apenas “parte 2/2”, sem “subchamada GLM 1-24”.
 
-5. **Adicionar botão “Baixar diagnóstico” só no GLM**
-   - Gerar um `.txt` local no navegador com:
-     - job id;
-     - provider OCR ativo;
-     - arquivo original e tamanho;
-     - etapas GLM registradas com horário/duração;
-     - partes geradas, páginas e tamanho;
-     - último `current_step`, `progress`, `step_id`;
-     - últimos logs de backend já disponíveis no modal;
-     - motivo de alerta/trava/abort quando existir.
-   - O botão aparece durante processamento GLM e em alerta/erro de trava.
+3. **O diagnóstico desaparece porque o frontend muda para `processingStep = idle` ao abortar por trava.**
+   O botão “Baixar diagnóstico” só existe enquanto `processingStep === analyzing` ou `isSplitting`. Quando a detecção de trava chama `abortWithStaleError`, ela limpa a tela de análise. Resultado: o modal volta para a tela inicial e o usuário perde o relatório exatamente quando mais precisa dele.
 
-6. **Mensagens de erro mais objetivas**
-   - Trocar erro genérico por mensagens com causa provável e último ponto observado:
-     - “GLM parou na parte 1/2 após X min sem avanço real.”
-     - “Último sinal do servidor: ...”
-     - “Ação recomendada: tentar Mistral como backup ou reduzir PDF.”
+## Plano de correção
 
-7. **Garantias de isolamento**
-   - Não alterar Previdenciário.
-   - Não alterar prompts, campos, `laudo-structure`, criação de laudo ou fluxo pós-OCR.
-   - Não padronizar split para todos os providers.
-   - Não alterar o caminho Mistral, exceto se for necessário apenas para não afetá-lo por condicionais explícitas.
+### 1. Persistir falhas de GLM no banco mesmo quando o frontend detecta travamento
 
-### Validação
-- Conferir typecheck automático do projeto.
-- Verificar no código que o painel/diagnóstico só aparece para GLM.
-- Confirmar que Mistral continua usando o fluxo original do router, sem rasterização/split GLM.
-- Simular mentalmente os pontos de trava: probe, raster, split, upload, início do job, OCR parte N, estruturação pós-OCR.
+No botão/fluxo de aborto por trava no Trabalhista:
+
+- Manter o estado visual em uma nova tela/estado de erro, em vez de voltar para `idle` imediatamente.
+- Gravar no job, via nova edge function pequena ou endpoint existente seguro, um status `failed` com erro claro quando o frontend detecta stale real:
+  - “GLM sem avanço real há X minutos”
+  - último `current_step`
+  - último `progress`
+  - últimos logs disponíveis
+- Marcar também a tentativa (`import_attempts`) como `failed` quando possível.
+
+Isso evita jobs eternos em `processing` e preserva a causa.
+
+### 2. Manter o diagnóstico visível após erro
+
+No `ImportarAutosDialog.tsx`:
+
+- Criar estado dedicado, por exemplo `processingStep = 'error'` ou estado `glmFailedDiagnostic`.
+- Quando o GLM abortar por trava:
+  - parar polling;
+  - manter `selectedFile`, `currentJobId`, `glmDiagnostics`, `glmLastSignal`, `backendLogs` e `splitParts`;
+  - renderizar uma tela de erro com:
+    - resumo do ponto exato onde parou;
+    - botão “Baixar diagnóstico GLM”;
+    - botão “Fechar”;
+    - botão “Nova importação”.
+- Não chamar `handleClose()` nem resetar diagnóstico automaticamente.
+
+### 3. Corrigir a estratégia de partes do GLM para não depender de subpaginação interna
+
+Para o caminho GLM no Trabalhista:
+
+- Ajustar `RASTER_SPLIT_MAX_PAGES` de 90 para 30 ou criar constante específica para GLM chunked, gerando partes já no tamanho real de chamada do GLM.
+- Cada parte enviada ao backend terá no máximo 30 páginas.
+- No backend, quando `isChunkedUpload` + provider `glm`, chamar GLM sem precisar paginar internamente por `start_page_id/end_page_id` ou, se mantiver o helper, registrar subchamadas explicitamente.
+
+Benefício: se travar, saberemos “parte 4/4, páginas 91-114”, e cada chamada GLM será menor e mais previsível.
+
+### 4. Adicionar timeout de parte no backend, não apenas dentro do fetch GLM
+
+Hoje existe timeout por `fetch` GLM, mas o caso real mostra que a execução pode morrer sem atualizar o job. Vou envolver cada OCR de parte em `Promise.race` com timeout operacional, por exemplo:
+
+- GLM parte de até 30 páginas: 4 a 5 minutos;
+- ao exceder:
+  - gravar log `GLM-OCR: timeout da parte N/M`;
+  - atualizar `import_jobs.status = failed`;
+  - atualizar `import_attempts.status = failed`;
+  - lançar erro claro.
+
+Isso não altera Mistral, Gemini, MiniMax nem Previdenciário.
+
+### 5. Melhorar logs e status granulares da GLM
+
+No backend GLM chunked:
+
+- Antes de cada chamada GLM, gravar:
+  - parte N/M;
+  - páginas reais;
+  - tamanho MB;
+  - timeout configurado.
+- Durante o GLM, gravar heartbeat com etapa sem depender só de `updated_at`:
+  - `GLM-OCR: parte N/M enviada ao provedor`
+  - `GLM-OCR: aguardando resposta da parte N/M`
+- No erro, incluir:
+  - parte;
+  - páginas;
+  - provider;
+  - duração;
+  - mensagem técnica resumida.
+
+### 6. Recuperação/limpeza de jobs antigos presos
+
+Adicionar uma rotina defensiva no `check-import-status`:
+
+- Se um job GLM está em `processing`, `updated_at` antigo e sem logs novos, retornar ao frontend um campo como `stale: true` e `staleReason`.
+- Opcionalmente, marcar como failed por função dedicada quando o usuário clicar em “Encerrar e baixar diagnóstico”.
+
+### 7. Isolamento garantido
+
+- Não tocar no fluxo Mistral do Trabalhista.
+- Não tocar no Previdenciário.
+- Não alterar o pós-OCR / preenchimento dos campos do Trabalhista.
+- As mudanças ficam condicionadas a provider GLM ou ao fluxo de diagnóstico do modal.
+
+## Resultado esperado
+
+Depois da correção:
+
+- O GLM não ficará 10-15 minutos sem uma conclusão visível.
+- Se travar, a tela não fecha nem volta para a importação inicial.
+- O relatório de diagnóstico ficará disponível após o erro.
+- O job no banco ficará como `failed`, não eternamente `processing`.
+- O erro dirá exatamente qual parte/páginas travaram e qual foi o último sinal do backend.
