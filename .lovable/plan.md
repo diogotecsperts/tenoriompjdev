@@ -1,76 +1,67 @@
-## O que está acontecendo (diagnóstico honesto)
+## 1) Sua pergunta direta: a correção do fallback é segura para o Trabalhista atual?
 
-O OCR terminou bem: 6 partes, 114 páginas, 5m11s. O que quebrou é a **fase 2 — Estruturação pós-OCR**, que hoje é feita em UMA única chamada:
+**Sim, é segura**, mas quero deixar cristalino o que exatamente vai mudar e por quê não quebra o fluxo que acabou de funcionar:
 
-- Provider: `minimax/MiniMax-M3` (o que está configurado no DevPanel)
-- Input: ~200 000 caracteres de OCR concatenado (todo o processo)
-- Output pedido: `max_tokens = 65 536` em `response_format: json_object`
-- Timeout do nosso lado: 6 minutos
+- O que **é removido**: a "Tentativa 4" hardcoded que usava `google/gemini-2.5-flash` via Lovable Gateway. Essa tentativa **nunca foi executada** no seu processamento bem-sucedido — a estruturação passou na tentativa 1. Removê-la não altera o caminho feliz.
+- O que **permanece intacto**: tentativas 1, 2 e 3 continuam usando **exclusivamente o provider configurado no DevPanel** (hoje `minimax/MiniMax-M3`). É o mesmo provider que funcionou agora.
+- O que **é adicionado**: 3 chaves em `system_config` com defaults **desligados** (`structuring_fallback_enabled=false`, `structuring_fallback_provider='none'`). Enquanto você não ligar no DevPanel, o comportamento é **idêntico ao atual** — nenhuma chamada extra, nenhum provider extra.
+- **Zero mudança** em: prompts, OCR, resumos, Previdenciário, Impugnação, `gerar-justificativa-medica`, `getAIConfig`, chaves de API.
 
-O log mostra a etapa "Estruturação pós-OCR" morrendo em **1m 20s** com `provider_timeout`. Isso NÃO é o nosso timeout de 6 min. É o servidor da MiniMax (ou o gateway) devolvendo 504/erro em ~20-25s por tentativa; o `fetchWithRetry` está com `maxRetries=3` e faz 3 tentativas com backoff 1s → 2s → 4s. Somando as tentativas + backoff dá exatamente o ~1m 20s observado. Ou seja: **a MiniMax está recusando/derrubando o request grande, e a gente re-tenta 3× sem mudar nada, então falha do mesmo jeito**.
-
-Por que a MiniMax derruba:
-- Um único prompt com ~200k chars + pedido de JSON estruturado de até 65k tokens é fora do envelope prático da M3 para chat completions. Ela costuma cortar/504 quando a geração excede ~60-90s server-side.
-- No Previdenciário isso não acontece porque lá a extração é **modular** (várias chamadas menores por seção/campo), como já registrado em `mem/import-autos/modular-extraction-architecture` e `modular-prompt-assembly-and-fallback`.
-
-Comparação: no Trabalhista ainda usamos a estratégia "one-shot" para o preenchimento. É esse o gargalo. Não adianta aumentar timeout — a M3 encerra do lado dela.
-
-E além disso, hoje o `fetchWithRetry` re-tenta 504 SEM alterar o payload — 3 tentativas com o mesmo prompt gigante caem no mesmo erro.
+Risco residual: nulo no caminho de sucesso; no caminho de falha, ao invés de tentar Gemini indevidamente, o erro é propagado com o diagnóstico — que é exatamente o que você pediu.
 
 ---
 
-## Correção proposta (segura, cirúrgica, sem tocar Previdenciário)
+## 2) Erro em Referências Bibliográficas ("Edge Function returned a non-2xx status code")
 
-Objetivo: fazer a estruturação sobreviver a documentos grandes usando a MiniMax M3 (ou GLM/Lovable), sem alterar nada da fase OCR nem de outros módulos.
+### Diagnóstico honesto do que investiguei
 
-### 1. Cascata de mitigação para a chamada única de estruturação
-Em `supabase/functions/processar-autos/index.ts`, envolver o `callAI` da estruturação (linha ~1959) numa cascata de tentativas com **payloads progressivamente menores**, na mesma lógica que já usamos no OCR/import (`gemini-payload-cascading-retry-strategy`):
+- Edge function `gerar-justificativa-medica` está viva e respondendo bem para `gen_destino` (2-3s) e `gen_conclusao` (15s) no MiniMax-M3 — visto nos logs desta janela.
+- Para `campo === 'referencias'` a função aplica `maxOutputTokens: 2200` e `requestTimeoutMs: 90_000` (linhas 669-672).
+- **Não há nenhum log** de invocação com `campo=referencias` na janela recente — isso significa uma das duas coisas: (a) o request está falhando **antes** de chegar ao `console.log` de entrada (falha muito precoce — validação, auth, JSON parse, ou o próprio boot cold-start com timeout do cliente), ou (b) a invocação está sendo feita mas caindo em um branch de erro que hoje **não loga a fase**.
+- No frontend, `extractErrorMessage` tenta `err?.context?.error`. Em `supabase-js v2`, `FunctionsHttpError.context` é um **Response**, não JSON — então `context.error` é `undefined` e a UI cai no fallback genérico "Edge Function returned a non-2xx status code", **mascarando a mensagem real que o backend está retornando**.
 
-- **Tentativa 1:** payload atual (até 200k chars, `max_tokens: 65536`).
-- **Tentativa 2 (se timeout/504/response_truncated):** reduzir `max_tokens` para 32 768 e cortar o input para 140k chars (mantendo head 60% / tail 40%).
-- **Tentativa 3 (se ainda falhar):** cair para 90k chars, `max_tokens: 24 576`.
-- **Tentativa 4 (último recurso):** fallback de **provider**: se `aiConfig.provider === 'minimax'` (ou provider "premium" que estourou), refazer a mesma chamada via Lovable Gateway (`google/gemini-2.5-flash` ou o modelo configurado como fallback global no DevPanel). Isso NÃO muda a configuração global do usuário — é fallback só para esta operação, exatamente como já é feito no OCR.
+Ou seja: pode até já estar retornando um JSON `{error: "..."}` claro (ex.: "Preencha ao menos os CIDs..." ou "A IA demorou demais..."), e o frontend está engolindo por bug de extração.
 
-Cada tentativa registra fase (`structuring_attempt_1..4`) no `import_jobs.current_step` para o diagnóstico mostrar exatamente onde caiu.
+### Correção proposta (cirúrgica, mantém a funcionalidade)
 
-### 2. Desativar o retry cego dentro do `fetchWithRetry` para chamadas com `requestTimeoutMs` grande
-Hoje, um 504 vira 3 retries automáticos com o mesmo body — puro desperdício de wall-clock e a causa do "1m 20s exatos". Passar uma flag `retryOnServerError: false` na chamada de estruturação, deixando o retry só na camada da cascata acima (que muda o payload). Isso é escopo local — outras chamadas (OCR, resumos, previdenciário) mantêm o comportamento atual.
+**Passo A — Frontend: extrair a mensagem real do `context: Response`**
 
-### 3. Classificação correta na UI
-Já temos `phase: 'structuring'` no log de erro. Reforçar no `ImportarAutosDialog.tsx` que quando o erro vier com `phase === 'structuring'`, a UI mostre "**Estruturação pós-OCR falhou**" (não "GLM-OCR:" como no print). O prefixo "GLM-OCR:" está sendo colado no `current_step` porque a fase anterior deixou esse prefixo — corrigir para limpar o prefixo ao entrar em `structuring`.
+Em `src/components/laudo/sections/ReferenciasBibliograficas.tsx`, ajustar `handleGerarReferencias` para, quando `supabase.functions.invoke` lançar `FunctionsHttpError`, ler o `context.clone()` como texto/JSON antes de mostrar toast. Isso revela imediatamente se o erro é:
+  - 400 validação (falta CID/Conclusão) — o usuário sabe o que preencher;
+  - 502 timeout MiniMax — mensagem amigável já existe no backend;
+  - 500 outro — mensagem técnica real chega à UI e ao diagnóstico.
 
-### 4. Botão "Baixar diagnóstico" persistente
-Confirmar que o botão já foi adicionado no bloco de erro atual (`Processamento GLM-OCR interrompido`) — o print mostra que sim. Manter.
+Nada muda no fluxo de sucesso; apenas o ramo de erro passa a mostrar a mensagem verdadeira.
 
-### 5. Telemetria
-- Loggar tempo real de cada tentativa da cascata.
-- Loggar `input_chars` e `max_tokens` de cada tentativa.
-- Loggar o provider efetivo usado (para diferenciar "MiniMax caiu → Gemini fallback assumiu").
+**Passo B — Backend: logging da fase inicial e status HTTP correto**
+
+Em `supabase/functions/gerar-justificativa-medica/index.ts`:
+1. Adicionar `console.log('[gerar-justificativa-medica] request received campo=…')` **antes** das validações — hoje o primeiro log só ocorre após carregar o prompt (linha 639), então falhas de validação/auth não deixam rastro no log com nome de campo.
+2. Manter todos os status codes atuais (`400/401/403/404/502/500`) — nenhum handler novo.
+3. **Não** mexer em `maxOutputTokens: 2200` nem em `requestTimeoutMs: 90_000` (funcionam para conclusão de 3145 chars; referências pedem 5-8 itens, tamanho equivalente).
+
+**Passo C — Retentativa suave (opcional, só se persistir)**
+
+Se depois de A+B o diagnóstico mostrar que MiniMax está dando 5xx/timeout esporádico para referências, adicionar **um** retry único (mesmo provider, mesmo payload) — igual ao que já existe em outros lugares — sem trocar provider, sem fallback cruzado, respeitando sua regra.
+
+### Arquivos afetados (apenas 2)
+
+- `src/components/laudo/sections/ReferenciasBibliograficas.tsx` — melhoria de `extractErrorMessage` para ler `context: Response`.
+- `supabase/functions/gerar-justificativa-medica/index.ts` — 1 log adicional no início do handler; nada mais.
+
+### O que **NÃO** será tocado
+
+- Prompt de referências (`DEFAULT_PROMPTS.referencias`).
+- Provider/modelo de IA.
+- Validações backend (CIDs / Conclusão obrigatórios).
+- Qualquer outra função ou campo do módulo.
 
 ---
 
-## Arquivos afetados
+## Ordem de execução sugerida
 
-- `supabase/functions/processar-autos/index.ts` — cascata de estruturação (~linhas 1937-1970 e 2600-2700 para o path não-chunked).
-- `supabase/functions/_shared/ai-config.ts` — adicionar opção `retryOnServerError` no `fetchWithRetry` (default `true` para não quebrar callers existentes).
-- `src/components/tools/ImportarAutosDialog.tsx` — texto do banner de erro quando `phase='structuring'` e sanitização do prefixo "GLM-OCR:".
+1. Implementar Passo A + Passo B (baixíssimo risco).
+2. Você clica novamente em "Gerar Referências" — a UI passará a mostrar a mensagem real do backend, e/ou o log passará a registrar a chamada.
+3. Com base nesse resultado real, se ainda houver falha técnica, aplico o Passo C.
 
-Nenhuma alteração em: Previdenciário, Impugnação, prompts globais, OCR client-side, edge functions de OCR.
-
----
-
-## Nota técnica (para revisão)
-
-O motivo real do "1m 20s" no diagnóstico:
-
-```text
-Tentativa 1 → 504 do MiniMax em ~20s
-   backoff 1s
-Tentativa 2 → 504 em ~20s
-   backoff 2s
-Tentativa 3 → 504 em ~20s
-   backoff 4s
-Total ≈ 20+1+20+2+20+4 = 67s + overhead ≈ 80s → aborta
-```
-
-Se removermos o retry cego, cada tentativa da cascata usa payload diferente e temos chance real de sucesso já na tentativa 2 ou 3.
+Confirma que sigo com **Passo A + B** primeiro (sem C, sem qualquer fallback de IA), e paralelamente a correção do fallback de estruturação como já descrito no `.lovable/plan.md`?
