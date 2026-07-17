@@ -2899,8 +2899,11 @@ serve(async (req) => {
     // Validate required fields
     const isRetry = !!retryFilePath;
     const hasPreOcr = typeof preExtractedText === 'string' && preExtractedText.trim().length > 0;
-    const isChunked = (isChunkedUpload && fileParts?.length > 0) || hasPreOcr;
-    const finalFilePath = filePath || retryFilePath || (fileParts?.[0] ?? null);
+    const normalizedFileParts = Array.isArray(fileParts) ? fileParts : [];
+    const normalizedPageRanges = Array.isArray(pageRanges) ? pageRanges : [];
+    const isChunked = (isChunkedUpload && normalizedFileParts.length > 0) || hasPreOcr;
+    const finalFilePath = filePath || retryFilePath || (normalizedFileParts[0] ?? null);
+    const partsLabel = normalizedFileParts.length > 0 ? `${normalizedFileParts.length} partes` : 'texto pré-extraído';
 
     if (!fileName) {
       return new Response(
@@ -2915,7 +2918,7 @@ serve(async (req) => {
       );
     }
 
-    console.log(`[processar-autos] ${isRetry ? 'Retry' : isChunked ? 'Chunked' : 'New'} request - scheduling background processing for: ${finalFilePath}${isChunked ? ` (${fileParts.length} parts)` : ''}`);
+    console.log(`[processar-autos] ${isRetry ? 'Retry' : isChunked ? 'Chunked' : 'New'} request - scheduling background processing for: ${finalFilePath || 'preExtractedText'}${isChunked ? ` (${partsLabel})` : ''}`);
 
     // Create job record with file_path for retry capability
     const { data: job, error: jobError } = await supabaseAdmin
@@ -2924,7 +2927,7 @@ serve(async (req) => {
         user_id: userId,
         status: 'processing',
         progress: 0,
-        current_step: isRetry ? 'Reprocessando documento...' : isChunked ? `Processando ${fileParts.length} partes...` : 'Iniciando processamento...',
+        current_step: isRetry ? 'Reprocessando documento...' : isChunked ? `Processando ${partsLabel}...` : 'Iniciando processamento...',
         file_path: finalFilePath || null
       })
       .select('id')
@@ -2945,8 +2948,8 @@ serve(async (req) => {
     if (isChunked) {
       // For chunked uploads or preExtractedText (MiniMax client-side OCR),
       // pass the parts info to background processor
-      const effectiveFileParts = fileParts ?? [];
-      const effectivePageRanges = pageRanges ?? [];
+      const effectiveFileParts = normalizedFileParts;
+      const effectivePageRanges = normalizedPageRanges;
       const effectiveTotalPages = totalPages ?? 0;
       // @ts-ignore - EdgeRuntime exists in Supabase Edge Functions
       EdgeRuntime.waitUntil(processarChunkedPDFBackground(
