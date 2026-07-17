@@ -204,11 +204,15 @@ export function invalidateRetryConfigCache(): void {
 async function fetchWithRetry(
   url: string,
   options: RequestInit,
-  configOverride?: Partial<RetryConfig> & { requestTimeoutMs?: number }
+  configOverride?: Partial<RetryConfig> & { requestTimeoutMs?: number; retryOnServerError?: boolean }
 ): Promise<Response> {
   // Load config from database (cached)
   const baseConfig = await getRetryConfig();
   const config = { ...baseConfig, ...configOverride };
+  // When retryOnServerError === false, the caller (e.g. the structuring cascade)
+  // owns retry semantics itself — re-sending the same huge payload against a 504
+  // just burns wall-clock. We still retry pure network errors, but skip status-code retries.
+  const retryOnServerError = configOverride?.retryOnServerError !== false;
   let lastResponse: Response | null = null;
   let lastError: Error | null = null;
 
@@ -236,7 +240,7 @@ async function fetchWithRetry(
       lastResponse = response;
 
       // Check if error is retryable and we have attempts left
-      if (config.retryableStatuses.includes(response.status) && attempt < config.maxRetries) {
+      if (retryOnServerError && config.retryableStatuses.includes(response.status) && attempt < config.maxRetries) {
         const delay = config.baseDelayMs * Math.pow(2, attempt); // Exponential: 1s, 2s, 4s
         console.log(`[Retry] ⏳ Status ${response.status} (rate limit), waiting ${delay}ms (attempt ${attempt + 1}/${config.maxRetries})`);
         await new Promise(resolve => setTimeout(resolve, delay));
