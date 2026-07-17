@@ -1794,12 +1794,14 @@ async function processarChunkedPDFBackground(
 
           const partStartedAt = Date.now();
           let timeoutId: number | null = null;
+          let partTimedOut = false;
           let ocrResult: Awaited<ReturnType<typeof runOcrWithConfiguredProvider>>;
           try {
             const ocrPromise = runOcrWithConfiguredProvider(partBytes, {
               logPrefix: `[processar-autos-chunked/part-${i + 1}]`,
               pageCount: range.end - range.start + 1,
               onHeartbeat: async (stage, providerProgress) => {
+                if (partTimedOut) return;
                 const normalizedProgress = Math.max(0, Math.min(100, Number(providerProgress) || 0));
                 const overallProgress = Math.round(5 + ((i + normalizedProgress / 100) / Math.max(1, fileParts.length)) * 35);
                 const stageLabel = typeof stage === 'string' && stage.startsWith('GLM-OCR')
@@ -1820,6 +1822,7 @@ async function processarChunkedPDFBackground(
                   new Promise<never>((_, reject) => {
                     timeoutId = setTimeout(async () => {
                       try {
+                      partTimedOut = true;
                         const persisted = await failGlmPart(
                           i,
                           range,
