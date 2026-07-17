@@ -210,6 +210,14 @@ interface GlmDiagnosticEntry {
   meta?: Record<string, string | number | boolean | null>;
 }
 
+interface GlmPartOcrResult {
+  text: string;
+  pageCount: number;
+  provider: string;
+  model: string;
+  durationMs?: number;
+}
+
 const GLM_STAGES: Array<{ id: GlmStageId; label: string }> = [
   { id: 'probe', label: 'Probe do PDF' },
   { id: 'raster', label: 'Rasterização no navegador' },
@@ -681,6 +689,42 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const invokeGlmPartOcr = async (
+    partPath: string,
+    pageCount: number,
+    label: string,
+  ): Promise<GlmPartOcrResult> => {
+    const timeoutMs = 5 * 60 * 1000;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const result = await Promise.race([
+        supabase.functions.invoke('trabalhista-ocr-part', {
+          body: { partPath, pageCount },
+        }),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(
+            () => reject(new Error(`${label}: timeout operacional de ${Math.round(timeoutMs / 60000)} min sem conclusão`)),
+            timeoutMs,
+          );
+        }),
+      ]);
+      if (result.error) throw result.error;
+      const data = result.data as Partial<GlmPartOcrResult> & { ok?: boolean; error?: string } | null;
+      if (!data?.ok || typeof data.text !== 'string') {
+        throw new Error(data?.error || `${label}: resposta inválida do OCR GLM`);
+      }
+      return {
+        text: data.text,
+        pageCount: Number(data.pageCount || pageCount),
+        provider: String(data.provider || 'glm-ocr'),
+        model: String(data.model || 'glm-ocr'),
+        durationMs: Number(data.durationMs || 0),
+      };
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
   };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -1228,7 +1272,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         activeOcrProviderRef.current = 'glm';
         setCurrentOCRProvider('glm');
         // Probe rápido de páginas (~50-200ms) — decide se precisa raster
-        const { probePdfPageCount, pdfNeedsRasterSplit, rebuildPdfAsRasterClean, splitCleanPdfByPages, RASTER_SPLIT_MAX_BYTES, RASTER_SPLIT_MAX_PAGES } = await import('@/lib/pdf-preprocess');
+        const { pdfNeedsRasterSplit, rebuildPdfAsRasterParts, RASTER_SPLIT_MAX_BYTES, RASTER_SPLIT_MAX_PAGES } = await import('@/lib/pdf-preprocess');
 
         setIsSplitting(true);
         setSplitProgress(0);
@@ -1290,10 +1334,10 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             message: `Rasterizando página 0/${probe.pageCount}...`,
             meta: { totalPages: probe.pageCount },
           });
-          let rebuilt: Awaited<ReturnType<typeof rebuildPdfAsRasterClean>>;
+          let rebuilt: Awaited<ReturnType<typeof rebuildPdfAsRasterParts>>;
           try {
             rebuilt = await withTimeout(
-              rebuildPdfAsRasterClean(selectedFile, RASTER_SPLIT_MAX_BYTES, {
+              rebuildPdfAsRasterParts(selectedFile, RASTER_SPLIT_MAX_PAGES, RASTER_SPLIT_MAX_BYTES, {
                 parallelism: 4,
                 onPageProgress: (done, total) => {
                   setSplitMessage(`Rasterizando página ${done}/${total}...`);
@@ -1319,69 +1363,32 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               `Tente um PDF menor ou troque o provider de OCR no DevPanel.`,
             );
           }
-          console.log(`[ImportarAutosDialog][glm] raster limpo: ${rebuilt.pageCount} págs @ ${rebuilt.dpiUsed}dpi q=${rebuilt.qualityUsed} → ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB`);
+          const rasterTotalMB = rebuilt.totalBytes / 1024 / 1024;
+          const largestPartMB = Math.max(...rebuilt.parts.map(p => p.blob.size / 1024 / 1024));
+          console.log(`[ImportarAutosDialog][glm] partes raster reais: ${rebuilt.pageCount} págs @ ${rebuilt.dpiUsed}dpi q=${rebuilt.qualityUsed} → ${rebuilt.parts.length} partes, total ${rasterTotalMB.toFixed(1)}MB, maior ${largestPartMB.toFixed(1)}MB`);
           updateGlmStage('raster', {
             status: 'completed',
             progress: 100,
-            message: `PDF rasterizado: ${rebuilt.pageCount} págs · ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB`,
-            meta: { pageCount: rebuilt.pageCount, rasterSizeMB: Number((rebuilt.blob.size / 1024 / 1024).toFixed(1)), dpi: rebuilt.dpiUsed, quality: rebuilt.qualityUsed },
+            message: `PDF rasterizado em partes reais: ${rebuilt.pageCount} págs · total ${rasterTotalMB.toFixed(1)}MB`,
+            meta: { pageCount: rebuilt.pageCount, rasterSizeMB: Number(rasterTotalMB.toFixed(1)), dpi: rebuilt.dpiUsed, quality: rebuilt.qualityUsed, largestPartMB: Number(largestPartMB.toFixed(1)) },
           });
-
-          const cleanBytes = new Uint8Array(await rebuilt.blob.arrayBuffer());
-          const cleanFitsSingle =
-            rebuilt.blob.size <= RASTER_SPLIT_MAX_BYTES && rebuilt.pageCount <= RASTER_SPLIT_MAX_PAGES;
-
-          if (cleanFitsSingle) {
-            setSplitMessage(`PDF limpo cabe em chamada única (${rebuilt.pageCount} págs, ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB)`);
-            updateGlmStage('split', {
-              status: 'completed',
-              progress: 100,
-              message: `Sem divisão: 1 parte (${rebuilt.pageCount} págs, ${(rebuilt.blob.size / 1024 / 1024).toFixed(1)}MB)`,
-              meta: { parts: 1, totalPages: rebuilt.pageCount },
-            });
-            glmRasterResult = {
-              parts: [rebuilt.blob],
-              pageRanges: [{ start: 1, end: rebuilt.pageCount }],
-              totalPages: rebuilt.pageCount,
-            };
-          } else {
-            setSplitMessage('Dividindo PDF limpo em partes...');
-            setSplitProgress(70);
-            updateGlmStage('split', { status: 'processing', progress: 20, message: 'Dividindo PDF limpo em partes...' });
-            let cleanParts: Awaited<ReturnType<typeof splitCleanPdfByPages>>;
-            try {
-              cleanParts = await withTimeout(
-                splitCleanPdfByPages(cleanBytes, RASTER_SPLIT_MAX_PAGES, RASTER_SPLIT_MAX_BYTES),
-                3 * 60_000, // 3 min
-                'split',
-              );
-            } catch (e) {
-              setIsSplitting(false);
-              const base = e instanceof Error ? e.message : String(e);
-              updateGlmStage('split', { status: 'error', message: base });
-              throw new Error(
-                `[GLM split] Divisão do PDF em partes falhou (${base}). ` +
-                `Tente um PDF menor ou troque o provider de OCR no DevPanel.`,
-              );
-            }
-            const parts = cleanParts.map(p => p.blob);
-            const pageRanges = cleanParts.map(p => ({ start: p.startPage, end: p.endPage }));
-            const totalPages = rebuilt.pageCount;
-            setSplitParts(cleanParts.map((p, idx) => ({
-              partNumber: idx + 1,
-              pageRange: { start: p.startPage, end: p.endPage },
-              sizeMB: Number((p.blob.size / 1024 / 1024).toFixed(1)),
-            })));
-            setSplitProgress(90);
-            setSplitMessage(`Dividido em ${parts.length} parte(s)`);
-            updateGlmStage('split', {
-              status: 'completed',
-              progress: 100,
-              message: `Dividido em ${parts.length} parte(s)`,
-              meta: { parts: parts.length, totalPages, largestPartMB: Number(Math.max(...parts.map(p => p.size / 1024 / 1024)).toFixed(1)) },
-            });
-            glmRasterResult = { parts, pageRanges, totalPages };
-          }
+          const parts = rebuilt.parts.map(p => p.blob);
+          const pageRanges = rebuilt.parts.map(p => ({ start: p.startPage, end: p.endPage }));
+          const totalPages = rebuilt.pageCount;
+          setSplitParts(rebuilt.parts.map((p, idx) => ({
+            partNumber: idx + 1,
+            pageRange: { start: p.startPage, end: p.endPage },
+            sizeMB: Number((p.blob.size / 1024 / 1024).toFixed(1)),
+          })));
+          setSplitProgress(90);
+          setSplitMessage(`Dividido em ${parts.length} parte(s) reais`);
+          updateGlmStage('split', {
+            status: 'completed',
+            progress: 100,
+            message: `Dividido em ${parts.length} parte(s) reais`,
+            meta: { parts: parts.length, totalPages, largestPartMB: Number(largestPartMB.toFixed(1)) },
+          });
+          glmRasterResult = { parts, pageRanges, totalPages };
         } else {
           // GLM aceita o PDF original tal como está — não precisa raster nem split.
           console.log('[ImportarAutosDialog][glm] PDF dentro dos limites; upload direto');
@@ -1492,7 +1499,6 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           console.log(`[ImportarAutosDialog] All ${parts.length} parts uploaded`);
           if (isGlm) {
             updateGlmStage('upload', { status: 'completed', progress: 100, message: `${parts.length} parte(s) enviada(s).` });
-            updateGlmStage('job_start', { status: 'processing', progress: 10, message: 'Iniciando job no servidor...' });
           }
           
           // Store first part as file path for reference
@@ -1515,14 +1521,78 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           })));
           lastStepIdRef.current = null;
           
-          // Invoke Edge Function with chunked upload info
+          let preExtractedText: string | undefined;
+          let preExtractedProvider = 'glm-ocr';
+          let preExtractedModel = 'glm-ocr';
+
+          if (isGlm) {
+            const extractedParts: string[] = [];
+            let processedPages = 0;
+            updateGlmStage('ocr_part', { status: 'processing', progress: 0, message: `OCR GLM por função curta: 0/${partPaths.length}` });
+
+            for (let i = 0; i < partPaths.length; i++) {
+              const range = pageRanges[i];
+              const pageCount = range.end - range.start + 1;
+              const partLabel = `parte ${i + 1}/${partPaths.length} (págs ${range.start}-${range.end})`;
+              const partStart = Date.now();
+              setAnalysisStep(`GLM-OCR: processando ${partLabel}`);
+              setAnalysisProgress(Math.round(5 + (i / Math.max(1, partPaths.length)) * 35));
+              updateGlmStage('ocr_part', {
+                status: 'processing',
+                progress: Math.round((i / Math.max(1, partPaths.length)) * 100),
+                message: `Processando ${partLabel}`,
+                meta: { currentPart: i + 1, totalParts: partPaths.length, startPage: range.start, endPage: range.end, partSizeMB: Number((parts[i].size / 1024 / 1024).toFixed(1)) },
+              });
+
+              try {
+                const ocr = await invokeGlmPartOcr(partPaths[i], pageCount, partLabel);
+                preExtractedProvider = ocr.provider;
+                preExtractedModel = ocr.model;
+                processedPages += ocr.pageCount || pageCount;
+                extractedParts.push(`=== PARTE ${i + 1}/${partPaths.length} (Páginas ${range.start}-${range.end}) [${ocr.provider}] ===\n${ocr.text}`);
+                updateGlmStage('ocr_part', {
+                  status: 'processing',
+                  progress: Math.round(((i + 1) / Math.max(1, partPaths.length)) * 100),
+                  message: `${partLabel} concluída em ${formatDuration(Date.now() - partStart)} · ${ocr.text.length} chars`,
+                  meta: { currentPart: i + 1, totalParts: partPaths.length, processedPages, provider: ocr.provider },
+                });
+              } catch (partError) {
+                const message = partError instanceof Error ? partError.message : String(partError);
+                setGlmAbortReason(`Falha no OCR GLM da ${partLabel}: ${message}`);
+                updateGlmStage('ocr_part', {
+                  status: 'error',
+                  message: `Falha na ${partLabel}: ${message}`,
+                  meta: { currentPart: i + 1, totalParts: partPaths.length, startPage: range.start, endPage: range.end },
+                });
+                setProcessingStep('error');
+                throw partError;
+              }
+            }
+
+            preExtractedText = extractedParts.join('\n\n');
+            updateGlmStage('ocr_part', { status: 'completed', progress: 100, message: `${partPaths.length} parte(s) concluída(s)` });
+            updateGlmStage('backend_processing', { status: 'processing', progress: 5, message: 'Enviando texto OCR para estruturação final...' });
+            updateGlmStage('job_start', { status: 'processing', progress: 10, message: 'Iniciando estruturação final no servidor...' });
+            setAnalysisStep('OCR GLM concluído · estruturando dados...');
+            setAnalysisProgress(40);
+          } else {
+            updateGlmStage('job_start', { status: 'processing', progress: 10, message: 'Iniciando job no servidor...' });
+          }
+
+          // Invoke Edge Function with chunked upload info. For GLM, OCR already ran per-part in short functions.
           const { data: invokeData, error: invokeError } = await supabase.functions.invoke('processar-autos', {
             body: { 
               fileName: selectedFile.name,
               fileParts: partPaths,
               pageRanges,
               totalPages,
-              isChunkedUpload: true
+              isChunkedUpload: true,
+              ...(preExtractedText ? {
+                preExtractedText,
+                preExtractedProvider,
+                preExtractedModel,
+                preExtractedPageCount: totalPages,
+              } : {}),
             }
           });
           
@@ -1540,7 +1610,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           setCurrentJobId(jobId);
           if (isGlm) {
             updateGlmStage('job_start', { status: 'completed', progress: 100, message: `Job iniciado: ${jobId}`, meta: { jobId } });
-            updateGlmStage('ocr_part', { status: 'processing', progress: 0, message: 'Aguardando primeiro sinal do GLM-OCR...' });
+            updateGlmStage('backend_processing', { status: 'processing', progress: 10, message: 'Estruturação final em andamento...' });
           }
           
           // Start polling for status
@@ -1671,6 +1741,17 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     } catch (error) {
       console.error('Processing error:', error);
       setIsSplitting(false);
+      if (isGlmActive()) {
+        const message = error instanceof Error ? error.message : String(error);
+        setGlmAbortReason(message);
+        setAnalysisStep(message);
+        updateGlmStage(inferGlmStageFromStep(analysisStep, glmLastSignal?.stepId) || 'ocr_part', {
+          status: 'error',
+          message,
+        });
+        setProcessingStep('error');
+        return;
+      }
       toast({
         variant: "destructive",
         title: "Erro no processamento",
