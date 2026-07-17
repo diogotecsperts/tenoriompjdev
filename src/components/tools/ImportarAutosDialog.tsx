@@ -1385,6 +1385,14 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           setIsSplitting(false);
           setProcessingStep("uploading");
           setUploadProgress(0);
+          if (isGlm) {
+            updateGlmStage('upload', {
+              status: 'processing',
+              progress: 0,
+              message: `Enviando ${parts.length} parte(s) para armazenamento...`,
+              meta: { parts: parts.length, totalPages },
+            });
+          }
           
           // Upload each part
           const partPaths: string[] = [];
@@ -1395,6 +1403,14 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             setCurrentUploadingPart(i);
             const uploadPercent = Math.floor((i / parts.length) * 90);
             setUploadProgress(uploadPercent);
+            if (isGlm) {
+              updateGlmStage('upload', {
+                status: 'processing',
+                progress: uploadPercent,
+                message: `Enviando parte ${i + 1}/${parts.length} (${(parts[i].size / 1024 / 1024).toFixed(1)}MB)...`,
+                meta: { currentPart: i + 1, totalParts: parts.length },
+              });
+            }
             
             const partPath = `${user.id}/${timestamp}-${baseName}_part_${i + 1}.pdf`;
             console.log(`[ImportarAutosDialog] Uploading part ${i + 1}/${parts.length}: ${partPath}`);
@@ -1405,6 +1421,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             
             if (uploadError) {
               console.error(`[ImportarAutosDialog] Upload failed for part ${i + 1}:`, uploadError);
+              if (isGlm) {
+                updateGlmStage('upload', { status: 'error', message: `Falha no upload da parte ${i + 1}: ${uploadError.message}` });
+              }
               throw new Error(`Falha no upload da parte ${i + 1}: ${uploadError.message}`);
             }
             
@@ -1414,6 +1433,10 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           setCurrentUploadingPart(parts.length); // Mark all as done
           setUploadProgress(100);
           console.log(`[ImportarAutosDialog] All ${parts.length} parts uploaded`);
+          if (isGlm) {
+            updateGlmStage('upload', { status: 'completed', progress: 100, message: `${parts.length} parte(s) enviada(s).` });
+            updateGlmStage('job_start', { status: 'processing', progress: 10, message: 'Iniciando job no servidor...' });
+          }
           
           // Store first part as file path for reference
           setCurrentFilePath(partPaths[0]);
@@ -1448,12 +1471,19 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           
           if (invokeError) {
             console.error('Function error:', invokeError);
+            if (isGlm) {
+              updateGlmStage('job_start', { status: 'error', message: 'Falha ao iniciar processamento no servidor.' });
+            }
             throw new Error('Falha ao iniciar processamento');
           }
           
           const jobId = invokeData.jobId;
           console.log('[ImportarAutosDialog] Chunked job started:', jobId);
           setCurrentJobId(jobId);
+          if (isGlm) {
+            updateGlmStage('job_start', { status: 'completed', progress: 100, message: `Job iniciado: ${jobId}`, meta: { jobId } });
+            updateGlmStage('ocr_part', { status: 'processing', progress: 0, message: 'Aguardando primeiro sinal do GLM-OCR...' });
+          }
           
           // Start polling for status
           setAnalysisStep("Processando partes com IA...");
