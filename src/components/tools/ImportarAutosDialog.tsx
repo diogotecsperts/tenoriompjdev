@@ -617,10 +617,23 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
   const inferGlmStageFromStep = (step: string | null | undefined, stepId?: string | null): GlmStageId | null => {
     const normalized = (step || '').toLowerCase();
+    // Prioridade 1: stepId oficial do backend — evita que uma mensagem legada
+    // "GLM-OCR: ..." no current_step arraste a falha para a etapa de OCR quando
+    // na verdade a falha aconteceu na fase de estruturação/resumos pós-OCR.
+    if (stepId) {
+      if (stepId === 'processing') return 'backend_processing';
+      if (stepId === 'finalizing') return 'backend_processing';
+      if (stepId.startsWith('resumo_') || stepId === 'descricao_doencas' || stepId === 'nexo_causal' || stepId === 'incapacidade' || stepId === 'referencias_bibliograficas') return 'backend_processing';
+      if (stepId === 'extraction') {
+        // fase 1 (OCR). Confirma pelo texto quando disponível.
+        return 'ocr_part';
+      }
+    }
     if (!normalized) return null;
+    if (normalized.includes('estruturação pós-ocr') || normalized.includes('estruturacao pos-ocr') || normalized.includes('geração de resumos') || normalized.includes('geracao de resumos')) return 'backend_processing';
     if (normalized.includes('glm') && (normalized.includes('parte') || normalized.includes('ocr'))) return 'ocr_part';
     if (normalized.includes('extraindo parte') || normalized.includes('processando parte')) return 'ocr_part';
-    if (stepId === 'processing' || normalized.includes('estruturando') || normalized.includes('fase 2')) return 'backend_processing';
+    if (normalized.includes('estruturando') || normalized.includes('fase 2')) return 'backend_processing';
     if (normalized.includes('gerando resumo') || normalized.includes('finalizando')) return 'backend_processing';
     return null;
   };
@@ -887,7 +900,15 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     console.error('[ImportarAutosDialog] Abortando por trava:', description);
     setGlmAbortReason(reason);
     if (isGlmActive()) {
-      const inferred = inferGlmStageFromStep(lastStep, glmLastSignal?.stepId) || 'ocr_part';
+      let inferred = inferGlmStageFromStep(lastStep, glmLastSignal?.stepId);
+      if (!inferred) {
+        const ocrStage = glmDiagnostics.find(s => s.id === 'ocr_part');
+        inferred = ocrStage?.status === 'completed' ? 'backend_processing' : 'ocr_part';
+      }
+      const targetStage = glmDiagnostics.find(s => s.id === inferred);
+      if (targetStage?.status === 'completed' && inferred === 'ocr_part') {
+        inferred = 'backend_processing';
+      }
       updateGlmStage(inferred, {
         status: 'error',
         message: reason,
@@ -1072,7 +1093,19 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         if (statusIsGlm) {
           const reason = data.error || 'Erro no processamento GLM-OCR';
           setGlmAbortReason(reason);
-          const inferred = inferGlmStageFromStep(data.currentStep, data.stepId) || 'ocr_part';
+          // Descobre em qual estágio a falha realmente aconteceu. Nunca sobrescreve
+          // uma etapa que já ficou 'completed' — se o OCR terminou e a falha veio
+          // da estruturação pós-OCR, só a linha "backend_processing" vira erro.
+          let inferred = inferGlmStageFromStep(data.currentStep, data.stepId);
+          if (!inferred) {
+            const ocrStage = glmDiagnostics.find(s => s.id === 'ocr_part');
+            inferred = ocrStage?.status === 'completed' ? 'backend_processing' : 'ocr_part';
+          }
+          const targetStage = glmDiagnostics.find(s => s.id === inferred);
+          if (targetStage?.status === 'completed' && inferred === 'ocr_part') {
+            // Proteção final: OCR já concluiu, redireciona a marcação de erro para a fase seguinte.
+            inferred = 'backend_processing';
+          }
           updateGlmStage(inferred, {
             status: 'error',
             message: reason,
@@ -1754,7 +1787,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         const message = error instanceof Error ? error.message : String(error);
         setGlmAbortReason(message);
         setAnalysisStep(message);
-        updateGlmStage(inferGlmStageFromStep(analysisStep, glmLastSignal?.stepId) || 'ocr_part', {
+        let clientInferred = inferGlmStageFromStep(analysisStep, glmLastSignal?.stepId);
+        if (!clientInferred) {
+          const ocrStage = glmDiagnostics.find(s => s.id === 'ocr_part');
+          clientInferred = ocrStage?.status === 'completed' ? 'backend_processing' : 'ocr_part';
+        }
+        updateGlmStage(clientInferred, {
           status: 'error',
           message,
         });

@@ -19,8 +19,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Timeout for individual summary generation (90 seconds)
-const SUMMARY_TIMEOUT_MS = 90000;
+// Timeout for individual summary generation (aligned to inner callAI + tolerance for slow providers)
+const SUMMARY_TIMEOUT_MS = 180_000; // 3 min
+const SUMMARY_INNER_TIMEOUT_MS = 170_000; // callAI internal (< outer race)
+const SUMMARY_RETRY_TIMEOUT_MS = 300_000; // 5 min on retry
+
+// Post-OCR structuring (chunked path fase 2) — big JSON payloads on MiniMax/GLM chat can exceed default 75s
+const STRUCTURING_TIMEOUT_MS = 6 * 60 * 1000; // 6 min hard ceiling
+const STRUCTURING_HEARTBEAT_MS = 15_000; // ping updated_at every 15s so watchdog doesn't false-kill
 
 // Constants for PDF processing limits
 const GEMINI_PROCESSING_LIMIT = 45_000_000; // 45MB - max size for single Gemini call
@@ -1421,10 +1427,13 @@ const results: Record<string, string> = {
       });
       
       // Race between AI call and timeout
+      // The inner callAI timeout must be < outer race timeout so the outer message wins
+      // and the retry path can pick it up as an explicit "Timeout".
       const result = await Promise.race([
         callAI(aiConfig, summarySystemPrompt, promptComRegra, {
           promptType: tipo,
-          userId: userId
+          userId: userId,
+          requestTimeoutMs: SUMMARY_INNER_TIMEOUT_MS,
         }),
         timeoutPromise
       ]);
@@ -1480,7 +1489,7 @@ const results: Record<string, string> = {
       
       // Retry once with extended timeout for timeout errors (covers slow providers like GLM-5)
       if (isTimeout) {
-        console.warn(`[gerarResumosIA] Timeout on ${tipo}, retrying with extended timeout (180s)...`);
+        console.warn(`[gerarResumosIA] Timeout on ${tipo}, retrying with extended timeout (${Math.round(SUMMARY_RETRY_TIMEOUT_MS/1000)}s)...`);
         await supabaseAdmin
           .from('import_jobs')
           .update({ 
@@ -1493,11 +1502,12 @@ const results: Record<string, string> = {
           const retryPrompt = await getPromptForType(tipo, contexto);
           const retryPromptComRegra = retryPrompt + '\n\nREGRA FINAL INQUEBRÁVEL: Todo o texto acima DEVE ser redigido em Português Brasileiro correto e formal, com TODOS os acentos e diacríticos (á, é, í, ó, ú, â, ê, ô, ã, õ, ç). Palavras como "infeccao", "nao", "orgao", "funcoes" são ERROS GRAVES — o correto é "infecção", "não", "órgão", "funções". NUNCA omita acentos.';
           const retryTimeout = new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error(`Retry timeout após 180s`)), 180_000);
+            setTimeout(() => reject(new Error(`Retry timeout após ${Math.round(SUMMARY_RETRY_TIMEOUT_MS/1000)}s`)), SUMMARY_RETRY_TIMEOUT_MS);
           });
           const retryResult = await Promise.race([
             callAI(aiConfig, summarySystemPrompt, retryPromptComRegra, {
-              promptType: tipo, userId
+              promptType: tipo, userId,
+              requestTimeoutMs: SUMMARY_RETRY_TIMEOUT_MS - 5_000,
             }),
             retryTimeout
           ]);
@@ -1598,6 +1608,10 @@ async function processarChunkedPDFBackground(
   let attemptId: string | null = null;
   let modelUsed = 'unknown';
   let chunkedOcrProvider = 'unknown';
+  // Track current phase so the catch handler can attribute the failure to the correct
+  // pipeline stage (OCR vs post-OCR structuring vs summaries) — the UI relies on this
+  // to avoid marking a completed OCR as failed when the AI structuring times out.
+  let currentPhase: 'extraction' | 'structuring' | 'summaries' | 'finalizing' = 'extraction';
   
   // Heartbeat interval for long-running operations
   let heartbeatInterval: number | null = null;
@@ -1889,6 +1903,7 @@ async function processarChunkedPDFBackground(
     });
 
     // PHASE 2: Structure the combined text with AI
+    currentPhase = 'structuring';
     await supabaseAdmin.from('import_jobs').update({ 
       progress: 42, 
       current_step: 'Estruturando dados com IA...', 
@@ -1919,13 +1934,40 @@ async function processarChunkedPDFBackground(
       console.log(`[processar-autos-chunked] Truncated to ${textForFilling.length} chars`);
     }
     
-    // Call AI with the combined text
-    const fillResult = await callAI(
-      aiConfig,
-      systemPrompt,
-      `Analise o seguinte texto extraído de ${partCountForDisplay} partes de um documento de processo trabalhista (${totalPages} páginas) e retorne o JSON estruturado:\n\n${textForFilling}`,
-      { promptType: 'chunked_import', userId, maxOutputTokens: 65536, jsonMode: true }
-    );
+    // Call AI with the combined text.
+    // NOTE: default callAI internal timeout is 75s (see _shared/ai-config.ts). Large JSON
+    // structuring on providers like MiniMax-M3/GLM chat routinely takes 2-5 min, so we
+    // pass an explicit STRUCTURING_TIMEOUT_MS and turn on a heartbeat so the client-side
+    // stale-job watchdog does not false-kill an alive request.
+    const structuringStartedAt = Date.now();
+    await startHeartbeat('AI structuring (chunked phase 2)');
+    let fillResult: Awaited<ReturnType<typeof callAI>>;
+    try {
+      // Periodic progress ping in current_step so the UI shows the elapsed time
+      // for the structuring wait (updated_at is already refreshed by startHeartbeat).
+      const structuringProgressInterval = setInterval(async () => {
+        try {
+          const elapsedSec = Math.round((Date.now() - structuringStartedAt) / 1000);
+          await supabaseAdmin.from('import_jobs').update({
+            current_step: `Estruturando dados com IA · ${elapsedSec}s (provider ${aiConfig.provider}/${aiConfig.model})`,
+            step_id: 'processing',
+            updated_at: new Date().toISOString(),
+          }).eq('id', jobId);
+        } catch (_e) { /* ignore */ }
+      }, STRUCTURING_HEARTBEAT_MS) as unknown as number;
+      try {
+        fillResult = await callAI(
+          aiConfig,
+          systemPrompt,
+          `Analise o seguinte texto extraído de ${partCountForDisplay} partes de um documento de processo trabalhista (${totalPages} páginas) e retorne o JSON estruturado:\n\n${textForFilling}`,
+          { promptType: 'chunked_import', userId, maxOutputTokens: 65536, jsonMode: true, requestTimeoutMs: STRUCTURING_TIMEOUT_MS }
+        );
+      } finally {
+        clearInterval(structuringProgressInterval);
+      }
+    } finally {
+      stopHeartbeat();
+    }
 
     modelUsed = `${aiConfig.provider}/${aiConfig.model}`;
 
@@ -1958,6 +2000,7 @@ async function processarChunkedPDFBackground(
     console.log('[processar-autos-chunked] MEMORY: Freed extraction text before summaries');
 
     // PHASE 3: Generate AI summaries
+    currentPhase = 'summaries';
     timings.summaries.start = Date.now();
     
     await supabaseAdmin.from('import_jobs').update({ 
@@ -1970,6 +2013,7 @@ async function processarChunkedPDFBackground(
     startHeartbeat('AI summary generation (chunked)');
     const resumosResult = await gerarResumosIA(extractedData, supabaseAdmin, jobId, userId, timings.total.start);
     stopHeartbeat();
+    currentPhase = 'finalizing';
     
     timings.summaries.end = Date.now();
     
@@ -2079,7 +2123,8 @@ async function processarChunkedPDFBackground(
     await logError('processar-autos', `Job chunked falhou: ${errorMessage}`, jobId, {
       errorMessage,
       errorStack,
-      partsCount: partCountForDisplay
+      partsCount: partCountForDisplay,
+      phase: currentPhase,
     });
     
     // Update attempt record with failure
@@ -2094,15 +2139,35 @@ async function processarChunkedPDFBackground(
         .eq('id', attemptId);
     }
     
+    // Attribute the failure to the correct pipeline phase so the UI does not
+    // mark a completed OCR as errored when the post-OCR AI structuring times out.
+    // Only prefix with "GLM-OCR:" if we actually failed inside the OCR phase.
+    let failureStepLabel: string;
+    let failureStepId: string;
+    if (currentPhase === 'extraction') {
+      failureStepLabel = chunkedOcrProvider === 'glm'
+        ? `GLM-OCR: ${errorMessage.slice(0, 180)}`
+        : `Erro no OCR: ${errorMessage.slice(0, 180)}`;
+      failureStepId = 'extraction';
+    } else if (currentPhase === 'structuring') {
+      failureStepLabel = `Estruturação pós-OCR falhou: ${errorMessage.slice(0, 180)}`;
+      failureStepId = 'processing';
+    } else if (currentPhase === 'summaries') {
+      failureStepLabel = `Geração de resumos falhou: ${errorMessage.slice(0, 180)}`;
+      failureStepId = 'resumo_peticao';
+    } else {
+      failureStepLabel = `Erro ao finalizar: ${errorMessage.slice(0, 180)}`;
+      failureStepId = 'finalizing';
+    }
+
     // Save error
     await supabaseAdmin
       .from('import_jobs')
       .update({ 
         status: 'failed',
         error: errorMessage,
-        current_step: chunkedOcrProvider === 'glm'
-          ? `GLM-OCR: ${errorMessage.slice(0, 180)}`
-          : 'Erro no processamento',
+        current_step: failureStepLabel,
+        step_id: failureStepId,
         updated_at: new Date().toISOString()
       })
       .eq('id', jobId);
