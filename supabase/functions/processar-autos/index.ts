@@ -1489,7 +1489,7 @@ const results: Record<string, string> = {
       
       // Retry once with extended timeout for timeout errors (covers slow providers like GLM-5)
       if (isTimeout) {
-        console.warn(`[gerarResumosIA] Timeout on ${tipo}, retrying with extended timeout (180s)...`);
+        console.warn(`[gerarResumosIA] Timeout on ${tipo}, retrying with extended timeout (${Math.round(SUMMARY_RETRY_TIMEOUT_MS/1000)}s)...`);
         await supabaseAdmin
           .from('import_jobs')
           .update({ 
@@ -1502,11 +1502,12 @@ const results: Record<string, string> = {
           const retryPrompt = await getPromptForType(tipo, contexto);
           const retryPromptComRegra = retryPrompt + '\n\nREGRA FINAL INQUEBRÁVEL: Todo o texto acima DEVE ser redigido em Português Brasileiro correto e formal, com TODOS os acentos e diacríticos (á, é, í, ó, ú, â, ê, ô, ã, õ, ç). Palavras como "infeccao", "nao", "orgao", "funcoes" são ERROS GRAVES — o correto é "infecção", "não", "órgão", "funções". NUNCA omita acentos.';
           const retryTimeout = new Promise<never>((_, reject) => {
-            setTimeout(() => reject(new Error(`Retry timeout após 180s`)), 180_000);
+            setTimeout(() => reject(new Error(`Retry timeout após ${Math.round(SUMMARY_RETRY_TIMEOUT_MS/1000)}s`)), SUMMARY_RETRY_TIMEOUT_MS);
           });
           const retryResult = await Promise.race([
             callAI(aiConfig, summarySystemPrompt, retryPromptComRegra, {
-              promptType: tipo, userId
+              promptType: tipo, userId,
+              requestTimeoutMs: SUMMARY_RETRY_TIMEOUT_MS - 5_000,
             }),
             retryTimeout
           ]);
