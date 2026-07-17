@@ -1664,7 +1664,20 @@ async function processarChunkedPDFBackground(
     await startHeartbeat('Chunked OCR extraction');
     
     // OCR provider vem do DevPanel (system_config.phase1_ocr_provider) — nada de hardcode.
-    const { runOcrWithConfiguredProvider } = await import('../_shared/ocr-router.ts');
+    const ocrConfig = await getOcrRouterConfig();
+    const isGlmChunked = ocrConfig.provider === 'glm';
+    let ocrProviderUsed = ocrConfig.provider;
+    let ocrModelUsed = ocrConfig.geminiModel;
+
+    await supabaseAdmin.from('import_jobs').update({
+      current_step: isGlmChunked
+        ? `GLM-OCR: preparando processamento de ${fileParts.length} parte(s)...`
+        : `Preparando OCR (${ocrConfig.provider}) para ${fileParts.length} parte(s)...`,
+      progress: 4,
+      step_id: 'extraction',
+      result: { route: 'chunked_large', partsCount: fileParts.length, totalPages, ocrProvider: ocrConfig.provider, startedAt: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    }).eq('id', jobId);
 
     // Process each part with OCR
     const extractedTexts: string[] = [];
@@ -1687,7 +1700,9 @@ async function processarChunkedPDFBackground(
         const range = pageRanges[i];
 
         await supabaseAdmin.from('import_jobs').update({
-          current_step: `Extraindo parte ${i + 1}/${fileParts.length} (págs ${range.start}-${range.end})...`,
+          current_step: isGlmChunked
+            ? `GLM-OCR: preparando parte ${i + 1}/${fileParts.length} (págs ${range.start}-${range.end})...`
+            : `Extraindo parte ${i + 1}/${fileParts.length} (págs ${range.start}-${range.end})...`,
           progress: Math.round(5 + (i / fileParts.length) * 35),
           step_id: 'extraction',
           updated_at: new Date().toISOString()
@@ -1707,18 +1722,55 @@ async function processarChunkedPDFBackground(
         const partBytes = new Uint8Array(await partData.arrayBuffer());
         const partSizeMB = (partBytes.byteLength / 1024 / 1024).toFixed(2);
         console.log(`[processar-autos-chunked] Part ${i + 1} downloaded: ${partSizeMB}MB`);
+        await logInfo('processar-autos', `${isGlmChunked ? 'GLM-OCR' : ocrConfig.provider}: iniciando OCR da parte ${i + 1}/${fileParts.length}`, jobId, {
+          provider: ocrConfig.provider,
+          part: i + 1,
+          totalParts: fileParts.length,
+          startPage: range.start,
+          endPage: range.end,
+          partSizeMB,
+        });
 
         // OCR via router — respeita o provider escolhido no DevPanel.
         try {
           const ocrResult = await runOcrWithConfiguredProvider(partBytes, {
             logPrefix: `[processar-autos-chunked/part-${i + 1}]`,
+            onHeartbeat: async (stage, providerProgress) => {
+              const normalizedProgress = Math.max(0, Math.min(100, Number(providerProgress) || 0));
+              const overallProgress = Math.round(5 + ((i + normalizedProgress / 100) / Math.max(1, fileParts.length)) * 35);
+              const stageLabel = typeof stage === 'string' && stage.startsWith('GLM-OCR')
+                ? stage
+                : `${isGlmChunked ? 'GLM-OCR' : ocrConfig.provider}: ${stage}`;
+              await supabaseAdmin.from('import_jobs').update({
+                current_step: `${stageLabel} · parte ${i + 1}/${fileParts.length} (págs ${range.start}-${range.end})`,
+                progress: overallProgress,
+                step_id: 'extraction',
+                updated_at: new Date().toISOString(),
+              }).eq('id', jobId);
+            },
           });
+          ocrProviderUsed = ocrResult.provider;
+          ocrModelUsed = ocrResult.model;
           const pageCount = range.end - range.start + 1;
           extractedTexts.push(`\n=== PARTE ${i + 1} (Páginas ${range.start}-${range.end}) [${ocrResult.provider}] ===\n${ocrResult.text}`);
           processedPageCount += pageCount;
           console.log(`[processar-autos-chunked] Part ${i + 1} OCR complete (${ocrResult.provider}): ${ocrResult.text.length} chars, ${pageCount} pages`);
+          await logInfo('processar-autos', `${ocrResult.provider}: parte ${i + 1}/${fileParts.length} concluída`, jobId, {
+            provider: ocrResult.provider,
+            model: ocrResult.model,
+            part: i + 1,
+            totalParts: fileParts.length,
+            chars: ocrResult.text.length,
+            pageCount,
+          });
         } catch (ocrError) {
           console.error(`[processar-autos-chunked] OCR failed for part ${i + 1}:`, ocrError);
+          await logError('processar-autos', `${isGlmChunked ? 'GLM-OCR' : ocrConfig.provider}: falha no OCR da parte ${i + 1}/${fileParts.length}`, jobId, {
+            provider: ocrConfig.provider,
+            part: i + 1,
+            totalParts: fileParts.length,
+            error: ocrError instanceof Error ? ocrError.message : String(ocrError),
+          });
           throw new Error(`Falha no OCR da parte ${i + 1}: ${ocrError instanceof Error ? ocrError.message : 'Erro desconhecido'}`);
         }
       }
