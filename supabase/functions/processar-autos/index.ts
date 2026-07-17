@@ -1798,6 +1798,7 @@ async function processarChunkedPDFBackground(
           try {
             const ocrPromise = runOcrWithConfiguredProvider(partBytes, {
               logPrefix: `[processar-autos-chunked/part-${i + 1}]`,
+              pageCount: range.end - range.start + 1,
               onHeartbeat: async (stage, providerProgress) => {
                 const normalizedProgress = Math.max(0, Math.min(100, Number(providerProgress) || 0));
                 const overallProgress = Math.round(5 + ((i + normalizedProgress / 100) / Math.max(1, fileParts.length)) * 35);
