@@ -1899,6 +1899,7 @@ async function processarChunkedPDFBackground(
     });
 
     // PHASE 2: Structure the combined text with AI
+    currentPhase = 'structuring';
     await supabaseAdmin.from('import_jobs').update({ 
       progress: 42, 
       current_step: 'Estruturando dados com IA...', 
@@ -1929,13 +1930,40 @@ async function processarChunkedPDFBackground(
       console.log(`[processar-autos-chunked] Truncated to ${textForFilling.length} chars`);
     }
     
-    // Call AI with the combined text
-    const fillResult = await callAI(
-      aiConfig,
-      systemPrompt,
-      `Analise o seguinte texto extraído de ${partCountForDisplay} partes de um documento de processo trabalhista (${totalPages} páginas) e retorne o JSON estruturado:\n\n${textForFilling}`,
-      { promptType: 'chunked_import', userId, maxOutputTokens: 65536, jsonMode: true }
-    );
+    // Call AI with the combined text.
+    // NOTE: default callAI internal timeout is 75s (see _shared/ai-config.ts). Large JSON
+    // structuring on providers like MiniMax-M3/GLM chat routinely takes 2-5 min, so we
+    // pass an explicit STRUCTURING_TIMEOUT_MS and turn on a heartbeat so the client-side
+    // stale-job watchdog does not false-kill an alive request.
+    const structuringStartedAt = Date.now();
+    await startHeartbeat('AI structuring (chunked phase 2)');
+    let fillResult: Awaited<ReturnType<typeof callAI>>;
+    try {
+      // Periodic progress ping in current_step so the UI shows the elapsed time
+      // for the structuring wait (updated_at is already refreshed by startHeartbeat).
+      const structuringProgressInterval = setInterval(async () => {
+        try {
+          const elapsedSec = Math.round((Date.now() - structuringStartedAt) / 1000);
+          await supabaseAdmin.from('import_jobs').update({
+            current_step: `Estruturando dados com IA · ${elapsedSec}s (provider ${aiConfig.provider}/${aiConfig.model})`,
+            step_id: 'processing',
+            updated_at: new Date().toISOString(),
+          }).eq('id', jobId);
+        } catch (_e) { /* ignore */ }
+      }, STRUCTURING_HEARTBEAT_MS) as unknown as number;
+      try {
+        fillResult = await callAI(
+          aiConfig,
+          systemPrompt,
+          `Analise o seguinte texto extraído de ${partCountForDisplay} partes de um documento de processo trabalhista (${totalPages} páginas) e retorne o JSON estruturado:\n\n${textForFilling}`,
+          { promptType: 'chunked_import', userId, maxOutputTokens: 65536, jsonMode: true, requestTimeoutMs: STRUCTURING_TIMEOUT_MS }
+        );
+      } finally {
+        clearInterval(structuringProgressInterval);
+      }
+    } finally {
+      stopHeartbeat();
+    }
 
     modelUsed = `${aiConfig.provider}/${aiConfig.model}`;
 
