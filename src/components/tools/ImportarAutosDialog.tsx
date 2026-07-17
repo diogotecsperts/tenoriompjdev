@@ -1036,6 +1036,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       // Start timing
       processingStartTime.current = Date.now();
       setBackendLogs([]);
+      setCurrentOCRProvider(null);
       activeOcrProviderRef.current = ocrConfig?.provider || null;
       setGlmDiagnostics(createGlmDiagnosticState());
       setGlmLastSignal(null);
@@ -1906,6 +1907,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     networkErrorCountRef.current = 0;
     setIsReconnecting(false);
     setIsJobStale(false);
+    setCurrentOCRProvider(null);
     lastJobUpdateRef.current = null;
     staleCheckCountRef.current = 0;
     staleExtensionUsedRef.current = false;
@@ -1943,6 +1945,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setIsRetrying(false);
     setCurrentFilePath(null);
     setCurrentJobId(null);
+    setCurrentOCRProvider(null);
     setAttempts([]);
     // Reset steps status
     setStepsStatus(PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' })));
