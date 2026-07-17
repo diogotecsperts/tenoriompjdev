@@ -19,8 +19,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Timeout for individual summary generation (90 seconds)
-const SUMMARY_TIMEOUT_MS = 90000;
+// Timeout for individual summary generation (aligned to inner callAI + tolerance for slow providers)
+const SUMMARY_TIMEOUT_MS = 180_000; // 3 min
+const SUMMARY_INNER_TIMEOUT_MS = 170_000; // callAI internal (< outer race)
+const SUMMARY_RETRY_TIMEOUT_MS = 300_000; // 5 min on retry
+
+// Post-OCR structuring (chunked path fase 2) — big JSON payloads on MiniMax/GLM chat can exceed default 75s
+const STRUCTURING_TIMEOUT_MS = 6 * 60 * 1000; // 6 min hard ceiling
+const STRUCTURING_HEARTBEAT_MS = 15_000; // ping updated_at every 15s so watchdog doesn't false-kill
 
 // Constants for PDF processing limits
 const GEMINI_PROCESSING_LIMIT = 45_000_000; // 45MB - max size for single Gemini call
