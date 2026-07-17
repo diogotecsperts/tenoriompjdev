@@ -1629,18 +1629,19 @@ async function processarChunkedPDFBackground(
     pdfExtraction: { start: 0, end: 0 },
     summaries: { start: 0, end: 0 }
   };
+  const partCountForDisplay = Math.max(fileParts.length, preExtractedText?.trim() ? 1 : 0);
   
   try {
-    console.log(`[processar-autos-chunked] Starting chunked processing for job ${jobId}: ${fileParts.length} parts, ${totalPages} pages`);
+    console.log(`[processar-autos-chunked] Starting chunked processing for job ${jobId}: ${partCountForDisplay} parts, ${totalPages} pages`);
 
     // Marca rota (PDF grande → chunked) já no início do result para diagnóstico
     await supabaseAdmin.from('import_jobs').update({
-      result: { route: 'chunked_large', partsCount: fileParts.length, totalPages, startedAt: new Date().toISOString() },
+      result: { route: 'chunked_large', partsCount: partCountForDisplay, totalPages, startedAt: new Date().toISOString() },
       updated_at: new Date().toISOString(),
     }).eq('id', jobId);
 
-    await logInfo('processar-autos', `Iniciando processamento chunked: ${fileParts.length} partes, ${totalPages} páginas`, jobId, {
-      partsCount: fileParts.length,
+    await logInfo('processar-autos', `Iniciando processamento chunked: ${partCountForDisplay} partes, ${totalPages} páginas`, jobId, {
+      partsCount: partCountForDisplay,
       totalPages,
       fileName,
       route: 'chunked_large',
@@ -1677,11 +1678,11 @@ async function processarChunkedPDFBackground(
 
     await supabaseAdmin.from('import_jobs').update({
       current_step: isGlmChunked
-        ? `GLM-OCR: preparando processamento de ${fileParts.length} parte(s)...`
-        : `Preparando OCR (${ocrConfig.provider}) para ${fileParts.length} parte(s)...`,
+        ? `GLM-OCR: preparando processamento de ${partCountForDisplay} parte(s)...`
+        : `Preparando OCR (${ocrConfig.provider}) para ${partCountForDisplay} parte(s)...`,
       progress: 4,
       step_id: 'extraction',
-      result: { route: 'chunked_large', partsCount: fileParts.length, totalPages, ocrProvider: ocrConfig.provider, startedAt: new Date().toISOString() },
+      result: { route: 'chunked_large', partsCount: partCountForDisplay, totalPages, ocrProvider: ocrConfig.provider, startedAt: new Date().toISOString() },
       updated_at: new Date().toISOString(),
     }).eq('id', jobId);
 
@@ -1744,7 +1745,7 @@ async function processarChunkedPDFBackground(
         current_step: `Texto OCR já extraído (${preExtractedText.length} chars) — estruturando dados`,
         progress: 40,
         step_id: 'extraction',
-        result: { route: 'chunked_large', partsCount: fileParts.length, totalPages, ocrProvider: ocrProviderUsed, startedAt: new Date().toISOString(), preExtracted: true },
+        result: { route: 'chunked_large', partsCount: partCountForDisplay, totalPages, ocrProvider: ocrProviderUsed, startedAt: new Date().toISOString(), preExtracted: true },
         updated_at: new Date().toISOString(),
       }).eq('id', jobId);
       extractedTexts.push(preExtractedText);
@@ -1881,7 +1882,7 @@ async function processarChunkedPDFBackground(
     const combinedText = extractedTexts.join('\n\n');
     console.log(`[processar-autos-chunked] All parts processed: ${combinedText.length} chars total, ${processedPageCount} pages`);
     
-    await logInfo('processar-autos', `OCR chunked concluído: ${fileParts.length} partes processadas`, jobId, {
+    await logInfo('processar-autos', `OCR chunked concluído: ${partCountForDisplay} partes processadas`, jobId, {
       totalChars: combinedText.length,
       processedPages: processedPageCount,
       extractionTimeMs: timings.pdfExtraction.end - timings.pdfExtraction.start
@@ -1922,7 +1923,7 @@ async function processarChunkedPDFBackground(
     const fillResult = await callAI(
       aiConfig,
       systemPrompt,
-      `Analise o seguinte texto extraído de ${fileParts.length} partes de um documento de processo trabalhista (${totalPages} páginas) e retorne o JSON estruturado:\n\n${textForFilling}`,
+      `Analise o seguinte texto extraído de ${partCountForDisplay} partes de um documento de processo trabalhista (${totalPages} páginas) e retorne o JSON estruturado:\n\n${textForFilling}`,
       { promptType: 'chunked_import', userId, maxOutputTokens: 65536, jsonMode: true }
     );
 
@@ -2009,7 +2010,7 @@ async function processarChunkedPDFBackground(
           durationMs: pdfExtractionDuration,
           usedFallback: false,
           strategy: 'client_side_split',
-          partsProcessed: fileParts.length,
+          partsProcessed: partCountForDisplay,
           totalPages: totalPages
         },
         summaries: {
@@ -2022,7 +2023,7 @@ async function processarChunkedPDFBackground(
         totalDurationMs: totalDuration
       },
       chunkedInfo: {
-        partsCount: fileParts.length,
+        partsCount: partCountForDisplay,
         totalPages,
         originalFileName: fileName,
         ocrProvider: ocrProviderUsed,
@@ -2038,7 +2039,7 @@ async function processarChunkedPDFBackground(
           status: 'completed',
           result: {
             summariesCount: resumosResult.aiInfo.summariesGenerated,
-            partsProcessed: fileParts.length,
+            partsProcessed: partCountForDisplay,
             model: modelUsed,
             totalDurationMs: totalDuration
           },
@@ -2063,7 +2064,7 @@ async function processarChunkedPDFBackground(
     console.log(`[processar-autos-chunked] Job ${jobId} completed successfully`);
 
     await logInfo('processar-autos', `Job chunked concluído com sucesso`, jobId, {
-      partsProcessed: fileParts.length,
+      partsProcessed: partCountForDisplay,
       totalPages,
       totalDurationMs: totalDuration,
       summariesGenerated: resumosResult.aiInfo.summariesGenerated
@@ -2078,7 +2079,7 @@ async function processarChunkedPDFBackground(
     await logError('processar-autos', `Job chunked falhou: ${errorMessage}`, jobId, {
       errorMessage,
       errorStack,
-      partsCount: fileParts.length
+      partsCount: partCountForDisplay
     });
     
     // Update attempt record with failure
