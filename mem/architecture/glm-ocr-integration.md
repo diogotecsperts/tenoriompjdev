@@ -1,6 +1,6 @@
 ---
 name: GLM-OCR Integration (Z.AI)
-description: Integração do GLM-OCR (Z.AI layout_parsing) como provider server-side selecionável pelo DevPanel, com paginação automática de 30 páginas.
+description: Integração do GLM-OCR (Z.AI layout_parsing) como provider selecionável pelo DevPanel, com partes reais e funções curtas.
 type: architecture
 ---
 
@@ -17,15 +17,17 @@ Provider server-side adicionado como opção do DevPanel (principal ou fallback)
 - Limites da API: PDF ≤ 50 MB, imagens ≤ 10 MB, **máximo 30 páginas por request**
 - Paginação: campos `start_page_id` e `end_page_id` (1-based) para PDFs com > 30 páginas
 
-## Divisão em duas camadas
+## Divisão e orquestração segura
 
 O limite de 50MB da API GLM é global para o PDF inteiro (não por página) — a paginação por `start_page_id/end_page_id` sozinha não resolve arquivos grandes, porque o binário é reenviado a cada chamada. Por isso a divisão acontece em **duas camadas complementares**:
 
-1. **Física (client-side, antes do upload).** Em `ImportarAutosDialog.tsx`, quando `ocrConfig.provider === "glm"`, o PDF é dividido no navegador via `splitPDFClientSide(file, { maxSizeBytes: 38_000_000, maxPagesPerPart: 26 })` — margem de segurança contra o limite de 50MB / 30 páginas. Cada parte é subida separadamente como um arquivo.
+1. **Física real (client-side, antes do upload).** Em `ImportarAutosDialog.tsx`, quando `ocrConfig.provider === "glm"`, o PDF é rasterizado e remontado diretamente em PDFs de partes via `rebuildPdfAsRasterParts(...)`. Nunca montar um PDF rasterizado único e depois remover páginas, pois isso pode carregar recursos/imagens órfãs do documento inteiro em cada parte. Limite defensivo atual: 20 páginas por parte e 48MB.
 
-2. **Verificação pós-split (bug do pdf-lib).** `pdf-lib.copyPages()` pode carregar imagens não usadas do PDF original, inflando o tamanho da parte gerada em PDFs escaneados pesados. Após `splitPDFClientSide`, o dialog percorre cada parte; se alguma passar de 38MB, é re-dividida recursivamente (`maxPagesPerPart / 2`), máximo 2 níveis. `console.warn` cada ocorrência. Se após 2 níveis ainda passar, o processo falha com erro claro pedindo troca de provider ou redução manual.
+2. **OCR por função curta.** Cada parte GLM do Trabalhista é enviada para `trabalhista-ocr-part`, que processa apenas aquela parte e retorna texto. O browser concatena os textos e chama `processar-autos` com `preExtractedText` para estruturar e gerar resumos. Não voltar a processar todas as partes GLM dentro de um único `EdgeRuntime.waitUntil` longo.
 
 3. **Lógica (server-side, dentro do helper).** Dentro de cada parte que chega no `extractWithGlmOCR`, se ainda houver mais de 30 páginas (não deveria após a divisão física, mas serve como segunda linha), o helper itera com `start_page_id/end_page_id` em blocos de 30 páginas e concatena os `md_results`.
+
+Regra crítica aprendida: se um PDF rasterizado inteiro de 20MB gera 4 partes de 20MB, o split não é físico de verdade e está incorreto. Cada parte deve ser proporcional às páginas que contém.
 
 
 ## Formato de resposta relevante

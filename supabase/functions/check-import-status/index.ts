@@ -45,7 +45,7 @@ serve(async (req) => {
     });
 
     // Get job status
-    const { data: job, error } = await supabaseClient
+    let { data: job, error } = await supabaseClient
       .from('import_jobs')
       .select('*')
       .eq('id', jobId)
@@ -75,10 +75,11 @@ serve(async (req) => {
     const effectiveOcrProvider = detectOCRProvider(job.current_step) || resultProvider || null;
 
     let backendLogs: Array<{ level: string; message: string; created_at: string | null }> = [];
+    let supabaseAdmin: ReturnType<typeof createClient> | null = null;
     try {
       const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
       if (serviceKey) {
-        const supabaseAdmin = createClient(supabaseUrl, serviceKey);
+        supabaseAdmin = createClient(supabaseUrl, serviceKey);
         const { data: logs } = await supabaseAdmin
           .from('backend_logs')
           .select('level, message, created_at')
@@ -93,7 +94,57 @@ serve(async (req) => {
 
     const updatedAtMs = job.updated_at ? new Date(job.updated_at).getTime() : 0;
     const staleMs = updatedAtMs > 0 ? Date.now() - updatedAtMs : 0;
-    const isGlmStale = job.status === 'processing' && effectiveOcrProvider === 'glm' && staleMs > 5 * 60 * 1000;
+    let isGlmStale = job.status === 'processing' && effectiveOcrProvider === 'glm' && staleMs > 5 * 60 * 1000;
+
+    if (isGlmStale && supabaseAdmin) {
+      const staleReason = `GLM-OCR sem atualização do backend há ${Math.round(staleMs / 60000)} min. Última etapa: ${job.current_step || '—'}`;
+      try {
+        await supabaseAdmin.from('backend_logs').insert({
+          function_name: 'check-import-status',
+          job_id: jobId,
+          level: 'error',
+          message: `Job GLM marcado como falho por watchdog: ${staleReason}`,
+          metadata: {
+            staleMs,
+            previousStep: job.current_step,
+            previousProgress: job.progress,
+            previousUpdatedAt: job.updated_at,
+          },
+        });
+
+        await supabaseAdmin
+          .from('import_attempts')
+          .update({
+            status: 'failed',
+            error: staleReason,
+            completed_at: new Date().toISOString(),
+          })
+          .eq('job_id', jobId)
+          .eq('status', 'processing');
+
+        const { data: updatedJob } = await supabaseAdmin
+          .from('import_jobs')
+          .update({
+            status: 'failed',
+            error: staleReason,
+            current_step: `Erro GLM-OCR: ${staleReason}`.slice(0, 220),
+            step_id: 'extraction',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', jobId)
+          .eq('status', 'processing')
+          .select('*')
+          .maybeSingle();
+
+        if (updatedJob) {
+          job = updatedJob;
+          isGlmStale = false;
+          backendLogs.push({ level: 'error', message: `Job GLM marcado como falho por watchdog: ${staleReason}`, created_at: new Date().toISOString() });
+        }
+      } catch (watchdogError) {
+        console.warn('[check-import-status] Failed to mark GLM stale job as failed:', watchdogError);
+      }
+    }
 
     // Build response based on status
     const response: any = {

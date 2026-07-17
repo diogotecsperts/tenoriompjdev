@@ -4,7 +4,7 @@
  * Utilitário compartilhado (browser-only) para preparar PDFs grandes antes do
  * OCR: rasteriza cada página em JPEG e remonta um PDF novo, só-imagens, sem
  * herança de recursos. Também expõe split por páginas para respeitar o limite
- * duro do GLM-OCR (100 páginas, ~50 MB por chamada).
+ * duro do GLM-OCR (30 páginas, ~50 MB por chamada; usamos 20 por segurança).
  *
  * Este módulo é uma **duplicação intencional** das funções puras equivalentes
  * em `src/modules/previdenciario/api/pautas.ts`. O Prev continua com sua cópia
@@ -18,8 +18,8 @@
 /** Limite defensivo de bytes por parte (GLM aceita ~50 MB por request). */
 export const RASTER_SPLIT_MAX_BYTES = 48 * 1024 * 1024;
 
-/** Limite defensivo de páginas por parte. Mantém 1 parte = 1 chamada GLM real. */
-export const RASTER_SPLIT_MAX_PAGES = 30;
+/** Limite defensivo de páginas por parte. Mantém cada chamada GLM curta e rastreável. */
+export const RASTER_SPLIT_MAX_PAGES = 20;
 
 export interface RebuildRasterOptions {
   /** DPI base (default 150). O fallback usa 120 se o PDF ainda ficar grande. */
@@ -45,6 +45,13 @@ export interface PdfSplitPart {
    * optar por rasterizar novamente ou rejeitar.
    */
   needsClientRasterize?: boolean;
+}
+
+export interface RasterPart {
+  blob: Blob;
+  startPage: number;
+  endPage: number;
+  totalPages: number;
 }
 
 /**
@@ -155,6 +162,121 @@ export async function rebuildPdfAsRasterClean(
   const second = await doRebuild(dpi2, q2);
   console.info(`[pdf-preprocess] passada 2: ${(second.blob.size / 1024 / 1024).toFixed(1)}MB`);
   return { blob: second.blob, pageCount: second.pageCount, dpiUsed: dpi2, qualityUsed: q2 };
+}
+
+/**
+ * Rasteriza e monta os PDFs de saída diretamente por janela de páginas.
+ *
+ * Diferente de `rebuildPdfAsRasterClean` + `splitCleanPdfByPages`, esta função
+ * nunca cria um PDF limpo único para depois remover páginas. Isso evita que o
+ * pdf-lib carregue recursos/imagens órfãs do documento inteiro dentro de cada
+ * parte — exatamente o comportamento que fazia 4 partes terem o mesmo tamanho
+ * do PDF rasterizado completo.
+ */
+export async function rebuildPdfAsRasterParts(
+  source: Blob | File | Uint8Array,
+  maxPages: number = RASTER_SPLIT_MAX_PAGES,
+  maxBytes: number = RASTER_SPLIT_MAX_BYTES,
+  opts: RebuildRasterOptions = {},
+): Promise<{ parts: RasterPart[]; pageCount: number; dpiUsed: number; qualityUsed: number; totalBytes: number }> {
+  const renderAttempt = async (dpi: number, quality: number) => {
+    if (opts.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const pdfjs = await import("pdfjs-dist");
+    // @ts-ignore worker via Vite ?url
+    const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+    if (typeof window !== "undefined" && !pdfjs.GlobalWorkerOptions.workerSrc) {
+      pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+    }
+
+    const { PDFDocument } = await import("pdf-lib");
+    const bytes =
+      source instanceof Uint8Array
+        ? source
+        : new Uint8Array(await (source as Blob).arrayBuffer());
+    const loadingTask = pdfjs.getDocument({ data: bytes.slice() } as any);
+    const pdf = await loadingTask.promise;
+    const totalPages = pdf.numPages;
+    const parts: RasterPart[] = [];
+
+    for (let startPage = 1; startPage <= totalPages; startPage += maxPages) {
+      const endPage = Math.min(startPage + maxPages - 1, totalPages);
+      const out = await PDFDocument.create();
+
+      for (let pageNum = startPage; pageNum <= endPage; pageNum++) {
+        if (opts.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        const page = await pdf.getPage(pageNum);
+        const scale = dpi / 72;
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        const ctx = canvas.getContext("2d", { alpha: false });
+        if (!ctx) throw new Error("Canvas 2D indisponível");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, viewport, background: "white" } as any).promise;
+        const imgBlob: Blob = await new Promise((resolve, reject) => {
+          canvas.toBlob(
+            (b) => (b ? resolve(b) : reject(new Error("toBlob null"))),
+            "image/jpeg",
+            quality,
+          );
+        });
+        const jpg = await out.embedJpg(new Uint8Array(await imgBlob.arrayBuffer()));
+        const outPage = out.addPage([jpg.width, jpg.height]);
+        outPage.drawImage(jpg, { x: 0, y: 0, width: jpg.width, height: jpg.height });
+        canvas.width = 0;
+        canvas.height = 0;
+        page.cleanup();
+        opts.onPageProgress?.(pageNum, totalPages);
+      }
+
+      const outBytes = await out.save({ useObjectStreams: true });
+      const outBuf = new ArrayBuffer(outBytes.byteLength);
+      new Uint8Array(outBuf).set(outBytes);
+      const blob = new Blob([outBuf], { type: "application/pdf" });
+      parts.push({ blob, startPage, endPage, totalPages });
+      console.info(
+        `[pdf-preprocess-raster-parts] parte págs ${startPage}-${endPage}: ${(blob.size / 1024 / 1024).toFixed(1)}MB @ ${dpi}dpi q=${quality}`,
+      );
+    }
+
+    try { await loadingTask.destroy(); } catch { /* ignore */ }
+    return { parts, pageCount: totalPages };
+  };
+
+  const dpi1 = opts.dpi ?? 150;
+  const q1 = opts.jpegQuality ?? 0.75;
+  const first = await renderAttempt(dpi1, q1);
+  const firstLargest = Math.max(...first.parts.map((p) => p.blob.size));
+  if (firstLargest <= maxBytes) {
+    return {
+      ...first,
+      dpiUsed: dpi1,
+      qualityUsed: q1,
+      totalBytes: first.parts.reduce((sum, p) => sum + p.blob.size, 0),
+    };
+  }
+
+  const dpi2 = 120;
+  const q2 = 0.65;
+  console.warn(
+    `[pdf-preprocess-raster-parts] maior parte excedeu ${(maxBytes / 1024 / 1024).toFixed(0)}MB — refazendo @ ${dpi2}dpi q=${q2}`,
+  );
+  const second = await renderAttempt(dpi2, q2);
+  const secondLargest = Math.max(...second.parts.map((p) => p.blob.size));
+  if (secondLargest > maxBytes) {
+    throw new Error(
+      `Mesmo após compressão, uma parte ficou ${(secondLargest / 1024 / 1024).toFixed(1)}MB ` +
+      `(limite defensivo: ${(maxBytes / 1024 / 1024).toFixed(0)}MB).`,
+    );
+  }
+  return {
+    ...second,
+    dpiUsed: dpi2,
+    qualityUsed: q2,
+    totalBytes: second.parts.reduce((sum, p) => sum + p.blob.size, 0),
+  };
 }
 
 /** Lê o pageCount de um PDF sem rasterizar. Custo ~50-200ms. */
