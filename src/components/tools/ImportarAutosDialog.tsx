@@ -166,7 +166,7 @@ interface ImportAttempt {
   completed_at: string | null;
 }
 
-type ProcessingStep = "idle" | "uploading" | "analyzing" | "preview" | "creating";
+type ProcessingStep = "idle" | "uploading" | "analyzing" | "preview" | "creating" | "error";
 
 // Maximum processing time before showing timeout warning (25 minutes)
 const MAX_PROCESSING_TIME_MS = 25 * 60 * 1000;
@@ -318,6 +318,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const GLM_NO_ADVANCE_THRESHOLD_POLLS = 100; // 5 min em polling de 3s
   const GLM_NO_ADVANCE_ABORT_POLLS = 200; // +5 min após extensão única
   const activeOcrProviderRef = useRef<string | null>(null);
+  const failedJobPersistedRef = useRef(false);
 
   // Cancel confirmation state
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -793,8 +794,27 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
   const MAX_CONSECUTIVE_NETWORK_ERRORS = 10; // ~30s of failures before giving up
   const [isReconnecting, setIsReconnecting] = useState(false);
 
+  const markCurrentJobFailed = async (reason: string, lastStep: string | undefined) => {
+    if (!currentJobId || failedJobPersistedRef.current) return;
+    failedJobPersistedRef.current = true;
+    const provider = currentOCRProvider || activeOcrProviderRef.current || ocrConfig?.provider || 'desconhecido';
+    const { error } = await supabase.functions.invoke('mark-import-job-failed', {
+      body: {
+        jobId: currentJobId,
+        reason,
+        currentStep: lastStep || analysisStep || glmLastSignal?.currentStep || '—',
+        provider,
+        progress: glmLastSignal?.progress ?? analysisProgress,
+      },
+    });
+    if (error) {
+      console.warn('[ImportarAutosDialog] Falha ao persistir erro do job:', error);
+      failedJobPersistedRef.current = false;
+    }
+  };
+
   // Aborta polling e mostra erro rico ao operador quando o job trava (stale + teto absoluto).
-  const abortWithStaleError = (reason: string, lastStep: string | undefined) => {
+  const abortWithStaleError = async (reason: string, lastStep: string | undefined) => {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
@@ -824,14 +844,15 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         },
       });
     }
+    await markCurrentJobFailed(reason, lastStep);
     toast({
       variant: 'destructive',
       title: 'Processamento parou de responder',
       description,
       duration: 20000,
     });
-    setProcessingStep('idle');
-    setAnalysisStep('');
+    setProcessingStep('error');
+    setAnalysisStep(lastStep || analysisStep || 'Processamento GLM interrompido');
     setIsJobStale(false);
     staleExtensionUsedRef.current = false;
     staleCheckCountRef.current = 0;
@@ -859,7 +880,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         ? Date.now() - processingStartTime.current
         : 0;
       if (wallClockElapsed > ABSOLUTE_TIMEOUT_MS) {
-        abortWithStaleError(
+        await abortWithStaleError(
           `Tempo total excedeu ${Math.round(ABSOLUTE_TIMEOUT_MS / 60000)} minutos.`,
           data.currentStep || analysisStep,
         );
@@ -904,7 +925,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             setGlmAbortReason(`GLM sem avanço real há ~${Math.round((GLM_NO_ADVANCE_THRESHOLD_POLLS * 3) / 60)} min.`);
           }
           if (staleExtensionUsedRef.current && noMeaningfulAdvanceCountRef.current >= GLM_NO_ADVANCE_ABORT_POLLS) {
-            abortWithStaleError(
+            await abortWithStaleError(
               `GLM permaneceu na mesma etapa/progresso por ~${Math.round((GLM_NO_ADVANCE_ABORT_POLLS * 3) / 60)} minutos, apesar do heartbeat do servidor.`,
               data.currentStep || analysisStep,
             );
@@ -937,7 +958,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           staleExtensionUsedRef.current &&
           staleCheckCountRef.current >= STALE_THRESHOLD_POLLS * 2
         ) {
-          abortWithStaleError(
+          await abortWithStaleError(
             'Sem sinais do servidor após 10 minutos totais.',
             data.currentStep || analysisStep,
           );
@@ -949,6 +970,12 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         staleCheckCountRef.current = 0;
         staleExtensionUsedRef.current = false;
         setIsJobStale(false);
+      }
+
+      if (data.stale && statusIsGlm) {
+        setIsJobStale(true);
+        setGlmNoAdvanceAlert(true);
+        setGlmAbortReason(data.staleReason || 'GLM-OCR sem atualização recente do backend.');
       }
 
       
@@ -988,6 +1015,23 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       }
 
       if (data.status === 'failed') {
+        if (statusIsGlm) {
+          const reason = data.error || 'Erro no processamento GLM-OCR';
+          setGlmAbortReason(reason);
+          const inferred = inferGlmStageFromStep(data.currentStep, data.stepId) || 'ocr_part';
+          updateGlmStage(inferred, {
+            status: 'error',
+            message: reason,
+            meta: {
+              stepId: data.stepId || null,
+              progress: data.progress ?? null,
+            },
+          });
+          setAnalysisStep(data.currentStep || reason);
+          setAnalysisProgress(data.progress || 0);
+          setProcessingStep('error');
+          return true;
+        }
         throw new Error(data.error || 'Erro no processamento');
       }
 
@@ -1038,6 +1082,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
       setBackendLogs([]);
       setCurrentOCRProvider(null);
       activeOcrProviderRef.current = ocrConfig?.provider || null;
+      failedJobPersistedRef.current = false;
       setGlmDiagnostics(createGlmDiagnosticState());
       setGlmLastSignal(null);
       setGlmAbortReason(null);
@@ -1918,6 +1963,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     lastMeaningfulJobSignalRef.current = null;
     noMeaningfulAdvanceCountRef.current = 0;
     activeOcrProviderRef.current = null;
+    failedJobPersistedRef.current = false;
     setIsSlowAI(false);
     setSlowSteps([]);
     setStepsStatus(PROCESSING_STEPS.map(step => ({ ...step, status: 'pending' })));
@@ -1968,6 +2014,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     lastMeaningfulJobSignalRef.current = null;
     noMeaningfulAdvanceCountRef.current = 0;
     activeOcrProviderRef.current = null;
+    failedJobPersistedRef.current = false;
     // Reset network error tracking
     networkErrorCountRef.current = 0;
     setIsReconnecting(false);
