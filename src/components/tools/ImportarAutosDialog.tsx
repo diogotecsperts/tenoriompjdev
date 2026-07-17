@@ -536,7 +536,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         return 'GLM-OCR · rasterizando PDF no navegador (raster+split)';
       }
       if (step.includes('parte') || step.includes('dividindo')) {
-        return 'GLM-OCR · enviando por partes (contornando limite de 100 págs / ~50 MB por chamada)';
+        return 'GLM-OCR · enviando por partes reais (limite defensivo: 20 págs por chamada)';
       }
       return 'GLM-OCR · processando documento no servidor';
     }
@@ -1256,10 +1256,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
 
 
-      // GLM tem limite duro de ~50 MB E ≤100 páginas por chamada. Para atender
-      // ambos os limites usamos o mesmo pipeline "raster+clean+split" que o
-      // Previdenciário: rasteriza cada página em JPEG, remonta um PDF só-imagens
-      // (elimina bug do copyPages/pdf-lib) e divide por páginas quando preciso.
+      // GLM tem limite duro de ~50 MB E ≤30 páginas por chamada. Para atender
+      // ambos os limites usamos partes raster reais: cada PDF de parte é montado
+      // diretamente com suas páginas, sem salvar o documento inteiro e remover páginas.
       // Providers não-GLM continuam com o split pdf-lib halving legado (mais
       // rápido e sem regressão para quem já usa).
       const isGlm = ocrConfig?.provider === 'glm';
