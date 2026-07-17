@@ -512,11 +512,13 @@ serve(async (req) => {
     }
 
     const body = (await req.json()) as ReqBody;
+    console.log(`[gerar-justificativa-medica] request received campo=${body?.campo ?? 'n/a'} laudoId=${body?.laudoId ?? 'n/a'}`);
     if (!body?.laudoId || !body?.campo || !FIELD_TO_PROMPT[body.campo]) {
       return new Response(JSON.stringify({ error: 'Parâmetros inválidos: laudoId e campo são obrigatórios' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+
 
     // Validações específicas por campo
     if (body.campo === 'cid_descricao' && (!body.cidsManuais || body.cidsManuais.length === 0)) {
