@@ -866,6 +866,57 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         return true;
       }
 
+      if (Array.isArray(data.backendLogs)) {
+        setBackendLogs(data.backendLogs);
+      }
+
+      setGlmLastSignal({
+        currentStep: data.currentStep,
+        progress: data.progress,
+        stepId: data.stepId || null,
+        updatedAt: data.updatedAt,
+      });
+
+      const effectiveProviderFromStatus = data.ocrProvider || currentOCRProvider || activeOcrProviderRef.current || ocrConfig?.provider;
+      const statusIsGlm = isGlmProvider(effectiveProviderFromStatus);
+      if (statusIsGlm) {
+        activeOcrProviderRef.current = 'glm';
+        const inferredStage = inferGlmStageFromStep(data.currentStep, data.stepId);
+        if (inferredStage) {
+          completePreviousGlmStages(inferredStage);
+          updateGlmStage(inferredStage, {
+            status: 'processing',
+            progress: data.progress || 0,
+            message: data.currentStep || 'Aguardando sinal do GLM...',
+            meta: {
+              stepId: data.stepId || null,
+              updatedAt: data.updatedAt || null,
+            },
+          });
+        }
+
+        const meaningfulSignal = [data.status, data.currentStep || '', data.progress ?? '', data.stepId || ''].join('|');
+        if (lastMeaningfulJobSignalRef.current === meaningfulSignal && data.status === 'processing') {
+          noMeaningfulAdvanceCountRef.current++;
+          if (noMeaningfulAdvanceCountRef.current >= GLM_NO_ADVANCE_THRESHOLD_POLLS && !glmNoAdvanceAlert) {
+            setGlmNoAdvanceAlert(true);
+            setIsJobStale(true);
+            setGlmAbortReason(`GLM sem avanço real há ~${Math.round((GLM_NO_ADVANCE_THRESHOLD_POLLS * 3) / 60)} min.`);
+          }
+          if (staleExtensionUsedRef.current && noMeaningfulAdvanceCountRef.current >= GLM_NO_ADVANCE_ABORT_POLLS) {
+            abortWithStaleError(
+              `GLM permaneceu na mesma etapa/progresso por ~${Math.round((GLM_NO_ADVANCE_ABORT_POLLS * 3) / 60)} minutos, apesar do heartbeat do servidor.`,
+              data.currentStep || analysisStep,
+            );
+            return true;
+          }
+        } else {
+          lastMeaningfulJobSignalRef.current = meaningfulSignal;
+          noMeaningfulAdvanceCountRef.current = 0;
+          setGlmNoAdvanceAlert(false);
+        }
+      }
+
       if (lastJobUpdateRef.current === data.updatedAt) {
         staleCheckCountRef.current++;
 
