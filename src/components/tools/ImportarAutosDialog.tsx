@@ -2351,7 +2351,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         {partialFailures && partialFailures.failedSummaries.length > 0 && (
           <Alert className="border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400">
             <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>Importação parcial</AlertTitle>
+            <AlertTitle className="flex items-center justify-between gap-2">
+              <span>Importação parcial</span>
+              {isGlmActive() && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={downloadGlmDiagnosticReport}
+                  className="h-7 text-xs border-amber-500/50 hover:bg-amber-500/20"
+                >
+                  <Download className="h-3 w-3 mr-1" />
+                  Baixar diagnóstico
+                </Button>
+              )}
+            </AlertTitle>
             <AlertDescription>
               <p className="mb-2">Algumas seções não puderam ser geradas automaticamente:</p>
               <ul className="list-disc list-inside text-sm space-y-1">
