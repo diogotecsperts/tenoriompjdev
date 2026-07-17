@@ -1085,7 +1085,19 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         if (statusIsGlm) {
           const reason = data.error || 'Erro no processamento GLM-OCR';
           setGlmAbortReason(reason);
-          const inferred = inferGlmStageFromStep(data.currentStep, data.stepId) || 'ocr_part';
+          // Descobre em qual estágio a falha realmente aconteceu. Nunca sobrescreve
+          // uma etapa que já ficou 'completed' — se o OCR terminou e a falha veio
+          // da estruturação pós-OCR, só a linha "backend_processing" vira erro.
+          let inferred = inferGlmStageFromStep(data.currentStep, data.stepId);
+          if (!inferred) {
+            const ocrStage = glmDiagnostics.find(s => s.id === 'ocr_part');
+            inferred = ocrStage?.status === 'completed' ? 'backend_processing' : 'ocr_part';
+          }
+          const targetStage = glmDiagnostics.find(s => s.id === inferred);
+          if (targetStage?.status === 'completed' && inferred === 'ocr_part') {
+            // Proteção final: OCR já concluiu, redireciona a marcação de erro para a fase seguinte.
+            inferred = 'backend_processing';
+          }
           updateGlmStage(inferred, {
             status: 'error',
             message: reason,
