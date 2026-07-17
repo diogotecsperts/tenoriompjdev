@@ -91,9 +91,11 @@ export function ReferenciasBibliograficas() {
 
 
       if (response?.error) {
-        toast.error(extractErrorMessage(response.error, 'Erro ao gerar referências.'));
+        const realMsg = await extractErrorFromInvokeError(response.error, 'Erro ao gerar referências.');
+        toast.error(realMsg);
         return;
       }
+
 
       if (response?.data?.error) {
         toast.error(extractErrorMessage(response.data.error, 'Erro ao gerar referências.'));
