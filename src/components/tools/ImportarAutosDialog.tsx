@@ -1958,6 +1958,9 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     setIsReconnecting(false);
     setIsJobStale(false);
     setCurrentOCRProvider(null);
+    setCurrentFilePath(null);
+    currentJobIdRef.current = null;
+    setCurrentJobId(null);
     lastJobUpdateRef.current = null;
     staleCheckCountRef.current = 0;
     staleExtensionUsedRef.current = false;
