@@ -2727,35 +2727,27 @@ async function processarPDFBackground(
         // Use the existing AI config for field filling (text only, no PDF)
         const aiConfig = await getAIConfig();
         
-        // Smart truncation to prevent MAX_TOKENS in Phase 2 response
+        // Structuring goes through the cascade (input shrink + Lovable fallback)
+        // so 504s on huge payloads don't kill the two-phase path.
         let textForFilling = extracted.rawText;
-        const MAX_INPUT_CHARS = 200_000; // ~50k tokens para entrada
-
-        if (textForFilling.length > MAX_INPUT_CHARS) {
-          console.warn(`[processar-autos] Text too long (${textForFilling.length} chars), applying smart truncation`);
-          
-          // Preservar início (dados do processo, petição) e fim (quesitos)
-          const headChars = Math.floor(MAX_INPUT_CHARS * 0.6); // 60% início
-          const tailChars = Math.floor(MAX_INPUT_CHARS * 0.35); // 35% fim
-          const separator = '\n\n[... conteúdo intermediário omitido para processamento - seções detectadas preservadas ...]\n\n';
-          
-          textForFilling = textForFilling.substring(0, headChars) + 
-                           separator + 
-                           textForFilling.substring(textForFilling.length - tailChars);
-          
-          console.log(`[processar-autos] Truncated to ${textForFilling.length} chars (head: ${headChars}, tail: ${tailChars})`);
-        }
-        
-        // Call AI with the extracted raw text (no binary PDF!)
-        // Use high maxOutputTokens to prevent JSON truncation
-        const fillResult = await callAI(
-          { ...aiConfig, provider: fillProvider, model: fillModel },
-          systemPrompt,
-          `Analise o seguinte texto extraído de um documento de processo trabalhista e retorne o JSON estruturado:\n\n${textForFilling}`,
-          { promptType: 'two_phase_fill', userId, maxOutputTokens: 65536, jsonMode: true }
+        const cascade = await runStructuringWithCascade(
+          { ...aiConfig, provider: fillProvider, model: fillModel } as any,
+          {
+            supabaseAdmin,
+            jobId,
+            userId,
+            systemPrompt,
+            userPromptBuilder: (text) =>
+              `Analise o seguinte texto extraído de um documento de processo trabalhista e retorne o JSON estruturado:\n\n${text}`,
+            fullText: textForFilling,
+            promptType: 'two_phase_fill',
+            requestTimeoutMs: STRUCTURING_TIMEOUT_MS,
+          }
         );
+        const fillResult = cascade.fillResult;
+        textForFilling = truncateForStructuring(textForFilling, 200_000);
 
-        modelUsed = `${fillProvider}/${fillModel}`;
+        modelUsed = `${cascade.provider}/${cascade.model}`;
 
         // Parse the structured response
         let parsedResult = tryFixTruncatedJson(fillResult.text);
