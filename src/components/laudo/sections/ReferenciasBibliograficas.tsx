@@ -61,15 +61,19 @@ export function ReferenciasBibliograficas() {
     }
 
     // Validação client-side ANTES de chamar a Edge Function.
-    // Espelha exatamente a validação do backend (cids_selecionados + conclusao_analise).
-    // Evita o 400 que dispara o overlay de Runtime Error do preview.
-    const hasCids = Array.isArray((currentLaudo as any).cidsSelecionados)
-      && (currentLaudo as any).cidsSelecionados.length > 0;
-    const hasConclusao = !!(currentLaudo.conclusaoAnalise && currentLaudo.conclusaoAnalise.trim().length > 0);
-    if (!hasCids && !hasConclusao) {
-      toast.error("Preencha ao menos os CIDs ou a Conclusão antes de gerar referências.");
+    // Espelha exatamente a validação do backend. Aceita qualquer sinal clínico
+    // relevante: CIDs selecionados, CID digitado na Conclusão, Análise Conclusiva
+    // ou Justificativa. Evita o 400 que dispara o overlay de Runtime Error.
+    const laudoAny = currentLaudo as any;
+    const hasCidsArr = Array.isArray(laudoAny.cidsSelecionados) && laudoAny.cidsSelecionados.length > 0;
+    const hasCidConclusao = !!(currentLaudo.conclusaoCID && currentLaudo.conclusaoCID.trim().length > 0);
+    const hasConclusaoAnalise = !!(currentLaudo.conclusaoAnalise && currentLaudo.conclusaoAnalise.trim().length > 0);
+    const hasConclusaoJustif = !!(currentLaudo.conclusaoJustificativa && currentLaudo.conclusaoJustificativa.trim().length > 0);
+    if (!hasCidsArr && !hasCidConclusao && !hasConclusaoAnalise && !hasConclusaoJustif) {
+      toast.error("Preencha ao menos um CID (na Descrição Técnica ou na Conclusão) ou a Análise Conclusiva antes de gerar referências.");
       return;
     }
+
 
     setIsLoading(true);
     try {
