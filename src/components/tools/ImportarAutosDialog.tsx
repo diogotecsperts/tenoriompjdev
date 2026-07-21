@@ -1327,12 +1327,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
 
 
-      // GLM tem limite duro de ~50 MB E ≤30 páginas por chamada. O Trabalhista
-      // agora espelha exatamente o pipeline do Previdenciário: PDFs dentro dos
-      // limites (≤90 págs e ≤48MB) passam direto sem raster; grandes são
-      // rasterizados uma única vez para um PDF "limpo" e — se ainda assim
-      // excederem — divididos em partes de até 90 págs via split por páginas
-      // no PDF já limpo (recursos independentes por página).
+      // GLM tem limite duro de ~50 MB E ≤30 páginas por request. O gate segue
+      // alinhado ao Previdenciário (só rasteriza se >90 págs ou >48MB), mas o
+      // Trabalhista usa função curta por parte; então, no caminho pesado, cada
+      // parte operacional precisa ficar em até 30 páginas para não estourar o
+      // timeout real da Edge Function.
       // Providers não-GLM continuam com o split pdf-lib halving legado (mais
       // rápido e sem regressão para quem já usa).
       const isGlm = ocrConfig?.provider === 'glm';
@@ -1348,6 +1347,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         const {
           pdfNeedsRasterSplit,
           rebuildPdfAsRasterParts,
+          GLM_OCR_EDGE_MAX_PAGES,
           RASTER_SPLIT_MAX_BYTES,
           RASTER_SPLIT_MAX_PAGES,
         } = await import('@/lib/pdf-preprocess');
@@ -1424,7 +1424,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           let rasterParts: Awaited<ReturnType<typeof rebuildPdfAsRasterParts>>;
           try {
             rasterParts = await withTimeout(
-              rebuildPdfAsRasterParts(selectedFile, RASTER_SPLIT_MAX_PAGES, RASTER_SPLIT_MAX_BYTES, {
+              rebuildPdfAsRasterParts(selectedFile, GLM_OCR_EDGE_MAX_PAGES, RASTER_SPLIT_MAX_BYTES, {
                 parallelism: 1,
                 onPageProgress: (done, total) => {
                   setSplitMessage(`Rasterizando página ${done}/${total}...`);
@@ -1484,8 +1484,8 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             progress: 100,
             message: parts.length === 1
               ? `Sem divisão: 1 parte (${totalPages} págs, ${largestPartMB.toFixed(1)}MB)`
-              : `Dividido em ${parts.length} parte(s) (limite ${RASTER_SPLIT_MAX_PAGES} págs/parte)`,
-            meta: { parts: parts.length, totalPages, largestPartMB: Number(largestPartMB.toFixed(1)) },
+              : `Dividido em ${parts.length} parte(s) (OCR GLM: ${GLM_OCR_EDGE_MAX_PAGES} págs/parte; gate ${RASTER_SPLIT_MAX_PAGES})`,
+            meta: { parts: parts.length, totalPages, maxPagesPerOcrPart: GLM_OCR_EDGE_MAX_PAGES, gatePages: RASTER_SPLIT_MAX_PAGES, largestPartMB: Number(largestPartMB.toFixed(1)) },
           });
 
           glmRasterResult = { parts, pageRanges, totalPages };
