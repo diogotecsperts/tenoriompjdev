@@ -739,7 +739,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     pageCount: number,
     label: string,
   ): Promise<GlmPartOcrResult> => {
-    const timeoutMs = 5 * 60 * 1000;
+    const timeoutMs = GLM_EDGE_FUNCTION_TIMEOUT_MS;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     try {
       const result = await Promise.race([
@@ -748,12 +748,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         }),
         new Promise<never>((_, reject) => {
           timeoutId = setTimeout(
-            () => reject(new Error(`${label}: timeout operacional de ${Math.round(timeoutMs / 60000)} min sem conclusão`)),
+            () => reject(new Error(`${label}: tempo excedido na função OCR após ${Math.round(timeoutMs / 1000)}s. Reduza as páginas por parte ou tente novamente.`)),
             timeoutMs,
           );
         }),
       ]);
-      if (result.error) throw result.error;
+      if (result.error) {
+        const detail = await extractFunctionErrorMessage(result.error);
+        const isTimeout = /non-2xx|504|timeout|timed out|worker failed|failed to respond/i.test(detail);
+        throw new Error(
+          isTimeout
+            ? `${label}: tempo excedido na função OCR GLM após ~${Math.round(timeoutMs / 1000)}s. Detalhe: ${detail}`
+            : `${label}: ${detail}`,
+        );
+      }
       const data = result.data as Partial<GlmPartOcrResult> & { ok?: boolean; error?: string } | null;
       if (!data?.ok || typeof data.text !== 'string') {
         throw new Error(data?.error || `${label}: resposta inválida do OCR GLM`);
