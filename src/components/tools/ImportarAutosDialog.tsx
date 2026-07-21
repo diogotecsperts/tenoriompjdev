@@ -1491,21 +1491,50 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           glmRasterResult = { parts, pageRanges, totalPages };
         } else {
           // === CAMINHO RÁPIDO (paridade com Prev) ===
-          // GLM aceita o PDF original tal como está — sem raster, sem split.
-          // Segue o fluxo de função curta por parte única com o arquivo original.
-          console.log('[ImportarAutosDialog][glm] PDF dentro dos limites; usando OCR por função curta em parte única (sem raster)');
+          // GLM aceita o PDF original tal como está — sem raster. Se tiver mais
+          // de 30 páginas, só dividimos o ORIGINAL em janelas operacionais de
+          // 30 páginas para não repetir o timeout da função curta.
+          console.log('[ImportarAutosDialog][glm] PDF dentro do gate de raster; usando original sem rebuild');
           updateGlmStage('raster', { status: 'completed', progress: 100, message: 'Ignorada: PDF já dentro dos limites GLM.' });
-          updateGlmStage('split', { status: 'completed', progress: 100, message: `Sem divisão: 1 parte (${probe.pageCount} págs, ${(probe.sizeBytes / 1024 / 1024).toFixed(1)}MB)` });
-          setSplitParts([{
-            partNumber: 1,
-            pageRange: { start: 1, end: probe.pageCount },
-            sizeMB: Number((probe.sizeBytes / 1024 / 1024).toFixed(1)),
-          }]);
-          glmRasterResult = {
-            parts: [selectedFile],
-            pageRanges: [{ start: 1, end: probe.pageCount }],
-            totalPages: probe.pageCount,
-          };
+          if (probe.pageCount > GLM_OCR_EDGE_MAX_PAGES) {
+            setSplitMessage(`Dividindo PDF original em janelas GLM de ${GLM_OCR_EDGE_MAX_PAGES} páginas...`);
+            const originalSplit = await splitPDFClientSide(
+              selectedFile,
+              { maxSizeBytes: RASTER_SPLIT_MAX_BYTES, maxPagesPerPart: GLM_OCR_EDGE_MAX_PAGES },
+              (progress, message) => {
+                setSplitProgress(progress);
+                setSplitMessage(message);
+              },
+            );
+            setSplitParts(originalSplit.pageRanges.map((range, idx) => ({
+              partNumber: idx + 1,
+              pageRange: range,
+              sizeMB: Number((originalSplit.parts[idx].size / 1024 / 1024).toFixed(1)),
+            })));
+            updateGlmStage('split', {
+              status: 'completed',
+              progress: 100,
+              message: `PDF original dividido em ${originalSplit.parts.length} parte(s) (${GLM_OCR_EDGE_MAX_PAGES} págs/parte, sem raster)`,
+              meta: { parts: originalSplit.parts.length, totalPages: originalSplit.totalPages, maxPagesPerOcrPart: GLM_OCR_EDGE_MAX_PAGES, rasterized: false },
+            });
+            glmRasterResult = {
+              parts: originalSplit.parts,
+              pageRanges: originalSplit.pageRanges,
+              totalPages: originalSplit.totalPages,
+            };
+          } else {
+            updateGlmStage('split', { status: 'completed', progress: 100, message: `Sem divisão: 1 parte (${probe.pageCount} págs, ${(probe.sizeBytes / 1024 / 1024).toFixed(1)}MB)` });
+            setSplitParts([{
+              partNumber: 1,
+              pageRange: { start: 1, end: probe.pageCount },
+              sizeMB: Number((probe.sizeBytes / 1024 / 1024).toFixed(1)),
+            }]);
+            glmRasterResult = {
+              parts: [selectedFile],
+              pageRanges: [{ start: 1, end: probe.pageCount }],
+              totalPages: probe.pageCount,
+            };
+          }
         }
       }
 
