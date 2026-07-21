@@ -218,6 +218,36 @@ interface GlmPartOcrResult {
   durationMs?: number;
 }
 
+const GLM_EDGE_FUNCTION_TIMEOUT_MS = 150_000;
+
+async function extractFunctionErrorMessage(error: unknown): Promise<string> {
+  const fallback = error instanceof Error ? error.message : String(error || 'Erro desconhecido');
+  try {
+    const context = (error as { context?: Response })?.context;
+    if (context && typeof context.clone === 'function') {
+      const response = context.clone();
+      const text = await response.text();
+      if (text) {
+        try {
+          const body = JSON.parse(text) as { error?: unknown; message?: unknown; code?: unknown };
+          const message = typeof body.error === 'string'
+            ? body.error
+            : typeof body.message === 'string'
+              ? body.message
+              : text;
+          return response.status ? `${message} (HTTP ${response.status})` : message;
+        } catch {
+          return response.status ? `${text} (HTTP ${response.status})` : text;
+        }
+      }
+      if (response.status) return `${fallback} (HTTP ${response.status})`;
+    }
+  } catch {
+    // Mantém fallback original.
+  }
+  return fallback;
+}
+
 const GLM_STAGES: Array<{ id: GlmStageId; label: string }> = [
   { id: 'probe', label: 'Probe do PDF' },
   { id: 'raster', label: 'Rasterização no navegador' },
