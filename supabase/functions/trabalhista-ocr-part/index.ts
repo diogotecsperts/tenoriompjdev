@@ -6,6 +6,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const GLM_OCR_EDGE_MAX_PAGES = 30;
+
 interface ReqBody {
   partPath: string;
   pageCount?: number;
@@ -64,6 +66,15 @@ Deno.serve(async (req: Request) => {
     const pageCount = Number.isFinite(body.pageCount) && Number(body.pageCount) > 0
       ? Math.floor(Number(body.pageCount))
       : undefined;
+
+    if (pageCount && pageCount > GLM_OCR_EDGE_MAX_PAGES) {
+      return json({
+        error: `Parte GLM com ${pageCount} páginas excede o teto operacional de ${GLM_OCR_EDGE_MAX_PAGES} páginas por função curta.`,
+        code: "glm_part_too_large",
+        pageCount,
+        maxPages: GLM_OCR_EDGE_MAX_PAGES,
+      }, 400);
+    }
 
     console.log(
       `[trabalhista-ocr-part] user=${userId} part=${partPath} bytes=${bytes.byteLength} pages=${pageCount ?? "?"}`,

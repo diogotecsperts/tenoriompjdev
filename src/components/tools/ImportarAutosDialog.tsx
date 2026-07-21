@@ -218,6 +218,37 @@ interface GlmPartOcrResult {
   durationMs?: number;
 }
 
+const GLM_EDGE_FUNCTION_TIMEOUT_MS = 150_000;
+const GLM_OCR_EDGE_MAX_PAGES = 30;
+
+async function extractFunctionErrorMessage(error: unknown): Promise<string> {
+  const fallback = error instanceof Error ? error.message : String(error || 'Erro desconhecido');
+  try {
+    const context = (error as { context?: Response })?.context;
+    if (context && typeof context.clone === 'function') {
+      const response = context.clone();
+      const text = await response.text();
+      if (text) {
+        try {
+          const body = JSON.parse(text) as { error?: unknown; message?: unknown; code?: unknown };
+          const message = typeof body.error === 'string'
+            ? body.error
+            : typeof body.message === 'string'
+              ? body.message
+              : text;
+          return response.status ? `${message} (HTTP ${response.status})` : message;
+        } catch {
+          return response.status ? `${text} (HTTP ${response.status})` : text;
+        }
+      }
+      if (response.status) return `${fallback} (HTTP ${response.status})`;
+    }
+  } catch {
+    // Mantém fallback original.
+  }
+  return fallback;
+}
+
 const GLM_STAGES: Array<{ id: GlmStageId; label: string }> = [
   { id: 'probe', label: 'Probe do PDF' },
   { id: 'raster', label: 'Rasterização no navegador' },
@@ -709,7 +740,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
     pageCount: number,
     label: string,
   ): Promise<GlmPartOcrResult> => {
-    const timeoutMs = 5 * 60 * 1000;
+    const timeoutMs = GLM_EDGE_FUNCTION_TIMEOUT_MS;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     try {
       const result = await Promise.race([
@@ -718,12 +749,20 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         }),
         new Promise<never>((_, reject) => {
           timeoutId = setTimeout(
-            () => reject(new Error(`${label}: timeout operacional de ${Math.round(timeoutMs / 60000)} min sem conclusão`)),
+            () => reject(new Error(`${label}: tempo excedido na função OCR após ${Math.round(timeoutMs / 1000)}s. Reduza as páginas por parte ou tente novamente.`)),
             timeoutMs,
           );
         }),
       ]);
-      if (result.error) throw result.error;
+      if (result.error) {
+        const detail = await extractFunctionErrorMessage(result.error);
+        const isTimeout = /non-2xx|504|timeout|timed out|worker failed|failed to respond/i.test(detail);
+        throw new Error(
+          isTimeout
+            ? `${label}: tempo excedido na função OCR GLM após ~${Math.round(timeoutMs / 1000)}s. Detalhe: ${detail}`
+            : `${label}: ${detail}`,
+        );
+      }
       const data = result.data as Partial<GlmPartOcrResult> & { ok?: boolean; error?: string } | null;
       if (!data?.ok || typeof data.text !== 'string') {
         throw new Error(data?.error || `${label}: resposta inválida do OCR GLM`);
@@ -1289,12 +1328,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
 
 
 
-      // GLM tem limite duro de ~50 MB E ≤30 páginas por chamada. O Trabalhista
-      // agora espelha exatamente o pipeline do Previdenciário: PDFs dentro dos
-      // limites (≤90 págs e ≤48MB) passam direto sem raster; grandes são
-      // rasterizados uma única vez para um PDF "limpo" e — se ainda assim
-      // excederem — divididos em partes de até 90 págs via split por páginas
-      // no PDF já limpo (recursos independentes por página).
+      // GLM tem limite duro de ~50 MB E ≤30 páginas por request. O gate segue
+      // alinhado ao Previdenciário (só rasteriza se >90 págs ou >48MB), mas o
+      // Trabalhista usa função curta por parte; então, no caminho pesado, cada
+      // parte operacional precisa ficar em até 30 páginas para não estourar o
+      // timeout real da Edge Function.
       // Providers não-GLM continuam com o split pdf-lib halving legado (mais
       // rápido e sem regressão para quem já usa).
       const isGlm = ocrConfig?.provider === 'glm';
@@ -1386,7 +1424,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
           let rasterParts: Awaited<ReturnType<typeof rebuildPdfAsRasterParts>>;
           try {
             rasterParts = await withTimeout(
-              rebuildPdfAsRasterParts(selectedFile, RASTER_SPLIT_MAX_PAGES, RASTER_SPLIT_MAX_BYTES, {
+              rebuildPdfAsRasterParts(selectedFile, GLM_OCR_EDGE_MAX_PAGES, RASTER_SPLIT_MAX_BYTES, {
                 parallelism: 1,
                 onPageProgress: (done, total) => {
                   setSplitMessage(`Rasterizando página ${done}/${total}...`);
@@ -1446,28 +1484,57 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             progress: 100,
             message: parts.length === 1
               ? `Sem divisão: 1 parte (${totalPages} págs, ${largestPartMB.toFixed(1)}MB)`
-              : `Dividido em ${parts.length} parte(s) (limite ${RASTER_SPLIT_MAX_PAGES} págs/parte)`,
-            meta: { parts: parts.length, totalPages, largestPartMB: Number(largestPartMB.toFixed(1)) },
+              : `Dividido em ${parts.length} parte(s) (OCR GLM: ${GLM_OCR_EDGE_MAX_PAGES} págs/parte; gate ${RASTER_SPLIT_MAX_PAGES})`,
+            meta: { parts: parts.length, totalPages, maxPagesPerOcrPart: GLM_OCR_EDGE_MAX_PAGES, gatePages: RASTER_SPLIT_MAX_PAGES, largestPartMB: Number(largestPartMB.toFixed(1)) },
           });
 
           glmRasterResult = { parts, pageRanges, totalPages };
         } else {
           // === CAMINHO RÁPIDO (paridade com Prev) ===
-          // GLM aceita o PDF original tal como está — sem raster, sem split.
-          // Segue o fluxo de função curta por parte única com o arquivo original.
-          console.log('[ImportarAutosDialog][glm] PDF dentro dos limites; usando OCR por função curta em parte única (sem raster)');
+          // GLM aceita o PDF original tal como está — sem raster. Se tiver mais
+          // de 30 páginas, só dividimos o ORIGINAL em janelas operacionais de
+          // 30 páginas para não repetir o timeout da função curta.
+          console.log('[ImportarAutosDialog][glm] PDF dentro do gate de raster; usando original sem rebuild');
           updateGlmStage('raster', { status: 'completed', progress: 100, message: 'Ignorada: PDF já dentro dos limites GLM.' });
-          updateGlmStage('split', { status: 'completed', progress: 100, message: `Sem divisão: 1 parte (${probe.pageCount} págs, ${(probe.sizeBytes / 1024 / 1024).toFixed(1)}MB)` });
-          setSplitParts([{
-            partNumber: 1,
-            pageRange: { start: 1, end: probe.pageCount },
-            sizeMB: Number((probe.sizeBytes / 1024 / 1024).toFixed(1)),
-          }]);
-          glmRasterResult = {
-            parts: [selectedFile],
-            pageRanges: [{ start: 1, end: probe.pageCount }],
-            totalPages: probe.pageCount,
-          };
+          if (probe.pageCount > GLM_OCR_EDGE_MAX_PAGES) {
+            setSplitMessage(`Dividindo PDF original em janelas GLM de ${GLM_OCR_EDGE_MAX_PAGES} páginas...`);
+            const originalSplit = await splitPDFClientSide(
+              selectedFile,
+              { maxSizeBytes: RASTER_SPLIT_MAX_BYTES, maxPagesPerPart: GLM_OCR_EDGE_MAX_PAGES },
+              (progress, message) => {
+                setSplitProgress(progress);
+                setSplitMessage(message);
+              },
+            );
+            setSplitParts(originalSplit.pageRanges.map((range, idx) => ({
+              partNumber: idx + 1,
+              pageRange: range,
+              sizeMB: Number((originalSplit.parts[idx].size / 1024 / 1024).toFixed(1)),
+            })));
+            updateGlmStage('split', {
+              status: 'completed',
+              progress: 100,
+              message: `PDF original dividido em ${originalSplit.parts.length} parte(s) (${GLM_OCR_EDGE_MAX_PAGES} págs/parte, sem raster)`,
+              meta: { parts: originalSplit.parts.length, totalPages: originalSplit.totalPages, maxPagesPerOcrPart: GLM_OCR_EDGE_MAX_PAGES, rasterized: false },
+            });
+            glmRasterResult = {
+              parts: originalSplit.parts,
+              pageRanges: originalSplit.pageRanges,
+              totalPages: originalSplit.totalPages,
+            };
+          } else {
+            updateGlmStage('split', { status: 'completed', progress: 100, message: `Sem divisão: 1 parte (${probe.pageCount} págs, ${(probe.sizeBytes / 1024 / 1024).toFixed(1)}MB)` });
+            setSplitParts([{
+              partNumber: 1,
+              pageRange: { start: 1, end: probe.pageCount },
+              sizeMB: Number((probe.sizeBytes / 1024 / 1024).toFixed(1)),
+            }]);
+            glmRasterResult = {
+              parts: [selectedFile],
+              pageRanges: [{ start: 1, end: probe.pageCount }],
+              totalPages: probe.pageCount,
+            };
+          }
         }
       }
 
@@ -1608,6 +1675,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               const range = pageRanges[i];
               const pageCount = range.end - range.start + 1;
               const partLabel = `parte ${i + 1}/${partPaths.length} (págs ${range.start}-${range.end})`;
+              if (pageCount > GLM_OCR_EDGE_MAX_PAGES) {
+                throw new Error(
+                  `${partLabel}: parte com ${pageCount} páginas excede o teto operacional GLM de ${GLM_OCR_EDGE_MAX_PAGES} páginas por função curta.`,
+                );
+              }
               const partStart = Date.now();
               setAnalysisStep(`GLM-OCR: processando ${partLabel}`);
               setAnalysisProgress(Math.round(5 + (i / Math.max(1, partPaths.length)) * 35));

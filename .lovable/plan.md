@@ -1,66 +1,49 @@
-# Correção do bug catastrófico de split no Trabalhista GLM
+**Diagnóstico confirmado**
 
-## Diagnóstico (confirmado pelos artefatos enviados)
+- O split desta vez ficou correto: o PDF de 16,4 MB / 375 páginas virou **5 partes** de 90 páginas, com maior parte de **24,7 MB**.
+- O erro não foi no upload nem no tamanho da parte. A função `trabalhista-ocr-part` começou a processar a parte 1 com **90 páginas / 22,54 MB**.
+- O log mostra que dentro dessa parte o helper GLM ainda subdividiu internamente em blocos de **30 páginas**.
+- A chamada morreu em **504 após ~150s** (`execution_time_ms: 150113`) antes de terminar a parte 1.
 
-Do relatório: PDF 16.4 MB / 375 págs → `rebuildPdfAsRasterClean` produziu um PDF limpo de **55.7 MB** a 120dpi/0.65 (segunda passada, já comprimida no máximo).
+**Causa provável, com base nos arquivos lidos**
 
-Do print: aparecem "Parte 157 (55.7MB) ... Parte 209 (55.7MB) ..." — **cada parte com o tamanho do PDF limpo inteiro**, e centenas delas.
+A maior diferença prática entre o fluxo atual do Trabalhista e o Previdenciário não é só o split do PDF; é o **tempo de execução e orquestração**:
 
-Isso identifica exatamente uma coisa: `splitCleanPdfByPages` (em `src/lib/pdf-preprocess.ts`) é a origem do bug. O que aconteceu passo a passo:
+- No Trabalhista, a parte de 90 páginas é enviada para uma função curta (`trabalhista-ocr-part`) que precisa completar todas as 3 chamadas GLM internas de 30 páginas dentro do limite real da função. Ela estourou em ~150s.
+- No Previdenciário, o fluxo funcional é mais maduro: tem wrapper com retry, classificação de erro, polling/job assíncrono e caminhos separados para raster/split/finalização. Mesmo quando usa partes, o controle de progresso e erro é mais robusto.
 
-1. O novo pipeline chamou `rebuildPdfAsRasterClean` (OK) → gerou o PDF limpo de 55.7 MB.
-2. Como `55.7 MB > 48 MB (maxBytes)`, entrou em `splitCleanPdfByPages`.
-3. Dentro dela, `serializeRange(start, end)` **recarrega o PDF limpo inteiro no pdf-lib e chama `doc.removePage()` para as páginas fora da janela**. Isso **não remove os XObjects (JPEGs) associados** — o pdf-lib preserva os recursos órfãos. Resultado: cada "parte" salva com ~55.7 MB.
-4. Como cada janela de 90 págs continua > 48 MB, a recursão `emitRange` subdivide (`mid`) e chama de novo… e de novo… até `startIdx === endIdx` (página única), que ainda é ~55.7 MB e é empurrada como parte marcada `needsClientRasterize: true`.
-5. Isso produz **375 "partes" de página única, cada uma com 55.7 MB** — exatamente o que o print mostra.
+**Resposta direta à sua pergunta**
 
-Ou seja, `splitCleanPdfByPages` sozinha carrega o vício "PDF-lib herda recursos órfãos" que o comentário em `rebuildPdfAsRasterParts` (linhas 175-181) explicitamente avisa que precisa evitar. Ela nunca deveria ter sido o caminho principal no Trabalhista para PDFs grandes.
+A maior dificuldade aqui foi tentar “copiar a ideia” do Previdenciário, mas encaixar dentro de uma arquitetura Trabalhista diferente. O Previdenciário tem um fluxo orientado a perícia/job e com tratamento de falha mais completo; o Trabalhista foi adaptado para OCR por partes via função curta. O split agora ficou perto do que queríamos, mas o **OCR de 90 páginas por parte ficou grande demais para o tempo limite da função curta**.
 
-**O Previdenciário não quebrou** porque `pautas.ts` (a cópia dele desses helpers) não foi alterado nesta rodada — o gate lá continua igual e não vi mudanças de comportamento.
+**Plano de correção segura**
 
-## Correção
+1. **Não alterar nada no Previdenciário**
+   - Nenhum arquivo de `src/modules/previdenciario/*` será modificado.
+   - Nenhuma função `prev-*` será alterada.
 
-Reverter o Trabalhista GLM para o único método de split que já sabíamos ser correto — `rebuildPdfAsRasterParts` — mas **mantendo o gate condicional** do Previdenciário (o ganho que queríamos preservar): PDFs pequenos passam direto sem rasterizar; grandes vão pelo caminho seguro.
+2. **Reduzir o tamanho operacional das partes GLM no Trabalhista**
+   - Manter o gate condicional: PDFs pequenos continuam sem raster/split.
+   - Para PDFs grandes, criar partes Trabalhistas menores para GLM, alinhadas ao limite real de execução.
+   - Em vez de 90 páginas por parte, usar **30 páginas por parte** no Trabalhista GLM pesado, porque o próprio helper GLM trabalha em blocos de 30 e a função curta não aguenta 90 páginas dentro do timeout.
+   - Resultado esperado para este PDF: 375 páginas → cerca de 13 partes, mas cada parte faz só 1 chamada GLM, reduzindo risco de 504.
 
-### `src/components/tools/ImportarAutosDialog.tsx` (só o bloco `if (isGlm)`)
+3. **Corrigir a mensagem de erro do OCR por parte**
+   - Hoje a UI mostra “Edge Function returned a non-2xx status code”, que não explica nada.
+   - Ler o corpo do erro da função e mostrar algo como: “Tempo excedido na função OCR da parte 1/5 após 150s”.
+   - Preservar o botão de diagnóstico.
 
-Trocar o pipeline "clean único → splitCleanPdfByPages" pelo pipeline seguro:
+4. **Adicionar proteção contra partes grandes demais para função curta**
+   - Se uma parte GLM tiver mais de 30 páginas, avisar/impedir no próprio pipeline Trabalhista antes de chamar `trabalhista-ocr-part`.
+   - Isso evita repetir o mesmo erro silencioso.
 
-```text
-probe(pageCount, sizeBytes)
-  ├─ needsRasterSplit? (pageCount>90 || size>48MB)
-  │   ├─ NÃO → segue direto com o PDF original (fast path já implementado)
-  │   └─ SIM → rebuildPdfAsRasterParts(source, 90, 48MB)
-  │            → devolve N partes já rasterizadas por janela,
-  │              cada parte construída do zero (sem herdar recursos)
-  └─ upload de cada parte → trabalhista-ocr-part → estruturação
-```
+5. **Manter Mistral intacta**
+   - Toda a mudança fica dentro do bloco `isGlm` do Trabalhista.
+   - Mistral e demais providers continuam pelo fluxo atual.
 
-Especificamente:
-- Remover a chamada a `rebuildPdfAsRasterClean` seguida de `splitCleanPdfByPages` do caminho pesado.
-- Substituir por uma única chamada `rebuildPdfAsRasterParts(source, RASTER_SPLIT_MAX_PAGES, RASTER_SPLIT_MAX_BYTES, { onPageProgress, signal })`.
-- Manter a UI: `updateGlmStage('raster', ...)` durante o `onPageProgress`, e `updateGlmStage('split', 'completed')` ao final com `parts.length`, págs/parte e MB/parte reais.
-- O caminho rápido (PDF cabe direto) fica como está.
+**Resultado esperado**
 
-### `src/lib/pdf-preprocess.ts`
-
-- **Não remover** `splitCleanPdfByPages` — o Previdenciário pode estar usando (verificarei), então mantenho intocada. Só deixo de ser chamada pelo Trabalhista.
-- Adicionar comentário no topo de `splitCleanPdfByPages` avisando que ela não é segura para PDFs limpos com recursos JPEG grandes (herda XObjects), para evitar reincidência.
-
-## Por que isso resolve
-
-- `rebuildPdfAsRasterParts` **cria cada parte do zero** — abre um `PDFDocument` novo, embute só os JPEGs das páginas daquela janela, salva. Sem herança de recursos, sem inflar. Já é o método que estava funcionando antes da última mudança e é o que o print de auditoria ("PDF limpo gerado: 375 págs · 55.7MB") mostra que não é o problema.
-- Ganho de tempo do "gate condicional" segue preservado: PDFs ≤ 90 págs e ≤ 48 MB pulam a rasterização inteira.
-- Nenhum toque em Mistral, MiniMax OCR, Previdenciário, ou em `pautas.ts`.
-
-## Segurança e reversão
-
-- Diff mínimo: só o corpo do `if (isGlm)` em `ImportarAutosDialog.tsx` + comentário informativo em `pdf-preprocess.ts`.
-- Reversão trivial: se qualquer coisa der errado, `rebuildPdfAsRasterParts` já é o comportamento anterior conhecido.
-- Vou confirmar antes de aplicar: (a) que `splitCleanPdfByPages` **não** é chamada em nenhum lugar do Previdenciário; (b) que `rebuildPdfAsRasterParts` continua exportada e íntegra.
-
-## Escopo negativo (não vou tocar)
-
-- Nada em `src/modules/previdenciario/**`.
-- Nada em `_shared/glm-ocr.ts`, `_shared/mistral-ocr.ts`, `processar-autos`, `trabalhista-ocr-part`.
-- Sem novas migrations, sem novos secrets.
+- PDF pequeno: passa direto, sem rasterização.
+- PDF grande GLM: rasteriza e divide em partes menores de até 30 páginas para não estourar a função curta.
+- Erro futuro, se houver, vem com causa legível no modal e no diagnóstico.
+- Previdenciário permanece sem alterações.
