@@ -219,6 +219,7 @@ interface GlmPartOcrResult {
 }
 
 const GLM_EDGE_FUNCTION_TIMEOUT_MS = 150_000;
+const GLM_OCR_EDGE_MAX_PAGES = 30;
 
 async function extractFunctionErrorMessage(error: unknown): Promise<string> {
   const fallback = error instanceof Error ? error.message : String(error || 'Erro desconhecido');
@@ -1347,7 +1348,6 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         const {
           pdfNeedsRasterSplit,
           rebuildPdfAsRasterParts,
-          GLM_OCR_EDGE_MAX_PAGES,
           RASTER_SPLIT_MAX_BYTES,
           RASTER_SPLIT_MAX_PAGES,
         } = await import('@/lib/pdf-preprocess');
