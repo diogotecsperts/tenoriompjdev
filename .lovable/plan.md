@@ -1,67 +1,76 @@
-## 1) Sua pergunta direta: a correção do fallback é segura para o Trabalhista atual?
+## Objetivo
 
-**Sim, é segura**, mas quero deixar cristalino o que exatamente vai mudar e por quê não quebra o fluxo que acabou de funcionar:
+Replicar no branch **GLM do Trabalhista** o mesmo pipeline do Previdenciário — para arquivos pequenos **e** grandes — sem tocar em nenhum arquivo do módulo Previdenciário. O Trabalhista hoje **funciona** (embora lento por causa do split de 20 págs), então preservo um ponto de reversão claro antes de qualquer alteração.
 
-- O que **é removido**: a "Tentativa 4" hardcoded que usava `google/gemini-2.5-flash` via Lovable Gateway. Essa tentativa **nunca foi executada** no seu processamento bem-sucedido — a estruturação passou na tentativa 1. Removê-la não altera o caminho feliz.
-- O que **permanece intacto**: tentativas 1, 2 e 3 continuam usando **exclusivamente o provider configurado no DevPanel** (hoje `minimax/MiniMax-M3`). É o mesmo provider que funcionou agora.
-- O que **é adicionado**: 3 chaves em `system_config` com defaults **desligados** (`structuring_fallback_enabled=false`, `structuring_fallback_provider='none'`). Enquanto você não ligar no DevPanel, o comportamento é **idêntico ao atual** — nenhuma chamada extra, nenhum provider extra.
-- **Zero mudança** em: prompts, OCR, resumos, Previdenciário, Impugnação, `gerar-justificativa-medica`, `getAIConfig`, chaves de API.
+## Snapshot do estado atual (ponto de reversão)
 
-Risco residual: nulo no caminho de sucesso; no caminho de falha, ao invés de tentar Gemini indevidamente, o erro é propagado com o diagnóstico — que é exatamente o que você pediu.
+Registrado aqui para permitir reversão manual precisa caso algo dê errado. Estes são os únicos pontos que vou tocar — reverter = restaurar exatamente estes valores.
 
----
+**`src/lib/pdf-preprocess.ts`**
+- Linha 19: `export const RASTER_SPLIT_MAX_BYTES = 48 * 1024 * 1024;` (fica igual)
+- Linha 22: `export const RASTER_SPLIT_MAX_PAGES = 20;` ← valor atual a preservar
+- Funções `rebuildPdfAsRasterClean`, `splitCleanPdfByPages`, `rebuildPdfAsRasterParts`, `pdfNeedsRasterSplit`, `probePdfPageCount` já existem — **nenhuma delas será removida ou modificada**. Só mudo a constante `RASTER_SPLIT_MAX_PAGES` (20 → 90).
 
-## 2) Erro em Referências Bibliográficas ("Edge Function returned a non-2xx status code")
+**`src/components/tools/ImportarAutosDialog.tsx`**
+- Bloco `if (isGlm) { ... }` que hoje chama `rebuildPdfAsRasterParts(selectedFile, ...)` para gerar partes e depois faz upload+`trabalhista-ocr-part` por parte.
+- Nenhum outro bloco do arquivo é tocado (Mistral, MiniMax, timeline, diagnóstico, watchdog, tela de erro persistente — tudo permanece).
 
-### Diagnóstico honesto do que investiguei
+**Fora do escopo (não toco em nada):**
+- `src/modules/previdenciario/**` (Prev usa `pautas.ts` local — cópia independente).
+- `supabase/functions/**` (backend do Trabalhista já aceita `preExtractedText` via `trabalhista-ocr-part`/`processar-autos`; nenhuma edge function precisa mudar).
+- `src/lib/minimax-ocr-client.ts`, roteador OCR, DevPanel.
 
-- Edge function `gerar-justificativa-medica` está viva e respondendo bem para `gen_destino` (2-3s) e `gen_conclusao` (15s) no MiniMax-M3 — visto nos logs desta janela.
-- Para `campo === 'referencias'` a função aplica `maxOutputTokens: 2200` e `requestTimeoutMs: 90_000` (linhas 669-672).
-- **Não há nenhum log** de invocação com `campo=referencias` na janela recente — isso significa uma das duas coisas: (a) o request está falhando **antes** de chegar ao `console.log` de entrada (falha muito precoce — validação, auth, JSON parse, ou o próprio boot cold-start com timeout do cliente), ou (b) a invocação está sendo feita mas caindo em um branch de erro que hoje **não loga a fase**.
-- No frontend, `extractErrorMessage` tenta `err?.context?.error`. Em `supabase-js v2`, `FunctionsHttpError.context` é um **Response**, não JSON — então `context.error` é `undefined` e a UI cai no fallback genérico "Edge Function returned a non-2xx status code", **mascarando a mensagem real que o backend está retornando**.
+**Como reverter em 1 minuto se algo quebrar:**
+1. Voltar `RASTER_SPLIT_MAX_PAGES` para `20` em `src/lib/pdf-preprocess.ts`.
+2. Restaurar o bloco `if (isGlm)` em `ImportarAutosDialog.tsx` para chamar `rebuildPdfAsRasterParts` como faz hoje.
+Alternativa mais simples: usar o botão de revert do chat na mensagem imediatamente anterior à implementação.
 
-Ou seja: pode até já estar retornando um JSON `{error: "..."}` claro (ex.: "Preencha ao menos os CIDs..." ou "A IA demorou demais..."), e o frontend está engolindo por bug de extração.
+## Pipeline do Prev (base a replicar) — verificado em `src/modules/previdenciario/api/processar.ts:790-900`
 
-### Correção proposta (cirúrgica, mantém a funcionalidade)
+1. **Gate:** `size > 48 MB` **OU** `pageCount > 90` → precisa raster. Caso contrário, PDF passa **direto** pro OCR (chamada única, arquivo original intacto).
+2. **Se precisa raster:** rasteriza o PDF inteiro num "PDF limpo" único via `rebuildPdfAsRasterClean` (uma passada só).
+3. **Decisão pós-raster:**
+   - Limpo cabe em 48 MB **e** 90 págs → chamada única com o limpo (single-shot).
+   - Caso contrário → split do limpo em partes de até 90 págs via `splitCleanPdfByPages`.
 
-**Passo A — Frontend: extrair a mensagem real do `context: Response`**
+## Mudanças
 
-Em `src/components/laudo/sections/ReferenciasBibliograficas.tsx`, ajustar `handleGerarReferencias` para, quando `supabase.functions.invoke` lançar `FunctionsHttpError`, ler o `context.clone()` como texto/JSON antes de mostrar toast. Isso revela imediatamente se o erro é:
-  - 400 validação (falta CID/Conclusão) — o usuário sabe o que preencher;
-  - 502 timeout MiniMax — mensagem amigável já existe no backend;
-  - 500 outro — mensagem técnica real chega à UI e ao diagnóstico.
+### 1) `src/lib/pdf-preprocess.ts`
+- Trocar `RASTER_SPLIT_MAX_PAGES` de `20` → `90`, alinhando ao `PREV_SPLIT_MAX_PAGES` do Prev (que é o limite duro real da API GLM confirmado em produção).
+- Atualizar o comentário adjacente para refletir que o valor espelha deliberadamente o Prev.
+- `rebuildPdfAsRasterParts` **fica no arquivo** (não é removida) — só deixa de ser chamada pelo Trabalhista. Isso preserva a possibilidade de rollback pontual sem reintroduzir código.
 
-Nada muda no fluxo de sucesso; apenas o ramo de erro passa a mostrar a mensagem verdadeira.
+### 2) `src/components/tools/ImportarAutosDialog.tsx` — apenas o bloco `if (isGlm)`
 
-**Passo B — Backend: logging da fase inicial e status HTTP correto**
+Substituir o uso de `rebuildPdfAsRasterParts` pelo pipeline em dois passos do Prev, mantendo timeline, upload de partes, orquestração via browser e chamada por parte a `trabalhista-ocr-part` exatamente como hoje:
 
-Em `supabase/functions/gerar-justificativa-medica/index.ts`:
-1. Adicionar `console.log('[gerar-justificativa-medica] request received campo=…')` **antes** das validações — hoje o primeiro log só ocorre após carregar o prompt (linha 639), então falhas de validação/auth não deixam rastro no log com nome de campo.
-2. Manter todos os status codes atuais (`400/401/403/404/502/500`) — nenhum handler novo.
-3. **Não** mexer em `maxOutputTokens: 2200` nem em `requestTimeoutMs: 90_000` (funcionam para conclusão de 3145 chars; referências pedem 5-8 itens, tamanho equivalente).
+1. **Probe** com `pdfNeedsRasterSplit(selectedFile, 48MB, 90)` — decide se raster é necessário.
+2. **Caminho rápido (não precisa):** trata o `selectedFile` como parte única, faz upload direto para `processos-pdf/{userId}/...` e chama `trabalhista-ocr-part` uma vez. Sem raster, sem split. **Comportamento idêntico ao "caminho rápido" do Prev.**
+3. **Caminho pesado (precisa):**
+   - `rebuildPdfAsRasterClean(selectedFile, 48MB, { onPageProgress })` → um PDF limpo único (progresso já emitido para a timeline `raster`).
+   - **Decisão single-shot:** se `cleanBlob.size ≤ 48MB` **e** `cleanPageCount ≤ 90` → parte única com o limpo.
+   - **Caso contrário:** `splitCleanPdfByPages(cleanBlob, 90, 48MB)` → array de partes; cada uma passa por upload + `trabalhista-ocr-part`.
+4. O restante do fluxo (concatenação de texto, envio para `processar-autos` com `preExtractedText`, estruturação MiniMax, watchdog, diagnóstico, tela de erro persistente) **fica igual**.
 
-**Passo C — Retentativa suave (opcional, só se persistir)**
+## Arquivos alterados
 
-Se depois de A+B o diagnóstico mostrar que MiniMax está dando 5xx/timeout esporádico para referências, adicionar **um** retry único (mesmo provider, mesmo payload) — igual ao que já existe em outros lugares — sem trocar provider, sem fallback cruzado, respeitando sua regra.
+- `src/lib/pdf-preprocess.ts` — só a constante `RASTER_SPLIT_MAX_PAGES` + comentário.
+- `src/components/tools/ImportarAutosDialog.tsx` — só o bloco `if (isGlm)`.
 
-### Arquivos afetados (apenas 2)
+## Garantias explícitas
 
-- `src/components/laudo/sections/ReferenciasBibliograficas.tsx` — melhoria de `extractErrorMessage` para ler `context: Response`.
-- `supabase/functions/gerar-justificativa-medica/index.ts` — 1 log adicional no início do handler; nada mais.
+- **Previdenciário:** zero arquivos alterados. O Prev usa sua própria cópia em `src/modules/previdenciario/api/pautas.ts`; mudanças em `src/lib/pdf-preprocess.ts` não o alcançam.
+- **Mistral no Trabalhista:** o pipeline novo vive dentro de `if (isGlm)`. Mistral segue com o fluxo original intocado.
+- **GLM no Trabalhista:** passa a ter exatamente o mesmo formato de decisão do Prev — pequenos direto, grandes com raster único + single-shot ou split de 90 págs.
+- **Backend:** `trabalhista-ocr-part`, `processar-autos`, `check-import-status`, `mark-import-job-failed`, `_shared/glm-ocr.ts` — nenhum é tocado.
 
-### O que **NÃO** será tocado
+## Como validar após implementar
 
-- Prompt de referências (`DEFAULT_PROMPTS.referencias`).
-- Provider/modelo de IA.
-- Validações backend (CIDs / Conclusão obrigatórios).
-- Qualquer outra função ou campo do módulo.
+1. **PDF GLM pequeno** (ex.: 30 págs, 5 MB): timeline mostra probe → pula raster/split → OCR único.
+2. **PDF GLM médio** (ex.: 80 págs, 30 MB): probe não dispara raster; passa direto.
+3. **PDF GLM grande por páginas** (ex.: 150 págs, 20 MB): raster único → single-shot se couber, senão split em partes de até 90 págs.
+4. **PDF GLM grande por bytes** (ex.: 60 págs, 60 MB): mesmo caminho do item 3.
+5. **Trabalhista/Mistral** com qualquer PDF: idêntico.
+6. **Previdenciário** com qualquer PDF: idêntico.
 
----
-
-## Ordem de execução sugerida
-
-1. Implementar Passo A + Passo B (baixíssimo risco).
-2. Você clica novamente em "Gerar Referências" — a UI passará a mostrar a mensagem real do backend, e/ou o log passará a registrar a chamada.
-3. Com base nesse resultado real, se ainda houver falha técnica, aplico o Passo C.
-
-Confirma que sigo com **Passo A + B** primeiro (sem C, sem qualquer fallback de IA), e paralelamente a correção do fallback de estruturação como já descrito no `.lovable/plan.md`?
+Se qualquer item de 1–4 regredir em relação ao comportamento atual (que já passa em ~20 min), reverter usando as duas alterações listadas na seção de snapshot — nada além disso precisa ser desfeito.
