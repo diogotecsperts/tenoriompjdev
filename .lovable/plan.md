@@ -1,49 +1,46 @@
-**Diagnóstico confirmado**
+## Diagnóstico
 
-- O split desta vez ficou correto: o PDF de 16,4 MB / 375 páginas virou **5 partes** de 90 páginas, com maior parte de **24,7 MB**.
-- O erro não foi no upload nem no tamanho da parte. A função `trabalhista-ocr-part` começou a processar a parte 1 com **90 páginas / 22,54 MB**.
-- O log mostra que dentro dessa parte o helper GLM ainda subdividiu internamente em blocos de **30 páginas**.
-- A chamada morreu em **504 após ~150s** (`execution_time_ms: 150113`) antes de terminar a parte 1.
+A validação em `ReferenciasBibliograficas.tsx` (linhas 66-72) só aceita como "preenchido":
+- `currentLaudo.cidsSelecionados` (array populado apenas pela seção **"Descrição Técnica das Doenças"**), OU
+- `currentLaudo.conclusaoAnalise` (textarea "Análise Conclusiva" da seção Conclusão).
 
-**Causa provável, com base nos arquivos lidos**
+Ela **ignora**:
+- `conclusaoCID` — campo *"CID-10 / Diagnóstico"* da própria seção Conclusão (Input de texto livre).
+- `conclusaoDestino`, `conclusaoJustificativa`, `conclusaoIncapacidade`, `conclusaoStatus`.
 
-A maior diferença prática entre o fluxo atual do Trabalhista e o Previdenciário não é só o split do PDF; é o **tempo de execução e orquestração**:
+Se o usuário informou CID apenas em *"CID-10 / Diagnóstico"* (Conclusão) — sem passar pela *"Descrição Técnica das Doenças"* — e/ou a conclusão foi gerada mas ainda não salvou o laudo, `cidsSelecionados` fica `[]` e o toast dispara mesmo com o campo visível preenchido. O backend faz a mesma checagem estrita em `gerar-justificativa-medica/index.ts` (linhas 573-580), então mesmo bypassando o front o servidor rejeitaria.
 
-- No Trabalhista, a parte de 90 páginas é enviada para uma função curta (`trabalhista-ocr-part`) que precisa completar todas as 3 chamadas GLM internas de 30 páginas dentro do limite real da função. Ela estourou em ~150s.
-- No Previdenciário, o fluxo funcional é mais maduro: tem wrapper com retry, classificação de erro, polling/job assíncrono e caminhos separados para raster/split/finalização. Mesmo quando usa partes, o controle de progresso e erro é mais robusto.
+## Correção (escopo mínimo, apenas Trabalhista, sem tocar Previdenciário)
 
-**Resposta direta à sua pergunta**
+Ampliar a checagem para "há contexto clínico suficiente" nos dois lados, mantendo o gate defensivo mas alinhado com o UX real.
 
-A maior dificuldade aqui foi tentar “copiar a ideia” do Previdenciário, mas encaixar dentro de uma arquitetura Trabalhista diferente. O Previdenciário tem um fluxo orientado a perícia/job e com tratamento de falha mais completo; o Trabalhista foi adaptado para OCR por partes via função curta. O split agora ficou perto do que queríamos, mas o **OCR de 90 páginas por parte ficou grande demais para o tempo limite da função curta**.
+### 1. Frontend — `src/components/laudo/sections/ReferenciasBibliograficas.tsx`
+Trocar a validação por uma lista OR de sinais clínicos:
+- `cidsSelecionados.length > 0`, OU
+- `conclusaoCID.trim()` não-vazio, OU
+- `conclusaoAnalise.trim()` não-vazio, OU
+- `conclusaoJustificativa.trim()` não-vazio.
 
-**Plano de correção segura**
+Se nenhum estiver preenchido, manter o toast atual, mas ajustar a frase para refletir a nova lista:
+*"Preencha ao menos um CID (na Descrição Técnica ou na Conclusão) ou a Análise Conclusiva antes de gerar referências."*
 
-1. **Não alterar nada no Previdenciário**
-   - Nenhum arquivo de `src/modules/previdenciario/*` será modificado.
-   - Nenhuma função `prev-*` será alterada.
+### 2. Backend — `supabase/functions/gerar-justificativa-medica/index.ts` (linhas 573-580)
+Espelhar a mesma lógica lendo do banco:
+- `laudo.cids_selecionados` não-vazio, OU
+- `laudo.conclusao_cid` não-vazio, OU
+- `laudo.conclusao_analise` não-vazio, OU
+- `laudo.conclusao_justificativa` não-vazio.
 
-2. **Reduzir o tamanho operacional das partes GLM no Trabalhista**
-   - Manter o gate condicional: PDFs pequenos continuam sem raster/split.
-   - Para PDFs grandes, criar partes Trabalhistas menores para GLM, alinhadas ao limite real de execução.
-   - Em vez de 90 páginas por parte, usar **30 páginas por parte** no Trabalhista GLM pesado, porque o próprio helper GLM trabalha em blocos de 30 e a função curta não aguenta 90 páginas dentro do timeout.
-   - Resultado esperado para este PDF: 375 páginas → cerca de 13 partes, mas cada parte faz só 1 chamada GLM, reduzindo risco de 504.
+Mesma mensagem amigável. Nada mais é alterado no endpoint (o prompt de `referencias` continua recebendo o contexto que já monta hoje).
 
-3. **Corrigir a mensagem de erro do OCR por parte**
-   - Hoje a UI mostra “Edge Function returned a non-2xx status code”, que não explica nada.
-   - Ler o corpo do erro da função e mostrar algo como: “Tempo excedido na função OCR da parte 1/5 após 150s”.
-   - Preservar o botão de diagnóstico.
+### Fora do escopo
+- Não mexer no fluxo Previdenciário (validações `prev_*` intactas).
+- Não alterar o prompt de referências nem a montagem de contexto.
+- Não alterar `Conclusao.tsx`, `DescricaoTecnicaDoencas.tsx` nem `LaudoContext`.
+- Nenhuma migração, RLS ou edge function nova.
 
-4. **Adicionar proteção contra partes grandes demais para função curta**
-   - Se uma parte GLM tiver mais de 30 páginas, avisar/impedir no próprio pipeline Trabalhista antes de chamar `trabalhista-ocr-part`.
-   - Isso evita repetir o mesmo erro silencioso.
-
-5. **Manter Mistral intacta**
-   - Toda a mudança fica dentro do bloco `isGlm` do Trabalhista.
-   - Mistral e demais providers continuam pelo fluxo atual.
-
-**Resultado esperado**
-
-- PDF pequeno: passa direto, sem rasterização.
-- PDF grande GLM: rasteriza e divide em partes menores de até 30 páginas para não estourar a função curta.
-- Erro futuro, se houver, vem com causa legível no modal e no diagnóstico.
-- Previdenciário permanece sem alterações.
+## Verificação após implementar
+1. Laudo com CID só em *"CID-10 / Diagnóstico"* (Conclusão) → botão Gerar Referências deve funcionar.
+2. Laudo com `cidsSelecionados` populado → segue funcionando.
+3. Laudo totalmente vazio → mantém o toast (agora com texto mais claro).
+4. Bypass do front (chamar direto a Edge Function) sem nenhum sinal → 400 do backend com a mesma mensagem.

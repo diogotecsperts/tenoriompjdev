@@ -569,16 +569,21 @@ serve(async (req) => {
       });
     }
 
-    // Validação adicional pós-load: referências exigem ao menos CIDs OU conclusão preenchidos
+    // Validação adicional pós-load: referências exigem ao menos algum sinal clínico
+    // (CIDs selecionados, CID da conclusão, análise conclusiva ou justificativa).
     if (body.campo === 'referencias') {
-      const hasCids = Array.isArray(laudo.cids_selecionados) && laudo.cids_selecionados.length > 0;
-      const hasConclusao = !!(laudo.conclusao_analise && String(laudo.conclusao_analise).trim().length > 0);
-      if (!hasCids && !hasConclusao) {
-        return new Response(JSON.stringify({ error: 'Preencha ao menos os CIDs ou a Conclusão antes de gerar referências.' }), {
+      const l: any = laudo;
+      const hasCidsArr = Array.isArray(l.cids_selecionados) && l.cids_selecionados.length > 0;
+      const hasCidConclusao = !!(l.conclusao_cid && String(l.conclusao_cid).trim().length > 0);
+      const hasConclusaoAnalise = !!(l.conclusao_analise && String(l.conclusao_analise).trim().length > 0);
+      const hasConclusaoJustif = !!(l.conclusao_justificativa && String(l.conclusao_justificativa).trim().length > 0);
+      if (!hasCidsArr && !hasCidConclusao && !hasConclusaoAnalise && !hasConclusaoJustif) {
+        return new Response(JSON.stringify({ error: 'Preencha ao menos um CID (na Descrição Técnica ou na Conclusão) ou a Análise Conclusiva antes de gerar referências.' }), {
           status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
     }
+
 
     // ===== Validações pós-load para campos PREVIDENCIÁRIOS =====
     if (body.campo.startsWith('prev_')) {
