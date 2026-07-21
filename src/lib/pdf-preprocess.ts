@@ -18,8 +18,14 @@
 /** Limite defensivo de bytes por parte (GLM aceita ~50 MB por request). */
 export const RASTER_SPLIT_MAX_BYTES = 48 * 1024 * 1024;
 
-/** Limite defensivo de páginas por parte. Mantém cada chamada GLM curta e rastreável. */
-export const RASTER_SPLIT_MAX_PAGES = 20;
+/**
+ * Limite defensivo de páginas por parte. Espelha deliberadamente
+ * `PREV_SPLIT_MAX_PAGES` (90) do Previdenciário — que é o limite duro
+ * real confirmado em produção para a API GLM-OCR. O Trabalhista GLM
+ * agora usa o mesmo gate do Prev: só divide se pageCount > 90 ou
+ * size > 48 MB.
+ */
+export const RASTER_SPLIT_MAX_PAGES = 90;
 
 export interface RebuildRasterOptions {
   /** DPI base (default 150). O fallback usa 120 se o PDF ainda ficar grande. */
