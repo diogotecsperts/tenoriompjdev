@@ -1675,6 +1675,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               const range = pageRanges[i];
               const pageCount = range.end - range.start + 1;
               const partLabel = `parte ${i + 1}/${partPaths.length} (págs ${range.start}-${range.end})`;
+              if (pageCount > GLM_OCR_EDGE_MAX_PAGES) {
+                throw new Error(
+                  `${partLabel}: parte com ${pageCount} páginas excede o teto operacional GLM de ${GLM_OCR_EDGE_MAX_PAGES} páginas por função curta.`,
+                );
+              }
               const partStart = Date.now();
               setAnalysisStep(`GLM-OCR: processando ${partLabel}`);
               setAnalysisProgress(Math.round(5 + (i / Math.max(1, partPaths.length)) * 35));
