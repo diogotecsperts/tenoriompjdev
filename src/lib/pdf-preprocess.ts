@@ -301,7 +301,17 @@ export async function probePdfPageCount(source: Blob | File | Uint8Array): Promi
  * `maxPages` páginas E ≤ `maxBytes`. Só faz sentido em cima do output de
  * `rebuildPdfAsRasterClean` — o PDF original pode ter recursos compartilhados
  * que inflam qualquer range.
+ *
+ * ⚠️ AVISO (Trabalhista): NÃO usar como caminho principal de split. O pdf-lib
+ * NÃO faz garbage-collect de XObjects (JPEGs) órfãos ao chamar `removePage`,
+ * então quando o PDF limpo passa de ~50 MB cada "parte" pode sair inflada até
+ * o tamanho do documento inteiro. Use `rebuildPdfAsRasterParts` em vez desta
+ * função para o Trabalhista. Esta helper segue exportada porque o
+ * Previdenciário tem sua própria cópia em `modules/previdenciario/api/pautas.ts`
+ * (não afetado por este aviso — a cópia lá é intocada e mantém o comportamento
+ * original do módulo).
  */
+
 export async function splitCleanPdfByPages(
   cleanSource: Blob | Uint8Array,
   maxPages: number = RASTER_SPLIT_MAX_PAGES,
