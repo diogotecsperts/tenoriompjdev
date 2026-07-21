@@ -1309,8 +1309,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         // Probe rápido de páginas (~50-200ms) — decide se precisa raster
         const {
           pdfNeedsRasterSplit,
-          rebuildPdfAsRasterClean,
-          splitCleanPdfByPages,
+          rebuildPdfAsRasterParts,
           RASTER_SPLIT_MAX_BYTES,
           RASTER_SPLIT_MAX_PAGES,
         } = await import('@/lib/pdf-preprocess');
@@ -1372,8 +1371,11 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
         });
 
         if (probe.needs) {
-          // === CAMINHO PESADO (paridade com Prev) ===
-          // 1) Rasteriza o PDF inteiro num ÚNICO "PDF limpo" (uma passada só)
+          // === CAMINHO PESADO ===
+          // Rasteriza direto em partes já janeladas. Cada parte é construída
+          // do zero (novo PDFDocument + JPEGs só das páginas da janela),
+          // evitando o bug de recursos herdados que inflava cada parte ao
+          // tamanho do PDF limpo inteiro (>55MB × N partes).
           setSplitMessage(`Rasterizando página 0/${probe.pageCount}...`);
           updateGlmStage('raster', {
             status: 'processing',
@@ -1381,14 +1383,14 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
             message: `Rasterizando página 0/${probe.pageCount}...`,
             meta: { totalPages: probe.pageCount },
           });
-          let clean: Awaited<ReturnType<typeof rebuildPdfAsRasterClean>>;
+          let rasterParts: Awaited<ReturnType<typeof rebuildPdfAsRasterParts>>;
           try {
-            clean = await withTimeout(
-              rebuildPdfAsRasterClean(selectedFile, RASTER_SPLIT_MAX_BYTES, {
-                parallelism: 4,
+            rasterParts = await withTimeout(
+              rebuildPdfAsRasterParts(selectedFile, RASTER_SPLIT_MAX_PAGES, RASTER_SPLIT_MAX_BYTES, {
+                parallelism: 1,
                 onPageProgress: (done, total) => {
                   setSplitMessage(`Rasterizando página ${done}/${total}...`);
-                  setSplitProgress(Math.floor((done / total) * 60));
+                  setSplitProgress(Math.floor((done / total) * 80));
                   updateGlmStage('raster', {
                     status: 'processing',
                     progress: Math.floor((done / Math.max(1, total)) * 100),
@@ -1397,7 +1399,7 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
                   });
                 },
               }),
-              8 * 60_000, // 8 min
+              10 * 60_000, // 10 min
               'raster',
             );
           } catch (e) {
@@ -1410,74 +1412,43 @@ export function ImportarAutosDialog({ open, onOpenChange }: ImportarAutosDialogP
               `Tente um PDF menor ou troque o provider de OCR no DevPanel.`,
             );
           }
-          const cleanSizeMB = clean.blob.size / 1024 / 1024;
-          console.log(`[ImportarAutosDialog][glm] PDF limpo: ${clean.pageCount} págs @ ${clean.dpiUsed}dpi q=${clean.qualityUsed} → ${cleanSizeMB.toFixed(1)}MB`);
+
+          const largestPartMB = Math.max(...rasterParts.parts.map((p) => p.blob.size / 1024 / 1024));
+          console.log(
+            `[ImportarAutosDialog][glm] raster-parts: ${rasterParts.parts.length} partes @ ${rasterParts.dpiUsed}dpi q=${rasterParts.qualityUsed} (maior ${largestPartMB.toFixed(1)}MB)`,
+          );
           updateGlmStage('raster', {
             status: 'completed',
             progress: 100,
-            message: `PDF limpo gerado: ${clean.pageCount} págs · ${cleanSizeMB.toFixed(1)}MB`,
-            meta: { pageCount: clean.pageCount, cleanSizeMB: Number(cleanSizeMB.toFixed(1)), dpi: clean.dpiUsed, quality: clean.qualityUsed },
+            message: `${rasterParts.pageCount} páginas rasterizadas em ${rasterParts.parts.length} parte(s)`,
+            meta: {
+              pageCount: rasterParts.pageCount,
+              dpi: rasterParts.dpiUsed,
+              quality: rasterParts.qualityUsed,
+              parts: rasterParts.parts.length,
+              largestPartMB: Number(largestPartMB.toFixed(1)),
+            },
           });
 
-          // 2) Decisão single-shot: o PDF limpo cabe numa chamada só?
-          const singleShot =
-            clean.blob.size <= RASTER_SPLIT_MAX_BYTES &&
-            clean.pageCount <= RASTER_SPLIT_MAX_PAGES;
+          const parts = rasterParts.parts.map((p) => p.blob);
+          const pageRanges = rasterParts.parts.map((p) => ({ start: p.startPage, end: p.endPage }));
+          const totalPages = rasterParts.pageCount;
 
-          let parts: Blob[];
-          let pageRanges: Array<{ start: number; end: number }>;
-          const totalPages = clean.pageCount;
-
-          if (singleShot) {
-            console.log('[ImportarAutosDialog][glm] limpo cabe numa chamada única (single-shot)');
-            parts = [clean.blob];
-            pageRanges = [{ start: 1, end: clean.pageCount }];
-            setSplitParts([{
-              partNumber: 1,
-              pageRange: { start: 1, end: clean.pageCount },
-              sizeMB: Number(cleanSizeMB.toFixed(1)),
-            }]);
-            updateGlmStage('split', {
-              status: 'completed',
-              progress: 100,
-              message: `Sem divisão: 1 parte limpa (${clean.pageCount} págs, ${cleanSizeMB.toFixed(1)}MB)`,
-              meta: { parts: 1, totalPages, singleShot: true },
-            });
-          } else {
-            // 3) Split por páginas no PDF LIMPO (paridade com splitCleanPdfByPages do Prev)
-            let cleanParts: Awaited<ReturnType<typeof splitCleanPdfByPages>>;
-            try {
-              cleanParts = await withTimeout(
-                splitCleanPdfByPages(clean.blob, RASTER_SPLIT_MAX_PAGES, RASTER_SPLIT_MAX_BYTES),
-                4 * 60_000,
-                'split',
-              );
-            } catch (e) {
-              setIsSplitting(false);
-              const base = e instanceof Error ? e.message : String(e);
-              updateGlmStage('split', { status: 'error', message: base });
-              throw new Error(
-                `[GLM split] Divisão do PDF limpo falhou (${base}).`,
-              );
-            }
-            parts = cleanParts.map(p => p.blob);
-            pageRanges = cleanParts.map(p => ({ start: p.startPage, end: p.endPage }));
-            const largestPartMB = Math.max(...cleanParts.map(p => p.blob.size / 1024 / 1024));
-            console.log(`[ImportarAutosDialog][glm] split do limpo: ${cleanParts.length} partes, maior ${largestPartMB.toFixed(1)}MB`);
-            setSplitParts(cleanParts.map((p, idx) => ({
-              partNumber: idx + 1,
-              pageRange: { start: p.startPage, end: p.endPage },
-              sizeMB: Number((p.blob.size / 1024 / 1024).toFixed(1)),
-            })));
-            setSplitProgress(90);
-            setSplitMessage(`Dividido em ${parts.length} parte(s)`);
-            updateGlmStage('split', {
-              status: 'completed',
-              progress: 100,
-              message: `Dividido em ${parts.length} parte(s) (limite ${RASTER_SPLIT_MAX_PAGES} págs/parte)`,
-              meta: { parts: parts.length, totalPages, largestPartMB: Number(largestPartMB.toFixed(1)) },
-            });
-          }
+          setSplitParts(rasterParts.parts.map((p, idx) => ({
+            partNumber: idx + 1,
+            pageRange: { start: p.startPage, end: p.endPage },
+            sizeMB: Number((p.blob.size / 1024 / 1024).toFixed(1)),
+          })));
+          setSplitProgress(90);
+          setSplitMessage(`Dividido em ${parts.length} parte(s)`);
+          updateGlmStage('split', {
+            status: 'completed',
+            progress: 100,
+            message: parts.length === 1
+              ? `Sem divisão: 1 parte (${totalPages} págs, ${largestPartMB.toFixed(1)}MB)`
+              : `Dividido em ${parts.length} parte(s) (limite ${RASTER_SPLIT_MAX_PAGES} págs/parte)`,
+            meta: { parts: parts.length, totalPages, largestPartMB: Number(largestPartMB.toFixed(1)) },
+          });
 
           glmRasterResult = { parts, pageRanges, totalPages };
         } else {
