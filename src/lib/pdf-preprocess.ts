@@ -27,6 +27,15 @@ export const RASTER_SPLIT_MAX_BYTES = 48 * 1024 * 1024;
  */
 export const RASTER_SPLIT_MAX_PAGES = 90;
 
+/**
+ * Teto operacional para cada invocação curta do GLM-OCR no Trabalhista.
+ * A API processa no máximo 30 páginas por request; se mandarmos uma parte com
+ * 90 páginas, o helper faz 3 chamadas sequenciais e a Edge Function estoura
+ * o timeout real (~150s) antes de concluir. Mantém o gate de raster em 90,
+ * mas o OCR por função curta trabalha em janelas de 30.
+ */
+export const GLM_OCR_EDGE_MAX_PAGES = 30;
+
 export interface RebuildRasterOptions {
   /** DPI base (default 150). O fallback usa 120 se o PDF ainda ficar grande. */
   dpi?: number;
